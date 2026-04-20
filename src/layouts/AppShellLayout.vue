@@ -1,79 +1,53 @@
 <template>
   <div class="app-surface h-screen">
-    <div
-      ref="shellRef"
+    <div ref="shellRef"
       class="app-window-shell relative flex h-full flex-col overflow-hidden border border-(--shell-divider)"
-      :data-layout-resizing="layoutTransitionsEnabled ? 'false' : 'true'"
-    >
+      :data-layout-resizing="layoutTransitionsEnabled ? 'false' : 'true'">
       <template v-if="isDesktopRuntime">
-        <div
-          v-for="handle in resizeHandles"
-          :key="handle.direction"
-          class="window-resize-handle"
-          :class="handle.className"
-          @mousedown.prevent.stop="startWindowResize(handle.direction, $event)"
-        />
+        <div v-for="handle in resizeHandles" :key="handle.direction" class="window-resize-handle"
+          :class="handle.className" @mousedown.prevent.stop="startWindowResize(handle.direction, $event)" />
       </template>
 
       <slot name="titlebar" />
 
-      <div
-        class="grid min-h-0 flex-1 overflow-hidden"
-        :class="layoutTransitionsEnabled ? layoutGridTransitionClass : 'transition-none'"
-        :style="shellGridStyle"
-      >
+      <div class="grid min-h-0 flex-1 overflow-hidden"
+        :class="layoutTransitionsEnabled ? layoutGridTransitionClass : 'transition-none'" :style="shellGridStyle">
         <div class="border-r border-(--shell-divider) bg-(--activity-bg)">
           <slot name="activity" />
         </div>
 
-        <div
-          class="app-shell-pane min-w-0 overflow-hidden bg-(--sidebar-bg)"
-          :class="[
-            layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none',
-            props.sidebarVisible
-              ? 'translate-x-0 border-r border-(--shell-divider) opacity-100'
-              : '-translate-x-3 opacity-0 pointer-events-none',
-          ]"
-        >
+        <div class="app-shell-pane min-w-0 overflow-hidden bg-(--sidebar-bg)" :class="[
+          layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none',
+          props.sidebarVisible
+            ? 'translate-x-0 border-r border-(--shell-divider) opacity-100'
+            : '-translate-x-3 opacity-0 pointer-events-none',
+        ]">
           <slot name="sidebar" />
         </div>
 
         <div class="app-shell-pane flex min-h-0 flex-col bg-(--editor-bg)">
           <slot name="header" />
-          <main
-            ref="mainRef"
-            class="grid min-h-0 flex-1"
-            :class="layoutTransitionsEnabled ? layoutRowsTransitionClass : 'transition-none'"
-            :style="mainGridStyle"
-          >
+          <main ref="mainRef" class="grid min-h-0 flex-1"
+            :class="layoutTransitionsEnabled ? layoutRowsTransitionClass : 'transition-none'" :style="mainGridStyle">
             <section class="app-shell-pane min-h-0 editor-surface">
               <slot />
             </section>
 
-            <button
-              type="button"
-              class="terminal-resize-handle"
-              :class="[
-                layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none',
-                props.terminalVisible
-                  ? 'translate-y-0 opacity-100'
-                  : 'translate-y-3 opacity-0 pointer-events-none',
-              ]"
-              aria-label="调整终端高度"
-              @mousedown.prevent="startTerminalResize"
-            >
+            <button type="button" class="terminal-resize-handle" :class="[
+              layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none',
+              props.terminalVisible
+                ? 'translate-y-0 opacity-100'
+                : 'translate-y-3 opacity-0 pointer-events-none',
+            ]" aria-label="调整终端高度" @mousedown.prevent="startTerminalResize">
               <span class="terminal-resize-handle-bar" />
             </button>
 
-            <section
-              class="app-shell-pane min-h-0 overflow-hidden bg-(--panel-bg)"
-              :class="[
-                layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none',
-                props.terminalVisible
-                  ? 'translate-y-0 opacity-100'
-                  : 'translate-y-3 opacity-0 pointer-events-none',
-              ]"
-            >
+            <section class="app-shell-pane min-h-0 overflow-hidden bg-(--panel-bg)" :class="[
+              layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none',
+              props.terminalVisible
+                ? 'translate-y-0 opacity-100'
+                : 'translate-y-3 opacity-0 pointer-events-none',
+            ]">
               <slot name="terminal" />
             </section>
           </main>
@@ -131,8 +105,10 @@ let terminalResizeCleanup: (() => void) | null = null;
 let resizeSettleTimerId: number | null = null;
 let shellResizeFrameId: number | null = null;
 let terminalViewportSyncFrameId: number | null = null;
+let terminalResizeFrameId: number | null = null;
 let previousShellSize = { width: 0, height: 0 };
 let pendingShellSize: { width: number; height: number } | null = null;
+let pendingTerminalResizeHeight: number | null = null;
 
 const resizeHandles: Array<{ direction: TResizeDirection; className: string }> = [
   { direction: 'North', className: 'is-top' },
@@ -261,6 +237,30 @@ const syncTerminalHeightWithinViewport = (): void => {
   }
 };
 
+const flushPendingTerminalResizeHeight = (): void => {
+  terminalResizeFrameId = null;
+  if (pendingTerminalResizeHeight === null) {
+    return;
+  }
+
+  const nextHeight = pendingTerminalResizeHeight;
+  pendingTerminalResizeHeight = null;
+
+  if (nextHeight !== props.terminalHeight) {
+    emit('update:terminalHeight', nextHeight);
+  }
+};
+
+const queueTerminalResizeHeight = (nextHeight: number): void => {
+  pendingTerminalResizeHeight = nextHeight;
+
+  if (terminalResizeFrameId !== null) {
+    return;
+  }
+
+  terminalResizeFrameId = window.requestAnimationFrame(flushPendingTerminalResizeHeight);
+};
+
 const startTerminalResize = (event: MouseEvent): void => {
   if (!props.terminalVisible || !mainRef.value || event.button !== 0) {
     return;
@@ -268,15 +268,21 @@ const startTerminalResize = (event: MouseEvent): void => {
 
   const startY = event.clientY;
   const startHeight = clampTerminalHeight(props.terminalHeight);
+  layoutTransitionsEnabled.value = false;
 
   const handleMouseMove = (moveEvent: MouseEvent): void => {
     const nextHeight = clampTerminalHeight(startHeight + (startY - moveEvent.clientY));
-    emit('update:terminalHeight', nextHeight);
+    queueTerminalResizeHeight(nextHeight);
   };
 
   const stopResize = (): void => {
     window.removeEventListener('mousemove', handleMouseMove);
     window.removeEventListener('mouseup', stopResize);
+    if (terminalResizeFrameId !== null) {
+      window.cancelAnimationFrame(terminalResizeFrameId);
+      flushPendingTerminalResizeHeight();
+    }
+    scheduleLayoutTransitionRestore();
     terminalResizeCleanup = null;
   };
 
@@ -351,6 +357,13 @@ onBeforeUnmount(() => {
     window.cancelAnimationFrame(terminalViewportSyncFrameId);
     terminalViewportSyncFrameId = null;
   }
+
+  if (terminalResizeFrameId !== null) {
+    window.cancelAnimationFrame(terminalResizeFrameId);
+    terminalResizeFrameId = null;
+  }
+
+  pendingTerminalResizeHeight = null;
 
   if (resizeSettleTimerId !== null) {
     window.clearTimeout(resizeSettleTimerId);

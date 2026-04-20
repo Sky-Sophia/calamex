@@ -1,11 +1,7 @@
 <template>
   <div class="splash-screen" :class="{ 'is-leaving': isLeaving }">
-    <div
-      class="splash-editor"
-      :class="{ 'is-error': Boolean(error) }"
-      :role="error ? 'alert' : 'status'"
-      aria-live="polite"
-    >
+    <div class="splash-editor" :class="{ 'is-error': Boolean(error) }" :role="error ? 'alert' : 'status'"
+      aria-live="polite">
       <div class="splash-editor-top">
         <span class="splash-dot splash-dot-red" />
         <span class="splash-dot splash-dot-yellow" />
@@ -36,8 +32,9 @@
       </div>
 
       <div class="splash-progress-wrap">
-        <div class="splash-progress-bar" :class="{ 'is-error': Boolean(error) }">
-          <div class="splash-progress" :style="{ width: `${roundedProgress}%` }" />
+        <div class="splash-progress-bar" :class="{ 'is-error': Boolean(error) }" role="progressbar"
+          :aria-valuenow="Math.round(roundedProgress)" aria-valuemin="0" aria-valuemax="100">
+          <div class="splash-progress" :style="{ transform: `scaleX(${progressScale})` }" />
         </div>
       </div>
 
@@ -84,7 +81,7 @@ const props = withDefaults(
   }>(),
   {
     error: null,
-    minimumDuration: 2000,
+    minimumDuration: 2200,
   },
 );
 
@@ -124,8 +121,13 @@ const codeLines: ICodeFragment[][] = [
   ],
 ];
 
-const FADE_DELAY = 140;
-const FADE_DURATION = 320;
+const FADE_DELAY = 100;
+const FADE_DURATION = 240;
+const SHORT_PROGRESS_CEILING = 95;
+const SHORT_PROGRESS_FIRST_PHASE_RATIO = 0.15;
+const SHORT_PROGRESS_SECOND_PHASE_RATIO = 0.85;
+const SHORT_PROGRESS_FIRST_PHASE_VALUE = 30;
+const SHORT_PROGRESS_SECOND_PHASE_VALUE = 80;
 
 const lineLengths = codeLines.map((line) =>
   line.reduce((total, fragment) => total + fragment.text.length, 0),
@@ -157,8 +159,55 @@ let bootstrapHandoffFrame = 0;
 let bootstrapHandoffCleanupFrame = 0;
 
 const roundedProgress = computed(() => Math.min(100, Number(progress.value.toFixed(1))));
+const progressScale = computed(() => Number((roundedProgress.value / 100).toFixed(4)));
 
 const isTypingComplete = computed(() => visibleCharacters.value >= totalCharacters);
+
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
+const lerp = (start: number, end: number, ratio: number): number =>
+  start + (end - start) * ratio;
+
+const easeOutCubic = (ratio: number): number => 1 - Math.pow(1 - ratio, 3);
+
+const easeInOutSine = (ratio: number): number => -(Math.cos(Math.PI * ratio) - 1) / 2;
+
+const resolveAutoplayProgress = (elapsed: number): number => {
+  const estimate = Math.max(props.minimumDuration, 2200);
+  const ratio = clamp01(elapsed / estimate);
+
+  if (ratio <= SHORT_PROGRESS_FIRST_PHASE_RATIO) {
+    return lerp(
+      0,
+      SHORT_PROGRESS_FIRST_PHASE_VALUE,
+      easeOutCubic(clamp01(ratio / SHORT_PROGRESS_FIRST_PHASE_RATIO)),
+    );
+  }
+
+  if (ratio <= SHORT_PROGRESS_SECOND_PHASE_RATIO) {
+    return lerp(
+      SHORT_PROGRESS_FIRST_PHASE_VALUE,
+      SHORT_PROGRESS_SECOND_PHASE_VALUE,
+      easeInOutSine(
+        clamp01(
+          (ratio - SHORT_PROGRESS_FIRST_PHASE_RATIO) /
+          (SHORT_PROGRESS_SECOND_PHASE_RATIO - SHORT_PROGRESS_FIRST_PHASE_RATIO),
+        ),
+      ),
+    );
+  }
+
+  return lerp(
+    SHORT_PROGRESS_SECOND_PHASE_VALUE,
+    SHORT_PROGRESS_CEILING,
+    easeOutCubic(
+      clamp01(
+        (ratio - SHORT_PROGRESS_SECOND_PHASE_RATIO) /
+        (1 - SHORT_PROGRESS_SECOND_PHASE_RATIO),
+      ),
+    ),
+  );
+};
 
 const activeLineIndex = computed(() => {
   let remaining = visibleCharacters.value;
@@ -253,14 +302,15 @@ const hasCompletedLineAt = (characterCount: number): boolean => {
 const randomBetween = (min: number, max: number): number => min + Math.random() * (max - min);
 
 const getTypingDelay = (character: string, completedLine: boolean): number => {
+  const elapsed = performance.now() - startedAt;
+  const shouldCatchUp = props.ready && elapsed >= props.minimumDuration * 0.42;
+
   if (completedLine) {
-    return randomBetween(150, 260);
+    return shouldCatchUp ? randomBetween(72, 128) : randomBetween(150, 260);
   }
 
-  const elapsed = performance.now() - startedAt;
-  const shouldCatchUp = props.ready && elapsed >= props.minimumDuration * 0.72;
-  let minDelay = shouldCatchUp ? 8 : 24;
-  let maxDelay = shouldCatchUp ? 22 : 58;
+  let minDelay = shouldCatchUp ? 10 : 24;
+  let maxDelay = shouldCatchUp ? 24 : 58;
 
   if (character === ' ') {
     minDelay *= 0.45;
@@ -339,22 +389,22 @@ const updateProgress = (now: number): void => {
   }
 
   const elapsed = now - startedAt;
-  const timelineRatio = Math.min(1, elapsed / props.minimumDuration);
   const typingRatio = visibleCharacters.value / totalCharacters;
-  const typingTarget = Math.min(82, typingRatio * 72 + timelineRatio * 10);
-  const loadingTarget = props.ready
-    ? Math.min(96, Math.max(typingTarget, 72 + timelineRatio * 20))
-    : Math.min(88, Math.max(typingTarget, 6 + timelineRatio * 44 + Math.log1p(elapsed / 260) * 5));
+  const autoplayTarget = resolveAutoplayProgress(elapsed);
+  const typingTarget = Math.min(82, typingRatio * 74);
   const target =
-    props.ready && isTypingComplete.value && elapsed >= props.minimumDuration ? 100 : loadingTarget;
+    props.ready && isTypingComplete.value && elapsed >= props.minimumDuration
+      ? 100
+      : Math.max(autoplayTarget, typingTarget);
 
   progressTarget.value = Math.max(progressTarget.value, target);
 
   const remainingProgress = progressTarget.value - progress.value;
   if (remainingProgress > 0) {
+    const isFinishSprint = progressTarget.value >= 100;
     progress.value = Math.min(
       progressTarget.value,
-      progress.value + Math.max(0.08, remainingProgress * 0.12),
+      progress.value + Math.max(isFinishSprint ? 0.38 : 0.12, remainingProgress * (isFinishSprint ? 0.24 : 0.16)),
     );
   }
 
@@ -370,12 +420,15 @@ const updateProgress = (now: number): void => {
 watch(
   () => props.ready,
   (ready) => {
-    if (
-      !props.error &&
-      ready &&
-      isTypingComplete.value &&
-      performance.now() - startedAt >= props.minimumDuration
-    ) {
+    if (props.error || !ready) {
+      return;
+    }
+
+    if (!isTypingComplete.value) {
+      scheduleTyping(16);
+    }
+
+    if (isTypingComplete.value && performance.now() - startedAt >= props.minimumDuration) {
       progressTarget.value = 100;
     }
   },

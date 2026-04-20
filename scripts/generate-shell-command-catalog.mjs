@@ -1,5 +1,5 @@
 import availableFigSpecs from '@withfig/autocomplete';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -638,11 +638,38 @@ const formatJson = async (value) =>
         trailingComma: 'all',
     });
 
+const hasErrorCode = (error, code) =>
+    typeof error === 'object' && error !== null && 'code' in error && error.code === code;
+
+const readTextFileIfExists = async (filePath) => {
+    try {
+        return await readFile(filePath, 'utf8');
+    } catch (error) {
+        if (hasErrorCode(error, 'ENOENT')) {
+            return null;
+        }
+
+        throw error;
+    }
+};
+
+const writeFileIfChanged = async (filePath, fileContent) => {
+    const existingContent = await readTextFileIfExists(filePath);
+    if (existingContent === fileContent) {
+        return false;
+    }
+
+    await writeFile(filePath, fileContent, 'utf8');
+    return true;
+};
+
 const writeGeneratedCatalog = async (generatedCatalog) => {
-    await rm(generatedDirectory, { recursive: true, force: true });
     await mkdir(generatedDirectory, { recursive: true });
 
     const indexEntries = [];
+    const nextFileNames = new Set(['index.json']);
+    let updatedFileCount = 0;
+
     for (const commandSpec of generatedCatalog) {
         const label = selectPrimaryName(commandSpec.names);
         if (!label) {
@@ -650,6 +677,7 @@ const writeGeneratedCatalog = async (generatedCatalog) => {
         }
 
         const fileName = `${label}.json`;
+        nextFileNames.add(fileName);
         const aliases = commandSpec.names.slice(1);
         indexEntries.push({
             label,
@@ -659,20 +687,39 @@ const writeGeneratedCatalog = async (generatedCatalog) => {
         });
 
         const fileContent = await formatJson(commandSpec);
-        await writeFile(path.join(generatedDirectory, fileName), fileContent, 'utf8');
+        if (await writeFileIfChanged(path.join(generatedDirectory, fileName), fileContent)) {
+            updatedFileCount += 1;
+        }
     }
 
     const indexFileContent = await formatJson({ commands: indexEntries });
-    await writeFile(generatedIndexFilePath, indexFileContent, 'utf8');
+    if (await writeFileIfChanged(generatedIndexFilePath, indexFileContent)) {
+        updatedFileCount += 1;
+    }
+
+    const existingEntries = await readdir(generatedDirectory, { withFileTypes: true });
+    for (const entry of existingEntries) {
+        if (!entry.isFile() || nextFileNames.has(entry.name)) {
+            continue;
+        }
+
+        await rm(path.join(generatedDirectory, entry.name), { force: true });
+        updatedFileCount += 1;
+    }
+
     await rm(legacyOutputFilePath, { force: true });
+
+    return {
+        updatedFileCount,
+    };
 };
 
 const generatedCatalog = await generateCommandCatalog();
-await writeGeneratedCatalog(generatedCatalog);
+const { updatedFileCount } = await writeGeneratedCatalog(generatedCatalog);
 
 console.log(
     `Generated ${generatedCatalog.length} Fig root command specs at ${path.relative(
         workspaceRoot,
         generatedDirectory,
-    )}`,
+    )} (${updatedFileCount} files updated)`,
 );

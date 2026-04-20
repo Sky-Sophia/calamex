@@ -41,6 +41,7 @@ const isWindowSplashMode = ref(true);
 
 let revealMainWindowPromise: Promise<void> | null = null;
 let revealDelayTimerId: number | null = null;
+let revealFlowVersion = 0;
 
 // ---------- Tauri window helpers ----------
 
@@ -91,6 +92,7 @@ const loadWorkbenchModule = async (): Promise<void> => {
   try {
     const module = await import('@/views/ShellWorkbenchView.vue');
     workbenchComponent.value = markRaw(module.default);
+    isContentMounted.value = true;
   } catch (error) {
     setRuntimeError('工作台模块加载失败', error);
   } finally {
@@ -102,6 +104,7 @@ const isApplicationReady = computed(
   () =>
     !runtimeErrorState.value &&
     isWorkbenchModuleReady.value &&
+    isWorkbenchViewReady.value &&
     Boolean(workbenchComponent.value),
 );
 
@@ -149,20 +152,34 @@ const revealMainWindow = async (): Promise<void> => {
     return;
   }
 
-  isWindowSplashMode.value = false;
-  setDocumentSplashMode(false);
+  const currentRevealFlowVersion = revealFlowVersion;
 
-  revealMainWindowPromise = Promise.all([applyMainWindowFrame(), waitForMainRevealDelay()])
-    .then(async () => {
-      // 真正挂载 workbench 发生在此刻——splash 已离场、窗口尺寸已定。
+  revealMainWindowPromise = (async () => {
+    isWindowSplashMode.value = false;
+    setDocumentSplashMode(false);
+
+    if (!isContentMounted.value && workbenchComponent.value) {
       isContentMounted.value = true;
       await nextTick();
-      await waitForStablePaint();
-      isAppContentVisible.value = true;
-    })
-    .finally(() => {
-      revealMainWindowPromise = null;
-    });
+    }
+
+    await Promise.all([applyMainWindowFrame(), waitForMainRevealDelay()]);
+
+    if (runtimeErrorState.value || currentRevealFlowVersion !== revealFlowVersion) {
+      return;
+    }
+
+    await nextTick();
+    await waitForStablePaint();
+
+    if (runtimeErrorState.value || currentRevealFlowVersion !== revealFlowVersion) {
+      return;
+    }
+
+    isAppContentVisible.value = true;
+  })().finally(() => {
+    revealMainWindowPromise = null;
+  });
 
   await revealMainWindowPromise;
 };
@@ -170,15 +187,16 @@ const revealMainWindow = async (): Promise<void> => {
 // ---------- Event handlers ----------
 
 const handleSplashLeaveStart = (): void => {
-  isAppContentVisible.value = false;
+  void revealMainWindow();
 };
 
 const handleSplashAfterLeave = async (): Promise<void> => {
   if (runtimeErrorState.value) {
     return;
   }
-  isSplashMounted.value = false;
+
   await revealMainWindow();
+  isSplashMounted.value = false;
 };
 
 const handleWorkbenchReady = (): void => {
@@ -190,6 +208,7 @@ const handleWorkbenchReady = (): void => {
 watch(runtimeErrorState, (error: unknown, previousError: unknown) => {
   if (error) {
     // 进入错误态：回到 splash，并丢弃当前加载流水线
+    revealFlowVersion += 1;
     revealMainWindowPromise = null;
     clearRevealDelayTimer();
     isWindowSplashMode.value = true;

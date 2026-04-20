@@ -32,7 +32,6 @@ const MIN_RENDERABLE_TERMINAL_WIDTH = 24;
 const MIN_RENDERABLE_TERMINAL_HEIGHT = 24;
 const TERMINAL_ENABLE_WEBGL_RENDERER = false;
 const TERMINAL_WEBGL_RECOVERY_DELAY_MS = 180;
-const TERMINAL_LAYOUT_DEBOUNCE_MS = 48;
 const TERMINAL_STREAM_MARKER_PREFIX = '\u001b]SH_EDITOR:';
 const TERMINAL_STREAM_MARKER_SUFFIX = '\u0007';
 const TERMINAL_STREAM_START_MARKER_PREFIX = 'SH_EDITOR_RUN_BEGIN:';
@@ -223,8 +222,14 @@ const resolveInteger = (
   return Math.min(max, Math.max(min, integer));
 };
 
-const isPrintableTerminalInput = (data: string): boolean =>
-  data.length > 0 && !/^[\x00-\x1f\x7f]/.test(data);
+const isPrintableTerminalInput = (data: string): boolean => {
+  if (data.length === 0) {
+    return false;
+  }
+
+  const firstCharacterCode = data.charCodeAt(0);
+  return firstCharacterCode >= 0x20 && firstCharacterCode !== 0x7f;
+};
 
 type TUseIntegratedTerminalOptions = {
   visible: Ref<boolean>;
@@ -233,6 +238,10 @@ type TUseIntegratedTerminalOptions = {
   onStatusChange?: (payload: ITerminalStatusChangePayload) => void;
   onOutput?: (value: string) => void;
   onRunComplete?: (payload: ITerminalRunCompletePayload) => void;
+};
+
+type TTerminalLayoutSyncOptions = {
+  settle?: boolean;
 };
 
 const sharedStatus = ref<TTerminalConnectionState>('connecting');
@@ -259,10 +268,10 @@ let windowResizeCleanup: (() => void) | null = null;
 let webglContextLossCleanup: { dispose(): void } | null = null;
 let resizeObserver: ResizeObserver | null = null;
 
-let layoutDebounceTimeoutId: number | null = null;
 let layoutFrameId: number | null = null;
 let layoutSettleTimeoutId: number | null = null;
 let viewportFrameId: number | null = null;
+let pendingLayoutSettleSync = false;
 
 let shouldClearTextureAtlasOnViewportSync = false;
 let shouldRefreshViewportOnViewportSync = false;
@@ -300,6 +309,7 @@ let promptRestoreTimeoutId: number | null = null;
 
 let webglRendererBlocked = false;
 let previousHostSize = { width: 0, height: 0 };
+let previousTerminalSize = { cols: 0, rows: 0 };
 
 const didHostSizeChange = (width: number, height: number): boolean => {
   const normalizedWidth = Math.round(width);
@@ -319,6 +329,29 @@ const didHostSizeChange = (width: number, height: number): boolean => {
   previousHostSize = {
     width: normalizedWidth,
     height: normalizedHeight,
+  };
+
+  return true;
+};
+
+const didTerminalSizeChange = (cols: number, rows: number): boolean => {
+  const normalizedCols = Math.max(0, Math.trunc(cols));
+  const normalizedRows = Math.max(0, Math.trunc(rows));
+
+  if (normalizedCols <= 0 || normalizedRows <= 0) {
+    return false;
+  }
+
+  if (
+    previousTerminalSize.cols === normalizedCols &&
+    previousTerminalSize.rows === normalizedRows
+  ) {
+    return false;
+  }
+
+  previousTerminalSize = {
+    cols: normalizedCols,
+    rows: normalizedRows,
   };
 
   return true;
@@ -375,12 +408,6 @@ export const useIntegratedTerminal = ({
 
   const isTerminalVisible = (): boolean => Boolean(sharedVisibleRef?.value);
 
-  const clearLayoutDebounceTimeout = (): void => {
-    if (layoutDebounceTimeoutId !== null) {
-      window.clearTimeout(layoutDebounceTimeoutId);
-      layoutDebounceTimeoutId = null;
-    }
-  };
   const clearLayoutFrame = (): void => {
     if (layoutFrameId !== null) {
       cancelAnimationFrame(layoutFrameId);
@@ -451,7 +478,7 @@ export const useIntegratedTerminal = ({
       if (options?.forceLayout || shouldFitBeforeNextVisibleWrite) {
         syncTerminalLayout();
         shouldFitBeforeNextVisibleWrite = false;
-        scheduleViewportSync({ refresh: true, scrollToBottom: true });
+        scheduleViewportSync({ scrollToBottom: true });
       }
       flushPendingTerminalWriteCallbacks();
       return;
@@ -467,7 +494,7 @@ export const useIntegratedTerminal = ({
     isTerminalWriteInFlight = true;
     terminal.write(chunk, () => {
       isTerminalWriteInFlight = false;
-      scheduleViewportSync({ refresh: true, scrollToBottom: shouldScrollToBottom });
+      scheduleViewportSync({ scrollToBottom: shouldScrollToBottom });
       if (bufferedTerminalWrite) {
         flushTerminalWriteBufferNow();
         return;
@@ -655,12 +682,15 @@ export const useIntegratedTerminal = ({
   };
 
   const scheduleScrollRecovery = (): void => {
-    scheduleViewportSync({ refresh: true });
+    if (!webglAddonRef.value) {
+      return;
+    }
+
     clearScrollRecoveryTimeout();
     scrollRecoveryTimeoutId = window.setTimeout(() => {
       scrollRecoveryTimeoutId = null;
       scheduleViewportSync({
-        clearTextureAtlas: Boolean(webglAddonRef.value),
+        clearTextureAtlas: true,
         refresh: true,
       });
     }, TERMINAL_SCROLL_RECOVERY_DELAY_MS);
@@ -684,24 +714,33 @@ export const useIntegratedTerminal = ({
     } catch (error) {
       console.warn('终端尺寸同步失败', error);
     }
-    scheduleViewportSync({ refresh: true, scrollToBottom: true });
   };
 
-  const scheduleLayoutSync = (): void => {
-    clearLayoutDebounceTimeout();
-    clearLayoutFrame();
+  const scheduleLayoutSync = (options?: TTerminalLayoutSyncOptions): void => {
+    if (options?.settle) {
+      pendingLayoutSettleSync = true;
+    }
+
     clearLayoutSettleTimeout();
-    layoutDebounceTimeoutId = window.setTimeout(() => {
-      layoutDebounceTimeoutId = null;
-      layoutFrameId = requestAnimationFrame(() => {
-        layoutFrameId = null;
+
+    if (layoutFrameId !== null) {
+      return;
+    }
+
+    layoutFrameId = requestAnimationFrame(() => {
+      layoutFrameId = null;
+      syncTerminalLayout();
+
+      if (!pendingLayoutSettleSync) {
+        return;
+      }
+
+      pendingLayoutSettleSync = false;
+      layoutSettleTimeoutId = window.setTimeout(() => {
+        layoutSettleTimeoutId = null;
         syncTerminalLayout();
-        layoutSettleTimeoutId = window.setTimeout(() => {
-          layoutSettleTimeoutId = null;
-          syncTerminalLayout();
-        }, TERMINAL_LAYOUT_SETTLE_DELAY_MS);
-      });
-    }, TERMINAL_LAYOUT_DEBOUNCE_MS);
+      }, TERMINAL_LAYOUT_SETTLE_DELAY_MS);
+    });
   };
 
   const focusTerminal = (): void => {
@@ -944,7 +983,6 @@ export const useIntegratedTerminal = ({
       }
 
       scheduleLayoutSync();
-      scheduleViewportSync({ refresh: true });
     };
     window.addEventListener('resize', handleWindowResize);
     windowResizeCleanup = () => {
@@ -960,7 +998,7 @@ export const useIntegratedTerminal = ({
           return;
         }
         ensurePreferredRenderer();
-        scheduleLayoutSync();
+        scheduleLayoutSync({ settle: true });
         scheduleViewportSync({ clearTextureAtlas: true, refresh: true, scrollToBottom: true });
       };
       window.addEventListener('focus', handleWindowFocus);
@@ -976,7 +1014,7 @@ export const useIntegratedTerminal = ({
           return;
         }
         ensurePreferredRenderer();
-        scheduleLayoutSync();
+        scheduleLayoutSync({ settle: true });
         scheduleViewportSync({ clearTextureAtlas: true, refresh: true, scrollToBottom: true });
       };
       document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -995,7 +1033,7 @@ export const useIntegratedTerminal = ({
         return;
       }
       ensurePreferredRenderer();
-      scheduleLayoutSync();
+      scheduleLayoutSync({ settle: true });
       scheduleViewportSync({ refresh: true });
     };
     const readyPromise = fontSet.ready;
@@ -1032,7 +1070,7 @@ export const useIntegratedTerminal = ({
       session.value = payload;
       emitStatus('ready', `${payload.shellLabel} 已连接`);
       ensurePreferredRenderer();
-      scheduleViewportSync({ refresh: true, scrollToBottom: true });
+      scheduleViewportSync({ scrollToBottom: true });
       if (visible.value) {
         focusTerminal();
       }
@@ -1040,7 +1078,7 @@ export const useIntegratedTerminal = ({
       const message = resolveErrorMessage(error, '连接 WSL2 终端失败。');
       emitStatus('error', message);
       terminal.writeln(`\x1b[31m${message}\x1b[0m`, () => {
-        scheduleViewportSync({ refresh: true, scrollToBottom: true });
+        scheduleViewportSync({ scrollToBottom: true });
       });
     }
   };
@@ -1075,7 +1113,7 @@ export const useIntegratedTerminal = ({
       for (const completedRun of processed.completedRuns) {
         flushTerminalWriteBufferNow({
           afterWrite: () => {
-            scheduleViewportSync({ refresh: true, scrollToBottom: true });
+            scheduleViewportSync({ scrollToBottom: true });
             emitRunComplete(completedRun);
           },
           forceLayout: true,
@@ -1103,7 +1141,7 @@ export const useIntegratedTerminal = ({
     }
     queueTerminalWrite(`\r\n\x1b[90m${message}\x1b[0m\r\n`, { scrollToBottom: true });
     flushTerminalWriteBufferNow();
-    scheduleViewportSync({ refresh: true, scrollToBottom: true });
+    scheduleViewportSync({ scrollToBottom: true });
     emitStatus('closed', message);
   };
 
@@ -1145,7 +1183,7 @@ export const useIntegratedTerminal = ({
     bindResizeObserver();
     ensurePreferredRenderer();
     syncTerminalSurfaceTone();
-    scheduleLayoutSync();
+    scheduleLayoutSync({ settle: true });
     scheduleViewportSync({ clearTextureAtlas: true, refresh: true, scrollToBottom: true });
   };
 
@@ -1179,6 +1217,10 @@ export const useIntegratedTerminal = ({
       terminal.loadAddon(fitAddon);
       terminalRef.value = terminal;
       fitAddonRef.value = fitAddon;
+      previousTerminalSize = {
+        cols: terminal.cols,
+        rows: terminal.rows,
+      };
 
       terminal.onData((data) => {
         if (!session.value) {
@@ -1207,10 +1249,16 @@ export const useIntegratedTerminal = ({
         scheduleScrollRecovery();
       });
       terminal.onResize(({ cols, rows }) => {
-        scheduleViewportSync({ refresh: true, scrollToBottom: true });
+        if (!didTerminalSizeChange(cols, rows)) {
+          return;
+        }
+
+        scheduleViewportSync({ scrollToBottom: true });
+
         if (!session.value) {
           return;
         }
+
         void tauriService.resizeTerminalSession({ sessionId, cols, rows }).catch(() => {
           // 终端在关闭或窗口隐藏时可能触发瞬时 resize，这里忽略即可。
         });
@@ -1257,7 +1305,7 @@ export const useIntegratedTerminal = ({
       createTerminal();
       ensurePreferredRenderer();
       syncTerminalSurfaceTone();
-      scheduleLayoutSync();
+      scheduleLayoutSync({ settle: true });
       scheduleViewportSync({ clearTextureAtlas: true, refresh: true, scrollToBottom: true });
       focusTerminal();
     },
@@ -1282,7 +1330,7 @@ export const useIntegratedTerminal = ({
       replaySuppressedRunIds.delete(nextRunId);
       scheduleRunStartMarkerTimeout(nextRunId);
       scheduleLayoutSync();
-      scheduleViewportSync({ refresh: true, scrollToBottom: true });
+      scheduleViewportSync({ scrollToBottom: true });
     },
     { flush: 'sync' },
   );
@@ -1309,7 +1357,7 @@ export const useIntegratedTerminal = ({
             if (nextReplayRequest.restorePrompt) {
               beginPromptRestore(nextReplayRequest.runId);
             }
-            scheduleViewportSync({ refresh: true, scrollToBottom: true });
+            scheduleViewportSync({ scrollToBottom: true });
           },
           forceLayout: true,
         });
@@ -1338,7 +1386,6 @@ export const useIntegratedTerminal = ({
     dataUnlisten = null;
     exitUnlisten = null;
 
-    clearLayoutDebounceTimeout();
     clearLayoutFrame();
     clearLayoutSettleTimeout();
     clearViewportFrame();

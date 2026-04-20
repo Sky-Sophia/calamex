@@ -7,7 +7,7 @@
 <script setup lang="ts">
 import type { TThemeMode } from '@/types/app';
 import type { IAnalyzeScriptPayload, TScriptDiagnosticSeverity } from '@/types/editor';
-import { monaco } from '@/utils/monaco';
+import { applyMonacoTheme, monaco } from '@/utils/monaco';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 interface IEditorExpose {
@@ -104,7 +104,7 @@ const scheduleEditorLayout = (): void => {
 };
 
 const setTheme = (theme: TThemeMode): void => {
-  monaco.editor.setTheme(theme === 'dark' ? 'sh-dark' : 'sh-light');
+  applyMonacoTheme(theme);
 };
 
 const ensureShellCompletionProvider = async (): Promise<void> => {

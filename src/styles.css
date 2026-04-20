@@ -1085,7 +1085,98 @@ button:disabled,
 }
 
 /* ============================================================
- * 12. Terminal
+ * 12. Monaco editor widgets
+ * ============================================================ */
+
+.action-widget,
+.monaco-menu,
+.monaco-hover.workbench-hover,
+.monaco-editor .suggest-widget,
+.monaco-editor .suggest-details,
+.monaco-editor .find-widget,
+.monaco-editor .parameter-hints-widget,
+.monaco-editor .editor-widget {
+  font-family: var(--font-sans);
+}
+
+.action-widget,
+.monaco-menu,
+.monaco-hover.workbench-hover,
+.monaco-editor .suggest-widget,
+.monaco-editor .suggest-details,
+.monaco-editor .find-widget,
+.monaco-editor .parameter-hints-widget {
+  border-radius: 12px !important;
+  border-color: var(--border-subtle) !important;
+  box-shadow:
+    0 20px 56px rgba(0, 0, 0, 0.24),
+    0 0 0 1px rgba(255, 255, 255, 0.03) !important;
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+.action-widget,
+.monaco-menu,
+.monaco-hover.workbench-hover {
+  background: color-mix(in srgb, var(--panel-bg) 92%, transparent) !important;
+}
+
+.monaco-editor .suggest-widget,
+.monaco-editor .suggest-details,
+.monaco-editor .find-widget,
+.monaco-editor .parameter-hints-widget {
+  background: color-mix(in srgb, var(--editor-surface) 94%, transparent) !important;
+}
+
+.action-widget .monaco-list .monaco-list-row,
+.monaco-menu .monaco-action-bar.vertical .action-menu-item,
+.monaco-editor .suggest-widget .monaco-list-row,
+.monaco-editor .find-widget .button {
+  border-radius: 8px;
+}
+
+.action-widget .monaco-list .monaco-list-row,
+.monaco-menu .monaco-action-bar.vertical .action-label,
+.monaco-editor .suggest-widget .monaco-list-row {
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.monaco-editor .find-widget {
+  padding: 8px;
+}
+
+.monaco-editor .find-widget .monaco-inputbox {
+  border-radius: 8px;
+}
+
+.monaco-editor .suggest-widget,
+.monaco-editor .suggest-details,
+.monaco-editor .parameter-hints-widget {
+  overflow: hidden;
+}
+
+.light .action-widget,
+.light .monaco-menu,
+.light .monaco-hover.workbench-hover,
+.light .monaco-editor .suggest-widget,
+.light .monaco-editor .suggest-details,
+.light .monaco-editor .find-widget,
+.light .monaco-editor .parameter-hints-widget,
+[data-theme='light'] .action-widget,
+[data-theme='light'] .monaco-menu,
+[data-theme='light'] .monaco-hover.workbench-hover,
+[data-theme='light'] .monaco-editor .suggest-widget,
+[data-theme='light'] .monaco-editor .suggest-details,
+[data-theme='light'] .monaco-editor .find-widget,
+[data-theme='light'] .monaco-editor .parameter-hints-widget {
+  box-shadow:
+    0 18px 40px rgba(15, 23, 42, 0.12),
+    0 0 0 1px rgba(15, 23, 42, 0.04) !important;
+}
+
+/* ============================================================
+ * 13. Terminal
  * ============================================================ */
 
 .terminal-resize-handle {
@@ -2358,19 +2449,19 @@ button:disabled,
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
-  transform: translateY(14px) scale(0.992);
+  transform: translateY(10px);
   transform-origin: center top;
   transition:
-    opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
-    visibility 0s linear 0.42s;
+    opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.36s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0.36s;
 }
 
 .app-content-entry.is-visible {
   opacity: 1;
   pointer-events: auto;
   visibility: visible;
-  transform: translateY(0) scale(1);
+  transform: translateY(0);
   transition-delay: 0s;
 }
 
@@ -2386,8 +2477,8 @@ button:disabled,
   opacity: 1;
   visibility: visible;
   transition:
-    opacity 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    visibility 0s linear 0.32s;
+    opacity 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0.24s;
 }
 
 .splash-screen::before {
@@ -2399,7 +2490,7 @@ button:disabled,
   content: '';
   pointer-events: none;
   opacity: 1;
-  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .splash-screen.is-leaving {
@@ -2432,9 +2523,9 @@ button:disabled,
   transform-origin: center center;
   backface-visibility: hidden;
   transition:
-    opacity 0.26s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .splash-editor.is-error {
@@ -2447,7 +2538,7 @@ button:disabled,
 
 .splash-screen.is-leaving .splash-editor {
   opacity: 0;
-  transform: translateY(-10px) scale(0.986) translateZ(0);
+  transform: translateY(-6px) translateZ(0);
   box-shadow:
     0 14px 40px rgba(0, 0, 0, 0.24),
     0 1px 0 rgba(255, 255, 255, 0.03) inset;
@@ -2607,7 +2698,10 @@ button:disabled,
   height: 100%;
   border-radius: 6px;
   background: #5e6ad2;
-  transition: width 0.24s ease;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
 }
 
 .splash-status {

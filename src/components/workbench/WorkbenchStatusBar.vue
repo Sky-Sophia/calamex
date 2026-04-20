@@ -1,7 +1,6 @@
 <template>
   <footer
-    class="workbench-statusbar flex h-7 items-center justify-between border-t border-(--shell-divider) px-1 text-[11px]"
-  >
+    class="workbench-statusbar flex h-7 items-center justify-between border-t border-(--shell-divider) px-1 text-[11px]">
     <div class="flex h-full items-center gap-0.5">
       <span class="statusbar-segment statusbar-segment-passive">
         <span class="h-2 w-2 rounded-full" :class="isRunning ? 'bg-amber-400' : 'bg-emerald-400'" />
@@ -11,64 +10,37 @@
       <span v-if="!hasActiveDocument" class="statusbar-segment statusbar-segment-passive">
         未打开文件
       </span>
-      <span
-        v-else-if="documentKind === 'image'"
-        class="statusbar-segment statusbar-segment-passive"
-      >
+      <span v-else-if="documentKind === 'image'" class="statusbar-segment statusbar-segment-passive">
         图片预览
       </span>
     </div>
 
     <div class="flex h-full items-center gap-0.5">
       <template v-if="hasActiveDocument && documentKind === 'text'">
-        <span
-          class="statusbar-segment statusbar-segment-button app-tooltip-target"
-          :data-tooltip="cursorPositionTooltip"
-          data-tooltip-placement="top"
-        >
+        <span class="statusbar-segment statusbar-segment-button app-tooltip-target"
+          :data-tooltip="cursorPositionTooltip" data-tooltip-placement="top">
           {{ cursorLine }}:{{ cursorColumn }}
         </span>
-        <span
-          class="statusbar-segment statusbar-segment-button app-tooltip-target"
-          :data-tooltip="charCountTooltip"
-          data-tooltip-placement="top"
-        >
+        <span class="statusbar-segment statusbar-segment-button app-tooltip-target" :data-tooltip="charCountTooltip"
+          data-tooltip-placement="top">
           {{ charCount }} char
         </span>
-        <span
-          class="statusbar-segment statusbar-segment-button app-tooltip-target"
-          data-tooltip="LF 行尾序列"
-          data-tooltip-placement="top"
-        >
+        <span class="statusbar-segment statusbar-segment-button app-tooltip-target" data-tooltip="LF 行尾序列"
+          data-tooltip-placement="top">
           LF
         </span>
 
-        <AppDropdownMenu
-          :items="encodingItems"
-          align="right"
-          :min-width="118"
-          @select="handleEncodingChange"
-        >
-          <template #trigger="{ open, toggle }">
-            <button
-              type="button"
-              class="statusbar-segment statusbar-segment-button app-tooltip-target"
-              :class="{ 'is-open': open }"
-              :data-tooltip="encodingTooltip"
-              data-tooltip-placement="top"
-              @click="toggle"
-            >
+        <AppDropdownMenu :items="encodingItems" align="right" :min-width="118" @select="handleEncodingChange">
+          <template #trigger="{ open }">
+            <button type="button" class="statusbar-segment statusbar-segment-button app-tooltip-target"
+              :class="{ 'is-open': open }" :data-tooltip="encodingTooltip" data-tooltip-placement="top">
               {{ encodingLabel }}
             </button>
           </template>
         </AppDropdownMenu>
 
-        <span
-          class="statusbar-segment app-tooltip-target"
-          :class="{ 'statusbar-segment-passive': !isTerminalReady }"
-          :data-tooltip="executorTooltip"
-          data-tooltip-placement="top"
-        >
+        <span class="statusbar-segment app-tooltip-target" :class="{ 'statusbar-segment-passive': !isTerminalReady }"
+          :data-tooltip="executorTooltip" data-tooltip-placement="top">
           {{ executorLabel }}
         </span>
       </template>

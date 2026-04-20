@@ -26,7 +26,13 @@ export const ENCODING_OPTIONS: Array<{ label: string; value: TDocumentEncoding }
 
 export const DEFAULT_EXECUTOR: TExecutorKind = 'wsl';
 
-export const getExecutorLabel = (_executor: TExecutorKind): string => 'WSL2';
+export const getExecutorLabel = (executor: TExecutorKind): string => {
+  switch (executor) {
+    case 'wsl':
+    default:
+      return 'WSL2';
+  }
+};
 
 export const COMMAND_TEMPLATES: ICommandTemplate[] = [
   {

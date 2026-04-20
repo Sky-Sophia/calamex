@@ -18,7 +18,7 @@ interface TauriBootstrapInternals {
 interface BootstrapSplashState {
   /** 启动开始的高精度时间戳 (performance.now)。 */
   startedAt: number;
-  /** 兼容旧打字机动画：Infinity 表示直接全部可见。 */
+  /** 当前已显示的字符数，用于 bootstrap 与 Vue splash 连续接力。 */
   visibleCharacters: number;
   /** 当前进度 0-100。 */
   progress: number;
@@ -39,7 +39,7 @@ declare global {
 
 const BOOTSTRAP_SPLASH_HOST_ID = 'bootstrap-splash-host';
 const BOOTSTRAP_SPLASH_STYLE_ID = 'bootstrap-splash-style';
-const BOOTSTRAP_SPLASH_INITIAL_PROGRESS = 24; // 进度条初始值（百分比）
+const BOOTSTRAP_SPLASH_INITIAL_PROGRESS = 8; // 避免进度条长时间停在 0
 const BOOTSTRAP_ERROR_DETAIL_MAX_LENGTH = 8 * 1024; // 防止超长 stack 撑爆 DOM
 
 const MESSAGES = {
@@ -89,7 +89,7 @@ const SPLASH_STYLE = `
 #bootstrap-splash .progress-wrap{padding:0 32px 28px}
 #bootstrap-splash .progress-bar{width:100%;height:5px;overflow:hidden;border-radius:6px;background:#23262b}
 #bootstrap-splash .progress-bar.error-bar{background:#2b1d21}
-#bootstrap-splash .progress{height:100%;border-radius:6px;background:#5e6ad2;width:var(--bootstrap-progress,24%)}
+#bootstrap-splash .progress{height:100%;border-radius:6px;background:#5e6ad2;transform-origin:left center;transform:scaleX(var(--bootstrap-progress-scale,.08));transition:transform 220ms cubic-bezier(0.22,1,0.36,1);will-change:transform}
 #bootstrap-splash .progress.error-progress{width:100%;background:linear-gradient(90deg,#ff7b88,#ff8e6b)}
 #bootstrap-splash .status{display:flex;align-items:center;justify-content:center;gap:8px;padding-bottom:20px;color:#6e7681;font-size:12px}
 #bootstrap-splash .status.error-status{color:#c2c9d6}
@@ -127,13 +127,18 @@ const ensureBootstrapSplashState = (): BootstrapSplashState => {
   const current = window.__SH_SPLASH_BOOTSTRAP_STATE__;
   if (current) {
     if (!current.startedAt) current.startedAt = performance.now();
-    current.visibleCharacters = Number.POSITIVE_INFINITY;
-    current.progress = Math.max(current.progress ?? 0, BOOTSTRAP_SPLASH_INITIAL_PROGRESS);
+    current.visibleCharacters = Number.isFinite(current.visibleCharacters)
+      ? Math.max(0, Number(current.visibleCharacters))
+      : 0;
+    current.progress = Math.max(
+      BOOTSTRAP_SPLASH_INITIAL_PROGRESS,
+      Math.min(100, Number(current.progress ?? BOOTSTRAP_SPLASH_INITIAL_PROGRESS)),
+    );
     return current;
   }
   const next: BootstrapSplashState = {
     startedAt: performance.now(),
-    visibleCharacters: Number.POSITIVE_INFINITY,
+    visibleCharacters: 0,
     progress: BOOTSTRAP_SPLASH_INITIAL_PROGRESS,
   };
   window.__SH_SPLASH_BOOTSTRAP_STATE__ = next;
@@ -221,7 +226,10 @@ const buildLoadingSection = (): HTMLElement => {
 
   const progressWrap = document.createElement('div');
   progressWrap.className = 'progress-wrap';
-  progressWrap.style.setProperty('--bootstrap-progress', `${BOOTSTRAP_SPLASH_INITIAL_PROGRESS}%`);
+  progressWrap.style.setProperty(
+    '--bootstrap-progress-scale',
+    String(BOOTSTRAP_SPLASH_INITIAL_PROGRESS / 100),
+  );
   progressWrap.innerHTML = `
     <div class="progress-bar" role="progressbar"
          aria-valuenow="${BOOTSTRAP_SPLASH_INITIAL_PROGRESS}" aria-valuemin="0" aria-valuemax="100">

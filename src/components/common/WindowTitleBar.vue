@@ -12,24 +12,24 @@
 
         <nav class="flex min-w-0 items-center gap-1 text-[12px] text-(--text-tertiary)">
           <AppDropdownMenu :items="fileMenuItems" align="left" :min-width="140" @select="handleFileAction">
-            <template #trigger="{ open, toggle }">
-              <button type="button" class="titlebar-menu-button" :class="{ 'is-open': open }" @click="toggle">
+            <template #trigger="{ open }">
+              <button type="button" class="titlebar-menu-button" :class="{ 'is-open': open }">
                 文件
               </button>
             </template>
           </AppDropdownMenu>
 
           <AppDropdownMenu :items="editMenuItems" align="left" :min-width="188" @select="handleEditAction">
-            <template #trigger="{ open, toggle }">
-              <button type="button" class="titlebar-menu-button" :class="{ 'is-open': open }" @click="toggle">
+            <template #trigger="{ open }">
+              <button type="button" class="titlebar-menu-button" :class="{ 'is-open': open }">
                 编辑
               </button>
             </template>
           </AppDropdownMenu>
 
           <AppDropdownMenu :items="viewMenuItems" align="left" :min-width="140" @select="handleViewAction">
-            <template #trigger="{ open, toggle }">
-              <button type="button" class="titlebar-menu-button" :class="{ 'is-open': open }" @click="toggle">
+            <template #trigger="{ open }">
+              <button type="button" class="titlebar-menu-button" :class="{ 'is-open': open }">
                 查看
               </button>
             </template>
@@ -39,8 +39,8 @@
           <button type="button" class="titlebar-menu-button">转到</button>
 
           <AppDropdownMenu :items="terminalMenuItems" align="left" :min-width="140" @select="handleTerminalAction">
-            <template #trigger="{ open, toggle }">
-              <button type="button" class="titlebar-menu-button" :class="{ 'is-open': open }" @click="toggle">
+            <template #trigger="{ open }">
+              <button type="button" class="titlebar-menu-button" :class="{ 'is-open': open }">
                 终端
               </button>
             </template>

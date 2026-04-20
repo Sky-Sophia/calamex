@@ -51,15 +51,18 @@
         </div>
 
         <div v-else class="min-h-0 flex-1 overflow-y-auto">
-            <article v-for="item in issueCards" :key="item.key"
+            <article
+v-for="item in issueCards" :key="item.key"
                 class="group relative cursor-pointer border-b border-(--shell-divider) px-4 py-3 transition-colors duration-150 hover:bg-white/3"
                 role="button" tabindex="0" :aria-label="`跳转到 L${item.line}`" @click="handleSelect(item)"
                 @keydown.enter.prevent="handleSelect(item)" @keydown.space.prevent="handleSelect(item)">
-                <span class="absolute bottom-3.5 left-0 top-3.5 w-0.5 rounded-r-sm"
+                <span
+class="absolute bottom-3.5 left-0 top-3.5 w-0.5 rounded-r-sm"
                     :class="issueRailClass(item.level)" />
 
                 <div class="mb-1.5 flex items-center gap-2">
-                    <Badge :variant="severityBadgeVariant(item.level)"
+                    <Badge
+:variant="severityBadgeVariant(item.level)"
                         class="rounded-md px-1.5 py-0 text-[10.5px] font-medium uppercase tracking-[0.04em]">
                         {{ severityLabel(item.level) }}
                     </Badge>
@@ -76,16 +79,20 @@
 
                 <div
                     class="overflow-x-auto rounded-[5px] border border-white/6 bg-[color-mix(in_srgb,var(--app-bg)_88%,black)] px-2.5 py-1.5">
-                    <div v-if="item.isEmptyLine"
+                    <div
+v-if="item.isEmptyLine"
                         class="mono-text text-[11.5px] leading-5 text-[color-mix(in_srgb,var(--danger)_78%,white)]">
                         ~
                     </div>
 
-                    <div v-else
+                    <div
+v-else
                         class="mono-text text-[11.5px] leading-5 text-[color-mix(in_srgb,var(--text-secondary)_88%,white)]">
-                        <div v-for="previewLine in item.previewLines" :key="previewLine.key"
+                        <div
+v-for="previewLine in item.previewLines" :key="previewLine.key"
                             class="min-w-max whitespace-pre">
-                            <span v-for="(fragment, index) in previewLine.fragments"
+                            <span
+v-for="(fragment, index) in previewLine.fragments"
                                 :key="`${previewLine.key}-${index}`"
                                 :class="fragment.highlighted ? highlightClass(item.level) : undefined">{{ fragment.text
                                 }}</span>

@@ -1,57 +1,48 @@
 <template>
-  <div ref="rootRef" class="relative">
-    <slot name="trigger" :open="isOpen" :toggle="toggle" />
+  <DropdownMenuRoot v-model:open="isOpen">
+    <DropdownMenuTrigger as-child>
+      <slot name="trigger" :open="isOpen" />
+    </DropdownMenuTrigger>
 
-    <div
-      v-if="isOpen"
-      class="dropdown-menu-panel absolute z-50 mt-2 overflow-hidden"
-      :class="align === 'right' ? 'right-0' : 'left-0'"
-      :style="{ minWidth: `${minWidth}px` }"
-      @click.stop
-    >
-      <template v-for="item in items" :key="item.key">
-        <div v-if="item.separatorBefore" class="mx-2 border-t border-white/[0.08]" />
-        <button
-          type="button"
-          class="dropdown-menu-item w-full text-left"
-          :class="{
+    <DropdownMenuPortal>
+      <DropdownMenuContent class="dropdown-menu-panel z-[1250] overflow-hidden outline-none" :align="contentAlign"
+        :side-offset="8" :collision-padding="8" :style="{ minWidth: `${props.minWidth}px` }">
+        <template v-for="item in props.items" :key="item.key">
+          <DropdownMenuSeparator v-if="item.separatorBefore" class="mx-2 border-t border-white/8" />
+          <DropdownMenuItem class="dropdown-menu-item w-full text-left outline-none" :class="{
             'is-danger': item.tone === 'danger',
             'is-disabled': item.disabled,
             'is-selected': item.selected,
-          }"
-          :disabled="item.disabled"
-          @click="handleSelect(item.key, item.disabled)"
-        >
-          <span class="dropdown-menu-item-main">
-            <span class="truncate text-[13px] font-medium">{{ item.label }}</span>
-            <span
-              v-if="item.description"
-              class="mt-1 text-[11px] leading-5 text-[var(--text-quaternary)]"
-            >
-              {{ item.description }}
+          }" :disabled="item.disabled" @select="handleSelect(item.key)">
+            <span class="dropdown-menu-item-main">
+              <span class="truncate text-[13px] font-medium">{{ item.label }}</span>
+              <span v-if="item.description" class="mt-1 text-[11px] leading-5 text-(--text-quaternary)">
+                {{ item.description }}
+              </span>
             </span>
-          </span>
-          <span v-if="item.selected" class="dropdown-menu-item-check" aria-hidden="true">
-            <svg
-              viewBox="0 0 16 16"
-              class="h-3.5 w-3.5"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="m3.5 8.2 2.7 2.7 6.3-6.4" />
-            </svg>
-          </span>
-        </button>
-      </template>
-    </div>
-  </div>
+            <span v-if="item.selected" class="dropdown-menu-item-check" aria-hidden="true">
+              <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="m3.5 8.2 2.7 2.7 6.3-6.4" />
+              </svg>
+            </span>
+          </DropdownMenuItem>
+        </template>
+      </DropdownMenuContent>
+    </DropdownMenuPortal>
+  </DropdownMenuRoot>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import {
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuRoot,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { computed, ref } from 'vue';
 
 interface IDropdownMenuItem {
   key: string;
@@ -63,7 +54,7 @@ interface IDropdownMenuItem {
   tone?: 'default' | 'danger';
 }
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     items: IDropdownMenuItem[];
     align?: 'left' | 'right';
@@ -79,50 +70,10 @@ const emit = defineEmits<{
   select: [key: string];
 }>();
 
-const rootRef = ref<HTMLElement | null>(null);
 const isOpen = ref(false);
+const contentAlign = computed(() => (props.align === 'right' ? 'end' : 'start'));
 
-const close = (): void => {
-  isOpen.value = false;
-};
-
-const toggle = (): void => {
-  isOpen.value = !isOpen.value;
-};
-
-const handleSelect = (key: string, disabled = false): void => {
-  if (disabled) {
-    return;
-  }
-
+const handleSelect = (key: string): void => {
   emit('select', key);
-  close();
 };
-
-const handleClickOutside = (event: MouseEvent): void => {
-  const target = event.target;
-  if (!(target instanceof Node)) {
-    return;
-  }
-
-  if (!rootRef.value?.contains(target)) {
-    close();
-  }
-};
-
-const handleEscape = (event: KeyboardEvent): void => {
-  if (event.key === 'Escape') {
-    close();
-  }
-};
-
-onMounted(() => {
-  document.addEventListener('mousedown', handleClickOutside);
-  window.addEventListener('keydown', handleEscape);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener('mousedown', handleClickOutside);
-  window.removeEventListener('keydown', handleEscape);
-});
 </script>

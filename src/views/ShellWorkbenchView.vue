@@ -1,9 +1,11 @@
 <template>
-  <AppShellLayout :is-desktop-runtime="isDesktopRuntime" :sidebar-visible="isSidebarVisible"
+  <AppShellLayout
+:is-desktop-runtime="isDesktopRuntime" :sidebar-visible="isSidebarVisible"
     :terminal-visible="isTerminalVisible" :terminal-height="terminalHeight"
     @update:terminal-height="terminalHeight = $event">
     <template #titlebar>
-      <WindowTitleBar :document-name="editorStore.document.name" :is-dirty="editorStore.document.isDirty"
+      <WindowTitleBar
+:document-name="editorStore.document.name" :is-dirty="editorStore.document.isDirty"
         :has-active-document="editorStore.hasActiveDocument" :document-kind="editorStore.document.kind"
         :theme="appStore.theme" :is-running="editorStore.isRunning" :can-run="canRun" :can-save="canSave"
         :is-desktop-runtime="isDesktopRuntime" :is-terminal-visible="isTerminalVisible"
@@ -21,18 +23,21 @@
     </template>
 
     <template #sidebar>
-      <AppSidebar :document="editorStore.document" :view="activeSidebarView" :is-desktop-runtime="isDesktopRuntime"
+      <AppSidebar
+:document="editorStore.document" :view="activeSidebarView" :is-desktop-runtime="isDesktopRuntime"
         :workspace-root-path="editorStore.workspaceRootPath" :preloaded-workspace-root="startupWorkspaceRoot"
         @open-file="openDocumentByPath" />
     </template>
 
     <template #header>
-      <WorkbenchHeader :documents="editorStore.documents" :active-document-id="editorStore.activeDocumentId"
+      <WorkbenchHeader
+:documents="editorStore.documents" :active-document-id="editorStore.activeDocumentId"
         :file-path="editorStore.hasActiveDocument ? editorStore.document.path : null" @select-tab="activateDocument"
         @close-tab="requestCloseDocument" />
     </template>
 
-    <div ref="editorViewportRef"
+    <div
+ref="editorViewportRef"
       class="workbench-editor-viewport relative h-full min-h-0 overflow-hidden bg-(--editor-bg)"
       :data-diagnostics-resizing="diagnosticsTransitionsEnabled ? 'false' : 'true'">
       <div class="h-full min-h-0">
@@ -40,7 +45,8 @@
           <div class="flex max-w-md flex-col items-center gap-4 text-center text-(--text-quaternary)">
             <div
               class="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/8 bg-white/3 text-(--text-secondary)">
-              <svg viewBox="0 0 24 24" class="h-8 w-8" fill="none" stroke="currentColor" stroke-width="1.7"
+              <svg
+viewBox="0 0 24 24" class="h-8 w-8" fill="none" stroke="currentColor" stroke-width="1.7"
                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M14 3H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9z" />
                 <path d="M14 3v6h6" />
@@ -59,17 +65,20 @@
           </div>
         </div>
 
-        <SmartScriptEditor v-else-if="editorStore.document.kind === 'text'" ref="editorRef"
+        <SmartScriptEditor
+v-else-if="editorStore.document.kind === 'text'" ref="editorRef"
           :document-id="editorStore.document.id" :document-path="editorStore.document.path"
           :document-name="editorStore.document.name" :model-value="editorStore.document.content" :theme="appStore.theme"
           @update:model-value="updateContent" @cursor-position-change="handleCursorPositionChange"
           @diagnostics-change="handleDiagnosticsChange" @format-request="handleFormatDocument" />
 
-        <ImageAssetPreview v-else-if="editorStore.document.path" :path="editorStore.document.path"
+        <ImageAssetPreview
+v-else-if="editorStore.document.path" :path="editorStore.document.path"
           :name="editorStore.document.name" />
       </div>
 
-      <div v-if="shouldRenderDiagnosticsPanel"
+      <div
+v-if="shouldRenderDiagnosticsPanel"
         class="diagnostics-overlay-panel absolute inset-y-0 right-0 z-20 max-w-full overflow-hidden border-l border-(--shell-divider) bg-(--panel-bg) shadow-[-24px_0_48px_rgba(0,0,0,0.28)]"
         :style="diagnosticsPanelStyle" :class="[
           diagnosticsPanelMotionClass,
@@ -78,14 +87,16 @@
             : 'pointer-events-none translate-x-3 opacity-0',
         ]">
         <div class="h-full">
-          <DiagnosticsPanel :analysis="editorStore.activeScriptAnalysis" :content="editorStore.document.content"
+          <DiagnosticsPanel
+:analysis="editorStore.activeScriptAnalysis" :content="editorStore.document.content"
             :document-name="editorStore.document.name" @select-diagnostic="handleSelectDiagnostic" />
         </div>
       </div>
     </div>
 
     <template #terminal>
-      <RunPanel :terminal-output-version="editorStore.terminalOutputVersion"
+      <RunPanel
+:terminal-output-version="editorStore.terminalOutputVersion"
         :resolve-terminal-output="editorStore.getTerminalOutputSnapshot" :run-logs="editorStore.runLogs"
         :last-run-result="editorStore.lastRunResult" :is-running="editorStore.isRunning"
         :executor="editorStore.selectedExecutor" :document-name="editorStore.document.name"
@@ -95,7 +106,8 @@
     </template>
 
     <template #statusbar>
-      <WorkbenchStatusBar :has-active-document="editorStore.hasActiveDocument"
+      <WorkbenchStatusBar
+:has-active-document="editorStore.hasActiveDocument"
         :document-kind="editorStore.document.kind" :is-running="editorStore.isRunning"
         :encoding="editorStore.document.encoding" :executor="editorStore.selectedExecutor"
         :cursor-line="editorStore.cursorLine" :cursor-column="editorStore.cursorColumn"

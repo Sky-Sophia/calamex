@@ -1,38 +1,22 @@
 <template>
-  <header class="editor-tabbar flex h-10 items-center justify-between border-b border-[var(--shell-divider)] px-1">
+  <header class="editor-tabbar flex h-10 items-center justify-between border-b border-(--shell-divider) px-1">
     <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overflow-y-hidden pr-2">
-      <button
-        v-for="item in documents"
-        :key="item.id"
-        type="button"
-        class="editor-file-tab app-tooltip-target"
-        :class="{
-          'is-active': item.id === activeDocumentId,
-          'is-dirty': item.isDirty,
-        }"
-        :data-tooltip="item.name"
-        data-tooltip-placement="bottom"
-        @click="$emit('select-tab', item.id)"
-      >
-        <FileEntryIcon
-          kind="file"
-          :path="item.path ?? item.name"
-          class="editor-file-tab-icon"
-        />
+      <button v-for="item in documents" :key="item.id" type="button" class="editor-file-tab app-tooltip-target" :class="{
+        'is-active': item.id === activeDocumentId,
+        'is-dirty': item.isDirty,
+      }" :data-tooltip="item.name" data-tooltip-placement="bottom" @click="$emit('select-tab', item.id)">
+        <FileEntryIcon kind="file" :path="item.path ?? item.name" class="editor-file-tab-icon" />
         <span class="editor-file-tab-name truncate">{{ item.name }}</span>
         <span class="editor-file-tab-action" aria-hidden="true">
           <span class="editor-file-tab-indicator" />
-          <span
-            class="editor-file-tab-close"
-            @click.stop="$emit('close-tab', item.id)"
-          >
+          <span class="editor-file-tab-close" @click.stop="$emit('close-tab', item.id)">
             ×
           </span>
         </span>
       </button>
     </div>
 
-    <div class="flex min-w-0 items-center gap-3 px-3 text-[11px] text-[var(--text-quaternary)]">
+    <div class="flex min-w-0 items-center gap-3 px-3 text-[11px] text-(--text-quaternary)">
       <span class="truncate">{{ breadcrumbText }}</span>
     </div>
   </header>

@@ -39,7 +39,8 @@
       </section>
 
       <div class="run-log-timeline">
-        <article v-for="item in displayedReport.timeline" :key="item.id" class="run-log-item"
+        <article
+v-for="item in displayedReport.timeline" :key="item.id" class="run-log-item"
           :class="[`accent-${item.accent}`, { 'is-live': item.status === 'running' }]"
           :style="{ '--run-log-gap': String(item.gapWeight) }">
           <div class="run-log-row">
@@ -58,7 +59,8 @@
 
             <Transition name="run-log-expand">
               <div v-if="isExpanded(item.id)" class="run-log-output mono-text">
-                <p v-for="detail in item.details" :key="`${item.id}-${detail.text}`" class="run-log-output-line"
+                <p
+v-for="detail in item.details" :key="`${item.id}-${detail.text}`" class="run-log-output-line"
                   :class="`tone-${detail.tone}`">
                   {{ detail.text }}
                 </p>
