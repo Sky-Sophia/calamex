@@ -7,7 +7,27 @@ const TOOLTIP_GAP = 10;
 const MULTILINE_THRESHOLD_WIDTH = 420;
 const POINTER_WATCHDOG_INTERVAL_MS = 80;
 
-let cleanupTooltipSystem: (() => void) | null = null;
+declare global {
+  interface Window {
+    __SH_APP_TOOLTIP_CLEANUP__?: (() => void) | undefined;
+  }
+}
+
+const disposeAppTooltipSystem = (): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const cleanup = window.__SH_APP_TOOLTIP_CLEANUP__;
+  if (!cleanup) {
+    return;
+  }
+
+  cleanup();
+  if (window.__SH_APP_TOOLTIP_CLEANUP__ === cleanup) {
+    window.__SH_APP_TOOLTIP_CLEANUP__ = undefined;
+  }
+};
 
 const getPlacementCandidates = (preferredPlacement: TTooltipPlacement): TTooltipPlacement[] => {
   switch (preferredPlacement) {
@@ -125,9 +145,11 @@ const resolveOverflowScore = (
 };
 
 export const initAppTooltipSystem = (): void => {
-  if (typeof window === 'undefined' || cleanupTooltipSystem) {
+  if (typeof window === 'undefined') {
     return;
   }
+
+  disposeAppTooltipSystem();
 
   const tooltipElement = ensureTooltipElement();
   let activeTarget: HTMLElement | null = null;
@@ -370,7 +392,7 @@ export const initAppTooltipSystem = (): void => {
   window.addEventListener('blur', handleWindowBlur);
   window.addEventListener('keydown', handleKeyDown);
 
-  cleanupTooltipSystem = () => {
+  const cleanup = (): void => {
     document.removeEventListener('pointermove', handlePointerMove, true);
     document.removeEventListener('pointerover', handlePointerOver);
     document.removeEventListener('pointerout', handlePointerOut);
@@ -385,4 +407,12 @@ export const initAppTooltipSystem = (): void => {
     window.removeEventListener('keydown', handleKeyDown);
     hideTooltip();
   };
+
+  window.__SH_APP_TOOLTIP_CLEANUP__ = cleanup;
 };
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    disposeAppTooltipSystem();
+  });
+}

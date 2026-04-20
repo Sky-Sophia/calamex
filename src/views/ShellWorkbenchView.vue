@@ -136,6 +136,7 @@ let editorViewportResizeFrameId: number | null = null;
 let nativeCloseRequestedUnlisten: (() => void) | null = null;
 let previousEditorViewportSize = { width: 0, height: 0 };
 let pendingEditorViewportSize: { width: number; height: number } | null = null;
+let isUnmounted = false;
 
 const {
   appStore,
@@ -383,7 +384,7 @@ const hideTerminal = (): void => {
 };
 
 const emitWorkbenchReady = async (): Promise<void> => {
-  if (hasEmittedReady.value) {
+  if (hasEmittedReady.value || isUnmounted) {
     return;
   }
 
@@ -394,24 +395,36 @@ const emitWorkbenchReady = async (): Promise<void> => {
     });
   });
 
+  if (isUnmounted || hasEmittedReady.value) {
+    return;
+  }
+
   hasEmittedReady.value = true;
   emit('ready');
 };
 
 const initializeWorkbench = async (): Promise<void> => {
   const result = await initialize();
+  if (isUnmounted) {
+    return;
+  }
+
   startupWorkspaceRoot.value = result.startupWorkspaceDirectory;
   await emitWorkbenchReady();
 };
 
 const bindNativeWindowCloseRequest = async (): Promise<void> => {
   const runtimeReady = await waitForDesktopRuntime(400);
-  if (!runtimeReady) {
+  if (!runtimeReady || isUnmounted) {
     return;
   }
 
   const { getCurrentWindow } = await import('@tauri-apps/api/window');
-  nativeCloseRequestedUnlisten = await getCurrentWindow().onCloseRequested(async (event) => {
+  if (isUnmounted) {
+    return;
+  }
+
+  const unlisten = await getCurrentWindow().onCloseRequested(async (event) => {
     if (consumeProgrammaticWindowCloseAllowance()) {
       return;
     }
@@ -419,6 +432,13 @@ const bindNativeWindowCloseRequest = async (): Promise<void> => {
     event.preventDefault();
     await requestCloseApplication();
   });
+
+  if (isUnmounted) {
+    unlisten();
+    return;
+  }
+
+  nativeCloseRequestedUnlisten = unlisten;
 };
 
 const handleRunScript = async (): Promise<void> => {
@@ -442,6 +462,8 @@ watch(
 );
 
 onMounted(() => {
+  isUnmounted = false;
+
   if (editorViewportRef.value) {
     previousEditorViewportSize = {
       width: editorViewportRef.value.clientWidth,
@@ -467,9 +489,11 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  isUnmounted = true;
   nativeCloseRequestedUnlisten?.();
   nativeCloseRequestedUnlisten = null;
   editorViewportResizeObserver?.disconnect();
+  editorViewportResizeObserver = null;
 
   if (editorViewportResizeFrameId !== null) {
     window.cancelAnimationFrame(editorViewportResizeFrameId);

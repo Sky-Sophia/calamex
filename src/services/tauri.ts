@@ -66,11 +66,13 @@ const loadTauriDialog = (): Promise<TauriDialogModule> => {
 // 统一错误包装：保留原 cause，同时把操作名带出，便于调试 / Sentry 定位
 const wrapInvocationError = (guardHint: string, command: string, error: unknown): Error => {
   const baseMessage = error instanceof Error ? error.message : String(error);
-  const wrapped = new Error(`[${guardHint}] ${command} 调用失败: ${baseMessage}`);
-  if (error instanceof Error && (wrapped as unknown as { cause?: unknown }).cause === undefined) {
-    (wrapped as unknown as { cause: unknown }).cause = error;
+  if (error instanceof Error) {
+    return new Error(`[${guardHint}] ${command} 调用失败: ${baseMessage}`, {
+      cause: error,
+    });
   }
-  return wrapped;
+
+  return new Error(`[${guardHint}] ${command} 调用失败: ${baseMessage}`);
 };
 
 /**

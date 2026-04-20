@@ -6,6 +6,12 @@ export interface IRuntimeErrorState {
   detail: string;
 }
 
+declare global {
+  interface Window {
+    __SH_RUNTIME_DIAGNOSTICS_CLEANUP__?: (() => void) | undefined;
+  }
+}
+
 export const runtimeErrorState = ref<IRuntimeErrorState | null>(null);
 
 const readErrorLikeField = (error: unknown, field: 'name' | 'message'): string | null => {
@@ -56,17 +62,55 @@ export const setRuntimeError = (title: string, error: unknown): void => {
   };
 };
 
-export const registerRuntimeDiagnostics = (): void => {
-  window.addEventListener('error', (event) => {
-    setRuntimeError('应用运行时错误', event.error ?? event.message);
-  });
+export const disposeRuntimeDiagnostics = (): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
 
-  window.addEventListener('unhandledrejection', (event) => {
+  const cleanup = window.__SH_RUNTIME_DIAGNOSTICS_CLEANUP__;
+  if (!cleanup) {
+    return;
+  }
+
+  cleanup();
+  if (window.__SH_RUNTIME_DIAGNOSTICS_CLEANUP__ === cleanup) {
+    window.__SH_RUNTIME_DIAGNOSTICS_CLEANUP__ = undefined;
+  }
+};
+
+export const registerRuntimeDiagnostics = (): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  disposeRuntimeDiagnostics();
+
+  const handleError = (event: ErrorEvent): void => {
+    setRuntimeError('应用运行时错误', event.error ?? event.message);
+  };
+
+  const handleUnhandledRejection = (event: PromiseRejectionEvent): void => {
     if (isExpectedCancellationError(event.reason)) {
       event.preventDefault();
       return;
     }
 
     setRuntimeError('未处理的异步错误', event.reason);
-  });
+  };
+
+  window.addEventListener('error', handleError);
+  window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+  const cleanup = (): void => {
+    window.removeEventListener('error', handleError);
+    window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+  };
+
+  window.__SH_RUNTIME_DIAGNOSTICS_CLEANUP__ = cleanup;
 };
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    disposeRuntimeDiagnostics();
+  });
+}

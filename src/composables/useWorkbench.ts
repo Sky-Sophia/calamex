@@ -24,7 +24,7 @@ import {
   allowNextProgrammaticWindowClose,
   clearProgrammaticWindowCloseAllowance,
 } from '@/utils/window-close';
-import { computed } from 'vue';
+import { computed, onScopeDispose } from 'vue';
 
 const buildLogDetail = (title: string, detail: string): string => `${title}：${detail}`;
 
@@ -115,6 +115,7 @@ export const useWorkbench = () => {
   const editorStore = useEditorStore();
   let bufferedTerminalOutput = '';
   let bufferedTerminalOutputTimerId: number | null = null;
+  let isDisposed = false;
   let activeTerminalRunMeta: {
     runId: string;
     startedAt: string;
@@ -161,6 +162,11 @@ export const useWorkbench = () => {
     clearBufferedTerminalOutputTimer();
 
     if (!bufferedTerminalOutput) {
+      return;
+    }
+
+    if (isDisposed) {
+      bufferedTerminalOutput = '';
       return;
     }
 
@@ -686,6 +692,10 @@ export const useWorkbench = () => {
     activeTerminalRunMeta = null;
 
     const dispatchResult = await dispatchScriptToIntegratedTerminal(document, runId);
+    if (isDisposed) {
+      return;
+    }
+
     activeTerminalRunMeta = {
       runId,
       startedAt: dispatchResult.startedAt,
@@ -713,9 +723,17 @@ export const useWorkbench = () => {
         outputPath: dispatchResult.outputPath,
       })
       .then(async (result) => {
+        if (isDisposed) {
+          return;
+        }
+
         await new Promise((resolve) => {
           window.setTimeout(resolve, 120);
         });
+
+        if (isDisposed) {
+          return;
+        }
 
         handleIntegratedTerminalRunComplete({
           sessionId: DEFAULT_TERMINAL_SESSION_ID,
@@ -726,7 +744,7 @@ export const useWorkbench = () => {
         });
       })
       .catch((error) => {
-        if (editorStore.pendingTerminalRunId !== runId) {
+        if (isDisposed || editorStore.pendingTerminalRunId !== runId) {
           return;
         }
 
@@ -743,6 +761,10 @@ export const useWorkbench = () => {
   };
 
   const handleIntegratedTerminalRunComplete = (payload: ITerminalRunCompletePayload): void => {
+    if (isDisposed) {
+      return;
+    }
+
     const pendingRunId = editorStore.pendingTerminalRunId;
     if (payload.runId !== pendingRunId && payload.runId !== activeTerminalRunMeta?.runId) {
       return;
@@ -846,7 +868,7 @@ export const useWorkbench = () => {
   };
 
   const appendTerminalOutput = (value: string): void => {
-    if (!value) {
+    if (isDisposed || !value) {
       return;
     }
 
@@ -886,6 +908,12 @@ export const useWorkbench = () => {
     editorStore.appendLog('info', '插入模板', `已插入模板：${template.title}`);
     useMessage().success(`已插入 ${template.title}`);
   };
+
+  onScopeDispose(() => {
+    isDisposed = true;
+    resetBufferedTerminalOutput();
+    activeTerminalRunMeta = null;
+  });
 
   return {
     appStore,

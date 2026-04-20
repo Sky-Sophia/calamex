@@ -12,7 +12,7 @@ use commands::{
 use tauri::Manager;
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(TerminalSessionState::default())
         .setup(|app| {
@@ -40,7 +40,10 @@ fn main() {
             write_terminal_input,
             resize_terminal_session,
             close_terminal_session
-        ])
-        .run(tauri::generate_context!())
-        .expect("failed to run SH editor");
+        ]);
+
+    if let Err(error) = app.run(tauri::generate_context!()) {
+        eprintln!("failed to run SH editor: {error}");
+        std::process::exit(1);
+    }
 }
