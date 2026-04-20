@@ -850,6 +850,11 @@ export const useWorkbench = () => {
       return;
     }
 
+    // 运行日志只记录脚本执行期的终端输出，避免把 shell 欢迎词、提示符等常驻内容误当成一次运行。
+    if (!activeTerminalRunMeta && !editorStore.pendingTerminalRunId) {
+      return;
+    }
+
     if (activeTerminalRunMeta) {
       activeTerminalRunMeta.receivedLiveOutput = true;
     }

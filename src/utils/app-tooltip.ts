@@ -1,9 +1,11 @@
 type TTooltipPlacement = 'top' | 'bottom' | 'left' | 'right';
+type TTooltipActivationSource = 'pointer' | 'focus';
 
 const TOOLTIP_SELECTOR = '.app-tooltip-target[data-tooltip]';
 const VIEWPORT_PADDING = 12;
 const TOOLTIP_GAP = 10;
 const MULTILINE_THRESHOLD_WIDTH = 420;
+const POINTER_WATCHDOG_INTERVAL_MS = 80;
 
 let cleanupTooltipSystem: (() => void) | null = null;
 
@@ -129,9 +131,72 @@ export const initAppTooltipSystem = (): void => {
 
   const tooltipElement = ensureTooltipElement();
   let activeTarget: HTMLElement | null = null;
+  let activeSource: TTooltipActivationSource | null = null;
+  let lastPointerX = 0;
+  let lastPointerY = 0;
+  let hasPointerPosition = false;
+  let pointerWatchdogId: number | null = null;
+
+  const stopPointerWatchdog = (): void => {
+    if (pointerWatchdogId !== null) {
+      window.clearInterval(pointerWatchdogId);
+      pointerWatchdogId = null;
+    }
+  };
+
+  const updatePointerPosition = (clientX: number, clientY: number): void => {
+    lastPointerX = clientX;
+    lastPointerY = clientY;
+    hasPointerPosition = true;
+  };
+
+  const clearPointerPosition = (): void => {
+    hasPointerPosition = false;
+  };
+
+  const isPointerOverActiveTarget = (): boolean => {
+    if (!activeTarget || !hasPointerPosition || !document.body.contains(activeTarget)) {
+      return false;
+    }
+
+    const maxClientX = Math.max(0, window.innerWidth - 1);
+    const maxClientY = Math.max(0, window.innerHeight - 1);
+    const hitTarget = document.elementFromPoint(
+      clamp(Math.round(lastPointerX), 0, maxClientX),
+      clamp(Math.round(lastPointerY), 0, maxClientY),
+    );
+
+    return hitTarget instanceof Element
+      ? hitTarget === activeTarget || activeTarget.contains(hitTarget)
+      : false;
+  };
+
+  const ensurePointerWatchdog = (): void => {
+    if (pointerWatchdogId !== null || !activeTarget) {
+      return;
+    }
+
+    pointerWatchdogId = window.setInterval(() => {
+      if (!activeTarget) {
+        stopPointerWatchdog();
+        return;
+      }
+
+      if (!document.body.contains(activeTarget)) {
+        hideTooltip();
+        return;
+      }
+
+      if (activeSource === 'pointer' && (!hasPointerPosition || !isPointerOverActiveTarget())) {
+        hideTooltip();
+      }
+    }, POINTER_WATCHDOG_INTERVAL_MS);
+  };
 
   const hideTooltip = (): void => {
     activeTarget = null;
+    activeSource = null;
+    stopPointerWatchdog();
     tooltipElement.classList.remove(
       'is-visible',
       'is-top',
@@ -145,7 +210,7 @@ export const initAppTooltipSystem = (): void => {
     tooltipElement.textContent = '';
   };
 
-  const showTooltip = (target: HTMLElement): void => {
+  const showTooltip = (target: HTMLElement, source: TTooltipActivationSource): void => {
     const tooltipText = target.dataset.tooltip?.trim();
     if (!tooltipText) {
       hideTooltip();
@@ -153,6 +218,7 @@ export const initAppTooltipSystem = (): void => {
     }
 
     activeTarget = target;
+    activeSource = source;
     const preferredPlacement = resolveTooltipPlacement(target.dataset.tooltipPlacement);
     const lockPlacement = target.dataset.tooltipLockPlacement === 'true';
     const { width, height } = measureTooltip(tooltipElement, tooltipText);
@@ -187,6 +253,7 @@ export const initAppTooltipSystem = (): void => {
     tooltipElement.classList.add(`is-${resolvedPlacement}`, 'is-visible');
     tooltipElement.style.left = `${Math.round(resolvedPosition.left)}px`;
     tooltipElement.style.top = `${Math.round(resolvedPosition.top)}px`;
+    ensurePointerWatchdog();
   };
 
   const syncTooltipPosition = (): void => {
@@ -195,10 +262,16 @@ export const initAppTooltipSystem = (): void => {
       return;
     }
 
-    showTooltip(activeTarget);
+    showTooltip(activeTarget, activeSource ?? 'pointer');
+  };
+
+  const handlePointerMove = (event: PointerEvent): void => {
+    updatePointerPosition(event.clientX, event.clientY);
   };
 
   const handlePointerOver = (event: PointerEvent): void => {
+    updatePointerPosition(event.clientX, event.clientY);
+
     const target = event.target;
     if (!(target instanceof Element)) {
       return;
@@ -213,7 +286,7 @@ export const initAppTooltipSystem = (): void => {
       return;
     }
 
-    showTooltip(tooltipTarget);
+    showTooltip(tooltipTarget, 'pointer');
   };
 
   const handlePointerOut = (event: PointerEvent): void => {
@@ -242,7 +315,7 @@ export const initAppTooltipSystem = (): void => {
 
     const tooltipTarget = target.closest<HTMLElement>(TOOLTIP_SELECTOR);
     if (tooltipTarget) {
-      showTooltip(tooltipTarget);
+      showTooltip(tooltipTarget, 'focus');
     }
   };
 
@@ -261,29 +334,54 @@ export const initAppTooltipSystem = (): void => {
 
   const handlePointerDown = (): void => hideTooltip();
 
+  const handleDocumentMouseLeave = (): void => {
+    clearPointerPosition();
+    hideTooltip();
+  };
+
+  const handleWindowBlur = (): void => {
+    clearPointerPosition();
+    hideTooltip();
+  };
+
+  const handleVisibilityChange = (): void => {
+    if (document.hidden) {
+      clearPointerPosition();
+      hideTooltip();
+    }
+  };
+
   const handleKeyDown = (event: KeyboardEvent): void => {
     if (event.key === 'Escape') {
       hideTooltip();
     }
   };
 
+  document.addEventListener('pointermove', handlePointerMove, true);
   document.addEventListener('pointerover', handlePointerOver);
   document.addEventListener('pointerout', handlePointerOut);
   document.addEventListener('focusin', handleFocusIn);
   document.addEventListener('focusout', handleFocusOut);
   document.addEventListener('pointerdown', handlePointerDown, true);
+  document.documentElement.addEventListener('mouseleave', handleDocumentMouseLeave);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
   document.addEventListener('scroll', syncTooltipPosition, true);
   window.addEventListener('resize', syncTooltipPosition);
+  window.addEventListener('blur', handleWindowBlur);
   window.addEventListener('keydown', handleKeyDown);
 
   cleanupTooltipSystem = () => {
+    document.removeEventListener('pointermove', handlePointerMove, true);
     document.removeEventListener('pointerover', handlePointerOver);
     document.removeEventListener('pointerout', handlePointerOut);
     document.removeEventListener('focusin', handleFocusIn);
     document.removeEventListener('focusout', handleFocusOut);
     document.removeEventListener('pointerdown', handlePointerDown, true);
+    document.documentElement.removeEventListener('mouseleave', handleDocumentMouseLeave);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
     document.removeEventListener('scroll', syncTooltipPosition, true);
     window.removeEventListener('resize', syncTooltipPosition);
+    window.removeEventListener('blur', handleWindowBlur);
     window.removeEventListener('keydown', handleKeyDown);
     hideTooltip();
   };

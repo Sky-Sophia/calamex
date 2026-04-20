@@ -271,16 +271,16 @@
         line.reduce((total, fragment) => total + fragment.text.length, 0),
       );
       const totalCharacters = lineLengths.reduce((total, length) => total + length, 0);
-      const ESTIMATED_DURATION_MS = 2200;
-      const PROGRESS_CEILING = 95;
-      const PROGRESS_FIRST_PHASE_RATIO = 0.15;
-      const PROGRESS_SECOND_PHASE_RATIO = 0.85;
-      const PROGRESS_FIRST_PHASE_VALUE = 30;
-      const PROGRESS_SECOND_PHASE_VALUE = 80;
+      const ESTIMATED_DURATION_MS = 2400;
+      const PROGRESS_CEILING = 92;
+      const PROGRESS_FIRST_PHASE_RATIO = 0.12;
+      const PROGRESS_SECOND_PHASE_RATIO = 0.82;
+      const PROGRESS_FIRST_PHASE_VALUE = 18;
+      const PROGRESS_SECOND_PHASE_VALUE = 72;
       const splashState = {
         startedAt: performance.now(),
         visibleCharacters: 0,
-        progress: 8,
+        progress: 3,
         handoff: false,
       };
       let progressTarget = splashState.progress;
@@ -469,7 +469,7 @@
         if (remainingProgress > 0) {
           splashState.progress = Math.min(
             progressTarget,
-            splashState.progress + Math.max(0.12, remainingProgress * 0.16),
+            splashState.progress + Math.max(0.06, remainingProgress * 0.1),
           );
           renderProgress();
         }

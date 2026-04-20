@@ -16,7 +16,7 @@ UI 样式：Tailwind CSS 4.2.2，采用 CSS-first 配置方式。
 路由：Vue Router 4.4 及以上。严禁使用与 Vue 3 不匹配的 3.x 或不存在的 5.x。
 代码规范：ESLint 10.2.0、@eslint/js 10.0.1、eslint-plugin-vue 10.8.0、vue-eslint-parser 10.4.0、typescript-eslint 8 及以上。
 类型体系：vue-tsc 3.2.6、@types/node 25.6.0、@vue/tsconfig 0.9.1。
-工具库：monaco-editor 0.55.1，必须懒加载，严禁在入口直接同步引入。
+工具库：monaco-editor 0.55.1。
 全局变量：globals 17.5.0。
 包管理器：pnpm 9 及以上，在 package.json 的 packageManager 字段硬锁。
 运行时：Node 20 LTS 及以上，通过 engines.node 字段约束。

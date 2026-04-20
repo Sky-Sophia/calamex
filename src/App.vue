@@ -1,6 +1,7 @@
 <template>
   <div class="app-root-stage" :class="{ 'is-splash-mode': isWindowSplashMode }">
     <AppDialogHost />
+    <div v-if="isStartupVeilVisible" class="startup-veil" :class="{ 'is-leaving': isStartupVeilLeaving }" />
     <div v-if="isContentMounted && workbenchComponent && !runtimeErrorState" class="app-content-entry"
       :class="{ 'is-visible': isAppContentVisible }">
       <component :is="workbenchComponent" @ready="handleWorkbenchReady" />
@@ -29,18 +30,23 @@ import {
 const MAIN_WINDOW_SIZE = { width: 1500, height: 960 } as const;
 const MAIN_WINDOW_MIN_SIZE = { width: 1220, height: 760 } as const;
 const MAIN_CONTENT_REVEAL_DELAY_MS = 50;
+const STARTUP_VEIL_FADE_DURATION_MS = 140;
 const SPLASH_MODE_CLASS = 'splash-window-mode';
 
 const isSplashMounted = ref(true);
 const isContentMounted = ref(false);
 const isAppContentVisible = ref(false);
+const isStartupVeilVisible = ref(false);
+const isStartupVeilLeaving = ref(false);
 const isWorkbenchModuleReady = ref(false);
 const isWorkbenchViewReady = ref(false);
 const workbenchComponent = shallowRef<Component | null>(null);
 const isWindowSplashMode = ref(true);
+let isMainWindowPrepared = false;
 
-let revealMainWindowPromise: Promise<void> | null = null;
+let prepareMainWindowPromise: Promise<void> | null = null;
 let revealDelayTimerId: number | null = null;
+let startupVeilTimerId: number | null = null;
 let revealFlowVersion = 0;
 
 // ---------- Tauri window helpers ----------
@@ -127,6 +133,13 @@ const clearRevealDelayTimer = (): void => {
   }
 };
 
+const clearStartupVeilTimer = (): void => {
+  if (startupVeilTimerId !== null) {
+    window.clearTimeout(startupVeilTimerId);
+    startupVeilTimerId = null;
+  }
+};
+
 const waitForMainRevealDelay = (): Promise<void> =>
   new Promise((resolve) => {
     clearRevealDelayTimer();
@@ -143,27 +156,25 @@ const waitForStablePaint = (): Promise<void> =>
     });
   });
 
-const revealMainWindow = async (): Promise<void> => {
+const prepareMainWindow = async (): Promise<void> => {
   if (runtimeErrorState.value) {
     return;
   }
-  if (revealMainWindowPromise) {
-    await revealMainWindowPromise;
+  if (isMainWindowPrepared) {
+    return;
+  }
+  if (prepareMainWindowPromise) {
+    await prepareMainWindowPromise;
     return;
   }
 
   const currentRevealFlowVersion = revealFlowVersion;
 
-  revealMainWindowPromise = (async () => {
-    isWindowSplashMode.value = false;
-    setDocumentSplashMode(false);
-
+  prepareMainWindowPromise = (async () => {
     if (!isContentMounted.value && workbenchComponent.value) {
       isContentMounted.value = true;
       await nextTick();
     }
-
-    await Promise.all([applyMainWindowFrame(), waitForMainRevealDelay()]);
 
     if (runtimeErrorState.value || currentRevealFlowVersion !== revealFlowVersion) {
       return;
@@ -176,18 +187,65 @@ const revealMainWindow = async (): Promise<void> => {
       return;
     }
 
-    isAppContentVisible.value = true;
+    isMainWindowPrepared = true;
   })().finally(() => {
-    revealMainWindowPromise = null;
+    prepareMainWindowPromise = null;
   });
 
-  await revealMainWindowPromise;
+  await prepareMainWindowPromise;
+};
+
+const revealPreparedMainWindow = async (): Promise<void> => {
+  if (runtimeErrorState.value) {
+    return;
+  }
+
+  const currentRevealFlowVersion = revealFlowVersion;
+
+  await prepareMainWindow();
+
+  if (runtimeErrorState.value || currentRevealFlowVersion !== revealFlowVersion) {
+    return;
+  }
+
+  isStartupVeilVisible.value = true;
+  isStartupVeilLeaving.value = false;
+  isWindowSplashMode.value = false;
+  setDocumentSplashMode(false);
+
+  await Promise.all([applyMainWindowFrame(), waitForMainRevealDelay()]);
+
+  if (runtimeErrorState.value || currentRevealFlowVersion !== revealFlowVersion) {
+    return;
+  }
+
+  await nextTick();
+  await waitForStablePaint();
+
+  if (runtimeErrorState.value || currentRevealFlowVersion !== revealFlowVersion) {
+    return;
+  }
+
+  isAppContentVisible.value = true;
+
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => {
+      isStartupVeilLeaving.value = true;
+      clearStartupVeilTimer();
+      startupVeilTimerId = window.setTimeout(() => {
+        startupVeilTimerId = null;
+        isStartupVeilVisible.value = false;
+        isStartupVeilLeaving.value = false;
+        resolve();
+      }, STARTUP_VEIL_FADE_DURATION_MS);
+    });
+  });
 };
 
 // ---------- Event handlers ----------
 
 const handleSplashLeaveStart = (): void => {
-  void revealMainWindow();
+  void prepareMainWindow();
 };
 
 const handleSplashAfterLeave = async (): Promise<void> => {
@@ -195,8 +253,9 @@ const handleSplashAfterLeave = async (): Promise<void> => {
     return;
   }
 
-  await revealMainWindow();
+  await prepareMainWindow();
   isSplashMounted.value = false;
+  await revealPreparedMainWindow();
 };
 
 const handleWorkbenchReady = (): void => {
@@ -205,17 +264,29 @@ const handleWorkbenchReady = (): void => {
 
 // ---------- Watchers ----------
 
+watch(isApplicationReady, (ready: boolean) => {
+  if (!ready || runtimeErrorState.value || !isSplashMounted.value) {
+    return;
+  }
+
+  void prepareMainWindow();
+});
+
 watch(runtimeErrorState, (error: unknown, previousError: unknown) => {
   if (error) {
     // 进入错误态：回到 splash，并丢弃当前加载流水线
     revealFlowVersion += 1;
-    revealMainWindowPromise = null;
+    prepareMainWindowPromise = null;
+    isMainWindowPrepared = false;
     clearRevealDelayTimer();
+    clearStartupVeilTimer();
     isWindowSplashMode.value = true;
     setDocumentSplashMode(true);
     isSplashMounted.value = true;
     isContentMounted.value = false;
     isAppContentVisible.value = false;
+    isStartupVeilVisible.value = false;
+    isStartupVeilLeaving.value = false;
     isWorkbenchViewReady.value = false;
     return;
   }
@@ -236,6 +307,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearRevealDelayTimer();
+  clearStartupVeilTimer();
   setDocumentSplashMode(false);
 });
 </script>

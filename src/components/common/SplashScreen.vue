@@ -81,7 +81,7 @@ const props = withDefaults(
   }>(),
   {
     error: null,
-    minimumDuration: 2200,
+    minimumDuration: 2400,
   },
 );
 
@@ -91,6 +91,7 @@ const emit = defineEmits<{
 }>();
 
 const BOOTSTRAP_SPLASH_HOST_ID = 'bootstrap-splash-host';
+const BOOTSTRAP_SPLASH_SECTION_ID = 'bootstrap-splash';
 
 const codeLines: ICodeFragment[][] = [
   [
@@ -123,11 +124,11 @@ const codeLines: ICodeFragment[][] = [
 
 const FADE_DELAY = 100;
 const FADE_DURATION = 240;
-const SHORT_PROGRESS_CEILING = 95;
-const SHORT_PROGRESS_FIRST_PHASE_RATIO = 0.15;
-const SHORT_PROGRESS_SECOND_PHASE_RATIO = 0.85;
-const SHORT_PROGRESS_FIRST_PHASE_VALUE = 30;
-const SHORT_PROGRESS_SECOND_PHASE_VALUE = 80;
+const SHORT_PROGRESS_CEILING = 92;
+const SHORT_PROGRESS_FIRST_PHASE_RATIO = 0.12;
+const SHORT_PROGRESS_SECOND_PHASE_RATIO = 0.82;
+const SHORT_PROGRESS_FIRST_PHASE_VALUE = 18;
+const SHORT_PROGRESS_SECOND_PHASE_VALUE = 72;
 
 const lineLengths = codeLines.map((line) =>
   line.reduce((total, fragment) => total + fragment.text.length, 0),
@@ -173,7 +174,7 @@ const easeOutCubic = (ratio: number): number => 1 - Math.pow(1 - ratio, 3);
 const easeInOutSine = (ratio: number): number => -(Math.cos(Math.PI * ratio) - 1) / 2;
 
 const resolveAutoplayProgress = (elapsed: number): number => {
-  const estimate = Math.max(props.minimumDuration, 2200);
+  const estimate = Math.max(props.minimumDuration, 2400);
   const ratio = clamp01(elapsed / estimate);
 
   if (ratio <= SHORT_PROGRESS_FIRST_PHASE_RATIO) {
@@ -331,23 +332,25 @@ const scheduleTyping = (delay = 120): void => {
   typingTimer = window.setTimeout(typeNextCharacter, delay);
 };
 
-const removeBootstrapSplashHost = (): void => {
+const removeBootstrapSplashArtifacts = (): void => {
+  document.getElementById(BOOTSTRAP_SPLASH_SECTION_ID)?.remove();
   document.getElementById(BOOTSTRAP_SPLASH_HOST_ID)?.remove();
 };
 
 const scheduleBootstrapHandoffCleanup = (): void => {
   if (!bootstrapState) {
-    removeBootstrapSplashHost();
+    removeBootstrapSplashArtifacts();
     return;
   }
 
   bootstrapState.handoff = true;
+  removeBootstrapSplashArtifacts();
 
   bootstrapHandoffFrame = window.requestAnimationFrame(() => {
     bootstrapHandoffFrame = 0;
     bootstrapHandoffCleanupFrame = window.requestAnimationFrame(() => {
       bootstrapHandoffCleanupFrame = 0;
-      removeBootstrapSplashHost();
+      removeBootstrapSplashArtifacts();
     });
   });
 };
@@ -404,7 +407,7 @@ const updateProgress = (now: number): void => {
     const isFinishSprint = progressTarget.value >= 100;
     progress.value = Math.min(
       progressTarget.value,
-      progress.value + Math.max(isFinishSprint ? 0.38 : 0.12, remainingProgress * (isFinishSprint ? 0.24 : 0.16)),
+      progress.value + Math.max(isFinishSprint ? 0.32 : 0.06, remainingProgress * (isFinishSprint ? 0.2 : 0.1)),
     );
   }
 

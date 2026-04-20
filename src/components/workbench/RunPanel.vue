@@ -2,8 +2,7 @@
   <section class="flex h-full min-h-0 flex-col bg-(--panel-bg)">
     <div class="flex items-center justify-between border-b border-(--shell-divider) px-4">
       <div class="flex items-center gap-5">
-        <button
-v-for="item in tabs" :key="item.value" type="button" class="run-panel-tab h-11"
+        <button v-for="item in tabs" :key="item.value" type="button" class="run-panel-tab h-11"
           :class="{ 'is-active': activeTab === item.value }" @click="activeTab = item.value">
           {{ item.label }}
         </button>
@@ -14,11 +13,9 @@ v-for="item in tabs" :key="item.value" type="button" class="run-panel-tab h-11"
           {{ statusText }}
         </span>
 
-        <button
-type="button" class="icon-button app-tooltip-target run-panel-hide-button" data-tooltip="隐藏终端"
+        <button type="button" class="icon-button app-tooltip-target run-panel-hide-button" data-tooltip="隐藏终端"
           data-tooltip-placement="top" aria-label="隐藏终端" @click="$emit('hide')">
-          <svg
-viewBox="0 0 16 16" aria-hidden="true" class="h-4 w-4" fill="none" stroke="currentColor"
+          <svg viewBox="0 0 16 16" aria-hidden="true" class="h-4 w-4" fill="none" stroke="currentColor"
             stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 5.5h10" />
             <path d="m5.2 8.4 2.8 2.8 2.8-2.8" />
@@ -29,15 +26,13 @@ viewBox="0 0 16 16" aria-hidden="true" class="h-4 w-4" fill="none" stroke="curre
 
     <div class="min-h-0 flex-1 overflow-hidden">
       <div v-show="activeTab === 'output'" class="h-full overflow-hidden">
-        <EmbeddedTerminal
-:visible="props.visible && activeTab === 'output'" :theme="props.theme"
+        <EmbeddedTerminal :visible="props.visible && activeTab === 'output'" :theme="props.theme"
           @status-change="handleTerminalStatusChange" @output="$emit('terminal-output', $event)"
           @run-complete="$emit('terminal-run-complete', $event)" />
       </div>
 
       <div v-show="activeTab === 'logs'" class="workbench-scroll-region h-full overflow-auto px-4 py-3">
-        <StructuredRunInsights
-:active="activeTab === 'logs'" :terminal-output-version="props.terminalOutputVersion"
+        <StructuredRunInsights :active="activeTab === 'logs'" :terminal-output-version="props.terminalOutputVersion"
           :resolve-terminal-output="props.resolveTerminalOutput" :run-logs="props.runLogs"
           :last-run-result="props.lastRunResult" :is-running="props.isRunning" :executor="props.executor"
           :document-name="props.documentName" :document-path="props.documentPath"
@@ -53,7 +48,7 @@ import StructuredRunInsights from '@/components/workbench/StructuredRunInsights.
 import type { TThemeMode } from '@/types/app';
 import type { IRunLogEntry, IRunResult, TExecutorKind } from '@/types/editor';
 import type { ITerminalRunCompletePayload, ITerminalStatusChangePayload } from '@/types/terminal';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 const props = defineProps<{
   terminalOutputVersion: number;
@@ -98,4 +93,13 @@ const statusClassName = computed(() => (isTerminalReady.value ? 'is-ready' : 'is
 const handleTerminalStatusChange = (payload: ITerminalStatusChangePayload): void => {
   terminalStatus.value = payload;
 };
+
+watch(
+  () => props.isRunning,
+  (nextIsRunning, previousIsRunning) => {
+    if (nextIsRunning && !previousIsRunning) {
+      activeTab.value = 'logs';
+    }
+  },
+);
 </script>

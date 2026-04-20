@@ -39,7 +39,8 @@ declare global {
 
 const BOOTSTRAP_SPLASH_HOST_ID = 'bootstrap-splash-host';
 const BOOTSTRAP_SPLASH_STYLE_ID = 'bootstrap-splash-style';
-const BOOTSTRAP_SPLASH_INITIAL_PROGRESS = 8; // 避免进度条长时间停在 0
+const BOOTSTRAP_SPLASH_SECTION_ID = 'bootstrap-splash';
+const BOOTSTRAP_SPLASH_INITIAL_PROGRESS = 3; // 避免进度条长时间停在 0
 const BOOTSTRAP_ERROR_DETAIL_MAX_LENGTH = 8 * 1024; // 防止超长 stack 撑爆 DOM
 
 const MESSAGES = {
@@ -114,6 +115,9 @@ const enableSplashWindowMode = (): void => {
 
 const resolveBootstrapSplashHost = (): HTMLDivElement | null =>
   document.querySelector<HTMLDivElement>(`#${BOOTSTRAP_SPLASH_HOST_ID}`);
+
+const resolveBootstrapSplashSection = (): HTMLElement | null =>
+  document.getElementById(BOOTSTRAP_SPLASH_SECTION_ID);
 
 const ensureBootstrapSplashStyle = (): void => {
   if (document.getElementById(BOOTSTRAP_SPLASH_STYLE_ID)) return;
@@ -205,7 +209,7 @@ const createTopBar = (): HTMLElement => {
 
 const buildLoadingSection = (): HTMLElement => {
   const section = document.createElement('section');
-  section.id = 'bootstrap-splash';
+  section.id = BOOTSTRAP_SPLASH_SECTION_ID;
 
   const editor = document.createElement('div');
   editor.className = 'editor';
@@ -217,10 +221,10 @@ const buildLoadingSection = (): HTMLElement => {
   const code = document.createElement('div');
   code.className = 'code';
   code.innerHTML = `
-    <div class="line"><span class="keyword">import</span> { System } <span class="keyword">from</span> <span class="str">'@core/system'</span>;<span class="cursor"></span></div>
-    <div class="line"><span class="keyword">const</span> <span class="var">engine</span> = <span class="keyword">new</span> <span class="func">CoreEngine</span>();</div>
-    <div class="line"><span class="comment">// Initializing core modules and rendering</span></div>
-    <div class="line"><span class="keyword">await</span> <span class="var">engine</span>.<span class="func">startup</span>();</div>
+    <div id="bootstrap-line-0" class="line"><span class="cursor"></span></div>
+    <div id="bootstrap-line-1" class="line"></div>
+    <div id="bootstrap-line-2" class="line"></div>
+    <div id="bootstrap-line-3" class="line"></div>
   `;
   editor.appendChild(code);
 
@@ -343,6 +347,7 @@ const renderBootstrapLoading = (): void => {
   showStartupWindow();
   ensureBootstrapSplashState();
   if (!document.body) return;
+  if (resolveBootstrapSplashSection()) return;
   if (resolveBootstrapSplashHost()) return;
   ensureBootstrapSplashStyle();
   const host = ensureSplashHost();

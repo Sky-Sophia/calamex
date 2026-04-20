@@ -74,15 +74,15 @@ const syncMarkers = (): void => {
 
   const markers = analysisState.value.available
     ? analysisState.value.diagnostics.map((item) => ({
-      startLineNumber: item.line,
-      endLineNumber: item.endLine,
-      startColumn: item.column,
-      endColumn: Math.max(item.column + 1, item.endColumn),
-      severity: toMarkerSeverity(item.level),
-      message: `${item.code} · ${item.message}`,
-      source: 'ShellCheck',
-      code: item.code,
-    }))
+        startLineNumber: item.line,
+        endLineNumber: item.endLine,
+        startColumn: item.column,
+        endColumn: Math.max(item.column + 1, item.endColumn),
+        severity: toMarkerSeverity(item.level),
+        message: `${item.code} · ${item.message}`,
+        source: 'ShellCheck',
+        code: item.code,
+      }))
     : [];
 
   monaco.editor.setModelMarkers(model, 'shellcheck', markers);
