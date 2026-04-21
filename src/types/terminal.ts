@@ -37,6 +37,7 @@ export interface ITerminalSessionPayload {
   cwd: string;
   shellLabel: string;
   created: boolean;
+  initialOutput?: string | null;
 }
 
 export interface IDispatchTerminalScriptPayload {

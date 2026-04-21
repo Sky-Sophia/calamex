@@ -1,5 +1,6 @@
 import { FILE_ICON_GLYPHS } from '@/constants/file-icon-glyphs';
 import fileIconMap from '@/constants/file-icon-map.json';
+import { getPathBaseName } from '@/utils/path';
 import type {
     IFileIconGlyph,
     IFileIconMap,
@@ -18,9 +19,7 @@ const getFileName = (path: string | null | undefined): string => {
         return '';
     }
 
-    const normalizedPath = path.replace(/\\/g, '/');
-    const segments = normalizedPath.split('/');
-    return (segments[segments.length - 1] ?? '').toLowerCase();
+    return getPathBaseName(path).toLowerCase();
 };
 
 const getExtensionCandidates = (fileName: string): string[] => {

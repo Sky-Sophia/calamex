@@ -1,5 +1,5 @@
 <template>
-  <aside class="flex h-full flex-col items-center gap-1 py-2">
+  <aside class="flex h-full flex-col items-center gap-1 pt-[6px] pb-[6px]">
     <button
 type="button" class="activity-button app-tooltip-target" :class="{ 'is-active': activeView === 'explorer' }"
       data-tooltip="资源管理器" data-tooltip-placement="right" data-tooltip-lock-placement="true" aria-label="资源管理器"
@@ -51,16 +51,15 @@ viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-wid
     </button>
     <button
 type="button" class="activity-button app-tooltip-target"
-      :class="{ 'is-active': activeView === 'extensions' }" data-tooltip="扩展" data-tooltip-placement="right"
-      data-tooltip-lock-placement="true" aria-label="扩展" :aria-pressed="activeView === 'extensions'"
+      :class="{ 'is-active': activeView === 'extensions' }" data-tooltip="SSH 连接" data-tooltip-placement="right"
+      data-tooltip-lock-placement="true" aria-label="SSH 连接" :aria-pressed="activeView === 'extensions'"
       @click="emit('select-view', 'extensions')">
       <svg
 viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.7"
         stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 3l7 4v10l-7 4-7-4V7z" />
-        <path d="M12 12l7-4" />
-        <path d="M12 12L5 8" />
-        <path d="M12 12v9" />
+        <rect x="3.5" y="4" width="17" height="16" rx="2.5" />
+        <path d="M8 9l4 4-4 4" />
+        <path d="M13.5 17h2.5" />
       </svg>
     </button>
 
@@ -95,7 +94,7 @@ const emit = defineEmits<{
 const settingsIconRotation = ref(0);
 
 const settingsIconStyle = computed(() => ({
-  transform: `rotate(${settingsIconRotation.value}deg)`,
+  transform: `translateY(-2.5px) rotate(${settingsIconRotation.value}deg)`,
 }));
 
 const handleSettingsMouseEnter = (): void => {

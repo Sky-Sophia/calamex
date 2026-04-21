@@ -186,50 +186,22 @@ const buildGitDecorations = (): monaco.editor.IModelDeltaDecoration[] => {
       : computeGitLineChanges(gitBaseline.content, currentContent);
 
   return lineChanges.map((change) => {
-    const gutterClassName = `git-diff-gutter git-diff-gutter-${change.type}`;
+    const tone = change.type === 'deleted' ? 'deleted' : 'added';
     const range = new monaco.Range(change.startLine, 1, change.endLine, 1);
 
-    switch (change.type) {
-      case 'added':
-        return {
-          range,
-          options: {
-            isWholeLine: true,
-            className: 'git-diff-line-added',
-            linesDecorationsClassName: gutterClassName,
-            overviewRuler: {
-              color: '#22c55e99',
-              position: monaco.editor.OverviewRulerLane.Left,
-            },
-          },
-        };
-      case 'deleted':
-        return {
-          range,
-          options: {
-            isWholeLine: true,
-            className: 'git-diff-line-deleted',
-            linesDecorationsClassName: gutterClassName,
-            overviewRuler: {
-              color: '#ff6b7a88',
-              position: monaco.editor.OverviewRulerLane.Left,
-            },
-          },
-        };
-      default:
-        return {
-          range,
-          options: {
-            isWholeLine: true,
-            className: 'git-diff-line-modified',
-            linesDecorationsClassName: gutterClassName,
-            overviewRuler: {
-              color: '#6f7cff99',
-              position: monaco.editor.OverviewRulerLane.Left,
-            },
-          },
-        };
-    }
+    return {
+      range,
+      options: {
+        isWholeLine: true,
+        className: `git-diff-line git-diff-line-${tone}`,
+        lineNumberClassName: `git-diff-line-number git-diff-line-number-${tone}`,
+        linesDecorationsClassName: `git-diff-gutter git-diff-gutter-${tone}`,
+        overviewRuler: {
+          color: tone === 'added' ? '#86efaccc' : '#fb7185cc',
+          position: monaco.editor.OverviewRulerLane.Left,
+        },
+      },
+    };
   });
 };
 

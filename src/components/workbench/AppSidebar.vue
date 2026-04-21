@@ -13,7 +13,6 @@
       :is-desktop-runtime="isDesktopRuntime"
       :workspace-root-path="workspaceRootPath"
       :active-path="document.path"
-      :active-content="document.kind === 'text' ? document.content : null"
       @open-file="handleOpenFile"
     />
 
@@ -193,6 +192,8 @@
       @open-file="handleOpenFile"
     />
 
+    <SshSidebarPanel v-else-if="isSshView" />
+
     <template v-else>
       <div class="border-b border-(--shell-divider) px-3 py-3">
         <p class="sidebar-section-title">{{ panelMeta.title }}</p>
@@ -244,11 +245,17 @@ import { Button } from '@/components/ui/button';
 import ExplorerEntryIcon from '@/components/workbench/ExplorerEntryIcon.vue';
 import SearchSidebarPanel from '@/components/workbench/SearchSidebarPanel.vue';
 import SourceControlPanel from '@/components/workbench/SourceControlPanel.vue';
+import SshSidebarPanel from '@/components/workbench/SshSidebarPanel.vue';
 import WorkspaceTreeNode from '@/components/workbench/WorkspaceTreeNode.vue';
 import { useMessage } from '@/composables/useMessage';
 import { tauriService } from '@/services/tauri';
 import type { TWorkbenchSidebarView } from '@/types/app';
 import type { IEditorDocument, IWorkspaceDirectoryPayload, IWorkspaceEntry } from '@/types/editor';
+import { toErrorMessage } from '@/utils/error';
+import {
+  filterWorkspaceEntriesByQuery,
+  resolvePreloadedWorkspaceRoot,
+} from '@/utils/workspace';
 import { computed, reactive, ref, watch } from 'vue';
 
 const props = defineProps<{
@@ -274,8 +281,6 @@ const expandedPaths = reactive<Record<string, boolean>>({});
 const loadingPaths = reactive<Record<string, boolean>>({});
 const loadedWorkspaceKey = ref<string | null>(null);
 let rootRequestId = 0;
-
-const normalizePath = (value: string): string => value.replace(/\\/g, '/').toLowerCase();
 
 const SIDEBAR_META: Record<
   TWorkbenchSidebarView,
@@ -328,14 +333,14 @@ const SIDEBAR_META: Record<
     ],
   },
   extensions: {
-    title: '扩展',
-    headline: '能力扩展与工作流插件',
-    description: '后续可以把扩展推荐、已启用能力和集成入口都集中到这里。',
-    actionLabel: '扩展中心',
+    title: 'SSH 连接',
+    headline: '远端连接与文件传输',
+    description: '这里承载 SSH 会话、远端文件浏览和传输任务。',
+    actionLabel: '连接远端',
     items: [
-      { title: '扩展建议', description: '根据当前工作流推荐合适的工具能力。' },
-      { title: '已启用项', description: '管理可选增强特性和集成面板。' },
-      { title: '能力说明', description: '展示每个扩展页能做什么以及如何使用。' },
+      { title: '连接表单', description: '填写主机、端口、用户和认证方式。' },
+      { title: '远端文件', description: '查看当前路径、文件列表和选中状态。' },
+      { title: '传输任务', description: '追踪上传下载进度并保留后续操作位。' },
     ],
   },
 };
@@ -343,6 +348,7 @@ const SIDEBAR_META: Record<
 const isExplorerView = computed(() => props.view === 'explorer');
 const isSearchView = computed(() => props.view === 'search');
 const isSourceControlView = computed(() => props.view === 'source-control');
+const isSshView = computed(() => props.view === 'extensions');
 const panelMeta = computed(() => SIDEBAR_META[props.view]);
 const normalizedExplorerSearchQuery = computed(() => explorerSearchQuery.value.trim().toLowerCase());
 const hasExplorerSearch = computed(() => normalizedExplorerSearchQuery.value.length > 0);
@@ -365,36 +371,12 @@ const countLoadedEntries = (entries: IWorkspaceEntry[]): number =>
     return total + 1 + descendantCount;
   }, 0);
 
-const entryMatchesSearch = (entry: IWorkspaceEntry, query: string): boolean => {
-  if (!query) {
-    return true;
-  }
-
-  return (
-    entry.name.toLowerCase().includes(query) ||
-    normalizePath(entry.path).includes(query)
-  );
-};
-
-const entryMatchesTree = (entry: IWorkspaceEntry, query: string): boolean => {
-  if (!query || entryMatchesSearch(entry, query)) {
-    return true;
-  }
-
-  if (entry.kind !== 'directory') {
-    return false;
-  }
-
-  const descendants = childrenMap[entry.path] ?? [];
-  return descendants.some((child) => entryMatchesTree(child, query));
-};
-
 const filteredRootEntries = computed(() => {
-  if (!hasExplorerSearch.value) {
-    return rootEntries.value;
-  }
-
-  return rootEntries.value.filter((entry) => entryMatchesTree(entry, normalizedExplorerSearchQuery.value));
+  return filterWorkspaceEntriesByQuery(
+    rootEntries.value,
+    normalizedExplorerSearchQuery.value,
+    childrenMap,
+  );
 });
 
 const hasVisibleRootEntries = computed(() => filteredRootEntries.value.length > 0);
@@ -418,9 +400,6 @@ const explorerStatusText = computed(() => {
 
   return `${indexedEntryCount.value} 个项目 · 已索引`;
 });
-
-const getErrorMessage = (error: unknown, fallback: string): string =>
-  error instanceof Error ? error.message : fallback;
 
 const clearTreeState = (): void => {
   Object.keys(childrenMap).forEach((path) => {
@@ -448,16 +427,6 @@ const applyWorkspaceRootPayload = (
   rootExpanded.value = true;
 };
 
-const resolvePreloadedWorkspaceRoot = (): IWorkspaceDirectoryPayload | null => {
-  if (!props.workspaceRootPath || !props.preloadedWorkspaceRoot) {
-    return null;
-  }
-
-  return props.preloadedWorkspaceRoot.rootPath === props.workspaceRootPath
-    ? props.preloadedWorkspaceRoot
-    : null;
-};
-
 const loadWorkspaceRoot = async (workspaceKey: string): Promise<void> => {
   if (!props.isDesktopRuntime) {
     return;
@@ -472,7 +441,10 @@ const loadWorkspaceRoot = async (workspaceKey: string): Promise<void> => {
     return;
   }
 
-  const preloadedWorkspaceRoot = resolvePreloadedWorkspaceRoot();
+  const preloadedWorkspaceRoot = resolvePreloadedWorkspaceRoot(
+    props.workspaceRootPath,
+    props.preloadedWorkspaceRoot,
+  );
   if (preloadedWorkspaceRoot) {
     applyWorkspaceRootPayload(preloadedWorkspaceRoot, workspaceKey);
     return;
@@ -500,7 +472,7 @@ const loadWorkspaceRoot = async (workspaceKey: string): Promise<void> => {
 
     root.value = null;
     loadedWorkspaceKey.value = null;
-    loadError.value = getErrorMessage(error, '读取工作区目录失败');
+    loadError.value = toErrorMessage(error, '读取工作区目录失败');
   } finally {
     if (requestId === rootRequestId) {
       rootLoading.value = false;
@@ -519,7 +491,7 @@ const loadDirectoryEntries = async (path: string): Promise<void> => {
     const payload = await tauriService.listWorkspaceEntries(path, root.value?.rootPath);
     childrenMap[path] = payload.entries;
   } catch (error) {
-    const errorMessage = getErrorMessage(error, '读取目录失败');
+    const errorMessage = toErrorMessage(error, '读取目录失败');
     message.error(errorMessage);
     childrenMap[path] = [];
   } finally {

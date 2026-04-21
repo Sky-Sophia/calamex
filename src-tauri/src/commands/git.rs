@@ -100,6 +100,27 @@ pub fn get_git_repository_status(
 }
 
 #[tauri::command]
+pub fn init_git_repository(
+    workspace_root_path: Option<String>,
+) -> Result<GitRepositoryStatusPayload, String> {
+    let workspace_root = resolve_workspace_root(workspace_root_path)?;
+
+    match Repository::discover(&workspace_root) {
+        Ok(repository) => build_git_repository_status_payload(&repository),
+        Err(error) if error.code() == ErrorCode::NotFound => {
+            Repository::init(&workspace_root)
+                .map_err(|init_error| format!("初始化 Git 仓库失败：{init_error}"))?;
+
+            let repository = Repository::open(&workspace_root)
+                .map_err(|open_error| format!("读取初始化后的 Git 仓库失败：{open_error}"))?;
+
+            build_git_repository_status_payload(&repository)
+        }
+        Err(error) => Err(format!("初始化 Git 仓库失败：{error}")),
+    }
+}
+
+#[tauri::command]
 pub fn get_git_file_baseline(path: String) -> Result<GitFileBaselinePayload, String> {
     let file_path = PathBuf::from(&path);
     let discovery_root = file_path.parent().unwrap_or(file_path.as_path());

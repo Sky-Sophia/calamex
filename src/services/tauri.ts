@@ -28,6 +28,7 @@ import type {
   IWriteTerminalInputRequest,
 } from '@/types/terminal';
 import { assertDesktopRuntime } from '@/utils/desktop-runtime';
+import { toErrorMessage } from '@/utils/error';
 
 type TauriCoreModule = typeof import('@tauri-apps/api/core');
 type TauriDialogModule = typeof import('@tauri-apps/plugin-dialog');
@@ -70,7 +71,7 @@ const loadTauriDialog = (): Promise<TauriDialogModule> => {
 
 // 统一错误包装：保留原 cause，同时把操作名带出，便于调试 / Sentry 定位
 const wrapInvocationError = (guardHint: string, command: string, error: unknown): Error => {
-  const baseMessage = error instanceof Error ? error.message : String(error);
+  const baseMessage = toErrorMessage(error, '未知错误');
   if (error instanceof Error) {
     return new Error(`[${guardHint}] ${command} 调用失败: ${baseMessage}`, {
       cause: error,
@@ -196,6 +197,16 @@ export const tauriService: ITauriService & {
     return runTauriCommand<IGitRepositoryStatusPayload>(
       '读取 Git 仓库状态',
       'get_git_repository_status',
+      {
+        workspaceRootPath,
+      },
+    );
+  },
+
+  initGitRepository(workspaceRootPath) {
+    return runTauriCommand<IGitRepositoryStatusPayload>(
+      '初始化 Git 仓库',
+      'init_git_repository',
       {
         workspaceRootPath,
       },

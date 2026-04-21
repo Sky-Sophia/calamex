@@ -101,11 +101,16 @@ v-show="isWorkbenchContentVisible" :terminal-output-length="editorStore.terminal
     <template #statusbar>
       <WorkbenchStatusBar
 :has-active-document="editorStore.hasActiveDocument"
-        :document-kind="editorStore.document.kind" :is-running="editorStore.isRunning"
+        :document-kind="editorStore.document.kind"
         :status-message="statusbarMessage"
         :encoding="editorStore.document.encoding" :executor="editorStore.selectedExecutor"
         :cursor-line="editorStore.cursorLine" :cursor-column="editorStore.cursorColumn"
-        :char-count="editorStore.document.charCount" @change-encoding="updateEncoding" />
+        :char-count="editorStore.document.charCount"
+        :git-branch-name="gitBranchName"
+        :git-added-count="gitAddedCount"
+        :git-removed-count="gitRemovedCount"
+        @change-encoding="updateEncoding"
+        @open-source-control="handleSelectSidebarView('source-control')" />
     </template>
 
     <template #overlay>
@@ -130,6 +135,7 @@ import WorkbenchSettingsOverlay from '@/components/workbench/WorkbenchSettingsOv
 import WorkbenchStatusBar from '@/components/workbench/WorkbenchStatusBar.vue';
 import { useWorkbench } from '@/composables/useWorkbench';
 import AppShellLayout from '@/layouts/AppShellLayout.vue';
+import { useGitStore } from '@/store/git';
 import type { TWorkbenchSidebarView } from '@/types/app';
 import type {
     IAnalyzeScriptPayload,
@@ -167,7 +173,6 @@ const isTerminalVisible = ref(true);
 const isSidebarVisible = ref(true);
 const isDiagnosticsPanelVisible = ref(false);
 const activeSurfaceMode = ref<TWorkbenchSurfaceMode>('workbench');
-const terminalVisibilityBeforeDiagnostics = ref(false);
 const terminalHeight = ref(236);
 const terminalHeightBeforeMaximize = ref(236);
 const isTerminalMaximized = ref(false);
@@ -177,6 +182,7 @@ const sidebarWidth = computed(() =>
   activeSidebarView.value === 'source-control'
     || activeSidebarView.value === 'explorer'
     || activeSidebarView.value === 'search'
+    || activeSidebarView.value === 'extensions'
     ? 280
     : 240,
 );
@@ -223,6 +229,13 @@ const {
   toggleTheme,
   notifyTemplateInserted,
 } = useWorkbench();
+
+const gitStore = useGitStore();
+const gitBranchName = computed(() => gitStore.status.headBranchName ?? null);
+const gitAddedCount = computed(
+  () => gitStore.status.stagedCount + gitStore.status.unstagedCount + gitStore.status.untrackedCount,
+);
+const gitRemovedCount = computed(() => 0);
 
 const shouldRenderDiagnosticsPanel = computed(
   () => editorStore.hasActiveDocument && editorStore.document.kind === 'text',
@@ -373,10 +386,6 @@ const handleRerunDiagnostics = (): void => {
   editorRef.value?.rerunDiagnostics();
 };
 
-const resetDiagnosticsTerminalLink = (): void => {
-  terminalVisibilityBeforeDiagnostics.value = false;
-};
-
 const requestCloseSettingsView = async (): Promise<boolean> => {
   if (!isSettingsView.value) {
     return true;
@@ -402,27 +411,15 @@ const openDiagnosticsPanel = async (): Promise<void> => {
     }
   }
 
-  terminalVisibilityBeforeDiagnostics.value = isTerminalVisible.value;
   isDiagnosticsPanelVisible.value = true;
-
-  if (isTerminalVisible.value) {
-    isTerminalVisible.value = false;
-  }
 };
 
-const closeDiagnosticsPanel = (restoreTerminal = true): void => {
+const closeDiagnosticsPanel = (): void => {
   if (!isDiagnosticsPanelVisible.value) {
-    resetDiagnosticsTerminalLink();
     return;
   }
 
-  const shouldRestoreTerminal = terminalVisibilityBeforeDiagnostics.value;
   isDiagnosticsPanelVisible.value = false;
-  resetDiagnosticsTerminalLink();
-
-  if (restoreTerminal && shouldRestoreTerminal) {
-    isTerminalVisible.value = true;
-  }
 };
 
 const openTerminal = async (): Promise<void> => {
@@ -433,11 +430,6 @@ const openTerminal = async (): Promise<void> => {
     }
   }
 
-  if (isDiagnosticsPanelVisible.value) {
-    closeDiagnosticsPanel(false);
-  }
-
-  resetDiagnosticsTerminalLink();
   isTerminalVisible.value = true;
 };
 
@@ -615,7 +607,6 @@ const handleSelectSidebarView = async (view: TWorkbenchSidebarView): Promise<voi
 };
 
 const hideTerminal = (): void => {
-  resetDiagnosticsTerminalLink();
   isTerminalVisible.value = false;
 };
 
@@ -690,10 +681,9 @@ const handleRunScript = async (): Promise<void> => {
   }
 
   if (isDiagnosticsPanelVisible.value) {
-    closeDiagnosticsPanel(false);
+    closeDiagnosticsPanel();
   }
 
-  resetDiagnosticsTerminalLink();
   isTerminalVisible.value = true;
   await runScript();
 };

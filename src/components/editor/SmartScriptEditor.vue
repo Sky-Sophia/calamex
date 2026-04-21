@@ -15,6 +15,7 @@ import type { IAnalyzeScriptPayload } from '@/types/editor';
 import type { IGitFileBaselinePayload } from '@/types/git';
 import type { IEditorSettings } from '@/types/settings';
 import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
+import { toErrorMessage } from '@/utils/error';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 const ANALYSIS_INITIAL_DELAY_MS = 90;
@@ -176,7 +177,7 @@ const runAnalysis = async (requestId: number): Promise<void> => {
 
     emitAnalysis({
       available: false,
-      message: error instanceof Error ? error.message : 'ShellCheck 实时诊断失败。',
+      message: toErrorMessage(error, 'ShellCheck 实时诊断失败。'),
       dialect: 'bash',
       diagnostics: [],
     });

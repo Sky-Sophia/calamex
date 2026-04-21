@@ -1,9 +1,9 @@
 import type { TThemeMode } from '@/types/app';
 import 'monaco-editor/esm/nls.messages.zh-cn.js';
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import 'monaco-editor/esm/vs/basic-languages/shell/shell.contribution';
-import 'monaco-editor/min/vs/editor/editor.main.css';
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+import 'monaco-editor/min/vs/editor/editor.main.css';
 
 type TMonacoEnvironment = {
   getWorker: () => Worker;
@@ -28,11 +28,15 @@ const createDarkThemeDefinition = (): TMonacoThemeDefinition => ({
   base: 'vs-dark',
   inherit: true,
   rules: [
-    { token: 'comment', foreground: '949aa6' },
-    { token: 'keyword', foreground: '7c89ff' },
-    { token: 'string', foreground: '5dd39e' },
-    { token: 'number', foreground: 'f3c969' },
-    { token: 'delimiter', foreground: 'c9ced8' },
+    { token: 'comment', foreground: '4d5166', fontStyle: 'italic' },
+    { token: 'keyword', foreground: 'c4b5fd' },
+    { token: 'string', foreground: '86efac' },
+    { token: 'number', foreground: 'fca5a5' },
+    { token: 'delimiter', foreground: '737780' },
+    { token: 'variable', foreground: 'fcd34d' },
+    { token: 'type', foreground: '7dd3fc' },
+    { token: 'function', foreground: '7dd3fc' },
+    { token: 'operator', foreground: 'a0a7b0' },
   ],
   colors: {
     focusBorder: '#6f7cff',
@@ -70,11 +74,11 @@ const createDarkThemeDefinition = (): TMonacoThemeDefinition => ({
     'editorActionList.foreground': '#f3f4f6',
     'editorActionList.focusBackground': '#20242c',
     'editorActionList.focusForeground': '#f3f4f6',
-    'editor.background': '#1b1f24',
+    'editor.background': '#0f0f12',
     'editor.foreground': '#f3f4f6',
-    'editorLineNumber.foreground': '#656b76',
-    'editorLineNumber.activeForeground': '#c9ced8',
-    'editorCursor.foreground': '#6f7cff',
+    'editorLineNumber.foreground': '#383c44',
+    'editorLineNumber.activeForeground': '#cccdd8',
+    'editorCursor.foreground': '#a78bfa',
     'editor.selectionBackground': '#5e6ad242',
     'editor.inactiveSelectionBackground': '#5e6ad22a',
     'editor.selectionHighlightBackground': '#ffffff0d',
@@ -94,10 +98,10 @@ const createDarkThemeDefinition = (): TMonacoThemeDefinition => ({
     'editorBracketMatch.background': '#5e6ad218',
     'editorBracketMatch.border': '#6f7cff73',
     'editor.foldBackground': '#5e6ad21f',
-    'editorGutter.background': '#1b1f24',
-    'editorGutter.modifiedBackground': '#6f7cff',
-    'editorGutter.addedBackground': '#22c55e',
-    'editorGutter.deletedBackground': '#ff6b7a',
+    'editorGutter.background': '#0f0f12',
+    'editorGutter.modifiedBackground': '#7c89ff',
+    'editorGutter.addedBackground': '#86efac',
+    'editorGutter.deletedBackground': '#fb7185',
     'editorOverviewRuler.border': '#00000000',
     'editorOverviewRuler.errorForeground': '#ff6b7a70',
     'editorOverviewRuler.warningForeground': '#f3c96966',

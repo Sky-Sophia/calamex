@@ -1,8 +1,8 @@
 mod git;
 
 pub use git::{
-    commit_git_index, get_git_file_baseline, get_git_repository_status, stage_git_paths,
-    unstage_git_paths,
+    commit_git_index, get_git_file_baseline, get_git_repository_status, init_git_repository,
+    stage_git_paths, unstage_git_paths,
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -54,6 +54,7 @@ const TERMINAL_RUN_END_MARKER_PREFIX: &str = "SH_EDITOR_RUN_END:";
 const TERMINAL_READ_BUFFER_SIZE: usize = 64 * 1024;
 const TERMINAL_EVENT_FLUSH_INTERVAL: Duration = Duration::from_millis(16);
 const TERMINAL_EVENT_FLUSH_THRESHOLD: usize = 64 * 1024;
+const TERMINAL_SNAPSHOT_MAX_LENGTH: usize = 160 * 1024;
 const DEFAULT_WORKSPACE_DIRECTORY_NAME: &str = "builtin-workspace";
 const DEFAULT_WORKSPACE_SCRIPT_NAME: &str = "startup.sh";
 const DEFAULT_WORKSPACE_SCRIPT_CONTENT: &str = "#!/bin/bash\n\nset -euo pipefail\n\nmain() {\n  echo \"Welcome to SH Editor\"\n}\n\nmain \"$@\"\n";
@@ -224,6 +225,7 @@ pub struct TerminalSessionPayload {
     cwd: String,
     shell_label: String,
     created: bool,
+    initial_output: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -363,7 +365,7 @@ struct TerminalMarkerChunk<'a> {
 }
 
 struct TerminalUtf8ChunkDecoder {
-    decoder: encoding_rs::Decoder,
+    pending: Vec<u8>,
 }
 
 enum TerminalEmitterMessage {
@@ -376,6 +378,7 @@ enum TerminalEmitterMessage {
 #[derive(Clone, Default)]
 pub struct TerminalSessionState {
     sessions: Arc<Mutex<HashMap<String, Arc<TerminalSession>>>>,
+    snapshots: Arc<Mutex<HashMap<String, String>>>,
     creation_guard: Arc<Mutex<()>>,
 }
 
@@ -476,15 +479,18 @@ pub fn ensure_terminal_session(
         if let Some(existing_session) = get_terminal_session(&terminal_state, &payload.session_id)? {
             if payload.cwd.is_none() && should_recreate_terminal_session(existing_session.as_ref()) {
                 remove_terminal_session(&terminal_state, &payload.session_id)?;
+                remove_terminal_snapshot(&terminal_state, &payload.session_id)?;
                 terminate_terminal_session(existing_session.as_ref())?;
             } else {
                 resize_session_master(existing_session.as_ref(), payload.cols, payload.rows)?;
+                let initial_output = get_terminal_snapshot(&terminal_state, &payload.session_id)?;
 
                 return Ok(TerminalSessionPayload {
                     session_id: payload.session_id,
                     cwd: existing_session.working_directory.clone(),
                     shell_label: "WSL2".into(),
                     created: false,
+                    initial_output: (!initial_output.is_empty()).then_some(initial_output),
                 });
             }
         }
@@ -540,10 +546,12 @@ pub fn ensure_terminal_session(
             sessions.insert(payload.session_id.clone(), Arc::clone(&session));
         }
 
+        set_terminal_snapshot(&terminal_state, &payload.session_id, String::new())?;
+
         (child, reader, terminal_cwd)
     };
 
-    spawn_terminal_reader(app.clone(), payload.session_id.clone(), reader);
+    spawn_terminal_reader(app.clone(), terminal_state.clone(), payload.session_id.clone(), reader);
     spawn_terminal_waiter(app, terminal_state, payload.session_id.clone(), child);
 
     Ok(TerminalSessionPayload {
@@ -551,6 +559,7 @@ pub fn ensure_terminal_session(
         cwd: terminal_cwd,
         shell_label: "WSL2".into(),
         created: true,
+        initial_output: None,
     })
 }
 
@@ -592,6 +601,7 @@ pub fn close_terminal_session(
 ) -> Result<(), String> {
     let terminal_state = state.inner().clone();
     let removed_session = remove_terminal_session(&terminal_state, &payload.session_id)?;
+    remove_terminal_snapshot(&terminal_state, &payload.session_id)?;
 
     let Some(session) = removed_session else {
         return Ok(());
@@ -875,6 +885,81 @@ fn remove_terminal_session(
     Ok(sessions.remove(session_id))
 }
 
+fn lock_terminal_snapshots(
+    state: &TerminalSessionState,
+) -> Result<std::sync::MutexGuard<'_, HashMap<String, String>>, String> {
+    state
+        .snapshots
+        .lock()
+        .map_err(|_| "终端快照状态已损坏。".to_string())
+}
+
+fn get_terminal_snapshot(state: &TerminalSessionState, session_id: &str) -> Result<String, String> {
+    let snapshots = lock_terminal_snapshots(state)?;
+    Ok(snapshots.get(session_id).cloned().unwrap_or_default())
+}
+
+fn set_terminal_snapshot(
+    state: &TerminalSessionState,
+    session_id: &str,
+    value: String,
+) -> Result<(), String> {
+    let mut snapshots = lock_terminal_snapshots(state)?;
+    snapshots.insert(session_id.to_string(), value);
+    Ok(())
+}
+
+fn remove_terminal_snapshot(
+    state: &TerminalSessionState,
+    session_id: &str,
+) -> Result<(), String> {
+    let mut snapshots = lock_terminal_snapshots(state)?;
+    snapshots.remove(session_id);
+    Ok(())
+}
+
+fn advance_char_boundary(value: &str, index: usize) -> usize {
+    if index >= value.len() {
+        return value.len();
+    }
+
+    let mut next_index = index;
+    while next_index < value.len() && !value.is_char_boundary(next_index) {
+        next_index += 1;
+    }
+    next_index
+}
+
+fn trim_terminal_snapshot(snapshot: &mut String) {
+    if snapshot.len() <= TERMINAL_SNAPSHOT_MAX_LENGTH {
+        return;
+    }
+
+    let overflow = snapshot.len() - TERMINAL_SNAPSHOT_MAX_LENGTH;
+    let trim_index = snapshot[overflow..]
+        .find('\n')
+        .map(|index| overflow + index + 1)
+        .unwrap_or(overflow);
+    let safe_trim_index = advance_char_boundary(snapshot, trim_index);
+    snapshot.drain(..safe_trim_index);
+}
+
+fn append_terminal_snapshot(
+    state: &TerminalSessionState,
+    session_id: &str,
+    chunk: &str,
+) -> Result<(), String> {
+    if chunk.is_empty() {
+        return Ok(());
+    }
+
+    let mut snapshots = lock_terminal_snapshots(state)?;
+    let snapshot = snapshots.entry(session_id.to_string()).or_default();
+    snapshot.push_str(chunk);
+    trim_terminal_snapshot(snapshot);
+    Ok(())
+}
+
 fn normalize_pty_size(cols: u16, rows: u16) -> PtySize {
     PtySize {
         cols: cols.max(2),
@@ -1052,16 +1137,24 @@ fn emit_terminal_run_complete(app: &AppHandle, payload: TerminalRunCompleteEvent
     }
 }
 
-fn flush_terminal_data_buffer(app: &AppHandle, session_id: &str, buffer: &mut String) {
+fn flush_terminal_data_buffer(
+    app: &AppHandle,
+    state: &TerminalSessionState,
+    session_id: &str,
+    buffer: &mut String,
+) {
     if buffer.is_empty() {
         return;
     }
+
+    let chunk = std::mem::take(buffer);
+    let _ = append_terminal_snapshot(state, session_id, &chunk);
 
     emit_terminal_data(
         app,
         TerminalDataEvent {
             session_id: session_id.to_string(),
-            data: std::mem::take(buffer),
+            data: chunk,
         },
     );
 }
@@ -1077,6 +1170,7 @@ fn flush_terminal_run_output_buffer(
 
 fn spawn_terminal_event_emitter(
     app: AppHandle,
+    state: TerminalSessionState,
     session_id: String,
     receiver: mpsc::Receiver<TerminalEmitterMessage>,
 ) {
@@ -1089,7 +1183,12 @@ fn spawn_terminal_event_emitter(
                 Ok(TerminalEmitterMessage::VisibleOutput(chunk)) => {
                     visible_output_buffer.push_str(&chunk);
                     if visible_output_buffer.len() >= TERMINAL_EVENT_FLUSH_THRESHOLD {
-                        flush_terminal_data_buffer(&app, &session_id, &mut visible_output_buffer);
+                        flush_terminal_data_buffer(
+                            &app,
+                            &state,
+                            &session_id,
+                            &mut visible_output_buffer,
+                        );
                     }
                 }
                 Ok(TerminalEmitterMessage::RunOutput(payload)) => match run_output_buffer.as_mut() {
@@ -1108,27 +1207,42 @@ fn spawn_terminal_event_emitter(
                     }
                 },
                 Ok(TerminalEmitterMessage::RunComplete(payload)) => {
-                    flush_terminal_data_buffer(&app, &session_id, &mut visible_output_buffer);
+                    flush_terminal_data_buffer(
+                        &app,
+                        &state,
+                        &session_id,
+                        &mut visible_output_buffer,
+                    );
                     flush_terminal_run_output_buffer(&app, &mut run_output_buffer);
                     emit_terminal_run_complete(&app, payload);
                 }
                 Ok(TerminalEmitterMessage::Close) => break,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    flush_terminal_data_buffer(&app, &session_id, &mut visible_output_buffer);
+                    flush_terminal_data_buffer(
+                        &app,
+                        &state,
+                        &session_id,
+                        &mut visible_output_buffer,
+                    );
                     flush_terminal_run_output_buffer(&app, &mut run_output_buffer);
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
 
-        flush_terminal_data_buffer(&app, &session_id, &mut visible_output_buffer);
+        flush_terminal_data_buffer(&app, &state, &session_id, &mut visible_output_buffer);
         flush_terminal_run_output_buffer(&app, &mut run_output_buffer);
     });
 }
 
-fn spawn_terminal_reader(app: AppHandle, session_id: String, mut reader: Box<dyn Read + Send>) {
+fn spawn_terminal_reader(
+    app: AppHandle,
+    state: TerminalSessionState,
+    session_id: String,
+    mut reader: Box<dyn Read + Send>,
+) {
     let (sender, receiver) = mpsc::channel::<TerminalEmitterMessage>();
-    spawn_terminal_event_emitter(app, session_id.clone(), receiver);
+    spawn_terminal_event_emitter(app, state, session_id.clone(), receiver);
 
     thread::spawn(move || {
         let mut buffer = [0_u8; TERMINAL_READ_BUFFER_SIZE];
@@ -1208,6 +1322,9 @@ fn spawn_terminal_waiter(
         if let Ok(mut sessions) = state.sessions.lock() {
             sessions.remove(&session_id);
         }
+        if let Ok(mut snapshots) = state.snapshots.lock() {
+            snapshots.remove(&session_id);
+        }
 
         emit_terminal_exit(
             &app,
@@ -1221,15 +1338,53 @@ fn spawn_terminal_waiter(
 
 impl Default for TerminalUtf8ChunkDecoder {
     fn default() -> Self {
-        Self {
-            decoder: UTF_8.new_decoder(),
-        }
+        Self { pending: Vec::new() }
     }
 }
 
 impl TerminalUtf8ChunkDecoder {
     fn decode_into(&mut self, input: &[u8], output: &mut String, last: bool) {
-        let _ = self.decoder.decode_to_string(input, output, last);
+        if !input.is_empty() {
+            self.pending.extend_from_slice(input);
+        }
+
+        loop {
+            if self.pending.is_empty() {
+                return;
+            }
+
+            match std::str::from_utf8(&self.pending) {
+                Ok(valid) => {
+                    output.push_str(valid);
+                    self.pending.clear();
+                    return;
+                }
+                Err(error) => {
+                    let valid_up_to = error.valid_up_to();
+
+                    if valid_up_to > 0 {
+                        if let Ok(valid_prefix) = std::str::from_utf8(&self.pending[..valid_up_to]) {
+                            output.push_str(valid_prefix);
+                        }
+                        self.pending.drain(..valid_up_to);
+                        continue;
+                    }
+
+                    if let Some(error_len) = error.error_len() {
+                        output.push('\u{FFFD}');
+                        self.pending.drain(..error_len);
+                        continue;
+                    }
+
+                    if last {
+                        output.push('\u{FFFD}');
+                        self.pending.clear();
+                    }
+
+                    return;
+                }
+            }
+        }
     }
 }
 

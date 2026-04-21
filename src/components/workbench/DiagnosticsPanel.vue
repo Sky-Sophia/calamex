@@ -4,6 +4,8 @@ import type {
     IScriptDiagnostic,
     TScriptDiagnosticSeverity,
 } from '@/types/editor';
+import { writeClipboardText } from '@/utils/clipboard';
+import { openExternalUrl } from '@/utils/browser';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 type TDiagnosticFilter = 'all' | 'error' | 'warning' | 'info';
@@ -365,28 +367,16 @@ const handleSelect = (item: IDiagnosticCard): void => {
 };
 
 const openRulesOverview = (): void => {
-    if (typeof window === 'undefined') {
-        return;
-    }
-
-    window.open(RULES_URL, '_blank', 'noopener,noreferrer');
+    openExternalUrl(RULES_URL);
 };
 
 const openRuleDocumentation = (code: string): void => {
-    if (typeof window === 'undefined') {
-        return;
-    }
-
-    window.open(`${RULES_URL}${encodeURIComponent(code)}`, '_blank', 'noopener,noreferrer');
+    openExternalUrl(`${RULES_URL}${encodeURIComponent(code)}`);
 };
 
 const copyRuleCode = async (code: string): Promise<void> => {
-    if (typeof navigator === 'undefined' || typeof navigator.clipboard?.writeText !== 'function') {
-        return;
-    }
-
     try {
-        await navigator.clipboard.writeText(code);
+        await writeClipboardText(code);
     } catch {
         // 忽略剪贴板失败，避免把 UI 交互变成阻断错误。
     }

@@ -9,6 +9,7 @@ import type {
   TExecutorKind,
   TLogLevel,
 } from '@/types/editor';
+import { normalizeFileSystemPath } from '@/utils/path';
 import { DEFAULT_EXECUTOR, DEFAULT_SCRIPT } from '@/utils/templates';
 import { defineStore } from 'pinia';
 import { computed, ref, watch } from 'vue';
@@ -18,20 +19,6 @@ const MAX_TERMINAL_OUTPUT_CHUNK_LENGTH = 4_096;
 const MAX_RUN_LOG_ENTRIES = 500;
 
 const countCharacters = (content: string): number => Array.from(content).length;
-
-/**
- * 归一化路径用于"同文件判重"。
- * - 反斜杠统一为正斜杠。
- * - 仅 Windows 风格路径（`X:/...` 或 UNC `//host/...`）做大小写折叠；
- *   POSIX 路径（`/home/...`、`/mnt/c/...`）保持大小写敏感，
- *   避免在 Linux/WSL 下把不同文件误判成同一个。
- */
-const normalizePath = (value: string | null | undefined): string => {
-  if (!value) return '';
-  const forwardSlashed = value.replace(/\\/g, '/');
-  const isWindowsStyle = /^[a-zA-Z]:\//.test(forwardSlashed) || forwardSlashed.startsWith('//');
-  return isWindowsStyle ? forwardSlashed.toLowerCase() : forwardSlashed;
-};
 
 /**
  * 把可能在 UTF-16 代理对中间截断的字符串按 code point 边界修正。
@@ -200,10 +187,10 @@ export const useEditorStore = defineStore('editor', () => {
 
   const findDocumentByPath = (path: string): IEditorDocument | undefined => {
     if (!path) return undefined;
-    const normalizedPath = normalizePath(path);
+    const normalizedPath = normalizeFileSystemPath(path);
     if (!normalizedPath) return undefined;
     return documents.value.find(
-      (item) => item.path !== null && normalizePath(item.path) === normalizedPath,
+      (item) => item.path !== null && normalizeFileSystemPath(item.path) === normalizedPath,
     );
   };
 

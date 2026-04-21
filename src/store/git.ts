@@ -4,6 +4,7 @@ import type {
   IGitFileBaselinePayload,
   IGitRepositoryStatusPayload,
 } from '@/types/git';
+import { normalizeFileSystemPath } from '@/utils/path';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
@@ -28,22 +29,12 @@ const createEmptyGitRepositoryStatus = (): IGitRepositoryStatusPayload => ({
   lastCommit: null,
 });
 
-const normalizePath = (value: string | null | undefined): string => {
-  if (!value) {
-    return '';
-  }
-
-  const normalized = value.replace(/\\/g, '/');
-  const isWindowsStyle = /^[a-zA-Z]:\//.test(normalized) || normalized.startsWith('//');
-  return isWindowsStyle ? normalized.toLowerCase() : normalized;
-};
-
 const deduplicatePaths = (paths: string[]): string[] => {
   const seen = new Set<string>();
   const result: string[] = [];
 
   for (const path of paths) {
-    const key = normalizePath(path);
+    const key = normalizeFileSystemPath(path);
     if (!key || seen.has(key)) {
       continue;
     }
@@ -86,8 +77,8 @@ export const useGitStore = defineStore('git', () => {
   };
 
   const applyStatus = (payload: IGitRepositoryStatusPayload): IGitRepositoryStatusPayload => {
-    const previousRepositoryRoot = normalizePath(status.value.repositoryRootPath);
-    const nextRepositoryRoot = normalizePath(payload.repositoryRootPath);
+    const previousRepositoryRoot = normalizeFileSystemPath(status.value.repositoryRootPath);
+    const nextRepositoryRoot = normalizeFileSystemPath(payload.repositoryRootPath);
 
     status.value = payload;
 
@@ -124,8 +115,15 @@ export const useGitStore = defineStore('git', () => {
     }
   };
 
+  const initRepository = async (
+    workspaceRootPath?: string | null,
+  ): Promise<IGitRepositoryStatusPayload> => {
+    const payload = await tauriService.initGitRepository(workspaceRootPath);
+    return applyStatus(payload);
+  };
+
   const getFileBaseline = async (path: string): Promise<IGitFileBaselinePayload> => {
-    const cacheKey = normalizePath(path);
+    const cacheKey = normalizeFileSystemPath(path);
     const cached = baselineCache.value[cacheKey];
     if (cached) {
       return cached;
@@ -157,7 +155,7 @@ export const useGitStore = defineStore('git', () => {
   };
 
   const invalidateFileBaseline = (path?: string | null): void => {
-    const cacheKey = normalizePath(path);
+    const cacheKey = normalizeFileSystemPath(path);
     if (!cacheKey) {
       return;
     }
@@ -207,22 +205,6 @@ export const useGitStore = defineStore('git', () => {
     return applyStatus(payload);
   };
 
-  const stageAllChanges = async (): Promise<IGitRepositoryStatusPayload> => {
-    const paths = status.value.files
-      .filter((item) => !item.isConflicted && (item.isUntracked || item.worktreeStatus !== null))
-      .map((item) => item.path);
-
-    return stagePaths(paths);
-  };
-
-  const unstageAllChanges = async (): Promise<IGitRepositoryStatusPayload> => {
-    const paths = status.value.files
-      .filter((item) => item.indexStatus !== null && !item.isConflicted)
-      .map((item) => item.path);
-
-    return unstagePaths(paths);
-  };
-
   const commitIndex = async (message: string): Promise<IGitCommitResultPayload> => {
     const payload = await tauriService.commitGitIndex({
       repositoryRootPath: requireRepositoryRootPath(),
@@ -240,13 +222,12 @@ export const useGitStore = defineStore('git', () => {
     totalChangeCount,
     baselineEpoch,
     refreshRepositoryStatus,
+    initRepository,
     getFileBaseline,
     invalidateFileBaseline,
     clearBaselineCache,
     stagePaths,
     unstagePaths,
-    stageAllChanges,
-    unstageAllChanges,
     commitIndex,
     reset,
   };

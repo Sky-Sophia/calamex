@@ -252,6 +252,9 @@ import ExplorerEntryIcon from '@/components/workbench/ExplorerEntryIcon.vue';
 import { useMessage } from '@/composables/useMessage';
 import { tauriService } from '@/services/tauri';
 import type { IWorkspaceDirectoryPayload, IWorkspaceEntry } from '@/types/editor';
+import { toErrorMessage } from '@/utils/error';
+import { getRelativeFileSystemPath, normalizeFileSystemPath } from '@/utils/path';
+import { resolvePreloadedWorkspaceRoot, sortByRelativePath } from '@/utils/workspace';
 import { computed, ref, watch } from 'vue';
 
 type TSearchScope = 'all' | 'file-name' | 'symbol' | 'content';
@@ -317,8 +320,6 @@ const searchError = ref('');
 const selectedResultPath = ref<string | null>(null);
 let searchRequestId = 0;
 
-const normalizePath = (value: string): string => value.replace(/\\/g, '/');
-
 const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -332,18 +333,13 @@ const splitPatternList = (value: string): string[] =>
     .filter(Boolean);
 
 const buildRelativePath = (path: string, rootPath: string): string => {
-  const normalizedPath = normalizePath(path);
-  const normalizedRootPath = normalizePath(rootPath);
-
-  if (normalizedPath === normalizedRootPath) {
-    return normalizedPath;
-  }
-
-  if (normalizedPath.startsWith(`${normalizedRootPath}/`)) {
-    return normalizedPath.slice(normalizedRootPath.length + 1);
-  }
-
-  return normalizedPath;
+  return (
+    getRelativeFileSystemPath(path, rootPath) ??
+    normalizeFileSystemPath(path, {
+      collapseDuplicateSeparators: true,
+      trimTrailingSeparator: true,
+    })
+  );
 };
 
 const buildSearchIndexEntry = (
@@ -491,7 +487,7 @@ const resolveMatcher = (): ISearchMatcher => {
     } catch (error) {
       return {
         hasQuery: true,
-        errorMessage: error instanceof Error ? error.message : '请输入有效的正则表达式。',
+        errorMessage: toErrorMessage(error, '请输入有效的正则表达式。'),
         test: () => false,
         highlight: (value) => [{ text: value, matched: false }],
       };
@@ -614,16 +610,6 @@ const matchedFileCount = computed(
   () => new Set(activeResults.value.map((result) => result.path)).size,
 );
 
-const resolvePreloadedWorkspaceRoot = (): IWorkspaceDirectoryPayload | null => {
-  if (!props.workspaceRootPath || !props.preloadedWorkspaceRoot) {
-    return null;
-  }
-
-  return props.preloadedWorkspaceRoot.rootPath === props.workspaceRootPath
-    ? props.preloadedWorkspaceRoot
-    : null;
-};
-
 const buildSearchIndex = async (): Promise<void> => {
   if (!props.isDesktopRuntime) {
     searchIndexEntries.value = [];
@@ -645,7 +631,10 @@ const buildSearchIndex = async (): Promise<void> => {
   searchError.value = '';
 
   try {
-    const preloadedWorkspaceRoot = resolvePreloadedWorkspaceRoot();
+    const preloadedWorkspaceRoot = resolvePreloadedWorkspaceRoot(
+      props.workspaceRootPath,
+      props.preloadedWorkspaceRoot,
+    );
     const rootPayload = preloadedWorkspaceRoot
       ?? await tauriService.listWorkspaceEntries(undefined, props.workspaceRootPath);
 
@@ -686,16 +675,14 @@ const buildSearchIndex = async (): Promise<void> => {
       });
     }
 
-    searchIndexEntries.value = nextEntries.sort((left, right) =>
-      left.relativePath.localeCompare(right.relativePath, 'zh-CN'),
-    );
+    searchIndexEntries.value = sortByRelativePath(nextEntries);
   } catch (error) {
     if (requestId !== searchRequestId) {
       return;
     }
 
     searchIndexEntries.value = [];
-    searchError.value = error instanceof Error ? error.message : '建立搜索索引失败。';
+    searchError.value = toErrorMessage(error, '建立搜索索引失败。');
   } finally {
     if (requestId === searchRequestId) {
       searchIndexing.value = false;

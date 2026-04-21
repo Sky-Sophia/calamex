@@ -185,6 +185,8 @@
 <script setup lang="ts">
 import { useMessage } from '@/composables/useMessage';
 import type { IRunLogEntry, IRunResult, TExecutorKind } from '@/types/editor';
+import { writeClipboardText } from '@/utils/clipboard';
+import { toErrorMessage } from '@/utils/error';
 import {
     buildStructuredRunReport,
     type IStructuredRunDetailLine,
@@ -440,6 +442,8 @@ const hasCopyableOutput = computed(() => {
   return props.terminalOutputLength > 0 || displayedReport.value.timeline.length > 0;
 });
 
+type TTerminalLogTone = 'info' | 'exec' | 'ok' | 'warn' | 'err' | 'live';
+
 const resolveKindLabel = (item: IStructuredRunTimelineItem): string => {
   if (item.status === 'running') {
     return 'Run';
@@ -463,7 +467,7 @@ const resolveKindLabel = (item: IStructuredRunTimelineItem): string => {
   }
 };
 
-const resolveEventTone = (item: IStructuredRunTimelineItem): 'info' | 'exec' | 'ok' | 'warn' | 'err' | 'live' => {
+const resolveItemTone = (item: IStructuredRunTimelineItem): TTerminalLogTone => {
   if (item.status === 'running') {
     return 'live';
   }
@@ -487,29 +491,9 @@ const resolveEventTone = (item: IStructuredRunTimelineItem): 'info' | 'exec' | '
   return 'info';
 };
 
-const resolveKindTone = (item: IStructuredRunTimelineItem): 'info' | 'exec' | 'err' | 'warn' | 'live' | 'ok' => {
-  if (item.status === 'running') {
-    return 'live';
-  }
+const resolveEventTone = (item: IStructuredRunTimelineItem): TTerminalLogTone => resolveItemTone(item);
 
-  if (item.status === 'error') {
-    return 'err';
-  }
-
-  if (item.status === 'warning') {
-    return 'warn';
-  }
-
-  if (item.tag === 'exec' || item.tag === 'load') {
-    return 'exec';
-  }
-
-  if (item.tag === 'done') {
-    return 'ok';
-  }
-
-  return 'info';
-};
+const resolveKindTone = (item: IStructuredRunTimelineItem): TTerminalLogTone => resolveItemTone(item);
 
 const resolveInlineCode = (item: IStructuredRunTimelineItem): string | null => {
   if (item.status !== 'error') {
@@ -581,7 +565,9 @@ const toggleExpanded = (itemId: string): void => {
 
 const isExpanded = (itemId: string): boolean => expandedItemIds.value.has(itemId);
 
-const scrollTimelineToBottom = async (behavior: ScrollBehavior): Promise<void> => {
+type TTimelineScrollBehavior = 'auto' | 'smooth';
+
+const scrollTimelineToBottom = async (behavior: TTimelineScrollBehavior): Promise<void> => {
   await nextTick();
   const timelineElement = timelineRef.value;
   if (!timelineElement) {
@@ -610,23 +596,6 @@ watch(
   { flush: 'post' },
 );
 
-const copyText = async (value: string): Promise<void> => {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
-  }
-
-  const textarea = document.createElement('textarea');
-  textarea.value = value;
-  textarea.setAttribute('readonly', 'true');
-  textarea.style.position = 'absolute';
-  textarea.style.opacity = '0';
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand('copy');
-  document.body.removeChild(textarea);
-};
-
 const buildFallbackCopyPayload = (): string => {
   return displayedReport.value.timeline
     .map((item) => {
@@ -648,11 +617,10 @@ const handleCopyAllOutput = async (): Promise<void> => {
   }
 
   try {
-    await copyText(payload);
+    await writeClipboardText(payload);
     message.success('已复制终端输出');
   } catch (error) {
-    const nextMessage = error instanceof Error ? error.message : '复制终端输出失败';
-    message.error(nextMessage);
+    message.error(toErrorMessage(error, '复制终端输出失败'));
   }
 };
 

@@ -1486,6 +1486,7 @@
 <script setup lang="ts">
 import { useDialog } from '@/composables/useDialog';
 import { useAppStore } from '@/store/app';
+import { tryWriteClipboardText } from '@/utils/clipboard';
 import {
     createSettingsEnvironmentVariable,
     type IAppSettings,
@@ -1773,10 +1774,6 @@ const initialSettingsSnapshot = ref<IAppSettings>(cloneSettings(appStore.setting
 let pendingCloseRequest: Promise<boolean> | null = null;
 
 function cloneSettings(value: IAppSettings): IAppSettings {
-  if (typeof structuredClone === 'function') {
-    return structuredClone(value);
-  }
-
   return JSON.parse(JSON.stringify(value)) as IAppSettings;
 }
 
@@ -1973,18 +1970,8 @@ const resetSection = (section: TAppSettingsSectionKey, message: string): void =>
 
 const copyVersionInfo = async (): Promise<void> => {
   const payload = `sh-editor-desktop v0.1.0 (${resolvedThemeLabel.value})`;
-
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(payload);
-      emitSaved('版本信息已复制');
-      return;
-    } catch {
-      // fallback below
-    }
-  }
-
-  emitSaved('当前环境不支持剪贴板写入');
+  const copied = await tryWriteClipboardText(payload);
+  emitSaved(copied ? '版本信息已复制' : '当前环境不支持剪贴板写入');
 };
 
 const requestClose = async (): Promise<boolean> => {

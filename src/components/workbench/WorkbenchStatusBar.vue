@@ -1,20 +1,29 @@
 <template>
   <footer
-    class="workbench-statusbar flex h-7 items-center justify-between border-t border-(--shell-divider) px-1 text-[11px]">
+    class="workbench-statusbar flex h-7 w-full min-w-0 shrink-0 items-center justify-between border-t border-(--shell-divider) px-1 text-[11px]">
     <div class="flex h-full items-center gap-0.5">
-      <span class="statusbar-segment statusbar-segment-passive">
-        <span class="h-2 w-2 rounded-full" :class="isRunning ? 'bg-amber-400' : 'bg-emerald-400'" />
-        {{ isRunning ? '运行中' : '就绪' }}
-      </span>
+      <!-- Git branch + changes -->
+      <button
+        v-if="gitBranchName"
+        type="button"
+        class="statusbar-segment statusbar-segment-button statusbar-git-branch"
+        :title="`分支 ${gitBranchName}，点击打开源代码管理`"
+        @click="$emit('open-source-control')"
+      >
+        <svg class="inline-block" style="width:10px;height:10px;margin-right:4px;vertical-align:-1px" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="4" cy="3" r="1.5" /><circle cx="4" cy="13" r="1.5" /><circle cx="12" cy="8" r="1.5" />
+          <path d="M4 4.5v7" /><path d="M12 9.5v-1a4 4 0 0 0-4-4H6" />
+        </svg>
+        <span>{{ gitBranchName }}</span>
+        <span v-if="gitAddedCount > 0" class="statusbar-git-added"> +{{ gitAddedCount }}</span>
+        <span v-if="gitRemovedCount > 0" class="statusbar-git-removed"> −{{ gitRemovedCount }}</span>
+      </button>
 
       <span v-if="statusMessage" class="statusbar-segment statusbar-segment-passive statusbar-segment-flash">
         {{ statusMessage }}
       </span>
 
-      <span v-if="!hasActiveDocument" class="statusbar-segment statusbar-segment-passive">
-        未打开文件
-      </span>
-      <span v-else-if="documentKind === 'image'" class="statusbar-segment statusbar-segment-passive">
+      <span v-if="hasActiveDocument && documentKind === 'image'" class="statusbar-segment statusbar-segment-passive">
         图片预览
       </span>
     </div>
@@ -71,17 +80,20 @@ import { computed } from 'vue';
 const props = defineProps<{
   hasActiveDocument: boolean;
   documentKind: 'text' | 'image';
-  isRunning: boolean;
   statusMessage?: string | null;
   encoding: TDocumentEncoding;
   executor: TExecutorKind;
   cursorLine: number;
   cursorColumn: number;
   charCount: number;
+  gitBranchName?: string | null;
+  gitAddedCount?: number;
+  gitRemovedCount?: number;
 }>();
 
 const emit = defineEmits<{
   'change-encoding': [value: TDocumentEncoding];
+  'open-source-control': [];
 }>();
 
 const { status: terminalStatus, statusMessage: terminalStatusMessage } =

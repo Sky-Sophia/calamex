@@ -1,4 +1,5 @@
 import { ref } from 'vue';
+import { toErrorMessage } from '@/utils/error';
 
 export interface IRuntimeErrorState {
   title: string;
@@ -57,7 +58,7 @@ const normalizeErrorDetail = (error: unknown): string => {
 export const setRuntimeError = (title: string, error: unknown): void => {
   runtimeErrorState.value = {
     title,
-    message: error instanceof Error ? error.message : String(error),
+    message: toErrorMessage(error, '发生未知错误'),
     detail: normalizeErrorDetail(error),
   };
 };

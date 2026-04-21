@@ -18,7 +18,9 @@ import {
   type ITerminalRunOutputEvent,
 } from '@/types/terminal';
 import { desktopRuntimeReady, waitForDesktopRuntime } from '@/utils/desktop-runtime';
+import { toErrorMessage } from '@/utils/error';
 import { getFileBaseName, isImageAssetPath } from '@/utils/file-assets';
+import { getPathBaseName } from '@/utils/path';
 import {
   COMMAND_TEMPLATES,
   COMMENT_TEMPLATES,
@@ -59,11 +61,7 @@ const trimTrailingWhitespace = (content: string): string =>
 
 const isTextDocument = (document: IEditorDocument): boolean => document.kind === 'text';
 
-const getPathName = (path: string): string => {
-  const normalizedPath = path.replace(/\\/g, '/').replace(/\/+$/, '');
-  const segments = normalizedPath.split('/');
-  return segments.length > 0 ? segments[segments.length - 1] || normalizedPath : normalizedPath;
-};
+const getPathName = (path: string): string => getPathBaseName(path);
 
 type TDirtyCloseAction = 'save' | 'discard' | 'cancel';
 type TDirtyCloseScene =
@@ -163,7 +161,7 @@ export const useWorkbench = () => {
     try {
       await gitStore.refreshRepositoryStatus(workspaceRootPath);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '刷新 Git 状态失败';
+      const message = toErrorMessage(error, '刷新 Git 状态失败');
       editorStore.appendLog('error', '刷新 Git 状态失败', message);
     }
   };
@@ -306,7 +304,7 @@ export const useWorkbench = () => {
   };
 
   const shouldReconnectIntegratedTerminal = (error: unknown): boolean => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = toErrorMessage(error, '');
     return message.includes('目标终端会话不存在');
   };
 
@@ -442,7 +440,7 @@ export const useWorkbench = () => {
           : '当前系统未发现可用的 WSL2 运行环境，建议先安装或启用 WSL2。',
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : '执行环境检测失败';
+      const message = toErrorMessage(error, '执行环境检测失败');
       editorStore.appendLog('error', '执行环境检测失败', message);
       useMessage().error(message);
     }
@@ -457,7 +455,7 @@ export const useWorkbench = () => {
           startupWorkspace.rootPath,
         );
       } catch (error) {
-        const message = error instanceof Error ? error.message : '加载默认文件夹目录结构失败';
+        const message = toErrorMessage(error, '加载默认文件夹目录结构失败');
         editorStore.appendLog('error', '加载默认文件夹目录结构失败', message);
       }
 
@@ -468,7 +466,7 @@ export const useWorkbench = () => {
         await loadDocumentFromPath(startupWorkspace.defaultFilePath, '加载默认工作区');
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : '加载默认工作区失败';
+      const message = toErrorMessage(error, '加载默认工作区失败');
       editorStore.appendLog('error', '加载默认工作区失败', message);
       useMessage().error(message);
     }
@@ -495,7 +493,7 @@ export const useWorkbench = () => {
 
       await loadDocumentFromPath(path, '打开脚本');
     } catch (error) {
-      const message = error instanceof Error ? error.message : '打开脚本失败';
+      const message = toErrorMessage(error, '打开脚本失败');
       editorStore.appendLog('error', '打开脚本失败', message);
       useMessage().error(message);
     }
@@ -527,7 +525,7 @@ export const useWorkbench = () => {
       editorStore.appendLog('success', '打开文件夹', buildLogDetail('资源目录', path));
       useMessage().success(`已打开文件夹 ${getPathName(path)}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '打开文件夹失败';
+      const message = toErrorMessage(error, '打开文件夹失败');
       editorStore.appendLog('error', '打开文件夹失败', message);
       useMessage().error(message);
     }
@@ -544,7 +542,7 @@ export const useWorkbench = () => {
 
       await loadDocumentFromPath(path, '资源管理器打开文件');
     } catch (error) {
-      const message = error instanceof Error ? error.message : '打开资源文件失败';
+      const message = toErrorMessage(error, '打开资源文件失败');
       editorStore.appendLog('error', '打开资源文件失败', message);
       useMessage().error(message);
     }
@@ -591,7 +589,7 @@ export const useWorkbench = () => {
 
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'shfmt 格式化失败';
+      const message = toErrorMessage(error, 'shfmt 格式化失败');
       editorStore.appendLog('error', 'shfmt 格式化失败', message);
       useMessage().error(message);
       return false;
@@ -645,7 +643,7 @@ export const useWorkbench = () => {
       );
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : '工作区文件 shfmt 格式化失败';
+      const message = toErrorMessage(error, '工作区文件 shfmt 格式化失败');
       editorStore.appendLog('error', '工作区文件 shfmt 格式化失败', message);
       useMessage().error(message);
       return false;
@@ -683,7 +681,7 @@ export const useWorkbench = () => {
       useMessage().success('脚本已另存为');
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : '另存为失败';
+      const message = toErrorMessage(error, '另存为失败');
       editorStore.appendLog('error', '另存为失败', message);
       useMessage().error(message);
       return false;
@@ -718,7 +716,7 @@ export const useWorkbench = () => {
       useMessage().success('脚本已保存');
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : '保存失败';
+      const message = toErrorMessage(error, '保存失败');
       editorStore.appendLog('error', '保存失败', message);
       useMessage().error(message);
       return false;
@@ -941,7 +939,7 @@ export const useWorkbench = () => {
       editorStore.setPendingTerminalRunId(null);
       activeTerminalRunMeta = null;
       editorStore.isRunning = false;
-      const message = error instanceof Error ? error.message : '脚本执行失败';
+      const message = toErrorMessage(error, '脚本执行失败');
       editorStore.appendLog('error', '脚本执行失败', message);
       editorStore.setTerminalOutput(message);
       useMessage().error(message);

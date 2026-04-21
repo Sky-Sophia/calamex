@@ -13,6 +13,8 @@ import type {
 } from '@/types/terminal';
 import { DEFAULT_TERMINAL_SESSION_ID } from '@/types/terminal';
 import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
+import { writeClipboardText } from '@/utils/clipboard';
+import { toErrorMessage } from '@/utils/error';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -37,6 +39,7 @@ const TERMINAL_WEBGL_RECOVERY_DELAY_MS = 180;
 const TERMINAL_LAYOUT_SETTLE_DELAY_MS = 72;
 const TERMINAL_OUTPUT_FLUSH_DELAY_MS = 16;
 const TERMINAL_SCROLL_RECOVERY_DELAY_MS = 64;
+const TERMINAL_PROMPT_WAKE_DELAY_MS = 320;
 const DEFAULT_TERMINAL_FONT_FAMILY =
   "Berkeley Mono, JetBrains Mono, 'SFMono-Regular', Consolas, 'Courier New', monospace";
 
@@ -96,9 +99,6 @@ const createTerminalTheme = (theme: TThemeMode) =>
       brightCyan: '#a9e7ff',
       brightWhite: '#f5f7fb',
     };
-
-const resolveErrorMessage = (error: unknown, fallback: string): string =>
-  error instanceof Error ? error.message : fallback;
 
 const resolveInteger = (
   value: number | null | undefined,
@@ -247,6 +247,7 @@ let programmaticScrollReleaseFrameId: number | null = null;
 let terminalWriteFrameId: number | null = null;
 let terminalWriteTimeoutId: number | null = null;
 let scrollRecoveryTimeoutId: number | null = null;
+let promptWakeTimeoutId: number | null = null;
 
 let isTerminalWriteInFlight = false;
 let isProgrammaticScrollSync = false;
@@ -256,6 +257,7 @@ let hiddenTerminalWriteBacklog = '';
 let pendingScrollToBottomAfterWrite = false;
 let pendingHiddenScrollToBottom = false;
 let shouldFitBeforeNextVisibleWrite = false;
+let pendingInitialPaintRecovery = true;
 
 const pendingTerminalWriteCallbacks: Array<() => void> = [];
 let activeRunId: string | null = null;
@@ -396,6 +398,12 @@ export const useIntegratedTerminal = ({
       scrollRecoveryTimeoutId = null;
     }
   };
+  const clearPromptWakeTimeout = (): void => {
+    if (promptWakeTimeoutId !== null) {
+      window.clearTimeout(promptWakeTimeoutId);
+      promptWakeTimeoutId = null;
+    }
+  };
 
   const flushPendingTerminalWriteCallbacks = (): void => {
     if (pendingTerminalWriteCallbacks.length === 0) {
@@ -466,6 +474,11 @@ export const useIntegratedTerminal = ({
     terminal.write(chunk, () => {
       isTerminalWriteInFlight = false;
       scheduleViewportSync({ scrollToBottom: shouldScrollToBottom });
+      if (pendingInitialPaintRecovery && hasTerminalRenderableContent()) {
+        pendingInitialPaintRecovery = false;
+        syncTerminalLayout();
+        scheduleViewportSync({ refresh: true, scrollToBottom: true });
+      }
       if (bufferedTerminalWrite) {
         flushTerminalWriteBufferNow();
         return;
@@ -711,14 +724,48 @@ export const useIntegratedTerminal = ({
     terminalRef.value?.focus();
   };
 
+  const hasTerminalRenderableContent = (): boolean => {
+    const terminal = terminalRef.value;
+    if (!terminal) {
+      return false;
+    }
+
+    const activeBuffer = terminal.buffer.active;
+    for (let index = 0; index < activeBuffer.length; index += 1) {
+      const line = activeBuffer.getLine(index);
+      if (!line) {
+        continue;
+      }
+
+      if (line.translateToString(true).trim().length > 0) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const schedulePromptWake = (): void => {
+    clearPromptWakeTimeout();
+    promptWakeTimeoutId = window.setTimeout(() => {
+      promptWakeTimeoutId = null;
+
+      if (!session.value || hasTerminalRenderableContent()) {
+        return;
+      }
+
+      void tauriService.writeTerminalInput({
+        sessionId,
+        data: '\n',
+      }).catch(() => {
+        // 忽略提示符唤醒失败，终端仍可通过手动输入恢复。
+      });
+    }, TERMINAL_PROMPT_WAKE_DELAY_MS);
+  };
+
   const writeSelectionToClipboard = async (): Promise<void> => {
     const terminal = terminalRef.value;
-    if (
-      !terminal ||
-      !settings.value.copyOnSelect ||
-      typeof navigator === 'undefined' ||
-      typeof navigator.clipboard?.writeText !== 'function'
-    ) {
+    if (!terminal || !settings.value.copyOnSelect) {
       return;
     }
 
@@ -735,11 +782,9 @@ export const useIntegratedTerminal = ({
       return;
     }
 
-    try {
-      await navigator.clipboard.writeText(nextSelection);
-    } catch {
+    void writeClipboardText(nextSelection).catch(() => {
       // ignore clipboard write failures in preview or restricted contexts
-    }
+    });
   };
 
   const applyTerminalSettings = (): void => {
@@ -937,6 +982,21 @@ export const useIntegratedTerminal = ({
         rows: resolveInteger(terminal.rows, DEFAULT_ROWS, 1, 3000),
       });
       session.value = payload;
+      if (!payload.created && payload.initialOutput) {
+        terminal.reset();
+        bufferedTerminalWrite = '';
+        hiddenTerminalWriteBacklog = '';
+        pendingScrollToBottomAfterWrite = false;
+        pendingHiddenScrollToBottom = false;
+        isAutoFollowEnabled = true;
+        pendingInitialPaintRecovery = true;
+        queueTerminalWrite(payload.initialOutput, { scrollToBottom: true });
+        flushTerminalWriteBufferNow({ forceLayout: true });
+      }
+      if (payload.created && !payload.initialOutput) {
+        pendingInitialPaintRecovery = true;
+        schedulePromptWake();
+      }
       emitStatus('ready', `${payload.shellLabel} 已连接`);
       ensurePreferredRenderer();
       scheduleViewportSync({ scrollToBottom: true });
@@ -944,7 +1004,7 @@ export const useIntegratedTerminal = ({
         focusTerminal();
       }
     } catch (error) {
-      const message = resolveErrorMessage(error, '连接 WSL2 终端失败。');
+      const message = toErrorMessage(error, '连接 WSL2 终端失败。');
       emitStatus('error', message);
       terminal.writeln(`\x1b[31m${message}\x1b[0m`, () => {
         scheduleViewportSync({ scrollToBottom: true });
@@ -1062,6 +1122,7 @@ export const useIntegratedTerminal = ({
     bindResizeObserver();
     ensurePreferredRenderer();
     syncTerminalSurfaceTone();
+    pendingInitialPaintRecovery = true;
     scheduleLayoutSync({ settle: true });
     scheduleViewportSync({ clearTextureAtlas: true, refresh: true, scrollToBottom: true });
   };
@@ -1090,7 +1151,7 @@ export const useIntegratedTerminal = ({
           isAutoFollowEnabled = true;
         }
         void tauriService.writeTerminalInput({ sessionId, data }).catch((error) => {
-          emitStatus('error', resolveErrorMessage(error, '终端输入发送失败。'));
+          emitStatus('error', toErrorMessage(error, '终端输入发送失败。'));
         });
       });
       terminal.onScroll(() => {
@@ -1135,6 +1196,7 @@ export const useIntegratedTerminal = ({
     terminalRef.value?.reset();
     resetTerminalRunCapture();
     isAutoFollowEnabled = true;
+    pendingInitialPaintRecovery = true;
     await ensureSession();
   };
 
@@ -1233,6 +1295,7 @@ export const useIntegratedTerminal = ({
     clearTerminalWriteFrame();
     clearTerminalWriteTimeout();
     clearScrollRecoveryTimeout();
+    clearPromptWakeTimeout();
 
     resetTerminalRunCapture();
     bufferedTerminalWrite = '';
@@ -1242,6 +1305,7 @@ export const useIntegratedTerminal = ({
     pendingScrollToBottomAfterWrite = false;
     pendingHiddenScrollToBottom = false;
     shouldFitBeforeNextVisibleWrite = false;
+    pendingInitialPaintRecovery = true;
     previousHostSize = { width: 0, height: 0 };
 
     disposeWebglRenderer();

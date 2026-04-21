@@ -17,10 +17,6 @@
 
       <div class="run-panel-toolbar-spacer" />
 
-      <span v-if="!isTerminalReady" class="run-panel-status" :class="statusClassName">
-        {{ statusText }}
-      </span>
-
       <div class="run-panel-actions">
         <button
           type="button"
@@ -150,7 +146,8 @@ import type {
     ITerminalRunOutputEvent,
     ITerminalStatusChangePayload,
 } from '@/types/terminal';
-import { computed, ref, watch } from 'vue';
+import { toErrorMessage } from '@/utils/error';
+import { computed, ref } from 'vue';
 
 const props = defineProps<{
   terminalOutputLength: number;
@@ -192,49 +189,39 @@ const terminalStatus = ref<ITerminalStatusChangePayload>({
 const { retry, clearScreen, interrupt, sendCommand } = useIntegratedTerminalControls();
 
 const isTerminalReady = computed(() => terminalStatus.value.state === 'ready');
-const statusText = computed(() => terminalStatus.value.message);
-const statusClassName = computed(() => (isTerminalReady.value ? 'is-ready' : 'is-muted'));
 
 const handleTerminalStatusChange = (payload: ITerminalStatusChangePayload): void => {
   terminalStatus.value = payload;
 };
 
-const handleRestartTerminal = async (): Promise<void> => {
+const runTerminalAction = async (
+  task: () => Promise<void>,
+  fallbackMessage: string,
+  onSuccess?: () => void,
+): Promise<void> => {
   try {
-    await retry();
+    await task();
+    onSuccess?.();
   } catch (error) {
-    const nextMessage = error instanceof Error ? error.message : '重连终端失败';
-    message.error(nextMessage);
+    message.error(toErrorMessage(error, fallbackMessage));
   }
 };
 
-const handleClearTerminal = async (): Promise<void> => {
-  try {
-    await clearScreen();
-  } catch (error) {
-    const nextMessage = error instanceof Error ? error.message : '清屏失败';
-    message.error(nextMessage);
-  }
-};
+const handleRestartTerminal = (): Promise<void> => runTerminalAction(retry, '重连终端失败');
 
-const handleInterruptTerminal = async (): Promise<void> => {
-  try {
-    await interrupt();
-  } catch (error) {
-    const nextMessage = error instanceof Error ? error.message : '终止终端执行失败';
-    message.error(nextMessage);
-  }
-};
+const handleClearTerminal = (): Promise<void> => runTerminalAction(clearScreen, '清屏失败');
 
-const handleSubmitCommand = async (command: string): Promise<void> => {
-  try {
-    await sendCommand(command);
-    activeTab.value = 'terminal';
-  } catch (error) {
-    const nextMessage = error instanceof Error ? error.message : '发送命令失败';
-    message.error(nextMessage);
-  }
-};
+const handleInterruptTerminal = (): Promise<void> =>
+  runTerminalAction(interrupt, '终止终端执行失败');
+
+const handleSubmitCommand = (command: string): Promise<void> =>
+  runTerminalAction(
+    () => sendCommand(command),
+    '发送命令失败',
+    () => {
+      activeTab.value = 'terminal';
+    },
+  );
 
 const handleClearLogs = async (): Promise<void> => {
   emit('clear-logs');
@@ -244,13 +231,4 @@ const handleClearLogs = async (): Promise<void> => {
     // 忽略终端清屏失败，日志清空已单独完成。
   }
 };
-
-watch(
-  () => props.isRunning,
-  (nextIsRunning, previousIsRunning) => {
-    if (nextIsRunning && !previousIsRunning) {
-      activeTab.value = 'logs';
-    }
-  },
-);
 </script>

@@ -58,7 +58,6 @@ class="app-shell-pane min-h-0 overflow-hidden bg-(--panel-bg)" :class="[
               <slot name="terminal" />
             </section>
           </main>
-          <slot name="statusbar" />
         </div>
 
         <div
@@ -69,6 +68,8 @@ v-if="props.contentOverlayVisible" class="pointer-events-none absolute inset-y-0
           </div>
         </div>
       </div>
+
+      <slot name="statusbar" />
     </div>
   </div>
 </template>
@@ -90,7 +91,6 @@ const TERMINAL_MIN_HEIGHT = 140;
 const EDITOR_MIN_HEIGHT = 220;
 const SPLITTER_HEIGHT = 0;
 const ACTIVITY_RAIL_WIDTH = 52;
-const STATUSBAR_HEIGHT = 28;
 
 const props = withDefaults(
   defineProps<{
@@ -175,7 +175,6 @@ const shellGridStyle = computed(() => ({
 
 const contentOverlayStyle = computed(() => ({
   left: `${ACTIVITY_RAIL_WIDTH}px`,
-  bottom: `${STATUSBAR_HEIGHT}px`,
 }));
 
 const layoutGridTransitionClass =

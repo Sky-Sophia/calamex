@@ -1,5 +1,6 @@
 import type { IRunLogEntry, IRunResult, TExecutorKind } from '@/types/editor';
 import { formatTime } from '@/utils/date';
+import { getPathBaseName, getRelativeFileSystemPath } from '@/utils/path';
 
 export type TInsightTone = 'neutral' | 'success' | 'warning' | 'error' | 'running';
 export type TInsightStepStatus = 'done' | 'running' | 'warning' | 'error';
@@ -88,41 +89,10 @@ const ERROR_PATTERN =
 
 const stripAnsi = (value: string): string => value.replace(ANSI_PATTERN, '');
 
-const normalizePath = (value: string | null | undefined): string =>
-  (value ?? '')
-    .replace(/\\/g, '/')
-    .replace(/\/+/g, '/')
-    .replace(/\/$/, '');
-
-const getPathSegments = (value: string | null | undefined): string[] =>
-  normalizePath(value)
-    .split('/')
-    .filter(Boolean);
-
-const getPathLeaf = (value: string | null | undefined): string => {
-  const segments = getPathSegments(value);
-  return segments[segments.length - 1] ?? '';
-};
+const getPathLeaf = (value: string | null | undefined): string => getPathBaseName(value);
 
 const getRelativePath = (fullPath: string | null, rootPath: string | null): string | null => {
-  const normalizedFullPath = normalizePath(fullPath);
-  const normalizedRootPath = normalizePath(rootPath);
-
-  if (!normalizedFullPath || !normalizedRootPath) {
-    return null;
-  }
-
-  const lowerFullPath = normalizedFullPath.toLowerCase();
-  const lowerRootPath = normalizedRootPath.toLowerCase();
-  if (lowerFullPath === lowerRootPath) {
-    return '';
-  }
-
-  if (!lowerFullPath.startsWith(`${lowerRootPath}/`)) {
-    return null;
-  }
-
-  return normalizedFullPath.slice(normalizedRootPath.length + 1);
+  return getRelativeFileSystemPath(fullPath, rootPath);
 };
 
 const normalizeOutput = (value: string): string =>

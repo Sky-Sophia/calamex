@@ -67,6 +67,8 @@
 <script setup lang="ts">
 import ExplorerEntryIcon from '@/components/workbench/ExplorerEntryIcon.vue';
 import type { IWorkspaceEntry } from '@/types/editor';
+import { areFileSystemPathsEqual } from '@/utils/path';
+import { filterWorkspaceEntriesByQuery } from '@/utils/workspace';
 import type { CSSProperties } from 'vue';
 import { computed } from 'vue';
 
@@ -90,15 +92,12 @@ const emit = defineEmits<{
   'open-file': [path: string];
 }>();
 
-const normalizePath = (value: string | null | undefined): string =>
-  value ? value.replace(/\\/g, '/').toLowerCase() : '';
-
 const isDirectory = computed(() => props.entry.kind === 'directory');
 const isExpanded = computed(() => Boolean(props.expandedPaths[props.entry.path]));
 const isLoading = computed(() => Boolean(props.loadingPaths[props.entry.path]));
 const childEntries = computed(() => props.childrenMap[props.entry.path] ?? []);
 const isActive = computed(
-  () => normalizePath(props.entry.path) === normalizePath(props.activePath),
+  () => areFileSystemPathsEqual(props.entry.path, props.activePath),
 );
 const normalizedSearchQuery = computed(() => (props.searchQuery ?? '').trim().toLowerCase());
 const hasActiveSearch = computed(() => normalizedSearchQuery.value.length > 0);
@@ -113,36 +112,12 @@ const childStateStyle = computed<CSSProperties>(() => ({
   paddingLeft: `${44 + props.level * 18}px`,
 }));
 
-const entryMatchesSearch = (entry: IWorkspaceEntry, query: string): boolean => {
-  if (!query) {
-    return true;
-  }
-
-  return (
-    entry.name.toLowerCase().includes(query) ||
-    normalizePath(entry.path).includes(query)
-  );
-};
-
-const entryMatchesTree = (entry: IWorkspaceEntry, query: string): boolean => {
-  if (!query || entryMatchesSearch(entry, query)) {
-    return true;
-  }
-
-  if (entry.kind !== 'directory') {
-    return false;
-  }
-
-  const descendants = props.childrenMap[entry.path] ?? [];
-  return descendants.some((child) => entryMatchesTree(child, query));
-};
-
 const visibleChildEntries = computed(() => {
-  if (!hasActiveSearch.value) {
-    return childEntries.value;
-  }
-
-  return childEntries.value.filter((child) => entryMatchesTree(child, normalizedSearchQuery.value));
+  return filterWorkspaceEntriesByQuery(
+    childEntries.value,
+    normalizedSearchQuery.value,
+    props.childrenMap,
+  );
 });
 
 const shouldShowChildren = computed(

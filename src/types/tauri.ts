@@ -40,6 +40,7 @@ export interface ITauriService {
   runScript(payload: IRunScriptRequest): Promise<IRunResult>;
   listWorkspaceEntries(path?: string, rootPath?: string): Promise<IWorkspaceDirectoryPayload>;
   getGitRepositoryStatus(workspaceRootPath?: string | null): Promise<IGitRepositoryStatusPayload>;
+  initGitRepository(workspaceRootPath?: string | null): Promise<IGitRepositoryStatusPayload>;
   getGitFileBaseline(path: string): Promise<IGitFileBaselinePayload>;
   stageGitPaths(payload: IGitPathOperationRequest): Promise<IGitRepositoryStatusPayload>;
   unstageGitPaths(payload: IGitPathOperationRequest): Promise<IGitRepositoryStatusPayload>;

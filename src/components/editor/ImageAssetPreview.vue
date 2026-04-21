@@ -59,6 +59,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { tauriService } from '@/services/tauri';
 import type { IImageAssetPayload } from '@/types/editor';
+import { toErrorMessage } from '@/utils/error';
 import { formatBytes } from '@/utils/file-assets';
 
 const props = defineProps<{
@@ -80,9 +81,6 @@ const imageSizeLabel = computed(() => {
   return `${imageNaturalWidth.value} × ${imageNaturalHeight.value}`;
 });
 
-const resolveErrorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : '读取图片资源失败。';
-
 const loadImageAsset = async (): Promise<void> => {
   isLoading.value = true;
   errorMessage.value = '';
@@ -93,7 +91,7 @@ const loadImageAsset = async (): Promise<void> => {
   try {
     assetMeta.value = await tauriService.loadImageAsset(props.path);
   } catch (error) {
-    errorMessage.value = resolveErrorMessage(error);
+    errorMessage.value = toErrorMessage(error, '读取图片资源失败。');
   } finally {
     isLoading.value = false;
   }

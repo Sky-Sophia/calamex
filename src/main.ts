@@ -1,5 +1,6 @@
 import { listShellCommandLabels } from './services/shell-command-catalog';
 import { initAppTooltipSystem } from './utils/app-tooltip';
+import { writeClipboardText } from './utils/clipboard';
 import { registerRuntimeDiagnostics, setRuntimeError } from './utils/runtime-diagnostics';
 
 registerRuntimeDiagnostics();
@@ -301,11 +302,7 @@ const buildErrorSection = (error: unknown): HTMLElement => {
       copyBtn.textContent = MESSAGES.copyButtonDone;
       window.setTimeout(() => (copyBtn.textContent = MESSAGES.copyButton), 1600);
     };
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(payload).then(done).catch(done);
-    } else {
-      done();
-    }
+    void writeClipboardText(payload).then(done).catch(done);
   });
   actions.appendChild(copyBtn);
   log.appendChild(actions);
