@@ -24,7 +24,10 @@ type TUseDocumentLifecycleOptions = {
   gitStore: TGitStore;
   saveDocument: (documentId?: string) => Promise<boolean>;
   saveDirtyDocuments: (documentIds: string[]) => Promise<boolean>;
+  flushSession?: () => Promise<void>;
 };
+
+const CLOSE_FLUSH_TIMEOUT_MS = 1000;
 
 const resolveCloseConfirmMessage = (
   dirtyDocuments: IEditorDocument[],
@@ -81,7 +84,27 @@ export const useDocumentLifecycle = ({
   gitStore,
   saveDocument,
   saveDirtyDocuments,
+  flushSession,
 }: TUseDocumentLifecycleOptions) => {
+  const notifier = useMessage();
+
+  const flushSessionWithTimeout = async (): Promise<void> => {
+    if (!flushSession) {
+      return;
+    }
+
+    try {
+      await Promise.race([
+        flushSession(),
+        new Promise<void>((resolve) => {
+          window.setTimeout(() => resolve(), CLOSE_FLUSH_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (error) {
+      editorStore.appendLog('error', '会话落盘失败', String(error));
+    }
+  };
+
   const getAppWindow = async () => {
     const runtimeReady = await waitForDesktopRuntime();
     if (!runtimeReady) {
@@ -138,75 +161,85 @@ export const useDocumentLifecycle = ({
     return 'cancel';
   };
 
+  const persistDirtyDocuments = async (dirtyDocuments: IEditorDocument[]): Promise<boolean> => {
+    if (dirtyDocuments.length === 0) {
+      return true;
+    }
+
+    if (dirtyDocuments.length === 1) {
+      const targetDocument = dirtyDocuments[0];
+      if (!targetDocument) {
+        return true;
+      }
+
+      return saveDocument(targetDocument.id);
+    }
+
+    return saveDirtyDocuments(dirtyDocuments.map((item) => item.id));
+  };
+
+  const ensureDirtyDocumentsHandled = async (
+    dirtyDocuments: IEditorDocument[],
+    scene: TDirtyCloseScene,
+  ): Promise<boolean> => {
+    const action = await confirmCloseForDirtyDocuments(dirtyDocuments, scene);
+    if (action === 'cancel') {
+      return false;
+    }
+
+    if (action !== 'save') {
+      return true;
+    }
+
+    return persistDirtyDocuments(dirtyDocuments);
+  };
+
   const requestCloseDocument = async (documentId: string): Promise<void> => {
     const targetDocument = editorStore.getDocumentById(documentId);
     if (!targetDocument) {
       return;
     }
 
-    if (!targetDocument.isDirty) {
-      editorStore.closeDocument(documentId);
+    const canCloseDocument = await ensureDirtyDocumentsHandled(
+      targetDocument.isDirty ? [targetDocument] : [],
+      'close-document',
+    );
+    if (!canCloseDocument) {
       return;
-    }
-
-    const action = await confirmCloseForDirtyDocuments([targetDocument], 'close-document');
-    if (action === 'cancel') {
-      return;
-    }
-
-    if (action === 'save') {
-      const saved = await saveDocument(documentId);
-      if (!saved) {
-        return;
-      }
     }
 
     editorStore.closeDocument(documentId);
   };
 
   const requestCloseWorkspace = async (): Promise<void> => {
-    const dirtyDocuments = editorStore.dirtyDocuments;
-    const action = await confirmCloseForDirtyDocuments(dirtyDocuments, 'close-workspace');
-    if (action === 'cancel') {
+    const canCloseWorkspace = await ensureDirtyDocumentsHandled(
+      editorStore.dirtyDocuments,
+      'close-workspace',
+    );
+    if (!canCloseWorkspace) {
       return;
-    }
-
-    if (action === 'save') {
-      const saved = await saveDirtyDocuments(dirtyDocuments.map((item) => item.id));
-      if (!saved) {
-        return;
-      }
     }
 
     editorStore.clearWorkspaceSession();
     gitStore.reset();
-    useMessage().success('工作区已关闭');
+    notifier.success('工作区已关闭');
   };
 
   const requestCloseApplication = async (): Promise<void> => {
-    const dirtyDocuments = editorStore.dirtyDocuments;
-    if (dirtyDocuments.length === 0) {
-      await closeAppWindow();
+    const canCloseApplication = await ensureDirtyDocumentsHandled(
+      editorStore.dirtyDocuments,
+      'close-application',
+    );
+    if (!canCloseApplication) {
       return;
     }
 
-    const action = await confirmCloseForDirtyDocuments(dirtyDocuments, 'close-application');
-    if (action === 'cancel') {
-      return;
-    }
-
-    if (action === 'save') {
-      const saved = await saveDirtyDocuments(dirtyDocuments.map((item) => item.id));
-      if (!saved) {
-        return;
-      }
-    }
-
+    await flushSessionWithTimeout();
     await closeAppWindow();
   };
 
   return {
-    confirmCloseForDirtyDocuments,
+    ensureDirtyDocumentsHandled,
     requestCloseDocument,
     requestCloseWorkspace,
     requestCloseApplication,

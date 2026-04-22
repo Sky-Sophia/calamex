@@ -3,19 +3,19 @@
 mod commands;
 
 use commands::{
-    analyze_script, apply_window_stage, close_terminal_session, detect_execution_environment,
-    dispatch_script_to_terminal, ensure_terminal_session, format_script, get_git_file_baseline,
-    get_git_repository_status, get_startup_workspace, init_git_repository, list_workspace_entries,
-    load_image_asset, load_script, resize_terminal_session, run_script, save_script,
-    show_startup_window, stage_git_paths, unstage_git_paths, write_terminal_input,
-    commit_git_index,
-    TerminalSessionState,
+    analyze_script, apply_window_stage, close_terminal_session, commit_git_index,
+    detect_execution_environment, dispatch_script_to_terminal, ensure_terminal_session,
+    format_script, get_git_file_baseline, get_git_repository_status, get_startup_workspace,
+    init_git_repository, list_workspace_entries, load_image_asset, load_script,
+    resize_terminal_session, run_script, save_script, show_startup_window, stage_git_paths,
+    unstage_git_paths, write_terminal_input, TerminalSessionState,
 };
 use tauri::Manager;
 
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
         .manage(TerminalSessionState::default())
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {

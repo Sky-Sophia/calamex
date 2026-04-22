@@ -1,14 +1,26 @@
 import { useMessage } from '@/composables/useMessage';
 import { tauriService } from '@/services/tauri';
 import type { useEditorStore } from '@/store/editor';
-import type { IEditorDocument, IRunResult, TRunHistoryStatus } from '@/types/editor';
+import type { IEditorDocument } from '@/types/editor';
 import {
-    DEFAULT_TERMINAL_SESSION_ID,
-    type ITerminalRunCompletePayload,
-    type ITerminalRunOutputEvent,
+  DEFAULT_TERMINAL_SESSION_ID,
+  type ITerminalRunCompletePayload,
+  type ITerminalRunOutputEvent,
 } from '@/types/terminal';
 import { toErrorMessage } from '@/utils/error';
 import { DEFAULT_EXECUTOR, getExecutorLabel } from '@/utils/templates';
+import {
+  TERMINAL_RUN_LOG_CODES,
+  TERMINAL_RUN_LOG_TITLES,
+  buildDispatchedTerminalRunSummary,
+  buildPendingTerminalRunSummary,
+  buildTerminalRunCompletionDetail,
+  buildTerminalRunHistoryEntry,
+  buildTerminalRunResult,
+  createActiveTerminalRunMeta,
+  createTerminalRunId,
+  type IActiveTerminalRunMeta,
+} from '@/utils/terminal-run';
 import { onScopeDispose, type ComputedRef } from 'vue';
 
 const DEFAULT_TERMINAL_COLS = 120;
@@ -18,381 +30,343 @@ const TERMINAL_RUN_COMPLETION_TIMEOUT_MS = 30 * 60 * 1000;
 
 type TEditorStore = ReturnType<typeof useEditorStore>;
 
-type TActiveTerminalRunMeta = {
-    runId: string;
-    startedAt: string;
-    commandLine: string;
-    usedTempFile: boolean;
-};
-
 type TUseTerminalRunOptions = {
-    canRun: ComputedRef<boolean>;
-    editorStore: TEditorStore;
-};
-
-const resolveRunHistoryStatus = (exitCode: number | null): TRunHistoryStatus => {
-    if (exitCode === 0) {
-        return 'success';
-    }
-
-    if (exitCode === null || exitCode === -1 || exitCode === 130) {
-        return 'canceled';
-    }
-
-    return 'failed';
+  canRun: ComputedRef<boolean>;
+  editorStore: TEditorStore;
 };
 
 const isTextDocument = (document: IEditorDocument): boolean => document.kind === 'text';
 
-export const useTerminalRun = ({
-    canRun,
-    editorStore,
-}: TUseTerminalRunOptions) => {
-    let bufferedTerminalOutput = '';
-    let bufferedTerminalOutputTimerId: number | null = null;
-    let terminalRunFallbackTimerId: number | null = null;
-    let isDisposed = false;
-    let activeTerminalRunMeta: TActiveTerminalRunMeta | null = null;
+export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) => {
+  const notifier = useMessage();
 
-    const clearBufferedTerminalOutputTimer = (): void => {
-        if (bufferedTerminalOutputTimerId === null) {
-            return;
-        }
+  let bufferedTerminalOutput = '';
+  let bufferedTerminalOutputTimerId: number | null = null;
+  let terminalRunFallbackTimerId: number | null = null;
+  let isDisposed = false;
+  let activeTerminalRunMeta: IActiveTerminalRunMeta | null = null;
 
-        window.clearTimeout(bufferedTerminalOutputTimerId);
-        bufferedTerminalOutputTimerId = null;
-    };
+  const clearBufferedTerminalOutputTimer = (): void => {
+    if (bufferedTerminalOutputTimerId === null) {
+      return;
+    }
 
-    const clearTerminalRunFallbackTimer = (): void => {
-        if (terminalRunFallbackTimerId === null) {
-            return;
-        }
+    window.clearTimeout(bufferedTerminalOutputTimerId);
+    bufferedTerminalOutputTimerId = null;
+  };
 
-        window.clearTimeout(terminalRunFallbackTimerId);
-        terminalRunFallbackTimerId = null;
-    };
+  const clearTerminalRunFallbackTimer = (): void => {
+    if (terminalRunFallbackTimerId === null) {
+      return;
+    }
 
-    const flushBufferedTerminalOutput = (): void => {
-        clearBufferedTerminalOutputTimer();
+    window.clearTimeout(terminalRunFallbackTimerId);
+    terminalRunFallbackTimerId = null;
+  };
 
-        if (!bufferedTerminalOutput) {
-            return;
-        }
+  const flushBufferedTerminalOutput = (): void => {
+    clearBufferedTerminalOutputTimer();
 
-        if (isDisposed) {
-            bufferedTerminalOutput = '';
-            return;
-        }
+    if (!bufferedTerminalOutput) {
+      return;
+    }
 
-        editorStore.appendTerminalOutput(bufferedTerminalOutput);
-        bufferedTerminalOutput = '';
-    };
+    if (isDisposed) {
+      bufferedTerminalOutput = '';
+      return;
+    }
 
-    const resetBufferedTerminalOutput = (): void => {
-        clearBufferedTerminalOutputTimer();
-        bufferedTerminalOutput = '';
-    };
+    editorStore.appendTerminalOutput(bufferedTerminalOutput);
+    bufferedTerminalOutput = '';
+  };
 
-    const scheduleTerminalRunCompletionTimeout = (runId: string): void => {
-        clearTerminalRunFallbackTimer();
-        terminalRunFallbackTimerId = window.setTimeout(() => {
-            terminalRunFallbackTimerId = null;
+  const resetBufferedTerminalOutput = (): void => {
+    clearBufferedTerminalOutputTimer();
+    bufferedTerminalOutput = '';
+  };
 
-            if (isDisposed || editorStore.pendingTerminalRunId !== runId) {
-                return;
-            }
+  const clearActiveTerminalRunState = (): void => {
+    editorStore.setPendingTerminalRunId(null);
+    editorStore.setActiveRunSummary(null);
+    editorStore.isRunning = false;
+    activeTerminalRunMeta = null;
+  };
 
-            resetBufferedTerminalOutput();
-            editorStore.isRunning = false;
-            editorStore.setPendingTerminalRunId(null);
-            editorStore.setActiveRunSummary(null);
-            activeTerminalRunMeta = null;
+  const appendRunLifecycleLog = (
+    level: 'info' | 'success' | 'error',
+    title: string,
+    detail: string,
+    runId: string | null,
+    code: string,
+  ): void => {
+    editorStore.appendLog(level, title, detail, {
+      scope: 'run',
+      runId,
+      code,
+    });
+  };
 
-            const message = '终端运行超时，已停止等待完成事件，请检查终端状态。';
-            editorStore.appendLog('error', '终端运行超时', message);
-            useMessage().error(message);
-        }, TERMINAL_RUN_COMPLETION_TIMEOUT_MS);
-    };
+  const isCurrentTerminalRun = (runId: string): boolean =>
+    editorStore.pendingTerminalRunId === runId || activeTerminalRunMeta?.runId === runId;
 
-    const ensureIntegratedTerminalSession = async (): Promise<void> => {
-        await tauriService.ensureTerminalSession({
-            sessionId: DEFAULT_TERMINAL_SESSION_ID,
-            cwd: null,
-            cols: DEFAULT_TERMINAL_COLS,
-            rows: DEFAULT_TERMINAL_ROWS,
-        });
-    };
+  const failTerminalRun = (
+    title: string,
+    errorOrMessage: unknown,
+    fallbackMessage: string,
+    logCode: string,
+    options: {
+      writeMessageToTerminalOutput?: boolean;
+    } = {},
+  ): void => {
+    const message =
+      typeof errorOrMessage === 'string'
+        ? errorOrMessage
+        : toErrorMessage(errorOrMessage, fallbackMessage);
+    const failedRunId = activeTerminalRunMeta?.runId ?? editorStore.pendingTerminalRunId;
 
-    const shouldReconnectIntegratedTerminal = (error: unknown): boolean => {
-        const message = toErrorMessage(error, '');
-        return message.includes('目标终端会话不存在');
-    };
+    resetBufferedTerminalOutput();
+    clearTerminalRunFallbackTimer();
+    clearActiveTerminalRunState();
 
-    const dispatchScriptToIntegratedTerminal = async (
-        document: IEditorDocument,
-        runId: string,
-    ) => {
-        try {
-            return await tauriService.dispatchScriptToTerminal({
-                sessionId: DEFAULT_TERMINAL_SESSION_ID,
-                path: document.path,
-                content: document.content,
-                isDirty: document.isDirty,
-                runId,
-            });
-        } catch (error) {
-            if (!shouldReconnectIntegratedTerminal(error)) {
-                throw error;
-            }
+    if (options.writeMessageToTerminalOutput) {
+      editorStore.setTerminalOutput(message);
+    }
 
-            await ensureIntegratedTerminalSession();
-            return tauriService.dispatchScriptToTerminal({
-                sessionId: DEFAULT_TERMINAL_SESSION_ID,
-                path: document.path,
-                content: document.content,
-                isDirty: document.isDirty,
-                runId,
-            });
-        }
-    };
+    appendRunLifecycleLog('error', title, message, failedRunId, logCode);
+    notifier.error(message);
+  };
 
-    const runScriptInIntegratedTerminal = async (document: IEditorDocument): Promise<void> => {
-        if (!isTextDocument(document)) {
-            throw new Error('当前文档不是可执行脚本文本。');
-        }
+  const scheduleTerminalRunCompletionTimeout = (runId: string): void => {
+    clearTerminalRunFallbackTimer();
+    terminalRunFallbackTimerId = window.setTimeout(() => {
+      terminalRunFallbackTimerId = null;
 
-        const runId = `terminal-run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const startedAt = new Date().toISOString();
-        const initialUsedTempFile = document.isDirty || !document.path;
+      if (isDisposed || !isCurrentTerminalRun(runId)) {
+        return;
+      }
 
-        editorStore.setPendingTerminalRunId(runId);
-        editorStore.setActiveRunSummary({
-            runId,
-            documentName: document.name,
-            documentPath: document.path,
-            commandLine: '正在发送到集成终端…',
-            executor: DEFAULT_EXECUTOR,
-            executorLabel: getExecutorLabel(DEFAULT_EXECUTOR),
-            startedAt,
-            usedTempFile: initialUsedTempFile,
-        });
-        resetBufferedTerminalOutput();
-        editorStore.lastRunResult = null;
-        editorStore.setTerminalOutput('');
-        activeTerminalRunMeta = {
-            runId,
-            startedAt,
-            commandLine: 'bash',
-            usedTempFile: initialUsedTempFile,
-        };
-        scheduleTerminalRunCompletionTimeout(runId);
+      failTerminalRun(
+        TERMINAL_RUN_LOG_TITLES.timeout,
+        '终端运行超时，已停止等待完成事件，请检查终端状态。',
+        TERMINAL_RUN_LOG_TITLES.timeout,
+        TERMINAL_RUN_LOG_CODES.timeout,
+      );
+    }, TERMINAL_RUN_COMPLETION_TIMEOUT_MS);
+  };
 
-        try {
-            const dispatchResult = await dispatchScriptToIntegratedTerminal(document, runId);
-            if (isDisposed) {
-                return;
-            }
+  const ensureIntegratedTerminalSession = async (): Promise<void> => {
+    await tauriService.ensureTerminalSession({
+      sessionId: DEFAULT_TERMINAL_SESSION_ID,
+      cwd: null,
+      cols: DEFAULT_TERMINAL_COLS,
+      rows: DEFAULT_TERMINAL_ROWS,
+    });
+  };
 
-            const currentPendingRunId = editorStore.pendingTerminalRunId;
-            if (currentPendingRunId !== runId) {
-                return;
-            }
+  const shouldReconnectIntegratedTerminal = (error: unknown): boolean => {
+    const message = toErrorMessage(error, '');
+    return message.includes('目标终端会话不存在');
+  };
 
-            activeTerminalRunMeta = {
-                runId,
-                startedAt: dispatchResult.startedAt,
-                commandLine: dispatchResult.commandLine,
-                usedTempFile: dispatchResult.usedTempFile,
-            };
-            editorStore.setActiveRunSummary({
-                runId,
-                documentName: document.name,
-                documentPath: document.path,
-                commandLine: dispatchResult.commandLine,
-                executor: DEFAULT_EXECUTOR,
-                executorLabel: getExecutorLabel(DEFAULT_EXECUTOR),
-                startedAt: dispatchResult.startedAt,
-                usedTempFile: dispatchResult.usedTempFile,
-            });
-            editorStore.appendLog('success', '已发送到集成终端', dispatchResult.commandLine);
+  const dispatchScriptToIntegratedTerminal = async (document: IEditorDocument, runId: string) => {
+    try {
+      return await tauriService.dispatchScriptToTerminal({
+        sessionId: DEFAULT_TERMINAL_SESSION_ID,
+        path: document.path,
+        content: document.content,
+        isDirty: document.isDirty,
+        runId,
+      });
+    } catch (error) {
+      if (!shouldReconnectIntegratedTerminal(error)) {
+        throw error;
+      }
 
-            if (dispatchResult.usedTempFile) {
-                editorStore.appendLog(
-                    'info',
-                    '临时脚本文件',
-                    '当前内容已写入临时 shell 脚本文件后执行。',
-                );
-            }
+      await ensureIntegratedTerminalSession();
+      return tauriService.dispatchScriptToTerminal({
+        sessionId: DEFAULT_TERMINAL_SESSION_ID,
+        path: document.path,
+        content: document.content,
+        isDirty: document.isDirty,
+        runId,
+      });
+    }
+  };
 
-            useMessage().success('脚本已发送到集成终端。');
-        } catch (error) {
-            if (isDisposed) {
-                return;
-            }
+  const primeTerminalRun = (document: IEditorDocument): string => {
+    const runId = createTerminalRunId();
+    const startedAt = new Date().toISOString();
+    const usedTempFile = document.isDirty || !document.path;
 
-            const currentPendingRunId = editorStore.pendingTerminalRunId;
-            const currentActiveRunId = activeTerminalRunMeta?.runId;
-            if (currentPendingRunId !== runId && currentActiveRunId !== runId) {
-                return;
-            }
+    editorStore.setPendingTerminalRunId(runId);
+    editorStore.setActiveRunSummary(
+      buildPendingTerminalRunSummary(document, runId, startedAt, DEFAULT_EXECUTOR, usedTempFile),
+    );
+    resetBufferedTerminalOutput();
+    editorStore.lastRunResult = null;
+    editorStore.setTerminalOutput('');
+    activeTerminalRunMeta = createActiveTerminalRunMeta(runId, startedAt, 'bash', usedTempFile);
+    appendRunLifecycleLog(
+      'info',
+      TERMINAL_RUN_LOG_TITLES.start,
+      `当前脚本将使用 ${getExecutorLabel(DEFAULT_EXECUTOR)} 执行。`,
+      runId,
+      TERMINAL_RUN_LOG_CODES.start,
+    );
+    scheduleTerminalRunCompletionTimeout(runId);
 
-            resetBufferedTerminalOutput();
-            clearTerminalRunFallbackTimer();
-            editorStore.setPendingTerminalRunId(null);
-            editorStore.setActiveRunSummary(null);
-            activeTerminalRunMeta = null;
-            editorStore.isRunning = false;
+    return runId;
+  };
 
-            const message = toErrorMessage(error, '脚本执行失败');
-            editorStore.appendLog('error', '脚本执行失败', message);
-            editorStore.setTerminalOutput(message);
-            useMessage().error(message);
-        }
-    };
+  const runScriptInIntegratedTerminal = async (document: IEditorDocument): Promise<void> => {
+    if (!isTextDocument(document)) {
+      throw new Error('当前文档不是可执行脚本文本。');
+    }
 
-    const handleIntegratedTerminalRunComplete = (payload: ITerminalRunCompletePayload): void => {
-        if (isDisposed) {
-            return;
-        }
+    const runId = primeTerminalRun(document);
 
-        const pendingRunId = editorStore.pendingTerminalRunId;
-        if (payload.runId !== pendingRunId && payload.runId !== activeTerminalRunMeta?.runId) {
-            return;
-        }
+    try {
+      const dispatchResult = await dispatchScriptToIntegratedTerminal(document, runId);
+      if (isDisposed || !isCurrentTerminalRun(runId)) {
+        return;
+      }
 
-        const activeRun = activeTerminalRunMeta;
-        const activeRunSummary = editorStore.activeRunSummary;
+      activeTerminalRunMeta = createActiveTerminalRunMeta(
+        runId,
+        dispatchResult.startedAt,
+        dispatchResult.commandLine,
+        dispatchResult.usedTempFile,
+      );
+      editorStore.setActiveRunSummary(
+        buildDispatchedTerminalRunSummary(document, activeTerminalRunMeta, DEFAULT_EXECUTOR),
+      );
+      appendRunLifecycleLog(
+        'success',
+        TERMINAL_RUN_LOG_TITLES.dispatched,
+        dispatchResult.commandLine,
+        runId,
+        TERMINAL_RUN_LOG_CODES.dispatched,
+      );
 
-        editorStore.setPendingTerminalRunId(null);
-        clearTerminalRunFallbackTimer();
-        flushBufferedTerminalOutput();
-
-        const safeOutput = editorStore.getTerminalOutputSnapshot();
-
-        const durationMs = activeRun
-            ? Math.max(
-                0,
-                new Date(payload.finishedAt).getTime() - new Date(activeRun.startedAt).getTime(),
-            )
-            : 0;
-
-        const runResult: IRunResult = {
-            success: payload.exitCode === 0,
-            stdout: safeOutput,
-            stderr: payload.exitCode === 0 ? '' : safeOutput,
-            combinedOutput: safeOutput,
-            exitCode: payload.exitCode,
-            executor: 'wsl',
-            executorLabel: getExecutorLabel('wsl'),
-            durationMs,
-            startedAt: activeRun?.startedAt ?? payload.finishedAt,
-            finishedAt: payload.finishedAt,
-            commandLine: activeRun?.commandLine ?? 'bash',
-            logPath: null,
-            usedTempFile: activeRun?.usedTempFile ?? false,
-        };
-
-        editorStore.lastRunResult = runResult;
-        editorStore.appendRunHistory({
-            status: resolveRunHistoryStatus(runResult.exitCode),
-            documentName: activeRunSummary?.documentName ?? editorStore.document.name,
-            documentPath: activeRunSummary?.documentPath ?? editorStore.document.path,
-            commandLine: runResult.commandLine,
-            executor: runResult.executor,
-            executorLabel: runResult.executorLabel,
-            startedAt: runResult.startedAt,
-            finishedAt: runResult.finishedAt,
-            durationMs: runResult.durationMs,
-            exitCode: runResult.exitCode,
-            usedTempFile: runResult.usedTempFile,
-        });
-        editorStore.isRunning = false;
-        editorStore.setActiveRunSummary(null);
-        activeTerminalRunMeta = null;
-
-        editorStore.appendLog(
-            runResult.success ? 'success' : 'error',
-            runResult.success ? '执行完成' : '执行失败',
-            `执行器：${runResult.executorLabel}，退出码：${runResult.exitCode ?? '未知'}，耗时：${runResult.durationMs}ms。`,
+      if (dispatchResult.usedTempFile) {
+        appendRunLifecycleLog(
+          'info',
+          TERMINAL_RUN_LOG_TITLES.tempFile,
+          '当前内容已写入临时 shell 脚本文件后执行。',
+          runId,
+          TERMINAL_RUN_LOG_CODES.tempFile,
         );
+      }
 
-        if (runResult.success) {
-            useMessage().success('脚本执行完成。');
-        } else {
-            useMessage().error('脚本执行失败，请检查终端输出。');
-        }
-    };
+      notifier.success('脚本已发送到集成终端。');
+    } catch (error) {
+      if (isDisposed || !isCurrentTerminalRun(runId)) {
+        return;
+      }
 
-    const runScript = async (): Promise<void> => {
-        if (!canRun.value) {
-            useMessage().warning(
-                isTextDocument(editorStore.document)
-                    ? '请先提供可执行脚本内容，并确认当前系统存在可用的 WSL2 运行环境。'
-                    : '当前打开的是图片预览，无法直接执行。',
-            );
-            return;
-        }
+      failTerminalRun(
+        '脚本执行失败',
+        error,
+        '脚本执行失败',
+        TERMINAL_RUN_LOG_CODES.failed,
+        {
+        writeMessageToTerminalOutput: true,
+        },
+      );
+    }
+  };
 
-        const currentDocument = editorStore.document;
-        if (!editorStore.environment.hasAny) {
-            useMessage().error('当前系统不可用：WSL2。');
-            return;
-        }
+  const handleIntegratedTerminalRunComplete = (payload: ITerminalRunCompletePayload): void => {
+    if (isDisposed || !isCurrentTerminalRun(payload.runId)) {
+      return;
+    }
 
-        editorStore.isRunning = true;
-        editorStore.appendLog(
-            'info',
-            '开始执行',
-            `当前脚本将使用 ${getExecutorLabel(DEFAULT_EXECUTOR)} 执行。`,
-        );
+    const activeRunSummary = editorStore.activeRunSummary;
 
-        try {
-            await runScriptInIntegratedTerminal(currentDocument);
-        } catch (error) {
-            const message = toErrorMessage(error, '脚本执行失败');
-            resetBufferedTerminalOutput();
-            clearTerminalRunFallbackTimer();
-            editorStore.setPendingTerminalRunId(null);
-            editorStore.setActiveRunSummary(null);
-            activeTerminalRunMeta = null;
-            editorStore.isRunning = false;
-            editorStore.appendLog('error', '脚本执行失败', message);
-            editorStore.setTerminalOutput(message);
-            useMessage().error(message);
-        }
-    };
+    clearTerminalRunFallbackTimer();
+    flushBufferedTerminalOutput();
 
-    const appendTerminalOutput = (payload: ITerminalRunOutputEvent): void => {
-        if (isDisposed || !payload.data) {
-            return;
-        }
-
-        const pendingRunId = editorStore.pendingTerminalRunId;
-        if (payload.runId !== pendingRunId && payload.runId !== activeTerminalRunMeta?.runId) {
-            return;
-        }
-
-        bufferedTerminalOutput += payload.data;
-        if (bufferedTerminalOutputTimerId !== null) {
-            return;
-        }
-
-        bufferedTerminalOutputTimerId = window.setTimeout(() => {
-            flushBufferedTerminalOutput();
-        }, TERMINAL_OUTPUT_BATCH_INTERVAL_MS);
-    };
-
-    onScopeDispose(() => {
-        isDisposed = true;
-        resetBufferedTerminalOutput();
-        clearTerminalRunFallbackTimer();
-        editorStore.setActiveRunSummary(null);
-        activeTerminalRunMeta = null;
+    const runResult = buildTerminalRunResult({
+      output: editorStore.getTerminalOutputSnapshot(),
+      exitCode: payload.exitCode,
+      finishedAt: payload.finishedAt,
+      executor: DEFAULT_EXECUTOR,
+      activeRunMeta: activeTerminalRunMeta,
+      activeRunSummary,
     });
 
-    return {
-        runScript,
-        appendTerminalOutput,
-        handleIntegratedTerminalRunComplete,
-    };
+    editorStore.lastRunResult = runResult;
+    editorStore.appendRunHistory(
+      buildTerminalRunHistoryEntry(runResult, activeRunSummary, editorStore.document),
+    );
+    clearActiveTerminalRunState();
+
+    appendRunLifecycleLog(
+      runResult.success ? 'success' : 'error',
+      runResult.success ? TERMINAL_RUN_LOG_TITLES.completed : TERMINAL_RUN_LOG_TITLES.failed,
+      buildTerminalRunCompletionDetail(runResult),
+      runResult.runId,
+      runResult.success ? TERMINAL_RUN_LOG_CODES.completed : TERMINAL_RUN_LOG_CODES.failed,
+    );
+
+    if (runResult.success) {
+      notifier.success('脚本执行完成。');
+    } else {
+      notifier.error('脚本执行失败，请检查终端输出。');
+    }
+  };
+
+  const runScript = async (): Promise<void> => {
+    if (!canRun.value) {
+      notifier.warning(
+        isTextDocument(editorStore.document)
+          ? '请先提供可执行脚本内容，并确认当前系统存在可用的 WSL2 运行环境。'
+          : '当前打开的是图片预览，无法直接执行。',
+      );
+      return;
+    }
+
+    if (!editorStore.environment.hasAny) {
+      notifier.error('当前系统不可用：WSL2。');
+      return;
+    }
+
+    editorStore.isRunning = true;
+
+    try {
+      await runScriptInIntegratedTerminal(editorStore.document);
+    } catch (error) {
+      failTerminalRun('脚本执行失败', error, '脚本执行失败', TERMINAL_RUN_LOG_CODES.failed, {
+        writeMessageToTerminalOutput: true,
+      });
+    }
+  };
+
+  const appendTerminalOutput = (payload: ITerminalRunOutputEvent): void => {
+    if (isDisposed || !payload.data || !isCurrentTerminalRun(payload.runId)) {
+      return;
+    }
+
+    bufferedTerminalOutput += payload.data;
+    if (bufferedTerminalOutputTimerId !== null) {
+      return;
+    }
+
+    bufferedTerminalOutputTimerId = window.setTimeout(() => {
+      flushBufferedTerminalOutput();
+    }, TERMINAL_OUTPUT_BATCH_INTERVAL_MS);
+  };
+
+  onScopeDispose(() => {
+    isDisposed = true;
+    resetBufferedTerminalOutput();
+    clearTerminalRunFallbackTimer();
+    clearActiveTerminalRunState();
+  });
+
+  return {
+    runScript,
+    appendTerminalOutput,
+    handleIntegratedTerminalRunComplete,
+  };
 };

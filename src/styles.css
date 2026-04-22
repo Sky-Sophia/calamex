@@ -274,7 +274,7 @@ button:disabled,
 [aria-disabled='true'],
 .is-disabled,
 .is-inert-control {
-  cursor: not-allowed;
+  cursor: default;
 }
 
 ::-webkit-scrollbar {
@@ -1655,7 +1655,7 @@ button:disabled,
   background: rgba(255, 255, 255, 0.04);
   padding: 8px 10px;
   opacity: 0.5;
-  cursor: not-allowed;
+  cursor: default;
 }
 
 .source-control-setup-search-bar svg,
@@ -1769,7 +1769,7 @@ button:disabled,
 }
 
 .source-control-setup-btn:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.46;
 }
 
@@ -2315,7 +2315,7 @@ button:disabled,
 .source-control-btn:disabled,
 .source-control-icon-btn:disabled,
 .source-control-btn-icon:disabled {
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.46;
 }
 
@@ -2895,12 +2895,9 @@ button:disabled,
 
 .embedded-terminal-host {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  max-width: 100%;
-  height: 100%;
+  inset: 14px 18px 18px 18px;
   min-height: 0;
-  padding: 14px 18px 18px 18px;
+  padding: 0;
   box-sizing: border-box;
   overflow: hidden;
   background:
@@ -2940,7 +2937,7 @@ button:disabled,
   display: block;
   width: 100%;
   height: 100%;
-  min-height: 100%;
+  min-height: 0;
   background: var(--terminal-fill, transparent);
 }
 

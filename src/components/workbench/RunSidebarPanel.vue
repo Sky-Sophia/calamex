@@ -44,6 +44,7 @@ const props = defineProps<{
     isDesktopRuntime: boolean;
     canRun: boolean;
     isRunning: boolean;
+    hasRunArtifacts: boolean;
     activeRun: IActiveRunSummary | null;
     runHistory: IRunHistoryEntry[];
     commandTemplates: ICommandTemplate[];
@@ -167,7 +168,7 @@ const quickRows = computed<IQuickRow[]>(() => {
             icon: 'trash',
             action: 'clear-history',
             badge: '重置',
-            disabled: props.runHistory.length === 0 && !props.activeRun,
+            disabled: !props.hasRunArtifacts,
             running: false,
         },
     ];
@@ -864,7 +865,15 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
 
 .run-sidebar-row.is-disabled {
     opacity: 0.46;
-    cursor: not-allowed;
+    cursor: default;
+}
+
+.run-sidebar-row.is-disabled:hover {
+    background: transparent;
+}
+
+.run-sidebar-row.is-disabled:hover .run-sidebar-row-icon {
+    color: var(--text-tertiary);
 }
 
 .run-sidebar-row-icon {

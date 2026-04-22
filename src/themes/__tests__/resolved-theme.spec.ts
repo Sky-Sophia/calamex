@@ -180,8 +180,8 @@ describe('buildTerminalTheme / dark', () => {
         expect(darkTerminalTheme.foreground).toBe(dark.terminal.foreground);
     });
 
-    it('cursor 等于 dark.terminal.cursor', () => {
-        expect(darkTerminalTheme.cursor).toBe(dark.terminal.cursor);
+    it('cursor 不出现在输出中（由 xterm 默认处理）', () => {
+        expect(darkTerminalTheme.cursor).toBeUndefined();
     });
 
     it('black 映射到 dark.terminal.black', () => {
@@ -218,6 +218,13 @@ describe('buildTerminalTheme / light', () => {
 
     it('深色与浅色终端背景应不同', () => {
         expect(lightTerminalTheme.background).not.toBe(darkTerminalTheme.background);
+    });
+
+    it('终端主题不应包含 cursor / cursorAccent（由 xterm 默认处理，不随主题切换）', () => {
+        expect(lightTerminalTheme.cursor).toBeUndefined();
+        expect(lightTerminalTheme.cursorAccent).toBeUndefined();
+        expect(darkTerminalTheme.cursor).toBeUndefined();
+        expect(darkTerminalTheme.cursorAccent).toBeUndefined();
     });
 });
 

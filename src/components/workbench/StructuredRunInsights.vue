@@ -202,6 +202,12 @@ import {
   type IStructuredRunReport,
   type IStructuredRunTimelineItem,
 } from '@/utils/structured-run-report';
+import {
+  isTerminalRunDispatchedLog,
+  isTerminalRunFlowLog,
+  isTerminalRunStartLog,
+  resolveTerminalRunLogKind,
+} from '@/utils/terminal-run';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 const MAX_REPORT_CACHE_ENTRIES = 8;
@@ -282,6 +288,11 @@ const ANSI_ESCAPE_PATTERN =
 const EMERGENCY_PROMPT_ONLY_PATTERN = /^[\w.-]+@[\w.-]+:.*[$#]\s*$/;
 const EMERGENCY_DISPATCH_RUNNER_PATTERN = /\/tmp\/sh-editor-dispatch-[\w.-]+\.sh/i;
 
+const resolveLatestRunMarker = (runLogs: IRunLogEntry[]): IRunLogEntry | undefined =>
+  [...runLogs]
+    .reverse()
+    .find((item) => isTerminalRunFlowLog(item) && (isTerminalRunStartLog(item) || isTerminalRunDispatchedLog(item)));
+
 const buildEmergencyDetailLines = (
   value: string,
   options?: {
@@ -342,17 +353,18 @@ const buildEmergencyReport = (reason?: string): IStructuredRunReport => {
   }
 
   for (const item of sortedRunLogs) {
+    const runLogKind = resolveTerminalRunLogKind(item);
     const status = item.level === 'error'
       ? 'error'
-      : /执行失败|终端运行超时|终端执行状态异常|脚本执行失败/i.test(item.title)
+      : runLogKind === 'failed' || runLogKind === 'timeout'
         ? 'error'
-        : props.isRunning && item.title === '开始执行'
+        : props.isRunning && runLogKind === 'start'
           ? 'running'
           : 'done';
     timeline.push({
       id: `fallback-log-${item.id}`,
-      tag: status === 'error' ? 'error' : item.title === '已发送到集成终端' ? 'exec' : 'info',
-      accent: status === 'error' ? 'red' : item.title === '已发送到集成终端' ? 'teal' : 'blue',
+      tag: status === 'error' ? 'error' : isTerminalRunDispatchedLog(item) ? 'exec' : 'info',
+      accent: status === 'error' ? 'red' : isTerminalRunDispatchedLog(item) ? 'teal' : 'blue',
       title: item.title,
       description: item.detail,
       status,
@@ -465,9 +477,7 @@ const buildEmergencyReport = (reason?: string): IStructuredRunReport => {
 
 const buildReportDebugSample = (): Record<string, unknown> => {
   const terminalOutput = props.resolveTerminalOutput();
-  const latestRunMarker = [...props.runLogs]
-    .reverse()
-    .find((item) => item.title === '开始执行' || item.title === '已发送到集成终端');
+  const latestRunMarker = resolveLatestRunMarker(props.runLogs);
 
   return {
     documentPath: props.documentPath,
@@ -489,9 +499,7 @@ const buildReportDebugSample = (): Record<string, unknown> => {
 };
 
 const resolveFallbackDiagnosticSignature = (reason: string): string => {
-  const latestRunMarker = [...props.runLogs]
-    .reverse()
-    .find((item) => item.title === '开始执行' || item.title === '已发送到集成终端');
+  const latestRunMarker = resolveLatestRunMarker(props.runLogs);
 
   return [
     currentReportKey.value,
@@ -692,7 +700,7 @@ const commandPreview = computed(() => {
 
   const dispatchLog = [...props.runLogs]
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-    .find((item) => item.title === '已发送到集成终端');
+    .find(isTerminalRunDispatchedLog);
 
   if (dispatchLog?.detail) {
     return dispatchLog.detail;
@@ -1563,7 +1571,7 @@ onBeforeUnmount(() => {
 }
 
 .terminal-log-command-input:disabled {
-  cursor: not-allowed;
+  cursor: default;
 }
 
 @media (max-width: 880px) {

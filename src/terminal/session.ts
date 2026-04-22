@@ -319,6 +319,11 @@ export class TerminalSession {
         // 捕获当前版本号；若异步期间 detach 使版本递增，则丢弃本次注册（Fix-2）
         const version = this._listenerVersion;
         this._eventListenerRegistration = (async () => {
+            const runtimeReady = await waitForDesktopRuntime();
+            if (!runtimeReady) {
+                return;
+            }
+
             const [dl, rl, cl, el] = await Promise.all([
                 listen<ITerminalDataEvent>('terminal:data', (e) => this._handleDataEvent(e)),
                 listen<ITerminalRunOutputEvent>('terminal:run-output', (e) =>
@@ -682,10 +687,27 @@ export class TerminalSession {
         )
             return;
         try {
+            const prevCols = terminal.cols;
+            const prevRows = terminal.rows;
             fitAddon.fit();
+            if (terminal.cols === prevCols && terminal.rows === prevRows) {
+                return;
+            }
+            if (!this._didTerminalSizeChange(terminal.cols, terminal.rows)) {
+                return;
+            }
+            this._scheduleViewportSync({ scrollToBottom: true });
+            this._syncPtySize(terminal.cols, terminal.rows);
         } catch (error) {
             console.warn('终端尺寸同步失败', error);
         }
+    }
+
+    private _syncPtySize(cols: number, rows: number): void {
+        if (!this.session.value) return;
+        void this._tauri.resizeTerminalSession({ sessionId: this.id, cols, rows }).catch((error) => {
+            console.warn('终端 PTY 尺寸同步失败', { sessionId: this.id, cols, rows, error });
+        });
     }
 
     private _scheduleViewportSync(options?: {
@@ -1190,8 +1212,7 @@ export class TerminalSession {
             terminal.onResize(({ cols, rows }) => {
                 if (!this._didTerminalSizeChange(cols, rows)) return;
                 this._scheduleViewportSync({ scrollToBottom: true });
-                if (!this.session.value) return;
-                void this._tauri.resizeTerminalSession({ sessionId: this.id, cols, rows }).catch(() => { });
+                this._syncPtySize(cols, rows);
             });
             terminal.onSelectionChange(() => {
                 void this._writeSelectionToClipboard();
@@ -1207,7 +1228,7 @@ export class TerminalSession {
             copyOnSelect: false,
             trimFinalNewlineOnCopy: true,
             cursorBlink: true,
-            cursorStyle: 'block',
+            cursorStyle: 'bar',
             fontFamily: '',
             fontSize: 14,
             lineHeight: 1.2,

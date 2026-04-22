@@ -2,7 +2,13 @@ import { useMessage } from '@/composables/useMessage';
 import { tauriService } from '@/services/tauri';
 import type { useAppStore } from '@/store/app';
 import type { useEditorStore } from '@/store/editor';
-import type { IEditorDocument } from '@/types/editor';
+import type { IEditorDocument, IScriptFilePayload, TDocumentEncoding } from '@/types/editor';
+import {
+  buildCurrentDocumentFormatFeedback,
+  buildDocumentSaveFeedback,
+  buildWorkspaceDocumentFormatFeedback,
+  type IEditorOperationFeedback,
+} from '@/utils/document-persistence';
 import { toErrorMessage } from '@/utils/error';
 
 type TAppStore = ReturnType<typeof useAppStore>;
@@ -14,10 +20,19 @@ type TUseDocumentPersistenceOptions = {
   refreshGitRepositoryStatus: (workspaceRootPath?: string | null) => Promise<void>;
 };
 
-const formatShellScriptWithWasm = async (
-  source: string,
-  path?: string | null,
-): Promise<string> => {
+type TTextSourceDocument = Pick<IScriptFilePayload, 'path' | 'name' | 'content' | 'encoding'>;
+
+interface IPersistTextDocumentOptions {
+  path: string;
+  content: string;
+  encoding: TDocumentEncoding;
+  onSaved?: (payload: IScriptFilePayload) => void;
+  resolveSuccessFeedback: (payload: IScriptFilePayload) => IEditorOperationFeedback;
+  failureTitle: string;
+  fallbackFailureMessage: string;
+}
+
+const formatShellScriptWithWasm = async (source: string, path?: string | null): Promise<string> => {
   const { formatShellScript } = await import('@/utils/shfmt');
   return formatShellScript(source, path);
 };
@@ -35,8 +50,11 @@ export const useDocumentPersistence = ({
   editorStore,
   refreshGitRepositoryStatus,
 }: TUseDocumentPersistenceOptions) => {
+  const notifier = useMessage();
+
   const buildDefaultScriptContent = (): string => {
-    const normalizedShebang = appStore.settings.editor.defaultShebang.trim() || '#!/usr/bin/env bash';
+    const normalizedShebang =
+      appStore.settings.editor.defaultShebang.trim() || '#!/usr/bin/env bash';
     const strictModeBlock = appStore.settings.editor.strictModeByDefault
       ? 'set -euo pipefail\n\n'
       : '';
@@ -60,6 +78,28 @@ export const useDocumentPersistence = ({
     return nextContent;
   };
 
+  const warnAndReturnFalse = (message: string): false => {
+    notifier.warning(message);
+    return false;
+  };
+
+  const reportPersistenceError = (
+    title: string,
+    fallbackMessage: string,
+    error: unknown,
+  ): false => {
+    const message = toErrorMessage(error, fallbackMessage);
+    editorStore.appendLog('error', title, message);
+    notifier.error(message);
+    return false;
+  };
+
+  const notifyOperationSuccess = (feedback: IEditorOperationFeedback): true => {
+    editorStore.appendLog('success', feedback.logTitle, feedback.logDetail);
+    notifier.success(feedback.toastMessage);
+    return true;
+  };
+
   const applySaveConventionsToDocument = (documentId: string): IEditorDocument | null => {
     const targetDocument = editorStore.getDocumentById(documentId);
     if (!targetDocument || !isTextDocument(targetDocument)) {
@@ -74,6 +114,48 @@ export const useDocumentPersistence = ({
     return editorStore.getDocumentById(documentId);
   };
 
+  const loadTextSourceDocument = async (path: string): Promise<TTextSourceDocument> => {
+    const existingDocument = editorStore.findDocumentByPath(path);
+    if (existingDocument) {
+      if (!isTextDocument(existingDocument)) {
+        throw new Error('当前目标不是可由 shfmt 处理的脚本文本。');
+      }
+
+      return {
+        path: existingDocument.path,
+        name: existingDocument.name,
+        content: existingDocument.content,
+        encoding: existingDocument.encoding,
+      };
+    }
+
+    return tauriService.loadScript(path);
+  };
+
+  const persistTextDocument = async ({
+    path,
+    content,
+    encoding,
+    onSaved,
+    resolveSuccessFeedback,
+    failureTitle,
+    fallbackFailureMessage,
+  }: IPersistTextDocumentOptions): Promise<boolean> => {
+    try {
+      const payload = await tauriService.saveScript({
+        path,
+        content,
+        encoding,
+      });
+
+      onSaved?.(payload);
+      void refreshGitRepositoryStatus();
+      return notifyOperationSuccess(resolveSuccessFeedback(payload));
+    } catch (error) {
+      return reportPersistenceError(failureTitle, fallbackFailureMessage, error);
+    }
+  };
+
   const formatDocumentWithShfmt = async (
     documentId = editorStore.document.id,
     options?: {
@@ -82,13 +164,11 @@ export const useDocumentPersistence = ({
   ): Promise<boolean> => {
     const targetDocument = editorStore.getDocumentById(documentId);
     if (!targetDocument) {
-      useMessage().warning('当前没有可格式化的脚本文件。');
-      return false;
+      return warnAndReturnFalse('当前没有可格式化的脚本文件。');
     }
 
     if (!isTextDocument(targetDocument)) {
-      useMessage().warning('当前图片预览不支持 shfmt 格式化。');
-      return false;
+      return warnAndReturnFalse('当前图片预览不支持 shfmt 格式化。');
     }
 
     try {
@@ -101,24 +181,12 @@ export const useDocumentPersistence = ({
       editorStore.updateDocumentContent(documentId, formattedContent);
 
       if (!options?.suppressSuccessMessage) {
-        editorStore.appendLog(
-          'success',
-          'shfmt 格式化',
-          hasChanges
-            ? `已格式化当前文件：${targetDocument.name}。`
-            : `当前文件已符合 shfmt 格式：${targetDocument.name}。`,
-        );
-        useMessage().success(
-          hasChanges ? '已通过 shfmt 格式化当前文件' : '当前文件已符合 shfmt 格式',
-        );
+        notifyOperationSuccess(buildCurrentDocumentFormatFeedback(targetDocument.name, hasChanges));
       }
 
       return true;
     } catch (error) {
-      const message = toErrorMessage(error, 'shfmt 格式化失败');
-      editorStore.appendLog('error', 'shfmt 格式化失败', message);
-      useMessage().error(message);
-      return false;
+      return reportPersistenceError('shfmt 格式化失败', 'shfmt 格式化失败', error);
     }
   };
 
@@ -144,55 +212,38 @@ export const useDocumentPersistence = ({
 
   const formatWorkspaceFileByPath = async (path: string): Promise<boolean> => {
     try {
-      const existingDocument = editorStore.findDocumentByPath(path);
-      if (existingDocument && !isTextDocument(existingDocument)) {
-        useMessage().warning('当前目标不是可由 shfmt 处理的脚本文件。');
-        return false;
-      }
-
-      const sourceDocument =
-        existingDocument && isTextDocument(existingDocument)
-          ? {
-            path: existingDocument.path,
-            name: existingDocument.name,
-            content: existingDocument.content,
-            encoding: existingDocument.encoding,
-          }
-          : await tauriService.loadScript(path);
-
+      const sourceDocument = await loadTextSourceDocument(path);
       const formattedContent = await formatShellScriptWithWasm(
         sourceDocument.content,
         sourceDocument.path ?? sourceDocument.name,
       );
-      const savedPayload = await tauriService.saveScript({
+      const hasChanges = formattedContent !== sourceDocument.content;
+
+      return persistTextDocument({
         path,
         content: formattedContent,
         encoding: sourceDocument.encoding,
+        onSaved: (payload) => {
+          const existingDocument = editorStore.findDocumentByPath(path);
+          if (existingDocument && isTextDocument(existingDocument)) {
+            editorStore.applyDocumentPayload(existingDocument.id, payload);
+          }
+        },
+        resolveSuccessFeedback: (payload) =>
+          buildWorkspaceDocumentFormatFeedback(payload.name, payload.path, hasChanges),
+        failureTitle: '工作区文件 shfmt 格式化失败',
+        fallbackFailureMessage: '工作区文件 shfmt 格式化失败',
       });
-      const hasChanges = formattedContent !== sourceDocument.content;
-
-      if (existingDocument && isTextDocument(existingDocument)) {
-        editorStore.applyDocumentPayload(existingDocument.id, savedPayload);
+    } catch (error) {
+      if (error instanceof Error && error.message === '当前目标不是可由 shfmt 处理的脚本文本。') {
+        return warnAndReturnFalse(error.message);
       }
 
-      void refreshGitRepositoryStatus();
-
-      editorStore.appendLog(
-        'success',
-        'shfmt 格式化',
-        `${hasChanges ? '已格式化文件' : '已检查文件'}：${savedPayload.path}`,
+      return reportPersistenceError(
+        '工作区文件 shfmt 格式化失败',
+        '工作区文件 shfmt 格式化失败',
+        error,
       );
-      useMessage().success(
-        hasChanges
-          ? `已通过 shfmt 格式化 ${savedPayload.name}`
-          : `${savedPayload.name} 已符合 shfmt 格式`,
-      );
-      return true;
-    } catch (error) {
-      const message = toErrorMessage(error, '工作区文件 shfmt 格式化失败');
-      editorStore.appendLog('error', '工作区文件 shfmt 格式化失败', message);
-      useMessage().error(message);
-      return false;
     }
   };
 
@@ -203,35 +254,31 @@ export const useDocumentPersistence = ({
     }
 
     if (!isTextDocument(targetDocument)) {
-      useMessage().warning('当前图片预览为只读模式，暂不支持另存为。');
-      return false;
+      return warnAndReturnFalse('当前图片预览为只读模式，暂不支持另存为。');
     }
 
+    let targetPath: string | null;
     try {
-      const targetPath = await tauriService.pickSavePath(
-        targetDocument.path ?? targetDocument.name,
-      );
-      if (!targetPath) {
-        return false;
-      }
-
-      const payload = await tauriService.saveScript({
-        path: targetPath,
-        content: targetDocument.content,
-        encoding: targetDocument.encoding,
-      });
-
-      editorStore.applyDocumentPayload(documentId, payload);
-      void refreshGitRepositoryStatus();
-      editorStore.appendLog('success', '另存为成功', `保存路径：${payload.path}`);
-      useMessage().success('脚本已另存为');
-      return true;
+      targetPath = await tauriService.pickSavePath(targetDocument.path ?? targetDocument.name);
     } catch (error) {
-      const message = toErrorMessage(error, '另存为失败');
-      editorStore.appendLog('error', '另存为失败', message);
-      useMessage().error(message);
+      return reportPersistenceError('另存为失败', '另存为失败', error);
+    }
+
+    if (!targetPath) {
       return false;
     }
+
+    return persistTextDocument({
+      path: targetPath,
+      content: targetDocument.content,
+      encoding: targetDocument.encoding,
+      onSaved: (payload) => {
+        editorStore.applyDocumentPayload(documentId, payload);
+      },
+      resolveSuccessFeedback: (payload) => buildDocumentSaveFeedback('save-as', payload.path),
+      failureTitle: '另存为失败',
+      fallbackFailureMessage: '另存为失败',
+    });
   };
 
   const saveDocument = async (documentId = editorStore.document.id): Promise<boolean> => {
@@ -241,32 +288,24 @@ export const useDocumentPersistence = ({
     }
 
     if (!isTextDocument(targetDocument)) {
-      useMessage().warning('当前图片预览为只读模式，无需保存。');
-      return false;
+      return warnAndReturnFalse('当前图片预览为只读模式，无需保存。');
     }
 
     if (!targetDocument.path) {
       return saveDocumentAs(documentId);
     }
 
-    try {
-      const payload = await tauriService.saveScript({
-        path: targetDocument.path,
-        content: targetDocument.content,
-        encoding: targetDocument.encoding,
-      });
-
-      editorStore.applyDocumentPayload(documentId, payload);
-      void refreshGitRepositoryStatus();
-      editorStore.appendLog('success', '保存成功', `保存路径：${payload.path}`);
-      useMessage().success('脚本已保存');
-      return true;
-    } catch (error) {
-      const message = toErrorMessage(error, '保存失败');
-      editorStore.appendLog('error', '保存失败', message);
-      useMessage().error(message);
-      return false;
-    }
+    return persistTextDocument({
+      path: targetDocument.path,
+      content: targetDocument.content,
+      encoding: targetDocument.encoding,
+      onSaved: (payload) => {
+        editorStore.applyDocumentPayload(documentId, payload);
+      },
+      resolveSuccessFeedback: (payload) => buildDocumentSaveFeedback('save', payload.path),
+      failureTitle: '保存失败',
+      fallbackFailureMessage: '保存失败',
+    });
   };
 
   const saveDirtyDocuments = async (documentIds: string[]): Promise<boolean> => {

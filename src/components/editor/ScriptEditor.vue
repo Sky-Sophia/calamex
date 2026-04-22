@@ -9,6 +9,7 @@ import type { TThemeMode } from '@/types/app';
 import type { IAnalyzeScriptPayload, TScriptDiagnosticSeverity } from '@/types/editor';
 import type { IGitFileBaselinePayload } from '@/types/git';
 import type { IEditorSettings } from '@/types/settings';
+import { useEditorStore } from '@/store/editor';
 import { computeGitLineChanges } from '@/utils/git-diff';
 import { applyMonacoTheme, monaco } from '@/utils/monaco';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -19,6 +20,8 @@ interface IEditorExpose {
   revealPosition: (line: number, column: number) => void;
 }
 
+const VIEW_STATE_SAVE_DEBOUNCE_MS = 500;
+
 const createEmptyAnalysis = (): IAnalyzeScriptPayload => ({
   available: true,
   message: null,
@@ -28,6 +31,7 @@ const createEmptyAnalysis = (): IAnalyzeScriptPayload => ({
 
 const props = withDefaults(
   defineProps<{
+    documentPath?: string | null;
     modelValue?: string;
     theme?: TThemeMode;
     analysis?: IAnalyzeScriptPayload;
@@ -35,6 +39,7 @@ const props = withDefaults(
     editorSettings: IEditorSettings;
   }>(),
   {
+    documentPath: null,
     modelValue: '',
     theme: 'dark',
     analysis: undefined,
@@ -50,6 +55,7 @@ const emit = defineEmits<{
 
 const containerRef = ref<HTMLElement | null>(null);
 const analysisState = computed(() => props.analysis ?? createEmptyAnalysis());
+const editorStore = useEditorStore();
 
 const DEFAULT_EDITOR_FONT_FAMILY =
   "Berkeley Mono, JetBrains Mono, Consolas, 'Courier New', monospace";
@@ -130,6 +136,49 @@ let shellCompletionRegistrationTimerId: number | null = null;
 let shellCompletionRegistrationPromise: Promise<void> | null = null;
 let previousContainerSize = { width: 0, height: 0 };
 let gitDecorationIds: string[] = [];
+let viewStateSaveTimerId: number | null = null;
+
+const clearViewStateSaveTimer = (): void => {
+  if (viewStateSaveTimerId !== null) {
+    window.clearTimeout(viewStateSaveTimerId);
+    viewStateSaveTimerId = null;
+  }
+};
+
+const persistViewState = (path: string | null | undefined): void => {
+  if (!editorInstance || !path) {
+    return;
+  }
+
+  const nextState = editorInstance.saveViewState();
+  if (!nextState) {
+    return;
+  }
+
+  editorStore.saveEditorViewState(path, nextState as unknown as Record<string, unknown>);
+};
+
+const scheduleViewStatePersist = (): void => {
+  clearViewStateSaveTimer();
+  viewStateSaveTimerId = window.setTimeout(() => {
+    viewStateSaveTimerId = null;
+    persistViewState(props.documentPath);
+  }, VIEW_STATE_SAVE_DEBOUNCE_MS);
+};
+
+const restoreViewStateForPath = (path: string | null | undefined): void => {
+  if (!editorInstance || !path) {
+    return;
+  }
+
+  const savedState = editorStore.getEditorViewState(path);
+  if (!savedState) {
+    return;
+  }
+
+  editorInstance.restoreViewState(savedState as unknown as monaco.editor.ICodeEditorViewState);
+  editorInstance.focus();
+};
 
 const toMarkerSeverity = (level: TScriptDiagnosticSeverity): monaco.MarkerSeverity => {
   switch (level) {
@@ -347,6 +396,15 @@ const createEditor = (): void => {
 
   editorInstance.onDidChangeCursorPosition((event) => {
     emit('cursor-position-change', event.position.lineNumber, event.position.column);
+    scheduleViewStatePersist();
+  });
+
+  editorInstance.onDidScrollChange(() => {
+    scheduleViewStatePersist();
+  });
+
+  editorInstance.onDidChangeModelDecorations(() => {
+    scheduleViewStatePersist();
   });
 
   const initialPosition = editorInstance.getPosition();
@@ -356,6 +414,7 @@ const createEditor = (): void => {
 
   syncMarkers();
   syncGitDecorations();
+  restoreViewStateForPath(props.documentPath);
   scheduleShellCompletionRegistration();
 
   requestAnimationFrame(() => {
@@ -365,6 +424,22 @@ const createEditor = (): void => {
     });
   });
 };
+
+watch(
+  () => props.documentPath,
+  (nextPath, previousPath) => {
+    if (!editorInstance) {
+      return;
+    }
+
+    if (previousPath) {
+      persistViewState(previousPath);
+    }
+
+    restoreViewStateForPath(nextPath);
+  },
+  { flush: 'sync' },
+);
 
 watch(
   () => props.modelValue,
@@ -449,6 +524,9 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  persistViewState(props.documentPath);
+  clearViewStateSaveTimer();
+
   const model = editorInstance?.getModel();
   if (model) {
     monaco.editor.setModelMarkers(model, 'shellcheck', []);

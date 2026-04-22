@@ -807,7 +807,7 @@ onBeforeUnmount(() => {
 
 .ssh-tab.is-disabled {
   color: color-mix(in srgb, var(--text-quaternary) 56%, transparent);
-  cursor: not-allowed;
+  cursor: default;
 }
 
 .ssh-tab.is-disabled:hover {
@@ -1441,7 +1441,7 @@ onBeforeUnmount(() => {
 .ssh-footer-button.is-disabled:hover {
   color: #3a3a44;
   background: rgba(255, 255, 255, 0.04);
-  cursor: not-allowed;
+  cursor: default;
   opacity: 0.6;
 }
 

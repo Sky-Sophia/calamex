@@ -89,7 +89,7 @@ export const dark: IRoles = {
     terminal: {
         background: P.n880,                          // #15191e
         foreground: P.n410,                          // #d7dce5
-        cursor: P.a500,                          // #7c89ff
+        cursor: P.a900,                          // #335cff
         cursorAccent: P.n880,
         selectionBackground: P.aa26,                          // rgba(94,106,210,.26)
         scrollbarBackground: P.wa10,

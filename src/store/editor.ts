@@ -10,7 +10,10 @@ import type {
   TDocumentEncoding,
   TExecutorKind,
   TLogLevel,
+  TRunLogScope,
 } from '@/types/editor';
+import type { TSessionSnapshot } from '@/types/session';
+import { tauriSessionStorage } from '@/store/plugins/tauriSessionStorage';
 import { normalizeFileSystemPath } from '@/utils/path';
 import { DEFAULT_EXECUTOR, DEFAULT_SCRIPT } from '@/utils/templates';
 import { defineStore } from 'pinia';
@@ -20,6 +23,10 @@ const MAX_TERMINAL_OUTPUT_LENGTH = 120_000;
 const MAX_TERMINAL_OUTPUT_CHUNK_LENGTH = 4_096;
 const MAX_RUN_LOG_ENTRIES = 500;
 const MAX_RUN_HISTORY_ENTRIES = 30;
+const MAX_OPEN_TABS = 30;
+const MAX_RECENT_WORKSPACES = 10;
+const MAX_RECENT_FILES = 50;
+const MAX_VIEW_STATE_ENTRIES = 30;
 
 const countCharacters = (content: string): number => Array.from(content).length;
 
@@ -92,6 +99,17 @@ const createDocumentId = (): string => createUniqueId('document');
 const createLogId = (): string => createUniqueId('log');
 const createRunHistoryId = (): string => createUniqueId('run-history');
 
+const createEmptySessionSnapshot = (): TSessionSnapshot => ({
+  schemaVersion: 1,
+  workspaceRoot: null,
+  openTabs: [],
+  activeTabPath: null,
+  viewStates: [],
+  recentWorkspaces: [],
+  recentFiles: [],
+  savedAt: new Date().toISOString(),
+});
+
 const syncDocumentState = (document: IEditorDocument): IEditorDocument => {
   document.lineCount = document.content.length === 0 ? 1 : document.content.split('\n').length;
   document.charCount = countCharacters(document.content);
@@ -139,6 +157,7 @@ const createDocument = (
 
 export const useEditorStore = defineStore('editor', () => {
   const documents = ref<IEditorDocument[]>([]);
+  const sessionSnapshot = ref<TSessionSnapshot>(createEmptySessionSnapshot());
   const environment = ref<IExecutionEnvironment>({
     recommended: DEFAULT_EXECUTOR,
     hasAny: false,
@@ -160,6 +179,56 @@ export const useEditorStore = defineStore('editor', () => {
   const activeDocumentId = ref('');
   const pendingTerminalRunId = ref<string | null>(null);
   const documentAnalysis = ref<Record<string, IAnalyzeScriptPayload>>({});
+
+  const touchSessionSnapshot = (): void => {
+    sessionSnapshot.value.savedAt = new Date().toISOString();
+  };
+
+  const pushRecentFile = (path: string): void => {
+    const normalized = normalizeFileSystemPath(path);
+    if (!normalized) return;
+    const next = [
+      normalized,
+      ...sessionSnapshot.value.recentFiles.filter(
+        (item) => normalizeFileSystemPath(item) !== normalized,
+      ),
+    ].slice(0, MAX_RECENT_FILES);
+    sessionSnapshot.value.recentFiles = next;
+  };
+
+  const pushRecentWorkspace = (path: string): void => {
+    const normalized = normalizeFileSystemPath(path);
+    if (!normalized) return;
+    const next = [
+      normalized,
+      ...sessionSnapshot.value.recentWorkspaces.filter(
+        (item) => normalizeFileSystemPath(item) !== normalized,
+      ),
+    ].slice(0, MAX_RECENT_WORKSPACES);
+    sessionSnapshot.value.recentWorkspaces = next;
+  };
+
+  const syncSessionOpenTabs = (): void => {
+    sessionSnapshot.value.openTabs = documents.value
+      .filter((item) => Boolean(item.path))
+      .slice(0, MAX_OPEN_TABS)
+      .map((item, index) => ({
+        path: item.path as string,
+        pinned: false,
+        order: index,
+        kind: item.kind,
+      }));
+
+    if (
+      sessionSnapshot.value.activeTabPath
+      && !sessionSnapshot.value.openTabs.some(
+        (tab) =>
+          normalizeFileSystemPath(tab.path) === normalizeFileSystemPath(sessionSnapshot.value.activeTabPath),
+      )
+    ) {
+      sessionSnapshot.value.activeTabPath = sessionSnapshot.value.openTabs[0]?.path ?? null;
+    }
+  };
 
   /**
    * 通过 watcher 维护 activeDocumentId，确保 activeDocumentId 始终指向
@@ -227,6 +296,43 @@ export const useEditorStore = defineStore('editor', () => {
       activeDiagnostics.value.filter((item) => item.level === 'info' || item.level === 'style')
         .length,
   );
+  const canOpenMoreTabs = computed(() => documents.value.length < MAX_OPEN_TABS);
+  const hasRunArtifacts = computed(
+    () =>
+      activeRunSummary.value !== null
+      || lastRunResult.value !== null
+      || runLogs.value.length > 0
+      || runHistory.value.length > 0
+      || terminalOutputLength.value > 0,
+  );
+
+  const saveEditorViewState = (path: string, viewState: Record<string, unknown>): void => {
+    const normalized = normalizeFileSystemPath(path);
+    if (!normalized) return;
+
+    const nextEntries = [
+      {
+        path: normalized,
+        viewState,
+        updatedAt: new Date().toISOString(),
+      },
+      ...sessionSnapshot.value.viewStates.filter(
+        (item) => normalizeFileSystemPath(item.path) !== normalized,
+      ),
+    ].slice(0, MAX_VIEW_STATE_ENTRIES);
+
+    sessionSnapshot.value.viewStates = nextEntries;
+    touchSessionSnapshot();
+  };
+
+  const getEditorViewState = (path: string): Record<string, unknown> | null => {
+    const normalized = normalizeFileSystemPath(path);
+    if (!normalized) return null;
+    const item = sessionSnapshot.value.viewStates.find(
+      (entry) => normalizeFileSystemPath(entry.path) === normalized,
+    );
+    return item?.viewState ?? null;
+  };
 
   const getTerminalOutputSnapshot = (): string => terminalOutputChunks.value.join('');
 
@@ -289,6 +395,8 @@ export const useEditorStore = defineStore('editor', () => {
       return;
     }
     activeDocumentId.value = targetDocument.id;
+    sessionSnapshot.value.activeTabPath = targetDocument.path;
+    touchSessionSnapshot();
     cursorLine.value = 1;
     cursorColumn.value = 1;
   };
@@ -297,6 +405,8 @@ export const useEditorStore = defineStore('editor', () => {
     const nextDocument = createDocument(documents.value, overrides);
     documents.value.push(nextDocument);
     setActiveDocument(nextDocument.id);
+    syncSessionOpenTabs();
+    touchSessionSnapshot();
     return nextDocument;
   };
 
@@ -306,6 +416,8 @@ export const useEditorStore = defineStore('editor', () => {
     const existingDocument = findDocumentByPath(payload.path);
     if (existingDocument) {
       setActiveDocument(existingDocument.id);
+      pushRecentFile(payload.path);
+      touchSessionSnapshot();
       return { document: existingDocument, reusedExisting: true };
     }
     const nextDocument = createDocument(documents.value, {
@@ -318,6 +430,9 @@ export const useEditorStore = defineStore('editor', () => {
     });
     documents.value.push(nextDocument);
     setActiveDocument(nextDocument.id);
+    pushRecentFile(payload.path);
+    syncSessionOpenTabs();
+    touchSessionSnapshot();
     return { document: nextDocument, reusedExisting: false };
   };
 
@@ -328,6 +443,8 @@ export const useEditorStore = defineStore('editor', () => {
     const existingDocument = findDocumentByPath(path);
     if (existingDocument) {
       setActiveDocument(existingDocument.id);
+      pushRecentFile(path);
+      touchSessionSnapshot();
       return { document: existingDocument, reusedExisting: true };
     }
     const nextDocument = createDocument(documents.value, {
@@ -341,6 +458,9 @@ export const useEditorStore = defineStore('editor', () => {
     });
     documents.value.push(nextDocument);
     setActiveDocument(nextDocument.id);
+    pushRecentFile(path);
+    syncSessionOpenTabs();
+    touchSessionSnapshot();
     return { document: nextDocument, reusedExisting: false };
   };
 
@@ -361,6 +481,11 @@ export const useEditorStore = defineStore('editor', () => {
     targetDocument.savedEncoding = payload.encoding;
     // 统一由本地计数器重新核算，避免与 payload.lineCount/charCount 不一致造成闪跳
     syncDocumentState(targetDocument);
+    if (payload.path) {
+      pushRecentFile(payload.path);
+      syncSessionOpenTabs();
+      touchSessionSnapshot();
+    }
     return targetDocument;
   };
 
@@ -414,8 +539,11 @@ export const useEditorStore = defineStore('editor', () => {
     const wasActive = documents.value[targetIndex].id === activeDocumentId.value;
     clearDocumentAnalysis(documentId);
     documents.value.splice(targetIndex, 1);
+    syncSessionOpenTabs();
+    touchSessionSnapshot();
     if (documents.value.length === 0) {
       activeDocumentId.value = '';
+      sessionSnapshot.value.activeTabPath = null;
       cursorLine.value = 1;
       cursorColumn.value = 1;
       return null;
@@ -449,17 +577,32 @@ export const useEditorStore = defineStore('editor', () => {
     cursorColumn.value = Math.max(1, Math.floor(column));
   };
 
-  const appendLog = (level: TLogLevel, title: string, detail: string): void => {
-    runLogs.value.unshift({
+  const appendLog = (
+    level: TLogLevel,
+    title: string,
+    detail: string,
+    options: {
+      scope?: TRunLogScope;
+      runId?: string | null;
+      code?: string | null;
+    } = {},
+  ): IRunLogEntry => {
+    const entry: IRunLogEntry = {
       id: createLogId(),
       level,
       title,
       detail,
       createdAt: new Date().toISOString(),
-    });
+      scope: options.scope,
+      runId: options.runId,
+      code: options.code,
+    };
+
+    runLogs.value.unshift(entry);
     if (runLogs.value.length > MAX_RUN_LOG_ENTRIES) {
       runLogs.value.length = MAX_RUN_LOG_ENTRIES;
     }
+    return entry;
   };
 
   const appendRunHistory = (entry: Omit<IRunHistoryEntry, 'id'>): void => {
@@ -479,6 +622,11 @@ export const useEditorStore = defineStore('editor', () => {
 
   const setWorkspaceRootPath = (path: string | null): void => {
     workspaceRootPath.value = path;
+    sessionSnapshot.value.workspaceRoot = path;
+    if (path) {
+      pushRecentWorkspace(path);
+    }
+    touchSessionSnapshot();
   };
 
   const setProtectedWorkspaceRootPaths = (paths: string[]): void => {
@@ -488,9 +636,12 @@ export const useEditorStore = defineStore('editor', () => {
   const clearDocuments = (): void => {
     documents.value = [];
     activeDocumentId.value = '';
+    sessionSnapshot.value.openTabs = [];
+    sessionSnapshot.value.activeTabPath = null;
     cursorLine.value = 1;
     cursorColumn.value = 1;
     documentAnalysis.value = {};
+    touchSessionSnapshot();
   };
 
   const clearLogs = (): void => {
@@ -507,10 +658,12 @@ export const useEditorStore = defineStore('editor', () => {
   const clearWorkspaceSession = (): void => {
     clearDocuments();
     workspaceRootPath.value = null;
+    sessionSnapshot.value.workspaceRoot = null;
     clearLogs();
     activeRunSummary.value = null;
     isRunning.value = false;
     pendingTerminalRunId.value = null;
+    touchSessionSnapshot();
   };
 
   return {
@@ -541,8 +694,13 @@ export const useEditorStore = defineStore('editor', () => {
     activeDiagnosticErrors,
     activeDiagnosticWarnings,
     activeDiagnosticInfos,
+    canOpenMoreTabs,
+    hasRunArtifacts,
+    sessionSnapshot,
     getDocumentById,
     findDocumentByPath,
+    getEditorViewState,
+    saveEditorViewState,
     setActiveDocument,
     createDocumentTab,
     openDocumentTab,
@@ -570,4 +728,10 @@ export const useEditorStore = defineStore('editor', () => {
     clearWorkspaceSession,
     clearLogs,
   };
+}, {
+  persist: {
+    key: 'shell-ide:editor',
+    storage: tauriSessionStorage,
+    pick: ['sessionSnapshot'],
+  },
 });

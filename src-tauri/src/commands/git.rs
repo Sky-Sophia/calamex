@@ -141,7 +141,9 @@ pub fn get_git_file_baseline(path: String) -> Result<GitFileBaselinePayload, Str
 }
 
 #[tauri::command]
-pub fn stage_git_paths(payload: GitPathOperationRequest) -> Result<GitRepositoryStatusPayload, String> {
+pub fn stage_git_paths(
+    payload: GitPathOperationRequest,
+) -> Result<GitRepositoryStatusPayload, String> {
     let repository = open_repository_from_root(&payload.repository_root_path)?;
     let repository_root = resolve_repository_root(&repository)?;
     let pathspecs = resolve_pathspecs(&repository_root, &payload.paths)?;
@@ -233,9 +235,7 @@ pub fn commit_git_index(payload: GitCommitRequest) -> Result<GitCommitResultPayl
     }
 
     let signature = repository.signature().map_err(|error| {
-        format!(
-            "读取 Git 提交身份失败：{error}。请先配置 user.name 和 user.email。"
-        )
+        format!("读取 Git 提交身份失败：{error}。请先配置 user.name 和 user.email。")
     })?;
 
     let mut index = repository
@@ -255,7 +255,14 @@ pub fn commit_git_index(payload: GitCommitRequest) -> Result<GitCommitResultPayl
 
     let commit_id = if let Some(parent) = parent_commit.as_ref() {
         repository
-            .commit(Some("HEAD"), &signature, &signature, message, &tree, &[parent])
+            .commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                message,
+                &tree,
+                &[parent],
+            )
             .map_err(|error| format!("创建 Git 提交失败：{error}"))?
     } else {
         repository
@@ -312,7 +319,9 @@ fn build_git_repository_status_payload(
     let head_commit = resolve_head_commit(repository)?;
     let head_branch_name = resolve_head_branch_name(repository)?;
     let is_detached = resolve_head_detached(repository)?;
-    let head_short_oid = head_commit.as_ref().map(|commit| short_commit_id(commit.id()));
+    let head_short_oid = head_commit
+        .as_ref()
+        .map(|commit| short_commit_id(commit.id()));
     let head_short_name = if is_detached {
         head_short_oid.clone()
     } else {
@@ -354,7 +363,9 @@ fn build_git_repository_status_payload(
     let unstaged_count = files
         .iter()
         .filter(|item| {
-            item.worktree_status.as_deref().is_some_and(|status| status != "untracked")
+            item.worktree_status
+                .as_deref()
+                .is_some_and(|status| status != "untracked")
                 && !item.is_conflicted
         })
         .count();
@@ -475,8 +486,8 @@ fn build_git_file_status_payload(
         return Ok(None);
     }
 
-    let relative_path = resolve_status_path(&entry)
-        .ok_or_else(|| "解析 Git 变更路径失败。".to_string())?;
+    let relative_path =
+        resolve_status_path(&entry).ok_or_else(|| "解析 Git 变更路径失败。".to_string())?;
     let previous_relative_path = resolve_previous_status_path(&entry, &relative_path);
     let index_status = map_index_status(status).map(str::to_string);
     let worktree_status = map_worktree_status(status).map(str::to_string);
@@ -518,9 +529,7 @@ fn resolve_head_commit(repository: &Repository) -> Result<Option<git2::Commit<'_
     match repository.head() {
         Ok(head) => match head.peel_to_commit() {
             Ok(commit) => Ok(Some(commit)),
-            Err(error)
-                if matches!(error.code(), ErrorCode::NotFound | ErrorCode::UnbornBranch) =>
-            {
+            Err(error) if matches!(error.code(), ErrorCode::NotFound | ErrorCode::UnbornBranch) => {
                 Ok(None)
             }
             Err(error) => Err(format!("读取 Git HEAD 提交失败：{error}")),

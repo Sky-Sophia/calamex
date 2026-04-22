@@ -1,5 +1,6 @@
 import { listShellCommandLabels } from './services/shell-command-catalog';
 import { pinia } from './store';
+import { hydrateSessionStorage } from './store/plugins/tauriSessionStorage';
 import { initAppTooltipSystem } from './utils/app-tooltip';
 import { registerRuntimeDiagnostics, setRuntimeError } from './utils/runtime-diagnostics';
 
@@ -89,6 +90,7 @@ const bootstrap = async (): Promise<void> => {
         ]);
 
         getThemeManager().init();
+        await hydrateSessionStorage();
 
         const app = createApp(App);
         app.use(pinia);

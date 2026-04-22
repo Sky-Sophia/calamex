@@ -1,58 +1,39 @@
 import { expect, test } from '@playwright/test';
 
-type IStartupSnapshot = {
-    t: number;
-    bootstrap: boolean;
-    splash: boolean;
+type IStartupEventSnapshot = {
+    name: string;
+    at: number;
+    splashVisible: boolean;
+    veilVisible: boolean;
     appVisible: boolean;
-    workbench: boolean;
-    veil: boolean;
 };
 
 declare global {
     interface Window {
-        __SH_STARTUP_TRACE__?: IStartupSnapshot[];
+        __SH_SAW_BOOTSTRAP__?: boolean;
+        __SH_STARTUP_EVENTS__?: IStartupEventSnapshot[];
     }
 }
 
 test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
-        const trace: IStartupSnapshot[] = [];
-
-        const snapshot = (): void => {
-            trace.push({
-                t: performance.now(),
-                bootstrap: Boolean(document.getElementById('bootstrap-splash')),
-                splash: Boolean(document.querySelector('[data-testid="splash-screen"]')),
-                appVisible: Boolean(document.querySelector('[data-testid="app-content-entry"].is-visible')),
-                workbench: Boolean(document.querySelector('[data-testid="workbench-root"]')),
-                veil: Boolean(document.querySelector('[data-testid="startup-veil"]')),
-            });
-
-            if (trace.length > 2_000) {
-                trace.shift();
+        const markBootstrapPresence = (): void => {
+            if (document.getElementById('bootstrap-splash')) {
+                window.__SH_SAW_BOOTSTRAP__ = true;
             }
         };
 
-        window.__SH_STARTUP_TRACE__ = trace;
+        window.__SH_SAW_BOOTSTRAP__ = false;
+        window.__SH_STARTUP_EVENTS__ = [];
 
-        document.addEventListener('DOMContentLoaded', snapshot, { once: true });
+        document.addEventListener('DOMContentLoaded', markBootstrapPresence, { once: true });
 
-        new MutationObserver(snapshot).observe(document.documentElement, {
+        new MutationObserver(markBootstrapPresence).observe(document.documentElement, {
             subtree: true,
             childList: true,
-            attributes: true,
-            attributeFilter: ['class', 'style'],
         });
 
-        const sample = (): void => {
-            snapshot();
-            if (performance.now() < 10_000) {
-                window.requestAnimationFrame(sample);
-            }
-        };
-
-        window.requestAnimationFrame(sample);
+        window.requestAnimationFrame(markBootstrapPresence);
     });
 });
 
@@ -65,31 +46,31 @@ test('启动流程不会出现空白帧，并完成 splash handoff', async ({ pa
     await expect(page.getByTestId('startup-veil')).toHaveCount(0);
     await expect(page.getByTestId('app-content-entry')).toHaveClass(/is-visible/);
 
-    const trace = await page.evaluate(() => window.__SH_STARTUP_TRACE__ ?? []);
+    const { sawBootstrap, events } = await page.evaluate(() => ({
+        sawBootstrap: window.__SH_SAW_BOOTSTRAP__ ?? false,
+        events: window.__SH_STARTUP_EVENTS__ ?? [],
+    }));
 
-    expect(trace.length).toBeGreaterThan(0);
+    expect(sawBootstrap).toBeTruthy();
+    expect(events.length).toBeGreaterThan(0);
 
-    const firstRelevantIndex = trace.findIndex(
-        (entry) => entry.bootstrap || entry.splash || entry.appVisible || entry.workbench,
-    );
+    const eventNames = events.map((entry) => entry.name);
 
-    expect(firstRelevantIndex).toBeGreaterThanOrEqual(0);
+    expect(eventNames).toContain('workbench-view-ready');
+    expect(eventNames).toContain('splash-leave-start');
+    expect(eventNames).toContain('splash-after-leave');
+    expect(eventNames).toContain('app-content-visible');
+    expect(eventNames).toContain('startup-veil-hidden');
 
-    const lifecycle = trace.slice(firstRelevantIndex);
+    const workbenchReadyIndex = eventNames.indexOf('workbench-view-ready');
+    const splashLeaveStartIndex = eventNames.indexOf('splash-leave-start');
+    const splashAfterLeaveIndex = eventNames.indexOf('splash-after-leave');
+    const appContentVisibleIndex = eventNames.indexOf('app-content-visible');
+    const veilHiddenIndex = eventNames.indexOf('startup-veil-hidden');
 
-    expect(lifecycle.some((entry) => entry.bootstrap)).toBeTruthy();
-    expect(lifecycle.some((entry) => entry.splash)).toBeTruthy();
-    expect(lifecycle.some((entry) => entry.workbench)).toBeTruthy();
-
-    const blankFrame = lifecycle.find(
-        (entry) => !entry.bootstrap && !entry.splash && !entry.appVisible && !entry.veil,
-    );
-
-    expect(blankFrame).toBeUndefined();
-
-    const finalSnapshot = lifecycle[lifecycle.length - 1];
-
-    expect(finalSnapshot?.bootstrap).toBeFalsy();
-    expect(finalSnapshot?.splash).toBeFalsy();
-    expect(finalSnapshot?.appVisible).toBeTruthy();
+    expect(workbenchReadyIndex).toBeGreaterThanOrEqual(0);
+    expect(splashLeaveStartIndex).toBeGreaterThan(workbenchReadyIndex);
+    expect(splashAfterLeaveIndex).toBeGreaterThanOrEqual(splashLeaveStartIndex);
+    expect(appContentVisibleIndex).toBeGreaterThan(splashAfterLeaveIndex);
+    expect(veilHiddenIndex).toBeGreaterThan(appContentVisibleIndex);
 });

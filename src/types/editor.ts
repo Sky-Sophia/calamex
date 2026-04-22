@@ -9,6 +9,7 @@ export type TDocumentEncoding =
 export type TDocumentKind = 'text' | 'image';
 export type TExecutorKind = 'wsl';
 export type TLogLevel = 'info' | 'success' | 'error';
+export type TRunLogScope = 'run' | 'workspace' | 'editor' | 'system';
 export type TScriptDiagnosticSeverity = 'error' | 'warning' | 'info' | 'style';
 export type TRunHistoryStatus = 'success' | 'failed' | 'canceled';
 
@@ -55,6 +56,9 @@ export interface IRunLogEntry {
   title: string;
   detail: string;
   createdAt: string;
+  scope?: TRunLogScope;
+  runId?: string | null;
+  code?: string | null;
 }
 
 export interface IActiveRunSummary {
@@ -104,6 +108,7 @@ export interface IStartupWorkspacePayload {
 }
 
 export interface IRunResult {
+  runId: string | null;
   success: boolean;
   stdout: string;
   stderr: string;

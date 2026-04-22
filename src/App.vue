@@ -28,6 +28,20 @@ import {
   watch,
 } from 'vue';
 
+interface IStartupEventSnapshot {
+  name: string;
+  at: number;
+  splashVisible: boolean;
+  veilVisible: boolean;
+  appVisible: boolean;
+}
+
+declare global {
+  interface Window {
+    __SH_STARTUP_EVENTS__?: IStartupEventSnapshot[];
+  }
+}
+
 const MAIN_WINDOW_SIZE = { width: 1500, height: 960 } as const;
 const MAIN_WINDOW_MIN_SIZE = { width: 1220, height: 760 } as const;
 const MAIN_CONTENT_REVEAL_DELAY_MS = 50;
@@ -104,6 +118,7 @@ const loadWorkbenchModule = async (): Promise<void> => {
     setRuntimeError('工作台模块加载失败', error);
   } finally {
     isWorkbenchModuleReady.value = true;
+    recordStartupEvent('workbench-module-ready');
   }
 };
 
@@ -118,6 +133,21 @@ const isApplicationReady = computed(
 const isSplashVisible = computed(
   () => isSplashMounted.value || Boolean(runtimeErrorState.value),
 );
+
+const recordStartupEvent = (name: string): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const events = window.__SH_STARTUP_EVENTS__ ?? (window.__SH_STARTUP_EVENTS__ = []);
+  events.push({
+    name,
+    at: performance.now(),
+    splashVisible: isSplashVisible.value,
+    veilVisible: isStartupVeilVisible.value,
+    appVisible: isAppContentVisible.value,
+  });
+};
 
 const setDocumentSplashMode = (enabled: boolean): void => {
   if (typeof document === 'undefined') return;
@@ -228,6 +258,7 @@ const revealPreparedMainWindow = async (): Promise<void> => {
   }
 
   isAppContentVisible.value = true;
+  recordStartupEvent('app-content-visible');
 
   await new Promise<void>((resolve) => {
     window.requestAnimationFrame(() => {
@@ -237,6 +268,7 @@ const revealPreparedMainWindow = async (): Promise<void> => {
         startupVeilTimerId = null;
         isStartupVeilVisible.value = false;
         isStartupVeilLeaving.value = false;
+        recordStartupEvent('startup-veil-hidden');
         resolve();
       }, STARTUP_VEIL_FADE_DURATION_MS);
     });
@@ -246,6 +278,7 @@ const revealPreparedMainWindow = async (): Promise<void> => {
 // ---------- Event handlers ----------
 
 const handleSplashLeaveStart = (): void => {
+  recordStartupEvent('splash-leave-start');
   void prepareMainWindow();
 };
 
@@ -256,11 +289,13 @@ const handleSplashAfterLeave = async (): Promise<void> => {
 
   await prepareMainWindow();
   isSplashMounted.value = false;
+  recordStartupEvent('splash-after-leave');
   await revealPreparedMainWindow();
 };
 
 const handleWorkbenchReady = (): void => {
   isWorkbenchViewReady.value = true;
+  recordStartupEvent('workbench-view-ready');
 };
 
 // ---------- Watchers ----------
@@ -303,6 +338,7 @@ watch(isWindowSplashMode, (visible: boolean) => setDocumentSplashMode(visible), 
 // ---------- Mount / Unmount ----------
 
 onMounted(() => {
+  recordStartupEvent('app-mounted');
   void loadWorkbenchModule();
 });
 

@@ -22,6 +22,7 @@
 | [ADR-0005](./ADR-0005-capability-domain-split.md) | Tauri capability 按 5 域拆分 | `accepted` | 2026-04-21 | T-1.8 |
 | [ADR-0006](./ADR-0006-router-dormant.md) | `src/router/` 休眠处置 | `accepted` | 2026-04-21 | T-1.8 |
 | [ADR-0007](./ADR-0007-ipc-acl-contract.md) | IPC 反腐层契约 | `proposed` | 2026-04-21 | T-3.1 / T-3.2 |
+| [ADR-0008](./ADR-0008-session-restore.md) | Session Restore（SR）落地 | `proposed` | 2026-04-22 | SR |
 
 ---
 

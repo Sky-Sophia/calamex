@@ -1,9 +1,8 @@
 <template>
-  <ScriptEditor
-ref="innerEditorRef" :model-value="modelValue" :theme="theme" :analysis="analysisState"
-    :editor-settings="editorSettings"
-    :git-baseline="gitBaseline" @update:model-value="handleModelValueChange"
-    @cursor-position-change="handleCursorPositionChange" @format-request="emit('format-request')" />
+  <ScriptEditor ref="innerEditorRef" :document-path="documentPath" :model-value="modelValue" :theme="theme"
+    :analysis="analysisState" :editor-settings="editorSettings" :git-baseline="gitBaseline"
+    @update:model-value="handleModelValueChange" @cursor-position-change="handleCursorPositionChange"
+    @format-request="emit('format-request')" />
 </template>
 
 <script setup lang="ts">

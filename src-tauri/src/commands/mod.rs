@@ -1,51 +1,45 @@
 mod git;
+mod script_run;
+mod shell_tools;
+mod window_stage;
+mod workspace_fs;
 
 pub use git::{
     commit_git_index, get_git_file_baseline, get_git_repository_status, init_git_repository,
     stage_git_paths, unstage_git_paths,
 };
+pub(crate) use script_run::{create_temp_script, find_command_path, line_count};
+pub use script_run::{detect_execution_environment, run_script};
+pub use shell_tools::{analyze_script, format_script};
+pub use window_stage::{apply_window_stage, show_startup_window};
+pub(crate) use workspace_fs::{
+    decode_script_bytes, encode_script_content, resolve_workspace_root, workspace_name,
+};
+pub use workspace_fs::{
+    get_startup_workspace, list_workspace_entries, load_image_asset, load_script, save_script,
+};
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::Utc;
-use encoding_rs::{GB18030, UTF_16BE, UTF_16LE, UTF_8};
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Cow,
-    cmp::Ordering,
     collections::HashMap,
-    ffi::OsString,
-    env, fs,
     io::{Read, Write},
     path::{Path, PathBuf},
     process::{Command as StdCommand, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering as AtomicOrdering},
-        mpsc, Arc, Mutex, OnceLock,
+        mpsc, Arc, Mutex,
     },
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{window::Color, AppHandle, Emitter, LogicalSize, Manager, Size, State};
-use tokio::{
-    io::AsyncWriteExt,
-    process::Command,
-    time::timeout,
-};
+use tauri::{AppHandle, Emitter, Manager, State};
 
-const PROBE_TIMEOUT: Duration = Duration::from_secs(4);
-const EXEC_TIMEOUT: Duration = Duration::from_secs(120);
 const SHELLCHECK_TIMEOUT: Duration = Duration::from_secs(12);
 const SHFMT_TIMEOUT: Duration = Duration::from_secs(12);
 const TERMINAL_RUN_STATUS_WATCHER_TIMEOUT: Duration = Duration::from_secs(60 * 60 * 6);
 const TERMINAL_RUN_STATUS_EMIT_DELAY: Duration = Duration::from_millis(96);
-const SPLASH_WINDOW_WIDTH: f64 = 780.0;
-const SPLASH_WINDOW_HEIGHT: f64 = 520.0;
-const MAIN_WINDOW_WIDTH: f64 = 1500.0;
-const MAIN_WINDOW_HEIGHT: f64 = 960.0;
-const MAIN_WINDOW_MIN_WIDTH: f64 = 1220.0;
-const MAIN_WINDOW_MIN_HEIGHT: f64 = 760.0;
-const MAIN_WINDOW_BACKGROUND: Color = Color(0x0D, 0x0F, 0x12, 0xFF);
 const WSL_TEMP_DIRECTORY: &str = "/tmp";
 const TERMINAL_DISPATCH_RUNNER_PREFIX: &str = "/tmp/sh-editor-dispatch";
 const TERMINAL_RUN_MARKER_PREFIX: &str = "\u{001b}]SH_EDITOR:";
@@ -58,12 +52,6 @@ const TERMINAL_READ_BUFFER_SIZE: usize = 64 * 1024;
 const TERMINAL_EVENT_FLUSH_INTERVAL: Duration = Duration::from_millis(16);
 const TERMINAL_EVENT_FLUSH_THRESHOLD: usize = 64 * 1024;
 const TERMINAL_SNAPSHOT_MAX_LENGTH: usize = 160 * 1024;
-const DEFAULT_WORKSPACE_DIRECTORY_NAME: &str = "builtin-workspace";
-const DEFAULT_WORKSPACE_SCRIPT_NAME: &str = "startup.sh";
-const DEFAULT_WORKSPACE_SCRIPT_CONTENT: &str = "#!/bin/bash\n\nset -euo pipefail\n\nmain() {\n  echo \"Welcome to SH Editor\"\n}\n\nmain \"$@\"\n";
-const SHELLCHECK_ZH_MESSAGES_JSON: &str = include_str!("../../../resources/Messages_zh.json");
-
-static SHELLCHECK_ZH_MESSAGES: OnceLock<HashMap<String, String>> = OnceLock::new();
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Serialize)]
@@ -303,32 +291,6 @@ struct TerminalRunCompleteEvent {
     finished_at: String,
 }
 
-struct ExecutorCandidate {
-    kind: &'static str,
-    label: &'static str,
-    description: &'static str,
-    path: Option<PathBuf>,
-    available: bool,
-}
-
-struct ShellCheckCandidate {
-    executable: PathBuf,
-    arguments: Vec<OsString>,
-    use_wsl: bool,
-}
-
-struct ShfmtCandidate {
-    executable: PathBuf,
-    use_wsl: bool,
-}
-
-struct PreparedScript {
-    execution_path: PathBuf,
-    working_directory: PathBuf,
-    used_temp_file: bool,
-    cleanup_path: Option<PathBuf>,
-}
-
 struct TerminalPreparedScript {
     execution_path: String,
     working_directory: String,
@@ -370,7 +332,10 @@ struct TerminalMarkerChunk<'a> {
 
 enum TerminalRunMarkerToken<'a> {
     Start(&'a str),
-    End { run_id: &'a str, exit_code: Option<i32> },
+    End {
+        run_id: &'a str,
+        exit_code: Option<i32>,
+    },
     Unknown,
 }
 
@@ -392,100 +357,6 @@ pub struct TerminalSessionState {
     creation_guard: Arc<Mutex<()>>,
 }
 
-fn apply_window_background(
-    window: &tauri::WebviewWindow,
-    color: Option<Color>,
-    scene: &str,
-) -> Result<(), String> {
-    window
-        .set_background_color(color)
-        .map_err(|error| format!("failed to set {scene} window background: {error}"))
-}
-
-#[tauri::command]
-pub fn apply_window_stage(app: AppHandle, stage: String) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "未找到主窗口。".to_string())?;
-
-    match stage.as_str() {
-        "splash" => {
-            let splash_size =
-                Size::Logical(LogicalSize::new(SPLASH_WINDOW_WIDTH, SPLASH_WINDOW_HEIGHT));
-            apply_window_background(&window, None, "startup")?;
-            window
-                .set_min_size(Some(splash_size))
-                .map_err(|error| format!("设置欢迎窗最小尺寸失败：{error}"))?;
-            window
-                .set_size(splash_size)
-                .map_err(|error| format!("设置欢迎窗尺寸失败：{error}"))?;
-            window
-                .set_resizable(false)
-                .map_err(|error| format!("锁定欢迎窗尺寸失败：{error}"))?;
-            window
-                .center()
-                .map_err(|error| format!("居中欢迎窗失败：{error}"))?;
-        }
-        "main" => {
-            let main_size = Size::Logical(LogicalSize::new(MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT));
-            let main_min_size = Size::Logical(LogicalSize::new(
-                MAIN_WINDOW_MIN_WIDTH,
-                MAIN_WINDOW_MIN_HEIGHT,
-            ));
-
-            apply_window_background(&window, Some(MAIN_WINDOW_BACKGROUND), "main")?;
-            window
-                .set_resizable(true)
-                .map_err(|error| format!("恢复主窗口缩放失败：{error}"))?;
-            window
-                .set_size(main_size)
-                .map_err(|error| format!("恢复主窗口尺寸失败：{error}"))?;
-            window
-                .set_min_size(Some(main_min_size))
-                .map_err(|error| format!("设置主窗口最小尺寸失败：{error}"))?;
-            window
-                .center()
-                .map_err(|error| format!("居中主窗口失败：{error}"))?;
-            window
-                .set_focus()
-                .map_err(|error| format!("聚焦主窗口失败：{error}"))?;
-        }
-        _ => return Err(format!("不支持的窗口阶段：{stage}")),
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn show_startup_window(app: AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "未找到主窗口。".to_string())?;
-
-    let splash_size = Size::Logical(LogicalSize::new(SPLASH_WINDOW_WIDTH, SPLASH_WINDOW_HEIGHT));
-    apply_window_background(&window, None, "startup")?;
-    window
-        .set_min_size(Some(splash_size))
-        .map_err(|error| format!("设置欢迎窗最小尺寸失败：{error}"))?;
-    window
-        .set_size(splash_size)
-        .map_err(|error| format!("设置欢迎窗尺寸失败：{error}"))?;
-    window
-        .set_resizable(false)
-        .map_err(|error| format!("锁定欢迎窗尺寸失败：{error}"))?;
-    window
-        .center()
-        .map_err(|error| format!("居中欢迎窗失败：{error}"))?;
-    window
-        .show()
-        .map_err(|error| format!("显示欢迎窗失败：{error}"))?;
-    window
-        .set_focus()
-        .map_err(|error| format!("聚焦欢迎窗失败：{error}"))?;
-
-    Ok(())
-}
-
 #[tauri::command]
 pub fn ensure_terminal_session(
     app: AppHandle,
@@ -499,8 +370,10 @@ pub fn ensure_terminal_session(
             .lock()
             .map_err(|_| "终端会话创建锁已损坏。".to_string())?;
 
-        if let Some(existing_session) = get_terminal_session(&terminal_state, &payload.session_id)? {
-            if payload.cwd.is_none() && should_recreate_terminal_session(existing_session.as_ref()) {
+        if let Some(existing_session) = get_terminal_session(&terminal_state, &payload.session_id)?
+        {
+            if payload.cwd.is_none() && should_recreate_terminal_session(existing_session.as_ref())
+            {
                 remove_terminal_session(&terminal_state, &payload.session_id)?;
                 remove_terminal_snapshot(&terminal_state, &payload.session_id)?;
                 terminate_terminal_session(existing_session.as_ref())?;
@@ -574,7 +447,12 @@ pub fn ensure_terminal_session(
         (child, reader, terminal_cwd)
     };
 
-    spawn_terminal_reader(app.clone(), terminal_state.clone(), payload.session_id.clone(), reader);
+    spawn_terminal_reader(
+        app.clone(),
+        terminal_state.clone(),
+        payload.session_id.clone(),
+        reader,
+    );
     spawn_terminal_waiter(app, terminal_state, payload.session_id.clone(), child);
 
     Ok(TerminalSessionPayload {
@@ -631,226 +509,6 @@ pub fn close_terminal_session(
     };
 
     terminate_terminal_session(session.as_ref())
-}
-
-#[tauri::command]
-pub fn get_startup_workspace(app: AppHandle) -> Result<StartupWorkspacePayload, String> {
-    let (workspace_root, default_file_path) = ensure_startup_workspace(&app)?;
-
-    Ok(StartupWorkspacePayload {
-        root_path: workspace_root.to_string_lossy().to_string(),
-        root_name: workspace_name(&workspace_root),
-        default_file_path: default_file_path.map(|value| value.to_string_lossy().to_string()),
-        protected_root_paths: vec![workspace_root.to_string_lossy().to_string()],
-    })
-}
-
-#[tauri::command]
-pub fn load_script(path: String) -> Result<ScriptFilePayload, String> {
-    let file_path = PathBuf::from(&path);
-    let bytes = fs::read(&file_path).map_err(|error| format!("读取脚本失败：{error}"))?;
-    let (content, encoding) = decode_script_bytes(&bytes)?;
-    Ok(build_script_payload(file_path, content, encoding))
-}
-
-#[tauri::command]
-pub fn load_image_asset(path: String) -> Result<ImageAssetPayload, String> {
-    let file_path = PathBuf::from(&path)
-        .canonicalize()
-        .map_err(|error| format!("读取图片资源失败：{error}"))?;
-
-    if !file_path.is_file() {
-        return Err("目标图片不存在或不是有效文件。".into());
-    }
-
-    let bytes = fs::read(&file_path).map_err(|error| format!("读取图片资源失败：{error}"))?;
-    build_image_asset_payload(file_path, bytes)
-}
-
-#[derive(Debug, Deserialize)]
-struct ShellCheckJsonPayload {
-    comments: Vec<ShellCheckComment>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ShellCheckComment {
-    line: usize,
-    end_line: usize,
-    column: usize,
-    end_column: usize,
-    level: String,
-    code: u64,
-    message: String,
-}
-
-#[tauri::command]
-pub async fn analyze_script(payload: AnalyzeScriptRequest) -> Result<AnalyzeScriptPayload, String> {
-    let normalized_content = normalize_shellcheck_content(&payload.content);
-    let dialect = detect_shellcheck_dialect(
-        payload.path.as_deref(),
-        payload.name.as_deref(),
-        &normalized_content,
-    )
-    .to_string();
-
-    if normalized_content.trim().is_empty() {
-        return Ok(AnalyzeScriptPayload {
-            available: true,
-            message: None,
-            dialect,
-            diagnostics: Vec::new(),
-        });
-    }
-
-    let Some(shellcheck) = resolve_shellcheck_candidate() else {
-        return Ok(AnalyzeScriptPayload {
-            available: false,
-            message: Some("未检测到可用的 ShellCheck，本地实时诊断暂不可用。".into()),
-            dialect,
-            diagnostics: Vec::new(),
-        });
-    };
-
-    let script_name = resolve_analysis_script_name(payload.path.as_deref(), payload.name.as_deref());
-    let temporary_root = env::temp_dir().join("sh-editor-shellcheck");
-    let temporary_script = create_temp_script(&temporary_root, &script_name, &normalized_content, "utf-8")?;
-    let output = run_shellcheck(&shellcheck, &temporary_script, &dialect).await;
-    let _ = fs::remove_file(&temporary_script);
-
-    let output = output?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let diagnostics = parse_shellcheck_diagnostics(&stdout)?;
-
-    Ok(AnalyzeScriptPayload {
-        available: true,
-        message: None,
-        dialect,
-        diagnostics,
-    })
-}
-
-#[tauri::command]
-pub async fn format_script(payload: FormatScriptRequest) -> Result<FormatScriptPayload, String> {
-    let Some(shfmt) = resolve_shfmt_candidate() else {
-        return Err(
-            "未检测到可用的 shfmt，请先在 Windows 或 WSL 中安装 shfmt，或配置 SHFMT_BIN。"
-                .into(),
-        );
-    };
-
-    if payload.content.trim().is_empty() {
-        return Ok(FormatScriptPayload {
-            line_count: line_count(&payload.content),
-            char_count: payload.content.chars().count(),
-            content: payload.content,
-            encoding: payload.encoding,
-        });
-    }
-
-    let formatted = run_shfmt(&shfmt, &payload.content, payload.path.as_deref()).await?;
-
-    Ok(FormatScriptPayload {
-        line_count: line_count(&formatted),
-        char_count: formatted.chars().count(),
-        content: formatted,
-        encoding: payload.encoding,
-    })
-}
-
-#[tauri::command]
-pub fn save_script(payload: SaveScriptRequest) -> Result<ScriptFilePayload, String> {
-    let file_path = PathBuf::from(&payload.path);
-    if let Some(parent) = file_path.parent() {
-        fs::create_dir_all(parent).map_err(|error| format!("创建目录失败：{error}"))?;
-    }
-
-    let bytes = encode_script_content(&payload.content, &payload.encoding)?;
-    fs::write(&file_path, bytes).map_err(|error| format!("保存脚本失败：{error}"))?;
-    Ok(build_script_payload(
-        file_path,
-        payload.content,
-        payload.encoding,
-    ))
-}
-
-#[tauri::command]
-pub async fn detect_execution_environment() -> Result<ExecutionEnvironment, String> {
-    let executors = collect_executor_candidates().await;
-    Ok(build_execution_environment(&executors))
-}
-
-#[tauri::command]
-pub fn list_workspace_entries(
-    path: Option<String>,
-    root_path: Option<String>,
-) -> Result<WorkspaceDirectoryPayload, String> {
-    let workspace_root = resolve_workspace_root(root_path)?;
-    let target_path = path
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_root.clone())
-        .canonicalize()
-        .map_err(|error| format!("读取资源目录失败：{error}"))?;
-
-    if !target_path.starts_with(&workspace_root) {
-        return Err("仅允许浏览当前资源根目录。".into());
-    }
-
-    if !target_path.is_dir() {
-        return Err("目标路径不是有效目录。".into());
-    }
-
-    Ok(WorkspaceDirectoryPayload {
-        root_path: workspace_root.to_string_lossy().to_string(),
-        root_name: workspace_name(&workspace_root),
-        entries: read_workspace_entries(&target_path)?,
-    })
-}
-
-#[tauri::command]
-pub async fn run_script(payload: RunScriptRequest) -> Result<RunScriptResponse, String> {
-    let executors = collect_executor_candidates().await;
-    let executor = resolve_executor(&payload.executor, &executors)?;
-    let prepared = prepare_script(&payload)?;
-    let started_at = Utc::now();
-    let start_time = Instant::now();
-    let (mut command, command_line) = build_run_command(executor, &prepared)?;
-    let output = execute_command(&mut command, EXEC_TIMEOUT).await?;
-    let duration_ms = start_time.elapsed().as_millis();
-    let finished_at = Utc::now();
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let combined_output = merge_output(&stdout, &stderr);
-    let success = output.status.success();
-    let log_path = write_run_log(
-        &started_at.to_rfc3339(),
-        &finished_at.to_rfc3339(),
-        &command_line,
-        &stdout,
-        &stderr,
-        output.status.code(),
-    )?;
-
-    if let Some(path) = prepared.cleanup_path {
-        let _ = fs::remove_file(path);
-    }
-
-    Ok(RunScriptResponse {
-        success,
-        stdout,
-        stderr,
-        combined_output,
-        exit_code: output.status.code(),
-        executor: executor.kind.to_string(),
-        executor_label: executor.label.to_string(),
-        duration_ms,
-        started_at: started_at.to_rfc3339(),
-        finished_at: finished_at.to_rfc3339(),
-        command_line,
-        log_path: Some(log_path.to_string_lossy().to_string()),
-        used_temp_file: prepared.used_temp_file,
-    })
 }
 
 #[tauri::command]
@@ -940,10 +598,7 @@ fn set_terminal_snapshot(
     Ok(())
 }
 
-fn remove_terminal_snapshot(
-    state: &TerminalSessionState,
-    session_id: &str,
-) -> Result<(), String> {
+fn remove_terminal_snapshot(state: &TerminalSessionState, session_id: &str) -> Result<(), String> {
     let mut snapshots = lock_terminal_snapshots(state)?;
     snapshots.remove(session_id);
     Ok(())
@@ -1126,7 +781,9 @@ fn build_terminal_dispatch_runner_path() -> Result<String, String> {
 fn build_terminal_dispatch_status_path() -> Result<String, String> {
     let suffix = build_temp_file_suffix()?;
 
-    Ok(format!("{WSL_TEMP_DIRECTORY}/sh-editor-run-status-{suffix}.tmp"))
+    Ok(format!(
+        "{WSL_TEMP_DIRECTORY}/sh-editor-run-status-{suffix}.tmp"
+    ))
 }
 
 fn build_temp_file_suffix() -> Result<String, String> {
@@ -1250,10 +907,7 @@ fn flush_terminal_data_buffer(
     );
 }
 
-fn flush_terminal_run_output_buffer(
-    app: &AppHandle,
-    buffer: &mut Option<TerminalRunOutputEvent>,
-) {
+fn flush_terminal_run_output_buffer(app: &AppHandle, buffer: &mut Option<TerminalRunOutputEvent>) {
     if let Some(payload) = buffer.take() {
         emit_terminal_run_output(app, payload);
     }
@@ -1282,21 +936,23 @@ fn spawn_terminal_event_emitter(
                         );
                     }
                 }
-                Ok(TerminalEmitterMessage::RunOutput(payload)) => match run_output_buffer.as_mut() {
-                    Some(buffer) if buffer.run_id == payload.run_id => {
-                        buffer.data.push_str(&payload.data);
-                        if buffer.data.len() >= TERMINAL_EVENT_FLUSH_THRESHOLD {
+                Ok(TerminalEmitterMessage::RunOutput(payload)) => {
+                    match run_output_buffer.as_mut() {
+                        Some(buffer) if buffer.run_id == payload.run_id => {
+                            buffer.data.push_str(&payload.data);
+                            if buffer.data.len() >= TERMINAL_EVENT_FLUSH_THRESHOLD {
+                                flush_terminal_run_output_buffer(&app, &mut run_output_buffer);
+                            }
+                        }
+                        Some(_) => {
                             flush_terminal_run_output_buffer(&app, &mut run_output_buffer);
+                            run_output_buffer = Some(payload);
+                        }
+                        None => {
+                            run_output_buffer = Some(payload);
                         }
                     }
-                    Some(_) => {
-                        flush_terminal_run_output_buffer(&app, &mut run_output_buffer);
-                        run_output_buffer = Some(payload);
-                    }
-                    None => {
-                        run_output_buffer = Some(payload);
-                    }
-                },
+                }
                 Ok(TerminalEmitterMessage::RunComplete(payload)) => {
                     flush_terminal_data_buffer(
                         &app,
@@ -1353,7 +1009,8 @@ fn spawn_terminal_reader(
 
                     let update = parser.push_chunk(&session_id, &decoded_chunk);
                     if !update.visible_output.is_empty() {
-                        let _ = sender.send(TerminalEmitterMessage::VisibleOutput(update.visible_output));
+                        let _ = sender
+                            .send(TerminalEmitterMessage::VisibleOutput(update.visible_output));
                     }
                     for item in update.run_output_events {
                         let _ = sender.send(TerminalEmitterMessage::RunOutput(item));
@@ -1429,7 +1086,9 @@ fn spawn_terminal_waiter(
 
 impl Default for TerminalUtf8ChunkDecoder {
     fn default() -> Self {
-        Self { pending: Vec::new() }
+        Self {
+            pending: Vec::new(),
+        }
     }
 }
 
@@ -1454,7 +1113,8 @@ impl TerminalUtf8ChunkDecoder {
                     let valid_up_to = error.valid_up_to();
 
                     if valid_up_to > 0 {
-                        if let Ok(valid_prefix) = std::str::from_utf8(&self.pending[..valid_up_to]) {
+                        if let Ok(valid_prefix) = std::str::from_utf8(&self.pending[..valid_up_to])
+                        {
                             output.push_str(valid_prefix);
                         }
                         self.pending.drain(..valid_up_to);
@@ -1506,7 +1166,8 @@ fn split_terminal_marker_chunk(value: &str) -> TerminalMarkerChunk<'_> {
     };
 
     let marker_content_start_index = marker_start_index + TERMINAL_RUN_MARKER_PREFIX.len();
-    let Some(marker_end_offset) = value[marker_content_start_index..].find(TERMINAL_RUN_MARKER_SUFFIX)
+    let Some(marker_end_offset) =
+        value[marker_content_start_index..].find(TERMINAL_RUN_MARKER_SUFFIX)
     else {
         return TerminalMarkerChunk {
             before: &value[..marker_start_index],
@@ -1555,11 +1216,7 @@ impl TerminalRunStreamParser {
         });
     }
 
-    fn push_chunk(
-        &mut self,
-        session_id: &str,
-        chunk: &str,
-    ) -> TerminalRunStreamUpdate {
+    fn push_chunk(&mut self, session_id: &str, chunk: &str) -> TerminalRunStreamUpdate {
         self.buffer.push_str(chunk);
         let mut update = TerminalRunStreamUpdate {
             visible_output: String::new(),
@@ -1683,15 +1340,13 @@ impl TerminalRunStreamParser {
 #[cfg(test)]
 mod tests {
     use super::{
-        TerminalRunMarkerToken, TerminalRunStreamParser, TERMINAL_RUN_END_MARKER_PREFIX,
-        TERMINAL_RUN_MARKER_PREFIX, TERMINAL_RUN_MARKER_SUFFIX, TERMINAL_RUN_START_MARKER_PREFIX,
-        parse_terminal_run_marker_token,
+        parse_terminal_run_marker_token, TerminalRunMarkerToken, TerminalRunStreamParser,
+        TERMINAL_RUN_END_MARKER_PREFIX, TERMINAL_RUN_MARKER_PREFIX, TERMINAL_RUN_MARKER_SUFFIX,
+        TERMINAL_RUN_START_MARKER_PREFIX,
     };
 
     fn build_marker(token: &str) -> String {
-        format!(
-            "{TERMINAL_RUN_MARKER_PREFIX}{token}{TERMINAL_RUN_MARKER_SUFFIX}"
-        )
+        format!("{TERMINAL_RUN_MARKER_PREFIX}{token}{TERMINAL_RUN_MARKER_SUFFIX}")
     }
 
     #[test]
@@ -1738,7 +1393,10 @@ mod tests {
                 build_marker(&format!("{TERMINAL_RUN_START_MARKER_PREFIX}{run_id}")),
             ),
         );
-        assert_eq!(start_update.visible_output, "$ /bin/bash /tmp/sh-editor-dispatch.sh\n");
+        assert_eq!(
+            start_update.visible_output,
+            "$ /bin/bash /tmp/sh-editor-dispatch.sh\n"
+        );
         assert!(start_update.completed_runs.is_empty());
 
         let output_update = parser.push_chunk("session-1", "111\n");
@@ -1758,841 +1416,6 @@ mod tests {
         assert_eq!(end_update.completed_runs[0].run_id, run_id);
         assert_eq!(end_update.completed_runs[0].exit_code, Some(0));
     }
-
-}
-
-fn build_script_payload(path: PathBuf, content: String, encoding: String) -> ScriptFilePayload {
-    let name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("untitled.sh")
-        .to_string();
-
-    ScriptFilePayload {
-        path: path.to_string_lossy().to_string(),
-        name,
-        line_count: line_count(&content),
-        char_count: content.chars().count(),
-        content,
-        encoding,
-    }
-}
-
-fn parse_shellcheck_diagnostics(output: &str) -> Result<Vec<ScriptDiagnosticPayload>, String> {
-    if output.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let payload: ShellCheckJsonPayload =
-        serde_json::from_str(output).map_err(|error| format!("解析 ShellCheck 结果失败：{error}"))?;
-
-    Ok(payload
-        .comments
-        .into_iter()
-        .map(|item| {
-            let code = format!("SC{}", item.code);
-
-            ScriptDiagnosticPayload {
-                line: item.line.max(1),
-                end_line: item.end_line.max(item.line).max(1),
-                column: item.column.max(1),
-                end_column: item.end_column.max(item.column).max(1),
-                level: item.level,
-                message: translate_shellcheck_message(&code, item.message),
-                code,
-            }
-        })
-        .collect())
-}
-
-fn shellcheck_translation_map() -> &'static HashMap<String, String> {
-    SHELLCHECK_ZH_MESSAGES.get_or_init(|| {
-        serde_json::from_str::<HashMap<String, String>>(
-            SHELLCHECK_ZH_MESSAGES_JSON.trim_start_matches('\u{feff}'),
-        )
-        .unwrap_or_else(|error| {
-            eprintln!("加载 ShellCheck 中文消息失败：{error}");
-            HashMap::new()
-        })
-    })
-}
-
-fn translate_shellcheck_message(code: &str, fallback: String) -> String {
-    shellcheck_translation_map()
-        .get(code)
-        .cloned()
-        .unwrap_or(fallback)
-}
-
-fn resolve_analysis_script_name(path: Option<&str>, name: Option<&str>) -> String {
-    if let Some(file_name) = path
-        .and_then(|value| Path::new(value).file_name())
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
-    {
-        return file_name.to_string();
-    }
-
-    name.filter(|value| !value.is_empty())
-        .unwrap_or("untitled.sh")
-        .to_string()
-}
-
-fn normalize_shellcheck_content(content: &str) -> String {
-    content.replace("\r\n", "\n").replace('\r', "\n")
-}
-
-fn detect_shellcheck_dialect(path: Option<&str>, name: Option<&str>, content: &str) -> &'static str {
-    let first_line = content.lines().next().unwrap_or_default().to_ascii_lowercase();
-    if first_line.starts_with("#!") {
-        if first_line.contains("bash") {
-            return "bash";
-        }
-        if first_line.contains("dash") {
-            return "dash";
-        }
-        if first_line.contains("ksh") {
-            return "ksh";
-        }
-        if first_line.contains("sh") {
-            return "sh";
-        }
-    }
-
-    let inferred_name = path
-        .and_then(|value| Path::new(value).file_name())
-        .and_then(|value| value.to_str())
-        .or(name)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    if inferred_name.ends_with(".dash") {
-        return "dash";
-    }
-    if inferred_name.ends_with(".ksh") {
-        return "ksh";
-    }
-    if inferred_name.ends_with(".sh") || inferred_name.ends_with(".bash") {
-        return "bash";
-    }
-
-    "bash"
-}
-
-fn resolve_shellcheck_candidate() -> Option<ShellCheckCandidate> {
-    if let Some(configured_path) = env::var_os("SHELLCHECK_BIN") {
-        let configured_path = PathBuf::from(configured_path);
-        if configured_path.exists() {
-            if let Some(candidate) = build_wrapped_shellcheck_candidate(configured_path) {
-                return Some(candidate);
-            }
-        }
-    }
-
-    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(Path::to_path_buf);
-    let local_binary_name = if cfg!(windows) { "shellcheck.exe" } else { "shellcheck" };
-    if let Some(repo_root) = repo_root {
-        let local_candidates = [
-            repo_root
-                .join("node_modules")
-                .join("shellcheck")
-                .join("bin")
-                .join("shellcheck.js"),
-            repo_root
-                .join("node_modules")
-                .join(".bin")
-                .join(if cfg!(windows) { "shellcheck.cmd" } else { "shellcheck" }),
-            repo_root
-                .join("node_modules")
-                .join("shellcheck")
-                .join("bin")
-                .join(local_binary_name),
-        ];
-
-        for local_candidate in local_candidates {
-            if !local_candidate.exists() {
-                continue;
-            }
-
-            if let Some(candidate) = build_wrapped_shellcheck_candidate(local_candidate) {
-                return Some(candidate);
-            }
-        }
-    }
-
-    let system_commands: &[&str] = if cfg!(windows) {
-        &["shellcheck.exe", "shellcheck.cmd"]
-    } else {
-        &["shellcheck"]
-    };
-
-    for command_name in system_commands {
-        if let Some(system_binary) = find_command_path(command_name, &[]) {
-            if let Some(candidate) = build_wrapped_shellcheck_candidate(system_binary) {
-                return Some(candidate);
-            }
-        }
-    }
-
-    let wsl_path = find_command_path("wsl.exe", &["C:\\Windows\\System32\\wsl.exe"])?;
-    if StdCommand::new(&wsl_path)
-        .args(["--", "shellcheck", "--version"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .ok()
-        .is_some_and(|status| status.success())
-    {
-        return Some(ShellCheckCandidate {
-            executable: wsl_path,
-            arguments: Vec::new(),
-            use_wsl: true,
-        });
-    }
-
-    None
-}
-
-fn build_wrapped_shellcheck_candidate(executable: PathBuf) -> Option<ShellCheckCandidate> {
-    let extension = executable
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_ascii_lowercase());
-
-    match extension.as_deref() {
-        Some("js" | "mjs" | "cjs") => {
-            let node_executable = resolve_node_command_path()?;
-            Some(ShellCheckCandidate {
-                executable: node_executable,
-                arguments: vec![executable.into_os_string()],
-                use_wsl: false,
-            })
-        }
-        Some("cmd" | "bat") => {
-            let command_shell = resolve_cmd_command_path()?;
-            Some(ShellCheckCandidate {
-                executable: command_shell,
-                arguments: vec![OsString::from("/C"), executable.into_os_string()],
-                use_wsl: false,
-            })
-        }
-        _ => Some(ShellCheckCandidate {
-            executable,
-            arguments: Vec::new(),
-            use_wsl: false,
-        }),
-    }
-}
-
-fn resolve_node_command_path() -> Option<PathBuf> {
-    if cfg!(windows) {
-        return find_command_path(
-            "node.exe",
-            &[
-                "C:\\Program Files\\nodejs\\node.exe",
-                "C:\\Program Files (x86)\\nodejs\\node.exe",
-            ],
-        );
-    }
-
-    find_command_path("node", &[])
-}
-
-fn resolve_cmd_command_path() -> Option<PathBuf> {
-    if cfg!(windows) {
-        return find_command_path("cmd.exe", &["C:\\Windows\\System32\\cmd.exe"]);
-    }
-
-    None
-}
-
-fn resolve_shfmt_candidate() -> Option<ShfmtCandidate> {
-    if let Some(configured_path) = env::var_os("SHFMT_BIN") {
-        let executable = PathBuf::from(configured_path);
-        if executable.exists() {
-            return Some(ShfmtCandidate {
-                executable,
-                use_wsl: false,
-            });
-        }
-    }
-
-    let shfmt_command = if cfg!(windows) { "shfmt.exe" } else { "shfmt" };
-    if let Some(system_binary) = find_command_path(shfmt_command, &[]) {
-        return Some(ShfmtCandidate {
-            executable: system_binary,
-            use_wsl: false,
-        });
-    }
-
-    let wsl_path = find_command_path("wsl.exe", &["C:\\Windows\\System32\\wsl.exe"])?;
-    if StdCommand::new(&wsl_path)
-        .args(["--", "shfmt", "--version"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .ok()
-        .is_some_and(|status| status.success())
-    {
-        return Some(ShfmtCandidate {
-            executable: wsl_path,
-            use_wsl: true,
-        });
-    }
-
-    None
-}
-
-async fn run_shellcheck(
-    candidate: &ShellCheckCandidate,
-    script_path: &Path,
-    dialect: &str,
-) -> Result<std::process::Output, String> {
-    let mut command = Command::new(&candidate.executable);
-
-    if candidate.use_wsl {
-        let wsl_script_path = to_wsl_path(script_path)?;
-        command.args([
-            "--",
-            "shellcheck",
-            "--format=json1",
-            "--shell",
-            dialect,
-            &wsl_script_path,
-        ]);
-    } else {
-        command
-            .args(&candidate.arguments)
-            .args(["--format=json1", "--shell", dialect])
-            .arg(script_path);
-    }
-
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-    let output = match timeout(SHELLCHECK_TIMEOUT, command.output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => return Err(format!("运行 ShellCheck 失败：{error}")),
-        Err(_) => {
-            return Err(format!(
-                "ShellCheck 分析超时（超过 {} 秒）。",
-                SHELLCHECK_TIMEOUT.as_secs()
-            ))
-        }
-    };
-
-    if matches!(output.status.code(), Some(0 | 1)) {
-        return Ok(output);
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if stderr.is_empty() {
-        return Err("ShellCheck 执行失败。".into());
-    }
-
-    Err(format!("ShellCheck 执行失败：{stderr}"))
-}
-
-async fn run_shfmt(
-    candidate: &ShfmtCandidate,
-    content: &str,
-    _path: Option<&str>,
-) -> Result<String, String> {
-    let mut command = Command::new(&candidate.executable);
-
-    if candidate.use_wsl {
-        command.args(["--", "shfmt", "-i", "2"]);
-    } else {
-        command.args(["-i", "2"]);
-    }
-
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("启动 shfmt 失败：{error}"))?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(content.as_bytes())
-            .await
-            .map_err(|error| format!("写入 shfmt 输入失败：{error}"))?;
-        stdin
-            .shutdown()
-            .await
-            .map_err(|error| format!("关闭 shfmt 输入失败：{error}"))?;
-    }
-
-    let output = match timeout(SHFMT_TIMEOUT, child.wait_with_output()).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(error)) => return Err(format!("运行 shfmt 失败：{error}")),
-        Err(_) => {
-            return Err(format!(
-                "shfmt 格式化超时（超过 {} 秒）。",
-                SHFMT_TIMEOUT.as_secs()
-            ))
-        }
-    };
-
-    if output.status.success() {
-        return String::from_utf8(output.stdout)
-            .map_err(|error| format!("解析 shfmt 输出失败：{error}"));
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if stderr.is_empty() {
-        return Err("shfmt 执行失败。".into());
-    }
-
-    Err(format!("shfmt 执行失败：{stderr}"))
-}
-
-fn build_image_asset_payload(path: PathBuf, bytes: Vec<u8>) -> Result<ImageAssetPayload, String> {
-    let mime_type = resolve_image_mime_type(&path)?;
-    let name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("image")
-        .to_string();
-    let byte_size = bytes.len();
-    let data_url = format!("data:{mime_type};base64,{}", STANDARD.encode(&bytes));
-
-    Ok(ImageAssetPayload {
-        path: path.to_string_lossy().to_string(),
-        name,
-        mime_type: mime_type.to_string(),
-        data_url,
-        byte_size,
-    })
-}
-
-fn resolve_image_mime_type(path: &Path) -> Result<&'static str, String> {
-    let extension = path
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_ascii_lowercase())
-        .ok_or_else(|| "无法识别图片格式。".to_string())?;
-
-    match extension.as_str() {
-        "png" => Ok("image/png"),
-        "jpg" | "jpeg" => Ok("image/jpeg"),
-        "gif" => Ok("image/gif"),
-        "webp" => Ok("image/webp"),
-        "bmp" => Ok("image/bmp"),
-        "svg" => Ok("image/svg+xml"),
-        "ico" => Ok("image/x-icon"),
-        _ => Err(format!("暂不支持预览该图片格式：{extension}")),
-    }
-}
-
-fn resolve_workspace_root(selected_root: Option<String>) -> Result<PathBuf, String> {
-    if let Some(root) = selected_root {
-        let root_path = PathBuf::from(root)
-            .canonicalize()
-            .map_err(|error| format!("读取资源根目录失败：{error}"))?;
-
-        if !root_path.is_dir() {
-            return Err("资源根路径不是有效目录。".into());
-        }
-
-        return Ok(root_path);
-    }
-
-    if let Ok(current_dir) = env::current_dir() {
-        if current_dir.join("package.json").exists()
-            || current_dir.join("src").exists()
-            || current_dir.join("resources").exists()
-        {
-            return current_dir
-                .canonicalize()
-                .map_err(|error| format!("读取工作区目录失败：{error}"));
-        }
-
-        if current_dir
-            .file_name()
-            .and_then(|value| value.to_str())
-            .is_some_and(|name| name.eq_ignore_ascii_case("src-tauri"))
-        {
-            if let Some(parent) = current_dir.parent() {
-                return parent
-                    .to_path_buf()
-                    .canonicalize()
-                    .map_err(|error| format!("读取工作区目录失败：{error}"));
-            }
-        }
-    }
-
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let fallback_root = manifest_dir
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or(manifest_dir);
-    fallback_root
-        .canonicalize()
-        .map_err(|error| format!("读取工作区目录失败：{error}"))
-}
-
-fn resolve_development_startup_workspace() -> Option<(PathBuf, Option<PathBuf>)> {
-    if !cfg!(debug_assertions) {
-        return None;
-    }
-
-    let workspace_root = resolve_workspace_root(None).ok()?;
-    if git2::Repository::discover(&workspace_root).is_err() {
-        return None;
-    }
-
-    Some((workspace_root, None))
-}
-
-fn ensure_startup_workspace(app: &AppHandle) -> Result<(PathBuf, Option<PathBuf>), String> {
-    if let Some(workspace) = resolve_development_startup_workspace() {
-        return Ok(workspace);
-    }
-
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("读取应用数据目录失败：{error}"))?;
-
-    fs::create_dir_all(&app_data_dir).map_err(|error| format!("创建应用数据目录失败：{error}"))?;
-
-    let workspace_root = app_data_dir.join(DEFAULT_WORKSPACE_DIRECTORY_NAME);
-    fs::create_dir_all(&workspace_root).map_err(|error| format!("创建默认工作区失败：{error}"))?;
-
-    let default_script_path = workspace_root.join(DEFAULT_WORKSPACE_SCRIPT_NAME);
-    let should_seed_default_script = match fs::metadata(&default_script_path) {
-        Ok(metadata) => metadata.len() == 0,
-        Err(_) => true,
-    };
-
-    if should_seed_default_script {
-        fs::write(&default_script_path, DEFAULT_WORKSPACE_SCRIPT_CONTENT.as_bytes())
-            .map_err(|error| format!("写入默认脚本失败：{error}"))?;
-    }
-
-    let canonical_workspace_root = workspace_root
-        .canonicalize()
-        .map_err(|error| format!("读取默认工作区失败：{error}"))?;
-    let canonical_default_script = default_script_path
-        .canonicalize()
-        .map_err(|error| format!("读取默认脚本失败：{error}"))?;
-
-    Ok((canonical_workspace_root, Some(canonical_default_script)))
-}
-
-fn workspace_name(root_path: &Path) -> String {
-    root_path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("workspace")
-        .to_string()
-}
-
-fn read_workspace_entries(directory: &Path) -> Result<Vec<WorkspaceEntry>, String> {
-    let read_dir = fs::read_dir(directory).map_err(|error| format!("读取资源目录失败：{error}"))?;
-    let mut entries = Vec::new();
-
-    for item in read_dir {
-        let Ok(entry) = item else {
-            continue;
-        };
-
-        let path = entry.path();
-        let Ok(metadata) = entry.metadata() else {
-            continue;
-        };
-        let is_directory = metadata.is_dir();
-
-        entries.push(WorkspaceEntry {
-            path: path.to_string_lossy().to_string(),
-            name: entry.file_name().to_string_lossy().to_string(),
-            kind: if is_directory {
-                "directory".into()
-            } else {
-                "file".into()
-            },
-            has_children: is_directory && directory_has_entries(&path),
-        });
-    }
-
-    entries.sort_by(compare_workspace_entries);
-    Ok(entries)
-}
-
-fn directory_has_entries(path: &Path) -> bool {
-    fs::read_dir(path)
-        .map(|mut iterator| iterator.any(|item| item.is_ok()))
-        .unwrap_or(false)
-}
-
-fn compare_workspace_entries(a: &WorkspaceEntry, b: &WorkspaceEntry) -> Ordering {
-    match (a.kind.as_str(), b.kind.as_str()) {
-        ("directory", "file") => Ordering::Less,
-        ("file", "directory") => Ordering::Greater,
-        _ => a
-            .name
-            .to_lowercase()
-            .cmp(&b.name.to_lowercase())
-            .then_with(|| a.name.cmp(&b.name)),
-    }
-}
-
-fn line_count(content: &str) -> usize {
-    if content.is_empty() {
-        1
-    } else {
-        content.split('\n').count()
-    }
-}
-
-fn decode_script_bytes(bytes: &[u8]) -> Result<(String, String), String> {
-    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        let content = String::from_utf8(bytes[3..].to_vec()).map_err(|error| error.to_string())?;
-        return Ok((content, "utf-8-bom".into()));
-    }
-
-    if bytes.starts_with(&[0xFF, 0xFE]) {
-        return decode_with_encoding(&bytes[2..], UTF_16LE, "utf-16le");
-    }
-
-    if bytes.starts_with(&[0xFE, 0xFF]) {
-        return decode_with_encoding(&bytes[2..], UTF_16BE, "utf-16be");
-    }
-
-    if bytes.contains(&0) {
-        return Err("当前文件疑似二进制内容，暂不支持在编辑器中打开。".into());
-    }
-
-    let (utf8, _, utf8_errors) = UTF_8.decode(bytes);
-    if !utf8_errors {
-        return Ok((utf8.into_owned(), "utf-8".into()));
-    }
-
-    let (gb18030, _, gb_errors) = GB18030.decode(bytes);
-    if !gb_errors {
-        return Ok((gb18030.into_owned(), "gb18030".into()));
-    }
-
-    Err("无法识别文件编码，请确认脚本是否为常见 UTF-8 / GB 编码。".into())
-}
-
-fn decode_with_encoding(
-    bytes: &[u8],
-    encoding: &'static encoding_rs::Encoding,
-    encoding_name: &str,
-) -> Result<(String, String), String> {
-    let (content, _, had_errors) = encoding.decode(bytes);
-    if had_errors {
-        return Err(format!("使用 {encoding_name} 解码脚本失败。"));
-    }
-
-    Ok((content.into_owned(), encoding_name.to_string()))
-}
-
-fn encode_script_content(content: &str, encoding: &str) -> Result<Vec<u8>, String> {
-    match encoding {
-        "utf-8" => Ok(content.as_bytes().to_vec()),
-        "utf-8-bom" => {
-            let mut bytes = vec![0xEF, 0xBB, 0xBF];
-            bytes.extend_from_slice(content.as_bytes());
-            Ok(bytes)
-        }
-        "utf-16le" => encode_with_encoding(content, UTF_16LE, "utf-16le", true),
-        "utf-16be" => encode_with_encoding(content, UTF_16BE, "utf-16be", true),
-        "gbk" => encode_with_encoding_name(content, "gbk"),
-        "gb18030" => encode_with_encoding_name(content, "gb18030"),
-        _ => Err(format!("暂不支持编码：{encoding}")),
-    }
-}
-
-fn encode_with_encoding(
-    content: &str,
-    encoding: &'static encoding_rs::Encoding,
-    label: &str,
-    with_bom: bool,
-) -> Result<Vec<u8>, String> {
-    let (bytes, _, had_errors) = encoding.encode(content);
-    if had_errors {
-        return Err(format!("将内容编码为 {label} 失败。"));
-    }
-
-    let mut result = Vec::new();
-    if with_bom {
-        if label == "utf-16le" {
-            result.extend_from_slice(&[0xFF, 0xFE]);
-        } else if label == "utf-16be" {
-            result.extend_from_slice(&[0xFE, 0xFF]);
-        }
-    }
-    result.extend_from_slice(bytes.as_ref());
-    Ok(result)
-}
-
-fn encode_with_encoding_name(content: &str, label: &str) -> Result<Vec<u8>, String> {
-    let (bytes, _, had_errors): (Cow<[u8]>, _, bool) = match label {
-        "gbk" => encoding_rs::GBK.encode(content),
-        "gb18030" => GB18030.encode(content),
-        _ => return Err(format!("暂不支持编码：{label}")),
-    };
-    if had_errors {
-        return Err(format!("将内容编码为 {label} 失败。"));
-    }
-    Ok(bytes.into_owned())
-}
-
-async fn collect_executor_candidates() -> Vec<ExecutorCandidate> {
-    let mut executors = vec![ExecutorCandidate {
-        kind: "wsl",
-        label: "WSL2",
-        description: "唯一执行环境，所有脚本统一通过 WSL2 Linux 子系统运行。",
-        path: find_command_path("wsl.exe", &["C:\\Windows\\System32\\wsl.exe"]),
-        available: false,
-    }];
-
-    for item in executors.iter_mut() {
-        item.available = probe_executor(item).await;
-    }
-
-    executors
-}
-
-fn find_preferred_available_executor(
-    executors: &[ExecutorCandidate],
-) -> Option<&ExecutorCandidate> {
-    executors.iter().find(|item| item.kind == "wsl" && item.available)
-}
-
-fn build_execution_environment(executors: &[ExecutorCandidate]) -> ExecutionEnvironment {
-    let has_any = executors.iter().any(|item| item.available);
-
-    ExecutionEnvironment {
-        recommended: "wsl".to_string(),
-        has_any,
-        executors: executors
-            .iter()
-            .map(|item| ExecutionOption {
-                r#type: item.kind.to_string(),
-                label: item.label.to_string(),
-                available: item.available,
-                description: item.description.to_string(),
-                command_path: item
-                    .path
-                    .as_ref()
-                    .map(|value| value.to_string_lossy().to_string()),
-            })
-            .collect(),
-    }
-}
-
-fn find_command_path(file_name: &str, extra_candidates: &[&str]) -> Option<PathBuf> {
-    if let Some(path_var) = env::var_os("PATH") {
-        for directory in env::split_paths(&path_var) {
-            let candidate = directory.join(file_name);
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-    }
-
-    if cfg!(windows) {
-        if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
-            let winget_link = PathBuf::from(local_app_data)
-                .join("Microsoft")
-                .join("WinGet")
-                .join("Links")
-                .join(file_name);
-            if winget_link.exists() {
-                return Some(winget_link);
-            }
-        }
-    }
-
-    extra_candidates
-        .iter()
-        .map(PathBuf::from)
-        .find(|candidate| candidate.exists())
-}
-
-async fn probe_executor(candidate: &ExecutorCandidate) -> bool {
-    let Some(path) = candidate.path.as_ref() else {
-        return false;
-    };
-
-    if candidate.kind != "wsl" {
-        return false;
-    }
-
-    let mut command = Command::new(path);
-    command.args(["--list", "--quiet"]);
-    command.stdout(Stdio::piped()).stderr(Stdio::null());
-
-    matches!(
-        timeout(PROBE_TIMEOUT, command.output()).await,
-        Ok(Ok(output))
-            if output.status.success()
-                && output
-                    .stdout
-                    .iter()
-                    .any(|byte| !matches!(*byte, 0 | b' ' | b'\n' | b'\r' | b'\t'))
-    )
-}
-
-fn resolve_executor<'a>(
-    requested: &str,
-    executors: &'a [ExecutorCandidate],
-) -> Result<&'a ExecutorCandidate, String> {
-    if requested != "wsl" {
-        return Err("当前版本仅支持 WSL2 执行环境。".into());
-    }
-
-    find_preferred_available_executor(executors)
-        .ok_or_else(|| "当前系统未检测到可用的 WSL2 运行环境。".into())
-}
-
-fn prepare_script(payload: &RunScriptRequest) -> Result<PreparedScript, String> {
-    let preferred_path = payload.path.as_ref().map(PathBuf::from);
-    let working_directory = preferred_path
-        .as_ref()
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-        .unwrap_or_else(env::temp_dir);
-
-    let should_use_temp = payload.is_dirty
-        || preferred_path
-            .as_ref()
-            .map(|path| !path.exists())
-            .unwrap_or(true);
-
-    if should_use_temp {
-        let file_name = preferred_path
-            .as_ref()
-            .and_then(|path| path.file_name().and_then(|value| value.to_str()))
-            .unwrap_or("untitled.sh");
-        let temp_path = create_temp_script(
-            &working_directory,
-            file_name,
-            &payload.content,
-            &payload.encoding,
-        )?;
-        return Ok(PreparedScript {
-            execution_path: temp_path.clone(),
-            working_directory,
-            used_temp_file: true,
-            cleanup_path: Some(temp_path),
-        });
-    }
-
-    let execution_path = preferred_path.ok_or_else(|| "脚本路径无效。".to_string())?;
-    Ok(PreparedScript {
-        execution_path,
-        working_directory,
-        used_temp_file: false,
-        cleanup_path: None,
-    })
 }
 
 fn prepare_terminal_dispatch_script(
@@ -2702,60 +1525,6 @@ exit \"$e\"\n\
     Ok(runner_path)
 }
 
-fn create_temp_script(
-    preferred_directory: &Path,
-    original_name: &str,
-    content: &str,
-    encoding: &str,
-) -> Result<PathBuf, String> {
-    let directory = preferred_directory.to_path_buf();
-    fs::create_dir_all(&directory).map_err(|error| format!("创建临时目录失败：{error}"))?;
-
-    let suffix = build_temp_file_suffix()?;
-    let stem = Path::new(original_name)
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("untitled");
-    let temp_path = directory.join(format!("{stem}-{suffix}.tmp.sh"));
-    let bytes = encode_script_content(content, encoding)?;
-    fs::write(&temp_path, bytes).map_err(|error| format!("写入临时脚本失败：{error}"))?;
-    Ok(temp_path)
-}
-
-fn build_run_command(
-    executor: &ExecutorCandidate,
-    prepared: &PreparedScript,
-) -> Result<(Command, String), String> {
-    if executor.kind != "wsl" {
-        return Err(format!("不支持的执行器：{}", executor.kind));
-    }
-
-    let shell_path = executor
-        .path
-        .as_ref()
-        .ok_or_else(|| "未找到 WSL2 可执行文件。".to_string())?;
-    let script_path = to_wsl_path(&prepared.execution_path)?;
-    let working_directory = to_wsl_path(&prepared.working_directory)?;
-    let bash_script = format!(
-        "cd {} && bash {}",
-        bash_quote(&working_directory),
-        bash_quote(&script_path)
-    );
-    let mut command = Command::new(shell_path);
-    command.args(["--", "bash", "-lc", &bash_script]);
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-    Ok((
-        command,
-        format!(
-            "{} -- bash -lc {}",
-            shell_path.to_string_lossy(),
-            bash_quote(&bash_script)
-        ),
-    ))
-}
-
 fn to_wsl_path(path: &Path) -> Result<String, String> {
     let normalized = path
         .canonicalize()
@@ -2781,7 +1550,7 @@ fn to_wsl_path(path: &Path) -> Result<String, String> {
     Ok(format!(
         "/mnt/{}/{}",
         drive_letter.to_ascii_lowercase(),
-        rest.replace('\\', "/").trim_start_matches('/')
+        rest.replace('\\', "/").trim_start_matches('/'),
     ))
 }
 
@@ -2802,47 +1571,4 @@ fn normalize_windows_path_for_wsl(value: &str) -> Result<String, String> {
 
 fn bash_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
-}
-
-async fn execute_command(
-    command: &mut Command,
-    timeout_duration: Duration,
-) -> Result<std::process::Output, String> {
-    match timeout(timeout_duration, command.output()).await {
-        Ok(Ok(output)) => Ok(output),
-        Ok(Err(error)) => Err(format!("执行脚本失败：{error}")),
-        Err(_) => Err(format!(
-            "脚本执行超时（超过 {} 秒），请检查脚本是否阻塞。",
-            timeout_duration.as_secs()
-        )),
-    }
-}
-
-fn merge_output(stdout: &str, stderr: &str) -> String {
-    match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
-        (false, false) => format!("# stdout\n{stdout}\n\n# stderr\n{stderr}"),
-        (false, true) => stdout.to_string(),
-        (true, false) => stderr.to_string(),
-        (true, true) => "# 脚本已执行，但未产生任何标准输出。".into(),
-    }
-}
-
-fn write_run_log(
-    started_at: &str,
-    finished_at: &str,
-    command_line: &str,
-    stdout: &str,
-    stderr: &str,
-    exit_code: Option<i32>,
-) -> Result<PathBuf, String> {
-    let file_name = format!("sh-editor-run-{}.log", Utc::now().format("%Y%m%d_%H%M%S"));
-    let log_path = env::temp_dir().join(file_name);
-    let log_content = format!(
-        "started_at={started_at}\nfinished_at={finished_at}\nexit_code={}\ncommand={command_line}\n\n[stdout]\n{stdout}\n\n[stderr]\n{stderr}\n",
-        exit_code
-            .map(|code| code.to_string())
-            .unwrap_or_else(|| "unknown".into())
-    );
-    fs::write(&log_path, log_content).map_err(|error| format!("写入运行日志失败：{error}"))?;
-    Ok(log_path)
 }

@@ -235,7 +235,7 @@ export const createDefaultAppSettings = (): IAppSettings => ({
         fontFamily: 'JetBrains Mono',
         fontSize: 13,
         lineHeight: '1.4',
-        cursorStyle: 'block',
+        cursorStyle: 'bar',
         cursorBlink: true,
         scrollback: 5000,
         trimFinalNewlineOnCopy: true,

@@ -134,7 +134,7 @@ const DEFAULT_TERMINAL_SETTINGS: ITerminalSettings = {
     fontFamily: '',
     fontSize: 13,
     lineHeight: '1.4',
-    cursorStyle: 'block',
+    cursorStyle: 'bar',
     cursorBlink: true,
     scrollback: 1000,
     trimFinalNewlineOnCopy: true,

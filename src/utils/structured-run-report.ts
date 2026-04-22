@@ -1,6 +1,14 @@
 import type { IRunLogEntry, IRunResult, TExecutorKind } from '@/types/editor';
 import { formatTime } from '@/utils/date';
 import { getPathBaseName, getRelativeFileSystemPath } from '@/utils/path';
+import {
+  TERMINAL_RUN_LOG_TITLES,
+  isTerminalRunDispatchedLog,
+  isTerminalRunFinalLog,
+  isTerminalRunFlowLog,
+  isTerminalRunStartLog,
+  resolveTerminalRunLogKind,
+} from '@/utils/terminal-run';
 
 export type TInsightTone = 'neutral' | 'success' | 'warning' | 'error' | 'running';
 export type TInsightStepStatus = 'done' | 'running' | 'warning' | 'error';
@@ -84,9 +92,6 @@ const HEREDOC_END_PATTERN = /^__SH_EDITOR_EOF_\d+__$/;
 const TEMP_SCRIPT_PATTERN = /\.sh-editor-[\w.-]+\.tmp\.sh/i;
 const DISPATCH_RUNNER_PATTERN = /\/tmp\/sh-editor-dispatch-[\w.-]+\.sh/i;
 const INTERNAL_SCRIPT_PATTERN = /__sh_editor_status|unset\s+__sh_editor_status/i;
-const RUN_FLOW_LOG_TITLE_PATTERN =
-  /^(开始执行|已发送到集成终端|临时脚本文件|执行完成|执行失败|终端执行状态异常|脚本执行失败)$/;
-const FINAL_LOG_TITLE_PATTERN = /^(执行完成|执行失败|终端执行状态异常|脚本执行失败)$/;
 const WARNING_PATTERN = /warning|warn|deprecated|注意|提醒/i;
 const ERROR_PATTERN =
   /error|failed|failure|denied|not found|no such file|syntax|traceback|exception|未找到|失败|错误|异常/i;
@@ -117,7 +122,7 @@ const sortLogsAscending = (runLogs: IRunLogEntry[]): IRunLogEntry[] =>
   );
 
 const collectRunFlowLogs = (runLogs: IRunLogEntry[]): IRunLogEntry[] =>
-  sortLogsAscending(runLogs).filter((item) => RUN_FLOW_LOG_TITLE_PATTERN.test(item.title));
+  sortLogsAscending(runLogs).filter(isTerminalRunFlowLog);
 
 const parseTimestamp = (value: string | null | undefined): number | null => {
   if (!value) {
@@ -208,7 +213,7 @@ const resolveCommandLine = (
   }
 
   for (let index = runLogs.length - 1; index >= 0; index -= 1) {
-    if (runLogs[index].title === '已发送到集成终端') {
+    if (isTerminalRunDispatchedLog(runLogs[index])) {
       return runLogs[index].detail;
     }
   }
@@ -249,17 +254,48 @@ const resolveSession = (
   };
 };
 
-const resolveScopedRunLogs = (runLogs: IRunLogEntry[]): IRunLogEntry[] => {
+const resolveTargetRunId = (
+  lastRunResult: IRunResult | null,
+  orderedLogs: IRunLogEntry[],
+): string | null => {
+  if (lastRunResult?.runId) {
+    return lastRunResult.runId;
+  }
+
+  for (let index = orderedLogs.length - 1; index >= 0; index -= 1) {
+    const item = orderedLogs[index];
+    if (isTerminalRunFlowLog(item) && item.runId) {
+      return item.runId;
+    }
+  }
+
+  return null;
+};
+
+const resolveScopedRunLogs = (
+  runLogs: IRunLogEntry[],
+  lastRunResult: IRunResult | null,
+): IRunLogEntry[] => {
   const orderedLogs = sortLogsAscending(runLogs);
-  const runFlowLogs = orderedLogs.filter((item) => RUN_FLOW_LOG_TITLE_PATTERN.test(item.title));
+  const runFlowLogs = orderedLogs.filter(isTerminalRunFlowLog);
 
   if (runFlowLogs.length === 0) {
     return [];
   }
 
+  const targetRunId = resolveTargetRunId(lastRunResult, orderedLogs);
+  if (targetRunId) {
+    const scopedByRunId = orderedLogs.filter(
+      (item) => isTerminalRunFlowLog(item) && item.runId === targetRunId,
+    );
+    if (scopedByRunId.length > 0) {
+      return scopedByRunId;
+    }
+  }
+
   let startIndex = -1;
   for (let index = orderedLogs.length - 1; index >= 0; index -= 1) {
-    if (orderedLogs[index].title === '开始执行') {
+    if (isTerminalRunStartLog(orderedLogs[index])) {
       startIndex = index;
       break;
     }
@@ -267,7 +303,7 @@ const resolveScopedRunLogs = (runLogs: IRunLogEntry[]): IRunLogEntry[] => {
 
   if (startIndex === -1) {
     for (let index = orderedLogs.length - 1; index >= 0; index -= 1) {
-      if (orderedLogs[index].title === '已发送到集成终端') {
+      if (isTerminalRunDispatchedLog(orderedLogs[index])) {
         startIndex = index;
         break;
       }
@@ -455,33 +491,47 @@ const buildLogTimelineItem = (
   let tag = 'trace';
   let accent: TInsightAccent = 'yellow';
   let status: TInsightStepStatus = 'done';
+  const kind = resolveTerminalRunLogKind(item);
 
-  if (item.title === '开始执行') {
-    tag = 'start';
-    accent = 'red';
-  } else if (item.title === '临时脚本文件') {
-    tag = 'load';
-    accent = 'orange';
-    status = 'warning';
-  } else if (item.title === '已发送到集成终端') {
-    tag = 'exec';
-    accent = 'teal';
-  } else if (item.title === '执行完成') {
-    tag = 'done';
-    accent = 'green';
-  } else if (item.level === 'error' || ERROR_PATTERN.test(item.title)) {
-    tag = 'error';
-    accent = 'red';
-    status = 'error';
-  } else if (WARNING_PATTERN.test(item.title)) {
-    tag = 'warn';
-    accent = 'yellow';
-    status = 'warning';
+  switch (kind) {
+    case 'start':
+      tag = 'start';
+      accent = 'red';
+      break;
+    case 'temp-file':
+      tag = 'load';
+      accent = 'orange';
+      status = 'warning';
+      break;
+    case 'dispatched':
+      tag = 'exec';
+      accent = 'teal';
+      break;
+    case 'completed':
+      tag = 'done';
+      accent = 'green';
+      break;
+    case 'failed':
+    case 'timeout':
+      tag = 'error';
+      accent = 'red';
+      status = 'error';
+      break;
+    default:
+      if (item.level === 'error' || ERROR_PATTERN.test(item.title)) {
+        tag = 'error';
+        accent = 'red';
+        status = 'error';
+      } else if (WARNING_PATTERN.test(item.title)) {
+        tag = 'warn';
+        accent = 'yellow';
+        status = 'warning';
+      }
   }
 
-  const detailLines = item.title === '已发送到集成终端'
+  const detailLines = isTerminalRunDispatchedLog(item)
     ? buildDetailLines([item.detail])
-    : FINAL_LOG_TITLE_PATTERN.test(item.title)
+    : isTerminalRunFinalLog(item)
       ? buildDetailLines(outputLines.length > 0 ? outputLines : [item.detail])
       : item.detail.includes('\n')
         ? buildDetailLines(item.detail.split('\n'))
@@ -495,7 +545,9 @@ const buildLogTimelineItem = (
     description: item.detail,
     status,
     timestamp: formatTime(item.createdAt),
-    detailsLabel: detailLines.length > 0 ? (item.title === '已发送到集成终端' ? '查看命令' : '查看输出') : undefined,
+    detailsLabel: detailLines.length > 0
+      ? (isTerminalRunDispatchedLog(item) ? '查看命令' : '查看输出')
+      : undefined,
     details: detailLines.length > 0 ? detailLines : undefined,
     createdAtMs: parseTimestamp(item.createdAt),
   };
@@ -535,7 +587,7 @@ const buildSyntheticOutcomeItem = (
       id: `synthetic-outcome-${lastRunResult.finishedAt}`,
       tag: lastRunResult.success ? 'done' : 'error',
       accent: lastRunResult.success ? 'green' : 'red',
-      title: lastRunResult.success ? '执行完成' : '执行失败',
+      title: lastRunResult.success ? TERMINAL_RUN_LOG_TITLES.completed : TERMINAL_RUN_LOG_TITLES.failed,
       description: `执行器：${lastRunResult.executorLabel}，退出码：${exitCode ?? '未知'}，耗时：${lastRunResult.durationMs}ms。`,
       status: lastRunResult.success ? 'done' : 'error',
       timestamp: formatTime(lastRunResult.finishedAt),
@@ -622,9 +674,16 @@ const buildTimeline = (
   exitCodeFromOutput: number | null,
   isRunning: boolean,
 ): IStructuredRunTimelineItem[] => {
-  const logItems = runLogs.map((item) => buildLogTimelineItem(item, outputLines));
-  const finalLogItems = logItems.filter((item) => FINAL_LOG_TITLE_PATTERN.test(item.title));
-  const primaryLogItems = logItems.filter((item) => !FINAL_LOG_TITLE_PATTERN.test(item.title));
+  const logItems = runLogs.map((item) => ({
+    item,
+    timelineItem: buildLogTimelineItem(item, outputLines),
+  }));
+  const finalLogItems = logItems
+    .filter(({ item }) => isTerminalRunFinalLog(item))
+    .map(({ timelineItem }) => timelineItem);
+  const primaryLogItems = logItems
+    .filter(({ item }) => !isTerminalRunFinalLog(item))
+    .map(({ timelineItem }) => timelineItem);
   const timelineItems: TInternalTimelineItem[] = [
     ...primaryLogItems,
     ...buildOutputTimelineItems(outputLines, isRunning),
@@ -764,7 +823,7 @@ export const buildStructuredRunReport = ({
 }: TBuildStructuredRunReportOptions): IStructuredRunReport => {
   const sourceRunLogs = Array.isArray(runLogs) ? runLogs : [];
   const rawRunFlowLogs = collectRunFlowLogs(sourceRunLogs);
-  const safeRunLogs = resolveScopedRunLogs(sourceRunLogs);
+  const safeRunLogs = resolveScopedRunLogs(sourceRunLogs, lastRunResult);
   const safeOutput = typeof terminalOutput === 'string' ? terminalOutput : '';
   const outputLines = collectExecutionOutputLines(safeOutput);
   const exitCodeFromOutput = parseExitCodeFromOutput(outputLines.join('\n'));

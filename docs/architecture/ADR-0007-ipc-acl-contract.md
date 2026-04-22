@@ -1,7 +1,7 @@
 # ADR-0007 IPC 反腐层契约
 
 - **日期**：2026-04-21
-- **状态**：`proposed`
+- **状态**：`accepted`
 - **决策者**：@xiaojianc
 
 ---
@@ -31,6 +31,7 @@
 | `outSchema` | `z.ZodType` | 出参 Zod schema（含 camelCase 映射） |
 | `timeoutMs` | `number` | 超时毫秒，默认 10000 |
 | `idempotent` | `boolean` | 是否幂等（决定重试策略） |
+| `errorMap` | `Record<string, { code: string; message: string }>` | Rust / invoke 错误到 `AppError` 的映射表 |
 | `audit` | `'none' \| 'info' \| 'sensitive'` | 审计等级 |
 
 ### safeParse 失败策略
@@ -48,8 +49,11 @@
 
 ### 取消语义
 
+- 前端契约固定为 `(input, options?: { signal?: AbortSignal }) => Promise<TOut>`
 - 通过 `AbortSignal` 传递；组件卸载时 MUST 自动取消进行中的 IPC
-- Rust 侧命令 MUST 响应取消（通过 Tauri `tauri::ipc::Channel` 或 `CancellationToken`）
+- 前端主动取消一律归一化为 `AppError({ code: 'ipc.canceled', scope: 'ipc' })`
+- 超时一律归一化为 `AppError({ code: 'ipc.timeout', scope: 'ipc' })`
+- Rust 侧命令 MUST 响应取消（通过 Tauri `tauri::ipc::Channel` 或 `CancellationToken`），不得继续执行不可逆副作用
 
 ### AppError 结构（统一前后端）
 

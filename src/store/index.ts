@@ -32,62 +32,61 @@ export const APP_STORE_KEY = 'shell-ide.app';
  * 迁移版本：1（migration version 1）
  */
 function migrateV0toV1(): void {
-    if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined') return;
 
-    let storage: Storage | null = null;
+  let storage: Storage;
+  try {
+    storage = window.localStorage;
+  } catch {
+    return; // localStorage 被策略禁用
+  }
+
+  // 新 key 已存在 → 已迁移过，仅清理残留旧 key
+  if (storage.getItem(APP_STORE_KEY) !== null) {
     try {
-        storage = window.localStorage;
+      storage.removeItem(V0_SETTINGS_KEY);
+      storage.removeItem(V0_LEGACY_THEME_KEY);
     } catch {
-        return; // localStorage 被策略禁用
+      // ignore
     }
-    if (!storage) return;
+    return;
+  }
 
-    // 新 key 已存在 → 已迁移过，仅清理残留旧 key
-    if (storage.getItem(APP_STORE_KEY) !== null) {
-        try {
-            storage.removeItem(V0_SETTINGS_KEY);
-            storage.removeItem(V0_LEGACY_THEME_KEY);
-        } catch {
-            // ignore
-        }
-        return;
-    }
-
-    // 尝试从旧主设置 key 迁移（v0 格式为裸 IAppSettings JSON）
-    const oldData = storage.getItem(V0_SETTINGS_KEY);
-    if (oldData !== null) {
-        try {
-            const parsed: unknown = JSON.parse(oldData);
-            // pinia-plugin-persistedstate pick:['settings'] 存储格式为 { settings: IAppSettings }
-            storage.setItem(APP_STORE_KEY, JSON.stringify({ settings: parsed }));
-        } catch {
-            // 数据损坏，以默认值启动；不写入新 key
-        }
-        try {
-            storage.removeItem(V0_SETTINGS_KEY);
-            storage.removeItem(V0_LEGACY_THEME_KEY);
-        } catch {
-            // ignore
-        }
-        return;
-    }
-
-    // 仅存在旧主题 key（最早期版本）→ 读取主题偏好写入新 key
-    const VALID_THEME_PREFS = ['dark', 'light', 'system'] as const;
-    const legacyTheme = storage.getItem(V0_LEGACY_THEME_KEY);
-    if (legacyTheme !== null && (VALID_THEME_PREFS as readonly string[]).includes(legacyTheme)) {
-        try {
-            const partialSettings = { appearance: { themePreference: legacyTheme } };
-            storage.setItem(APP_STORE_KEY, JSON.stringify({ settings: partialSettings }));
-        } catch {
-            // ignore
-        }
+  // 尝试从旧主设置 key 迁移（v0 格式为裸 IAppSettings JSON）
+  const oldData = storage.getItem(V0_SETTINGS_KEY);
+  if (oldData !== null) {
+    try {
+      const parsed: unknown = JSON.parse(oldData);
+      // pinia-plugin-persistedstate pick:['settings'] 存储格式为 { settings: IAppSettings }
+      storage.setItem(APP_STORE_KEY, JSON.stringify({ settings: parsed }));
+    } catch {
+      // 数据损坏，以默认值启动；不写入新 key
     }
     try {
-        storage.removeItem(V0_LEGACY_THEME_KEY);
+      storage.removeItem(V0_SETTINGS_KEY);
+      storage.removeItem(V0_LEGACY_THEME_KEY);
     } catch {
-        // ignore
+      // ignore
     }
+    return;
+  }
+
+  // 仅存在旧主题 key（最早期版本）→ 读取主题偏好写入新 key
+  const VALID_THEME_PREFS = ['dark', 'light', 'system'] as const;
+  const legacyTheme = storage.getItem(V0_LEGACY_THEME_KEY);
+  if (legacyTheme !== null && (VALID_THEME_PREFS as readonly string[]).includes(legacyTheme)) {
+    try {
+      const partialSettings = { appearance: { themePreference: legacyTheme } };
+      storage.setItem(APP_STORE_KEY, JSON.stringify({ settings: partialSettings }));
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    storage.removeItem(V0_LEGACY_THEME_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 // 迁移同步执行，必须在 Pinia 初始化前完成

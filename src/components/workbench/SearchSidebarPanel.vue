@@ -10,7 +10,14 @@
         title="切换到替换"
         @click="handleReplaceAction"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M3 7h11" />
           <path d="M3 17h8" />
           <path d="m16 14 4 3-4 3" />
@@ -22,7 +29,14 @@
     <div class="search-panel-search">
       <label class="search-panel-input-shell">
         <span class="search-panel-input-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <circle cx="11" cy="11" r="7" />
             <path d="m20 20-3.5-3.5" />
           </svg>
@@ -34,7 +48,7 @@
           placeholder="输入关键字搜索…"
           autocomplete="off"
           spellcheck="false"
-        >
+        />
 
         <button
           v-if="hasSearchQuery"
@@ -44,7 +58,14 @@
           title="清空搜索"
           @click.stop="searchQuery = ''"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <path d="M6 6l12 12" />
             <path d="M18 6 6 18" />
           </svg>
@@ -76,7 +97,14 @@
         title="区分大小写"
         @click="matchCase = !matchCase"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M4 18 8 6l4 12" />
           <path d="M5.5 14h5" />
           <path d="M14 12a3 3 0 1 1 5 2v2" />
@@ -91,7 +119,14 @@
         title="全字匹配"
         @click="wholeWord = !wholeWord"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <rect x="3" y="7" width="18" height="10" rx="1.5" />
           <path d="M3 10v4" />
           <path d="M21 10v4" />
@@ -109,7 +144,14 @@
         title="正则表达式"
         @click="useRegex = !useRegex"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M12 4v10" />
           <path d="M7.3 6.5 16.7 11.5" />
           <path d="M16.7 6.5 7.3 11.5" />
@@ -125,7 +167,14 @@
         title="包含 / 排除路径"
         @click="showPathFilters = !showPathFilters"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M4 7h10" />
           <path d="M4 12h10" />
           <path d="M4 17h6" />
@@ -144,7 +193,7 @@
           placeholder="例如 src/**/*.vue"
           autocomplete="off"
           spellcheck="false"
-        >
+        />
       </label>
 
       <label class="search-panel-path-filter">
@@ -155,7 +204,7 @@
           placeholder="例如 target/**"
           autocomplete="off"
           spellcheck="false"
-        >
+        />
       </label>
     </div>
 
@@ -227,14 +276,20 @@
 
         <span class="search-panel-result-body">
           <span class="search-panel-result-snippet">
-            <template v-for="(segment, index) in result.snippetSegments" :key="`${result.path}-snippet-${index}`">
+            <template
+              v-for="(segment, index) in result.snippetSegments"
+              :key="`${result.path}-snippet-${index}`"
+            >
               <mark v-if="segment.matched">{{ segment.text }}</mark>
               <span v-else>{{ segment.text }}</span>
             </template>
           </span>
 
           <span class="search-panel-result-loc">
-            <template v-for="(segment, index) in result.locationSegments" :key="`${result.path}-location-${index}`">
+            <template
+              v-for="(segment, index) in result.locationSegments"
+              :key="`${result.path}-location-${index}`"
+            >
               <mark v-if="segment.matched">{{ segment.text }}</mark>
               <span v-else>{{ segment.text }}</span>
             </template>
@@ -254,7 +309,11 @@ import { tauriService } from '@/services/tauri';
 import type { IWorkspaceDirectoryPayload, IWorkspaceEntry } from '@/types/editor';
 import { toErrorMessage } from '@/utils/error';
 import { getRelativeFileSystemPath, normalizeFileSystemPath } from '@/utils/path';
-import { resolvePreloadedWorkspaceRoot, sortByRelativePath } from '@/utils/workspace';
+import {
+  collectWorkspaceFileEntries,
+  resolveWorkspaceRootPayload,
+  sortByRelativePath,
+} from '@/utils/workspace';
 import { computed, ref, watch } from 'vue';
 
 type TSearchScope = 'all' | 'file-name' | 'symbol' | 'content';
@@ -285,6 +344,11 @@ interface ISearchMatcher {
   errorMessage: string;
   test: (value: string) => boolean;
   highlight: (value: string) => IHighlightedSegment[];
+}
+
+interface IPathFilterMatchers {
+  include: RegExp[];
+  exclude: RegExp[];
 }
 
 const props = defineProps<{
@@ -320,8 +384,7 @@ const searchError = ref('');
 const selectedResultPath = ref<string | null>(null);
 let searchRequestId = 0;
 
-const escapeRegExp = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const isWordCharacter = (value: string | undefined): boolean =>
   Boolean(value) && /[A-Za-z0-9_\-\u4E00-\u9FFF]/.test(value);
@@ -342,19 +405,13 @@ const buildRelativePath = (path: string, rootPath: string): string => {
   );
 };
 
-const buildSearchIndexEntry = (
-  entry: IWorkspaceEntry,
-  rootPath: string,
-): ISearchIndexEntry => ({
+const buildSearchIndexEntry = (entry: IWorkspaceEntry, rootPath: string): ISearchIndexEntry => ({
   path: entry.path,
   name: entry.name,
   relativePath: buildRelativePath(entry.path, rootPath),
 });
 
-const buildPatternRegExp = (
-  pattern: string,
-  caseSensitive: boolean,
-): RegExp => {
+const buildPatternRegExp = (pattern: string, caseSensitive: boolean): RegExp => {
   const wildcardPattern = pattern.split('*').map(escapeRegExp).join('.*');
   return new RegExp(`^${wildcardPattern}$`, caseSensitive ? 'u' : 'iu');
 };
@@ -396,10 +453,7 @@ const collectPlainMatchRanges = (
   return ranges;
 };
 
-const collectRegExpMatchRanges = (
-  value: string,
-  pattern: RegExp,
-): Array<[number, number]> => {
+const collectRegExpMatchRanges = (value: string, pattern: RegExp): Array<[number, number]> => {
   const ranges: Array<[number, number]> = [];
   pattern.lastIndex = 0;
 
@@ -507,10 +561,7 @@ const resolveMatcher = (): ISearchMatcher => {
   };
 };
 
-const resolveEntryScore = (
-  entry: ISearchIndexEntry,
-  reason: TSearchReason,
-): number => {
+const resolveEntryScore = (entry: ISearchIndexEntry, reason: TSearchReason): number => {
   const query = matchCase.value ? searchQuery.value.trim() : searchQuery.value.trim().toLowerCase();
   const target = reason === 'file-name' ? entry.name : entry.relativePath;
   const comparableTarget = matchCase.value ? target : target.toLowerCase();
@@ -538,26 +589,28 @@ const hasSearchQuery = computed(() => searchQuery.value.trim().length > 0);
 const matcher = computed(resolveMatcher);
 const matcherError = computed(() => matcher.value.errorMessage);
 const indexedFileCount = computed(() => searchIndexEntries.value.length);
+const pathFilterMatchers = computed<IPathFilterMatchers>(() => ({
+  include: splitPatternList(includePattern.value).map((pattern) =>
+    buildPatternRegExp(pattern, matchCase.value),
+  ),
+  exclude: splitPatternList(excludePattern.value).map((pattern) =>
+    buildPatternRegExp(pattern, matchCase.value),
+  ),
+}));
 
 const passesPathFilters = (entry: ISearchIndexEntry): boolean => {
   if (!showPathFilters.value) {
     return true;
   }
 
-  const includePatterns = splitPatternList(includePattern.value);
-  const excludePatterns = splitPatternList(excludePattern.value);
+  const { include, exclude } = pathFilterMatchers.value;
   const relativePath = entry.relativePath;
 
-  if (
-    includePatterns.length > 0
-    && !includePatterns.some((pattern) => buildPatternRegExp(pattern, matchCase.value).test(relativePath))
-  ) {
+  if (include.length > 0 && !include.some((pattern) => pattern.test(relativePath))) {
     return false;
   }
 
-  if (
-    excludePatterns.some((pattern) => buildPatternRegExp(pattern, matchCase.value).test(relativePath))
-  ) {
+  if (exclude.some((pattern) => pattern.test(relativePath))) {
     return false;
   }
 
@@ -631,49 +684,31 @@ const buildSearchIndex = async (): Promise<void> => {
   searchError.value = '';
 
   try {
-    const preloadedWorkspaceRoot = resolvePreloadedWorkspaceRoot(
+    const rootPayload = await resolveWorkspaceRootPayload(
       props.workspaceRootPath,
       props.preloadedWorkspaceRoot,
+      tauriService.listWorkspaceEntries,
     );
-    const rootPayload = preloadedWorkspaceRoot
-      ?? await tauriService.listWorkspaceEntries(undefined, props.workspaceRootPath);
 
     if (requestId !== searchRequestId) {
       return;
     }
 
-    const nextEntries: ISearchIndexEntry[] = rootPayload.entries
-      .filter((entry) => entry.kind === 'file')
-      .map((entry) => buildSearchIndexEntry(entry, rootPayload.rootPath));
+    const fileEntries = await collectWorkspaceFileEntries(
+      rootPayload,
+      tauriService.listWorkspaceEntries,
+      {
+        shouldContinue: () => requestId === searchRequestId,
+      },
+    );
 
-    const visitedDirectories = new Set<string>();
-    const pendingDirectories = rootPayload.entries.filter((entry) => entry.kind === 'directory');
-
-    while (pendingDirectories.length > 0) {
-      const directoryEntry = pendingDirectories.shift();
-      if (!directoryEntry || visitedDirectories.has(directoryEntry.path)) {
-        continue;
-      }
-
-      visitedDirectories.add(directoryEntry.path);
-      const directoryPayload = await tauriService.listWorkspaceEntries(
-        directoryEntry.path,
-        rootPayload.rootPath,
-      );
-
-      if (requestId !== searchRequestId) {
-        return;
-      }
-
-      directoryPayload.entries.forEach((entry) => {
-        if (entry.kind === 'directory') {
-          pendingDirectories.push(entry);
-          return;
-        }
-
-        nextEntries.push(buildSearchIndexEntry(entry, rootPayload.rootPath));
-      });
+    if (requestId !== searchRequestId) {
+      return;
     }
+
+    const nextEntries = fileEntries.map((entry) =>
+      buildSearchIndexEntry(entry, rootPayload.rootPath),
+    );
 
     searchIndexEntries.value = sortByRelativePath(nextEntries);
   } catch (error) {
@@ -700,11 +735,7 @@ const handleResultClick = (path: string): void => {
 };
 
 watch(
-  [
-    () => props.isDesktopRuntime,
-    () => props.workspaceRootPath,
-    () => props.preloadedWorkspaceRoot,
-  ],
+  [() => props.isDesktopRuntime, () => props.workspaceRootPath, () => props.preloadedWorkspaceRoot],
   () => {
     void buildSearchIndex();
   },
