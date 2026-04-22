@@ -1,3 +1,9 @@
 [workspace]
 members = ["src-tauri"]
 resolver = "2"
+
+[patch.crates-io]
+wry = { path = "vendor/wry" }
+tauri-runtime = { path = "vendor/tauri-runtime" }
+tauri-runtime-wry = { path = "vendor/tauri-runtime-wry" }
+tauri-utils = { path = "vendor/tauri-utils" }

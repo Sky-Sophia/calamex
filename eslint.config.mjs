@@ -12,6 +12,7 @@ export default tseslint.config(
       'node_modules/**',
       'src-tauri/target/**',
       'target/**',
+      'vendor/**',
       '*.cjs',
       'src/**/*.rs',
     ],

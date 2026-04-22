@@ -22,3 +22,4 @@ tauri-plugin-store = "~2"
 thiserror = "2.0.18"
 tokio = { version = "1.52.0", features = ["fs", "macros", "process", "rt-multi-thread", "time"] }
 tracing = "0.1.44"
+wry = { version = "0.54.4", features = ["visual-hosting"] }
