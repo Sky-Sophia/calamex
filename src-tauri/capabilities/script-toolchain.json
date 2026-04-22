@@ -1,0 +1,9 @@
+{
+    "$schema": "../gen/schemas/desktop-schema.json",
+    "identifier": "script-toolchain",
+    "description": "脚本工具链域能力：ShellCheck 诊断分析、shfmt 格式化、执行环境探测。对应命令：analyze_script / format_script / detect_execution_environment。参见 ADR-0005。高敏感命令：执行外部工具（ShellCheck/shfmt），已在安全评审中确认为只读/格式化操作。",
+    "windows": [
+        "main"
+    ],
+    "permissions": []
+}

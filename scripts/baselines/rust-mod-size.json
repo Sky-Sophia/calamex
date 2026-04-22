@@ -1,0 +1,14 @@
+{
+    "$schema": "../baselines-schema.json",
+    "description": "Rust commands/mod.rs 行数守卫豁免清单（R-20.5.1）",
+    "exemptions": [
+        {
+            "path": "src-tauri/src/commands/mod.rs",
+            "rule": "max-lines-80",
+            "reason": "存量违规：当前 ~2495 行，计划在 iteration 3 T-3.3/T-3.4 分两个里程碑拆分到 ≤ 80 行",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-08-31"
+        }
+    ]
+}

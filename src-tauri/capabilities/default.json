@@ -1,17 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "SH 编辑器默认能力",
-  "windows": [
-  "main"
-  ],
-  "permissions": [
-  "core:default",
-  "dialog:default",
-  "core:window:allow-start-dragging",
-  "core:window:allow-minimize",
-  "core:window:allow-toggle-maximize",
-  "core:window:allow-close",
-  "core:window:allow-destroy"
-  ]
+  "identifier": "legacy-migrated",
+  "description": "已迁移：此文件权限已拆分到 5 个域文件。参见 ADR-0005。  Migrated to: window.json / workspace-fs.json / script-toolchain.json / terminal.json / git.json",
+  "windows": [],
+  "permissions": []
 }

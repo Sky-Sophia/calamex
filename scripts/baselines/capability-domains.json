@@ -1,0 +1,5 @@
+{
+    "$schema": "../baselines-schema.json",
+    "description": "Tauri capability 5 域拆分守卫豁免清单（R-7.4.1 / R-18.12.5）",
+    "exemptions": []
+}

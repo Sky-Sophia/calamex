@@ -4,7 +4,7 @@
   "font": "inter",
   "typescript": true,
   "tailwind": {
-    "config": "tailwind.config.ts",
+    "config": "",
     "css": "src/styles.css",
     "baseColor": "neutral",
     "cssVariables": true,

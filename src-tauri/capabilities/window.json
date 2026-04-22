@@ -1,0 +1,16 @@
+{
+    "$schema": "../gen/schemas/desktop-schema.json",
+    "identifier": "window",
+    "description": "窗口管理域能力：标题栏拖动、最小化、最大化切换、关闭/销毁窗口。对应命令：apply_window_stage / show_startup_window。参见 ADR-0005。",
+    "windows": [
+        "main"
+    ],
+    "permissions": [
+        "core:default",
+        "core:window:allow-start-dragging",
+        "core:window:allow-minimize",
+        "core:window:allow-toggle-maximize",
+        "core:window:allow-close",
+        "core:window:allow-destroy"
+    ]
+}

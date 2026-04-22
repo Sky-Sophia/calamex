@@ -1,0 +1,14 @@
+{
+    "$schema": "../baselines-schema.json",
+    "description": "休眠模块未标注守卫豁免清单（R-18.2.2 / R-20.8.2）",
+    "exemptions": [
+        {
+            "path": "src/router/index.ts",
+            "rule": "dormant-no-readme",
+            "reason": "存量违规：router 未注册但未标注休眠，将在 T-1.8 当周修复（添加 @status:dormant 注释和 README）",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0006",
+            "expiresAt": "2026-04-28"
+        }
+    ]
+}

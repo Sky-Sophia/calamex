@@ -1,0 +1,9 @@
+{
+    "$schema": "../gen/schemas/desktop-schema.json",
+    "identifier": "terminal",
+    "description": "集成终端域能力：Rust PTY 会话生命周期管理与脚本派发。对应命令：ensure_terminal_session / write_terminal_input / resize_terminal_session / close_terminal_session / dispatch_script_to_terminal / run_script。参见 ADR-0005。注意：write_terminal_input 可写入任意字节，属高权限操作，前端 MUST 仅通过 services/tauri.ts 收口调用。",
+    "windows": [
+        "main"
+    ],
+    "permissions": []
+}

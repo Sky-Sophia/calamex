@@ -1,0 +1,14 @@
+{
+    "$schema": "../baselines-schema.json",
+    "description": "配置文件悬空引用守卫豁免清单（R-20.8.3 / R-20.8.5）",
+    "exemptions": [
+        {
+            "path": "components.json",
+            "rule": "dangling-config-ref",
+            "reason": "存量违规：components.json 引用不存在的 tailwind.config.ts，将在 T-1.8 当周修复",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-04-28"
+        }
+    ]
+}

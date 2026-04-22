@@ -3,15 +3,25 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "generate:shell-catalog": "node ./scripts/generate-shell-command-catalog.mjs",
     "dev": "npm run generate:shell-catalog && vite --host 0.0.0.0 --port 1420",
     "build": "npm run generate:shell-catalog && vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .ts,.vue",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "guard": "node_modules/.bin/tsx scripts/run-all-guards.ts",
     "tauri": "tauri",
     "tauri:dev": "node ./scripts/run-tauri.mjs dev",
-    "tauri:build": "node ./scripts/run-tauri.mjs build"
+    "tauri:build": "node ./scripts/run-tauri.mjs build",
+    "prepare": "husky"
   },
   "dependencies": {
     "@icon-park/vue-next": "^1.4.2",
@@ -19,6 +29,7 @@
     "@tauri-apps/plugin-dialog": "^2.0.1",
     "@wasm-fmt/shfmt": "^0.2.7",
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.11.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
@@ -26,35 +37,62 @@
     "lucide-vue-next": "^1.0.0",
     "monaco-editor": "^0.55.1",
     "pinia": "^3.0.1",
+    "pinia-plugin-persistedstate": "^4.1.0",
     "reka-ui": "^2.9.6",
     "tailwind-merge": "^3.5.0",
     "tree-sitter-bash": "^0.25.1",
     "vue": "^3.5.13",
     "vue-router": "^4.6.4",
-    "web-tree-sitter": "^0.26.8"
+    "web-tree-sitter": "^0.26.8",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@commitlint/cli": "^19.6.0",
+    "@commitlint/config-conventional": "^19.6.0",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.48.0",
+    "@size-limit/preset-app": "^11.1.0",
     "@tailwindcss/postcss": "^4.2.2",
     "@tauri-apps/cli": "^2.1.0",
     "@types/node": "^25.6.0",
     "@vitejs/plugin-vue": "^6.0.6",
+    "@vitest/coverage-v8": "^2.1.0",
+    "@vue/test-utils": "^2.4.0",
     "@vue/tsconfig": "^0.9.1",
     "@withfig/autocomplete": "^2.692.3",
     "@withfig/autocomplete-tools": "^2.11.0",
     "autoprefixer": "^10.5.0",
+    "dpdm": "^3.14.0",
     "eslint": "^10.2.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-vue": "^10.8.0",
     "globals": "^17.5.0",
+    "husky": "^9.1.0",
+    "jsdom": "^29.0.2",
+    "lint-staged": "^15.3.0",
     "postcss": "^8.5.10",
     "prettier": "^3.4.2",
     "shellcheck": "^4.1.0",
+    "size-limit": "^11.1.0",
+    "stylelint": "^16.12.0",
+    "stylelint-config-tailwindcss": "^1.0.1",
     "tailwindcss": "^4.2.2",
+    "tsx": "^4.19.0",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.18.2",
     "vite": "^8.0.8",
+    "vitest": "^2.1.0",
     "vue-eslint-parser": "^10.4.0",
     "vue-tsc": "^3.2.6"
+  },
+  "lint-staged": {
+    "*.{ts,vue}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{css,scss}": [
+      "prettier --write"
+    ]
   }
 }

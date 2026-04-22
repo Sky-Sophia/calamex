@@ -1,0 +1,9 @@
+{
+    "$schema": "../gen/schemas/desktop-schema.json",
+    "identifier": "git",
+    "description": "Git 域能力：仓库状态查询、文件 diff、暂存/取消暂存、提交。对应命令：git_get_repository_status / git_get_file_diff / git_stage_files / git_unstage_files / git_commit / git_get_file_status。参见 ADR-0005。注意：git_commit 为写操作，前端调用前 MUST 经用户确认。",
+    "windows": [
+        "main"
+    ],
+    "permissions": []
+}

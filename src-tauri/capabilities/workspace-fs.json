@@ -1,0 +1,11 @@
+{
+    "$schema": "../gen/schemas/desktop-schema.json",
+    "identifier": "workspace-fs",
+    "description": "工作区/文件系统域能力：对话框选择路径、脚本加载/保存、工作区条目列举、图片资产加载。对应命令：get_startup_workspace / load_script / save_script / list_workspace_entries / load_image_asset。参见 ADR-0005。",
+    "windows": [
+        "main"
+    ],
+    "permissions": [
+        "dialog:default"
+    ]
+}
