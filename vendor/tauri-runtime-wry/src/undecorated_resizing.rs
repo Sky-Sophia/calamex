@@ -88,6 +88,9 @@ mod windows {
   use windows::Win32::{Foundation::*, UI::Shell::SetWindowSubclass};
   use windows::Win32::{Graphics::Gdi::*, UI::Shell::DefSubclassProc};
 
+  const BASE_DPI: i32 = 96;
+  const RESIZE_BORDER_DIP: i32 = 4;
+
   impl HitTestResult {
     fn to_win32(self) -> i32 {
       match self {
@@ -102,6 +105,18 @@ mod windows {
         _ => HTTRANSPARENT,
       }
     }
+  }
+
+  #[inline]
+  fn pack_screen_point_lparam(x: i32, y: i32) -> LPARAM {
+    let packed = ((y as u16 as u32) << 16) | (x as u16 as u32);
+    LPARAM(packed as isize)
+  }
+
+  #[inline]
+  fn scale_resize_border(dpi: u32) -> i32 {
+    (((RESIZE_BORDER_DIP as i64 * dpi as i64) + (BASE_DPI as i64 / 2)) / BASE_DPI as i64)
+      .max(1) as i32
   }
 
   const CLASS_NAME: PCWSTR = w!("TAURI_DRAG_RESIZE_BORDERS");
@@ -304,8 +319,8 @@ mod windows {
         let (cx, cy) = (GET_X_LPARAM(lparam) as i32, GET_Y_LPARAM(lparam) as i32);
 
         let dpi = unsafe { util::hwnd_dpi(child) };
-        let border_x = util::get_system_metrics_for_dpi(SM_CXFRAME, dpi);
-        let border_y = util::get_system_metrics_for_dpi(SM_CYFRAME, dpi);
+        let border_x = scale_resize_border(dpi);
+        let border_y = scale_resize_border(dpi);
 
         let res = hit_test(
           rect.left,
@@ -317,6 +332,11 @@ mod windows {
           border_x,
           border_y,
         );
+
+        #[cfg(debug_assertions)]
+        {
+          // 临时关闭无边框 resize 命中测试日志，避免开发期持续刷屏。
+        }
 
         return LRESULT(res.to_win32() as _);
       }
@@ -350,8 +370,8 @@ mod windows {
           }
 
           let dpi = unsafe { util::hwnd_dpi(child) };
-          let border_x = util::get_system_metrics_for_dpi(SM_CXFRAME, dpi);
-          let border_y = util::get_system_metrics_for_dpi(SM_CYFRAME, dpi);
+          let border_x = scale_resize_border(dpi);
+          let border_y = scale_resize_border(dpi);
 
           hit_test(
             rect.left,
@@ -366,16 +386,15 @@ mod windows {
         };
 
         if res != HitTestResult::NoWhere {
-          let points = POINTS {
-            x: cx as i16,
-            y: cy as i16,
-          };
-
+          // WM_NCLBUTTONDOWN expects screen coordinates packed into LPARAM, not a
+          // pointer to a temporary POINTS struct. Left/top edge sizing uses the
+          // anchor point to decide which side stays fixed, so an invalid LPARAM
+          // manifests as "整窗平移" instead of resize.
           let _ = PostMessageW(
             Some(parent),
             WM_NCLBUTTONDOWN,
             WPARAM(res.to_win32() as _),
-            LPARAM(&points as *const _ as _),
+            pack_screen_point_lparam(cx, cy),
           );
         }
 
@@ -417,8 +436,8 @@ mod windows {
     // windows like the webview can receive mouse events.
 
     let dpi = unsafe { util::hwnd_dpi(hwnd) };
-    let border_x = util::get_system_metrics_for_dpi(SM_CXFRAME, dpi);
-    let border_y = util::get_system_metrics_for_dpi(SM_CYFRAME, dpi);
+    let border_x = scale_resize_border(dpi);
+    let border_y = scale_resize_border(dpi);
 
     // hrgn1 must be mutable to call .free() later
     let mut hrgn1 = CreateRectRgn(0, 0, width, height);
@@ -496,6 +515,22 @@ mod windows {
   #[inline]
   fn GET_Y_LPARAM(lparam: LPARAM) -> i16 {
     (((lparam.0 as usize) & 0xFFFF_0000) >> 16) as u16 as i16
+  }
+
+  #[cfg(test)]
+  mod tests {
+    use super::*;
+
+    #[test]
+    fn pack_screen_point_lparam_preserves_signed_coordinates() {
+      let lparam = pack_screen_point_lparam(-8, 24);
+      assert_eq!(GET_X_LPARAM(lparam), -8);
+      assert_eq!(GET_Y_LPARAM(lparam), 24);
+
+      let lparam = pack_screen_point_lparam(1440, -32);
+      assert_eq!(GET_X_LPARAM(lparam), 1440);
+      assert_eq!(GET_Y_LPARAM(lparam), -32);
+    }
   }
 }
 

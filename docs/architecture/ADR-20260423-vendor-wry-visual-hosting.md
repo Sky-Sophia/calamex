@@ -84,6 +84,16 @@ cargo build -p sh-editor --no-default-features
 - Spy++ / Win32 枚举：主窗口下不得出现可见 `WRY_WEBVIEW`，`Chrome_WidgetWin_0` 若存在必须为 `0x0`，`TAURI_DRAG_RESIZE_BORDERS` 仅作为 Tauri 无边框 resize 命中测试窗口。
 - 人工验证：快速拖拽 resize、中文 IME、Alt-Tab 焦点恢复、多 DPI 显示器移动、鼠标/滚轮/右键、触控/笔（有设备时）、屏幕阅读器 UIA 树。
 
+## WndProc 消息路由补充
+
+本 ADR 只定义 Visual Hosting 主干接入；后续 resize 收口的具体消息顺序以 `ADR-20260423-visual-hosting-nchittest-and-nobackground.md` 为准，补充约束如下：
+
+1. `WM_WINDOWPOSCHANGING` 先于 `WM_SIZE` 更新 Visual Hosting bounds，`WM_SIZE` 仅保留兜底。
+2. Visual Hosting 的 DComp tree 必须包含位于 WebView2 visual 下方的宿主 background visual；背景 surface 由 D3D11 clear 写入窗口背景色，用来兜住 WebView2 swap chain resize present 慢 1~3 帧时的新扩区域。
+3. `WM_ERASEBKGND` 在 Visual Hosting 下直接截断，避免系统尝试走 GDI 背景擦除。
+4. 宿主 `WM_NCHITTEST` 只兜住外圈 resize 框；标题栏拖动继续沿用应用现有交互真源。
+5. 无边框 resize 代理子窗口 `TAURI_DRAG_RESIZE_BORDERS` 的 `WM_NCLBUTTONDOWN` 转发必须传递正确的屏幕坐标打包值。
+
 ## 退出条件
 
 满足以下任一条件时，新建 ADR 迁移回官方依赖：

@@ -3,7 +3,8 @@
     <div class="grid h-10 grid-cols-[minmax(0,1fr)_minmax(240px,420px)_minmax(0,1fr)] items-center gap-3 px-3">
       <div class="flex min-w-0 items-center gap-3">
         <div class="flex h-6 w-6 items-center justify-center rounded-md bg-(--accent-muted) text-(--accent-strong)">
-          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8"
+          <svg
+viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
             <path d="M14 3v5h5" />
@@ -11,11 +12,13 @@
         </div>
 
         <nav class="flex min-w-0 items-center gap-1 text-[12px] text-(--text-tertiary)">
-          <AppDropdownMenu v-for="menu in menubarMenus" :key="menu.key" :items="menu.items" align="left"
+          <AppDropdownMenu
+v-for="menu in menubarMenus" :key="menu.key" :items="menu.items" align="left"
             variant="menubar" :min-width="menu.minWidth" :open="openMenuKey === menu.key"
             @update:open="handleMenuOpenChange(menu.key, $event)" @select="handleMenuSelect(menu.key, $event)">
             <template #trigger="{ open }">
-              <button type="button" class="menubar-menu-item" :class="{ 'is-open': open }" data-no-window-drag
+              <button
+type="button" class="menubar-menu-item" :class="{ 'is-open': open }" data-no-window-drag
                 @mouseenter="handleMenuTriggerMouseEnter(menu.key)">
                 {{ menu.label }}
               </button>
@@ -26,21 +29,24 @@
 
       <div class="flex justify-center" @dblclick="handleToggleMaximize">
         <div class="window-command-bar w-full justify-center text-[12px]">
-          <svg viewBox="0 0 24 24" class="h-4 w-4 text-(--text-quaternary)" fill="none" stroke="currentColor"
+          <svg
+viewBox="0 0 24 24" class="h-4 w-4 text-(--text-quaternary)" fill="none" stroke="currentColor"
             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="6.5" />
             <path d="M20 20l-3.5-3.5" />
           </svg>
-          <span class="truncate">my_desktop_app</span>
+          <span class="truncate">Calamex</span>
         </div>
       </div>
 
       <div class="flex min-w-0 items-center justify-end gap-2">
-        <button type="button" class="icon-button relative app-tooltip-target border border-transparent"
+        <button
+type="button" class="icon-button relative app-tooltip-target border border-transparent"
           :class="terminalToggleButtonClass" :disabled="!isDesktopRuntime"
           :data-tooltip="isTerminalToggleDisabled ? undefined : terminalToggleTooltip" data-tooltip-placement="bottom"
           :aria-label="terminalToggleTooltip" @click="toggleTerminalVisibility">
-          <svg viewBox="0 0 16 16" aria-hidden="true" class="h-4 w-4" fill="none" stroke="currentColor"
+          <svg
+viewBox="0 0 16 16" aria-hidden="true" class="h-4 w-4" fill="none" stroke="currentColor"
             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M2.5 3.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z" />
             <path d="m5.2 7 1.6 1.4-1.6 1.4" />
@@ -48,11 +54,13 @@
           </svg>
         </button>
 
-        <button type="button" class="icon-button relative app-tooltip-target border border-transparent"
+        <button
+type="button" class="icon-button relative app-tooltip-target border border-transparent"
           :class="diagnosticsToggleButtonClass" :aria-disabled="!props.canToggleDiagnostics"
           :data-tooltip="isDiagnosticsToggleDisabled ? undefined : diagnosticToggleTooltip"
           data-tooltip-placement="bottom" :aria-label="diagnosticToggleTooltip" @click="handleDiagnosticsToggleClick">
-          <svg viewBox="0 0 16 16" aria-hidden="true" class="h-4 w-4" fill="none" stroke="currentColor"
+          <svg
+viewBox="0 0 16 16" aria-hidden="true" class="h-4 w-4" fill="none" stroke="currentColor"
             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M2.5 3.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z" />
             <path d="M9 3.5v9" />
@@ -61,19 +69,24 @@
             <path d="M11.1 10.3h1.1" />
           </svg>
 
-          <span v-if="diagnosticIssueCount > 0"
+          <span
+v-if="diagnosticIssueCount > 0"
             class="absolute -right-1 -top-1 inline-flex min-w-4 items-center justify-center rounded-full border border-[#3a2f16] bg-[#2a2112] px-1 text-[9px] font-semibold leading-4 text-[#ffcc4d]">
             {{ diagnosticCounterLabel }}
           </span>
         </button>
 
-        <span class="app-tooltip-target inline-flex" :data-tooltip="isRunButtonDisabled ? undefined : runButtonTooltip"
+        <span
+class="app-tooltip-target inline-flex" :data-tooltip="isRunButtonDisabled ? undefined : runButtonTooltip"
           data-tooltip-placement="bottom">
-          <button type="button" class="titlebar-run-button" :disabled="isRunButtonDisabled" aria-label="运行脚本"
+          <button
+type="button" class="titlebar-run-button" :disabled="isRunButtonDisabled" aria-label="运行脚本"
             @click="$emit('run')">
-            <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 16 16"
+            <svg
+xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 16 16"
               class="titlebar-run-icon h-5 w-5" aria-hidden="true">
-              <path fill="currentColor"
+              <path
+fill="currentColor"
                 d="M4.506 3.503L12.501 8l-8 4.5zm-.004-1.505C3.718 1.998 3 2.626 3 3.5v9c0 .874.718 1.502 1.502 1.502c.245 0 .496-.061.733-.195l8-4.5c1.019-.573 1.019-2.041 0-2.615l-8-4.499a1.5 1.5 0 0 0-.733-.195" />
             </svg>
           </button>
@@ -84,27 +97,32 @@
         </span>
 
         <div v-if="isDesktopRuntime" class="ml-1 flex items-center gap-0.5">
-          <button class="window-control-button app-tooltip-target" type="button" aria-label="最小化" data-tooltip="最小化"
+          <button
+class="window-control-button app-tooltip-target" type="button" aria-label="最小化" data-tooltip="最小化"
             data-tooltip-placement="bottom" @click="handleMinimize">
             <svg viewBox="0 0 10 10" aria-hidden="true" class="h-3.5 w-3.5">
               <path d="M1 5h8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.2" />
             </svg>
           </button>
 
-          <button class="window-control-button app-tooltip-target" type="button"
+          <button
+class="window-control-button app-tooltip-target" type="button"
             :aria-label="isMaximized ? '向下还原' : '最大化'" :data-tooltip="isMaximized ? '向下还原' : '最大化'"
             data-tooltip-placement="bottom" @click="handleToggleMaximize">
             <svg v-if="!isMaximized" viewBox="0 0 10 10" aria-hidden="true" class="h-3.5 w-3.5">
-              <rect x="1.5" y="1.5" width="7" height="7" fill="none" rx="0.5" stroke="currentColor"
+              <rect
+x="1.5" y="1.5" width="7" height="7" fill="none" rx="0.5" stroke="currentColor"
                 stroke-width="1.1" />
             </svg>
             <svg v-else viewBox="0 0 10 10" aria-hidden="true" class="h-3.5 w-3.5">
-              <path d="M3 1.5h5.5V7M7 3H1.5v5.5H7z" fill="none" stroke="currentColor" stroke-linejoin="round"
+              <path
+d="M3 1.5h5.5V7M7 3H1.5v5.5H7z" fill="none" stroke="currentColor" stroke-linejoin="round"
                 stroke-width="1.1" />
             </svg>
           </button>
 
-          <button class="window-control-button app-tooltip-target" type="button" aria-label="关闭" data-tooltip="关闭"
+          <button
+class="window-control-button app-tooltip-target" type="button" aria-label="关闭" data-tooltip="关闭"
             data-tooltip-placement="bottom" @click="$emit('close-request')">
             <svg viewBox="0 0 10 10" aria-hidden="true" class="h-3.5 w-3.5">
               <path d="M2 2l6 6M8 2L2 8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.2" />
@@ -126,6 +144,7 @@ import type { UnlistenFn } from '@tauri-apps/api/event';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 type TTitlebarMenuKey = 'file' | 'edit' | 'view' | 'select' | 'goto' | 'terminal' | 'help';
+const RESIZE_EDGE_PX = 4;
 
 interface ITitlebarMenuItem {
   key: string;
@@ -795,6 +814,7 @@ const handleToggleMaximize = async (): Promise<void> => {
   await syncWindowState();
 };
 
+
 const handleStartWindowDrag = async (event: MouseEvent): Promise<void> => {
   if (!props.isDesktopRuntime || event.button !== 0) {
     return;
@@ -810,9 +830,53 @@ const handleStartWindowDrag = async (event: MouseEvent): Promise<void> => {
     return;
   }
 
+  // ⚠ 关键:event.currentTarget 在 await 之后会被置 null,
+  // 必须在任何 await 之前把 rect 和坐标抓出来保存。
+  const headerEl = event.currentTarget as HTMLElement | null;
+  const rect = headerEl?.getBoundingClientRect() ?? null;
+  const clientX = event.clientX;
+  const clientY = event.clientY;
+
   const appWindow = await getAppWindow();
   if (!appWindow) {
     return;
+  }
+
+  // Bug A 修复:titlebar 外圈 8dip 分流到 resize
+  if (rect) {
+    let maximized = false;
+    try {
+      maximized = await appWindow.isMaximized();
+    } catch {
+      /* ignore */
+    }
+
+    if (!maximized) {
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      const w = rect.width;
+      const e = RESIZE_EDGE_PX;
+
+      const direction:
+        | 'North' | 'NorthEast' | 'East' | 'SouthEast'
+        | 'South' | 'SouthWest' | 'West' | 'NorthWest'
+        | null =
+        y < e && x < e ? 'NorthWest'
+          : y < e && x > w - e ? 'NorthEast'
+            : y < e ? 'North'
+              : x < e ? 'West'
+                : x > w - e ? 'East'
+                  : null;
+
+      if (direction) {
+        try {
+          await appWindow.startResizeDragging(direction);
+        } catch (error) {
+          console.warn('窗口 resize 拖动失败', error);
+        }
+        return;
+      }
+    }
   }
 
   try {

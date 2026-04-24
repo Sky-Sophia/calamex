@@ -1,4 +1,4 @@
-use super::{ExecutionEnvironment, ExecutionOption};
+use super::{configure_tokio_command_for_background, ExecutionEnvironment, ExecutionOption};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -168,6 +168,7 @@ async fn probe_executor(candidate: &ExecutorCandidate) -> bool {
     }
 
     let mut command = Command::new(path);
+    configure_tokio_command_for_background(&mut command);
     command.args(["--list", "--quiet"]);
     command.stdout(Stdio::piped()).stderr(Stdio::null());
 

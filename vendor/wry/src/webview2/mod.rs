@@ -55,8 +55,15 @@ const PARENT_SUBCLASS_ID: u32 = WM_USER + 0x64;
 const PARENT_DESTROY_MESSAGE: u32 = WM_USER + 0x65;
 const MAIN_THREAD_DISPATCHER_SUBCLASS_ID: u32 = WM_USER + 0x66;
 static EXEC_MSG_ID: Lazy<u32> = Lazy::new(|| unsafe { RegisterWindowMessageA(s!("Wry::ExecMsg")) });
+const WINDOW_RESIZE_START_SCRIPT: &str =
+  "window.dispatchEvent(new Event('shell-window-resize-start'));";
+const WINDOW_RESIZE_END_SCRIPT: &str =
+  "window.dispatchEvent(new Event('shell-window-resize-end'));";
+const DEFAULT_CHROME_BACKGROUND: (u8, u8, u8) = (0x0D, 0x0F, 0x12);
 #[cfg(feature = "visual-hosting")]
 const WM_MOUSELEAVE: u32 = 0x02A3;
+#[cfg(feature = "visual-hosting")]
+const RESIZE_BORDER_DIP: i32 = 4;
 
 #[cfg(feature = "visual-hosting")]
 #[inline]
@@ -112,6 +119,13 @@ unsafe fn screen_to_client(hwnd: HWND, point: &mut POINT) -> bool {
   ScreenToClient(hwnd, point).as_bool()
 }
 
+#[cfg(feature = "visual-hosting")]
+#[inline]
+fn scale_dip(dip: i32, dpi: u32) -> i32 {
+  (((dip as i64 * dpi as i64) + (util::BASE_DPI as i64 / 2)) / util::BASE_DPI as i64)
+    .max(1) as i32
+}
+
 impl From<webview2_com::Error> for Error {
   fn from(err: webview2_com::Error) -> Self {
     Error::WebView2Error(err)
@@ -143,6 +157,9 @@ pub(crate) struct InnerWebView {
 enum ParentSubclassData {
   Windowed {
     controller: ICoreWebView2Controller,
+    webview: ICoreWebView2,
+    background_color: (u8, u8, u8),
+    is_interactive_resizing: bool,
   },
   #[cfg(feature = "visual-hosting")]
   Visual(VisualParentSubclassData),
@@ -458,6 +475,22 @@ impl InnerWebView {
           // Set focus to the child window(WebView document)
           let _ = SetFocus(child);
         }
+      }
+
+      if msg == WM_ERASEBKGND {
+        let mut rect = RECT::default();
+        if GetClientRect(hwnd, &mut rect).is_ok() {
+          let brush = CreateSolidBrush(COLORREF(
+            DEFAULT_CHROME_BACKGROUND.0 as u32
+              | ((DEFAULT_CHROME_BACKGROUND.1 as u32) << 8)
+              | ((DEFAULT_CHROME_BACKGROUND.2 as u32) << 16),
+          ));
+          if !brush.is_invalid() {
+            let _ = FillRect(HDC(wparam.0 as *mut _), &rect, brush);
+            let _ = DeleteObject(HGDIOBJ(brush.0));
+          }
+        }
+        return LRESULT(1);
       }
 
       DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -822,6 +855,12 @@ impl InnerWebView {
 
     // Subclass parent for resizing and focus
     if !is_child {
+      let opaque_background_color = attributes
+        .background_color
+        .filter(|(_, _, _, alpha)| *alpha != 0)
+        .map(|(red, green, blue, _)| (red, green, blue))
+        .unwrap_or(DEFAULT_CHROME_BACKGROUND);
+
       #[cfg(feature = "visual-hosting")]
       if let Some(visual_host) = visual_host {
         unsafe {
@@ -836,6 +875,9 @@ impl InnerWebView {
             parent,
             ParentSubclassData::Windowed {
               controller: controller.clone(),
+              webview: webview.clone(),
+              background_color: opaque_background_color,
+              is_interactive_resizing: false,
             },
           )
         };
@@ -846,6 +888,9 @@ impl InnerWebView {
           parent,
           ParentSubclassData::Windowed {
             controller: controller.clone(),
+            webview: webview.clone(),
+            background_color: opaque_background_color,
+            is_interactive_resizing: false,
           },
         )
       };
@@ -1542,11 +1587,63 @@ impl InnerWebView {
     let _ = TrackMouseEvent(&mut tme);
   }
 
-  unsafe fn handle_windowed_resize(controller: &ICoreWebView2Controller, hwnd: HWND) {
-    let Ok(PhysicalSize { width, height }) = Self::parent_bounds(hwnd) else {
-      return;
+  #[cfg(feature = "visual-hosting")]
+  unsafe fn handle_visual_nc_hit_test(hwnd: HWND, lparam: LPARAM) -> Option<LRESULT> {
+    if IsZoomed(hwnd).as_bool() {
+      return None;
+    }
+
+    let mut point = POINT {
+      x: get_x_lparam(lparam),
+      y: get_y_lparam(lparam),
+    };
+    if !screen_to_client(hwnd, &mut point) {
+      return None;
+    }
+
+    let mut client_rect = RECT::default();
+    if GetClientRect(hwnd, &mut client_rect).is_err() {
+      return None;
+    }
+
+    let border = scale_dip(RESIZE_BORDER_DIP, util::hwnd_dpi(hwnd));
+    let on_left = point.x < client_rect.left + border;
+    let on_right = point.x >= client_rect.right - border;
+    let on_top = point.y < client_rect.top + border;
+    let on_bottom = point.y >= client_rect.bottom - border;
+
+    let hit = match (on_top, on_bottom, on_left, on_right) {
+      (true, _, true, _) => HTTOPLEFT,
+      (true, _, _, true) => HTTOPRIGHT,
+      (_, true, true, _) => HTBOTTOMLEFT,
+      (_, true, _, true) => HTBOTTOMRIGHT,
+      (true, _, _, _) => HTTOP,
+      (_, true, _, _) => HTBOTTOM,
+      (_, _, true, _) => HTLEFT,
+      (_, _, _, true) => HTRIGHT,
+      _ => return None,
     };
 
+    Some(LRESULT(hit as isize))
+  }
+
+  #[cfg(all(feature = "visual-hosting", debug_assertions))]
+  fn log_visual_nc_hit_test(_lparam: LPARAM, _result: LRESULT) {
+    // 临时关闭宿主窗口 WM_NCHITTEST 调试日志，避免开发期持续刷屏。
+  }
+
+  #[cfg(all(feature = "visual-hosting", not(debug_assertions)))]
+  fn log_visual_nc_hit_test(_lparam: LPARAM, _result: LRESULT) {}
+
+  fn dispatch_window_resize_event(webview: &ICoreWebView2, script: &str) {
+    let _ = Self::execute_script(webview, script, |_| ());
+  }
+
+  unsafe fn set_windowed_controller_bounds(
+    controller: &ICoreWebView2Controller,
+    width: i32,
+    height: i32,
+  ) {
     let _ = controller.SetBounds(RECT {
       left: 0,
       top: 0,
@@ -1566,6 +1663,39 @@ impl InnerWebView {
         SWP_ASYNCWINDOWPOS | SWP_NOACTIVATE | SWP_NOZORDER,
       );
     }
+  }
+
+  unsafe fn handle_windowed_resize(controller: &ICoreWebView2Controller, hwnd: HWND) {
+    let Ok(PhysicalSize { width, height }) = Self::parent_bounds(hwnd) else {
+      return;
+    };
+
+    Self::set_windowed_controller_bounds(controller, width, height);
+  }
+
+  unsafe fn fill_windowed_resize_gap(hwnd: HWND, background_color: (u8, u8, u8)) {
+    let dc = GetDC(Some(hwnd));
+    if dc.is_invalid() {
+      return;
+    }
+
+    let mut rect = RECT::default();
+    if GetClientRect(hwnd, &mut rect).is_err() {
+      let _ = ReleaseDC(Some(hwnd), dc);
+      return;
+    }
+
+    let brush = CreateSolidBrush(COLORREF(
+      background_color.0 as u32
+        | ((background_color.1 as u32) << 8)
+        | ((background_color.2 as u32) << 16),
+    ));
+    if !brush.is_invalid() {
+      let _ = FillRect(dc, &rect, brush);
+      let _ = DeleteObject(HGDIOBJ(brush.0));
+    }
+
+    let _ = ReleaseDC(Some(hwnd), dc);
   }
 
   #[cfg(feature = "visual-hosting")]
@@ -1604,10 +1734,73 @@ impl InnerWebView {
     let data = &mut *(dwrefdata as *mut ParentSubclassData);
 
     match msg {
+      #[cfg(feature = "visual-hosting")]
+      WM_NCHITTEST => {
+        if let ParentSubclassData::Visual(_) = data {
+          if let Some(result) = Self::handle_visual_nc_hit_test(hwnd, lparam) {
+            Self::log_visual_nc_hit_test(lparam, result);
+            return result;
+          }
+
+          let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+          Self::log_visual_nc_hit_test(lparam, result);
+          return result;
+        }
+      }
+
+      #[cfg(feature = "visual-hosting")]
+      WM_NCLBUTTONDOWN => {
+        if let ParentSubclassData::Visual(_) = data {
+          #[cfg(debug_assertions)]
+          {
+            // 临时关闭 resize 调试日志，避免开发期持续刷屏。
+          }
+        }
+      }
+
+      WM_WINDOWPOSCHANGING => {
+        let window_pos = &*(lparam.0 as *const WINDOWPOS);
+        if (window_pos.flags & SWP_NOSIZE).0 == 0 {
+          match data {
+            ParentSubclassData::Windowed {
+              controller,
+              is_interactive_resizing,
+              ..
+            } => {
+              if *is_interactive_resizing {
+                Self::set_windowed_controller_bounds(controller, window_pos.cx, window_pos.cy);
+              }
+            }
+            #[cfg(feature = "visual-hosting")]
+            ParentSubclassData::Visual(state) => {
+              let _ = state.host.resize(window_pos.cx, window_pos.cy);
+              state.notify_parent_position_changed();
+            }
+          }
+        }
+      }
+
+      WM_ERASEBKGND => {
+        match data {
+          ParentSubclassData::Windowed {
+            background_color,
+            is_interactive_resizing,
+            ..
+          } => {
+            if *is_interactive_resizing {
+              Self::fill_windowed_resize_gap(hwnd, *background_color);
+              return LRESULT(1);
+            }
+          }
+          #[cfg(feature = "visual-hosting")]
+          ParentSubclassData::Visual(_) => return LRESULT(1),
+        }
+      }
+
       WM_SIZE => {
         if wparam.0 != SIZE_MINIMIZED as usize {
           match data {
-            ParentSubclassData::Windowed { controller } => {
+            ParentSubclassData::Windowed { controller, .. } => {
               Self::handle_windowed_resize(controller, hwnd)
             }
             #[cfg(feature = "visual-hosting")]
@@ -1617,19 +1810,33 @@ impl InnerWebView {
       }
 
       WM_SETFOCUS | WM_ENTERSIZEMOVE => match data {
-        ParentSubclassData::Windowed { controller } => {
+        ParentSubclassData::Windowed {
+          controller,
+          webview,
+          is_interactive_resizing,
+          ..
+        } => {
           let _ = controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+          if msg == WM_ENTERSIZEMOVE {
+            *is_interactive_resizing = true;
+            Self::dispatch_window_resize_event(webview, WINDOW_RESIZE_START_SCRIPT);
+          }
         }
         #[cfg(feature = "visual-hosting")]
         ParentSubclassData::Visual(state) => {
           state.move_focus_to_webview();
+          if msg == WM_ENTERSIZEMOVE {
+            if let Ok(webview) = state.host.controller.CoreWebView2() {
+              Self::dispatch_window_resize_event(&webview, WINDOW_RESIZE_START_SCRIPT);
+            }
+          }
         }
       },
 
       WM_ACTIVATE => {
         if (wparam.0 & 0xFFFF) != WA_INACTIVE as usize {
           match data {
-            ParentSubclassData::Windowed { controller } => {
+            ParentSubclassData::Windowed { controller, .. } => {
               let _ = controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
             }
             #[cfg(feature = "visual-hosting")]
@@ -1653,12 +1860,27 @@ impl InnerWebView {
           || msg == WM_EXITSIZEMOVE =>
       {
         match data {
-          ParentSubclassData::Windowed { controller } => {
+          ParentSubclassData::Windowed {
+            controller,
+            webview,
+            is_interactive_resizing,
+            ..
+          } => {
             let _ = controller.NotifyParentWindowPositionChanged();
+            if msg == WM_EXITSIZEMOVE {
+              *is_interactive_resizing = false;
+              Self::handle_windowed_resize(controller, hwnd);
+              Self::dispatch_window_resize_event(webview, WINDOW_RESIZE_END_SCRIPT);
+            }
           }
           #[cfg(feature = "visual-hosting")]
           ParentSubclassData::Visual(state) => {
             state.notify_parent_position_changed();
+            if msg == WM_EXITSIZEMOVE {
+              if let Ok(webview) = state.host.controller.CoreWebView2() {
+                Self::dispatch_window_resize_event(&webview, WINDOW_RESIZE_END_SCRIPT);
+              }
+            }
           }
         }
       }
@@ -2174,6 +2396,9 @@ impl InnerWebView {
           parent,
           ParentSubclassData::Windowed {
             controller: self.controller.clone(),
+            webview: self.webview.clone(),
+            background_color: DEFAULT_CHROME_BACKGROUND,
+            is_interactive_resizing: false,
           },
         );
 
@@ -2214,7 +2439,14 @@ impl InnerWebView {
   }
 
   pub fn set_background_color(&self, background_color: RGBA) -> Result<()> {
-    unsafe { set_background_color(&self.controller, background_color) }
+    unsafe {
+      #[cfg(feature = "visual-hosting")]
+      if let Some(visual_host) = &self.visual_host {
+        visual_host.set_background_color(background_color)?;
+      }
+
+      set_background_color(&self.controller, background_color)
+    }
   }
 
   pub fn set_memory_usage_level(&self, level: MemoryUsageLevel) -> Result<()> {

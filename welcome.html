@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Calamex</title>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #08090a;
+      }
+
+      body {
+        display: block;
+      }
+
+      #welcome-root {
+        position: fixed;
+        inset: 0;
+        overflow: hidden;
+        background: #08090a;
+        contain: strict;
+        isolation: isolate;
+        will-change: transform, opacity;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-app-region: drag;
+      }
+
+      #welcome-root svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      #welcome-root text {
+        text-rendering: geometricPrecision;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="welcome-root" tabindex="-1"></div>
+    <script type="module" src="/src/welcome.ts"></script>
+  </body>
+</html>

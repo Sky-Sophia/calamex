@@ -1,14 +1,30 @@
 export type TFileIconEntryKind = 'file' | 'directory';
 
-export interface IFileIconMap {
-  filenames: Record<string, string>;
-  compoundExtensions: Record<string, string>;
-  extensions: Record<string, string>;
+export interface IFileIconAsset {
+  darkSrc: string;
+  lightSrc: string;
 }
 
-export interface IFileIconGlyph {
-  viewBox: string;
-  body: string;
+export interface IPierreFileIconDefinition {
+  iconPath: string;
+}
+
+export interface IPierreFileIconThemeLight {
+  file: string;
+  folder: string;
+  folderExpanded: string;
+  fileExtensions?: Record<string, string>;
+  fileNames?: Record<string, string>;
+}
+
+export interface IPierreFileIconTheme {
+  iconDefinitions: Record<string, IPierreFileIconDefinition>;
+  file: string;
+  folder: string;
+  folderExpanded: string;
+  fileExtensions?: Record<string, string>;
+  fileNames?: Record<string, string>;
+  light: IPierreFileIconThemeLight;
 }
 
 export interface IFileIconResolveOptions {

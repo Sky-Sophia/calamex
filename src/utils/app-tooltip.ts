@@ -5,6 +5,7 @@ const TOOLTIP_SELECTOR = '.app-tooltip-target[data-tooltip]';
 const VIEWPORT_PADDING = 12;
 const TOOLTIP_GAP = 10;
 const MULTILINE_THRESHOLD_WIDTH = 420;
+const POINTER_TOOLTIP_DELAY_MS = 3000;
 const POINTER_WATCHDOG_INTERVAL_MS = 80;
 
 declare global {
@@ -154,10 +155,21 @@ export const initAppTooltipSystem = (): void => {
   const tooltipElement = ensureTooltipElement();
   let activeTarget: HTMLElement | null = null;
   let activeSource: TTooltipActivationSource | null = null;
+  let pendingTarget: HTMLElement | null = null;
   let lastPointerX = 0;
   let lastPointerY = 0;
   let hasPointerPosition = false;
+  let pendingShowTimeoutId: number | null = null;
   let pointerWatchdogId: number | null = null;
+
+  const clearPendingTooltip = (): void => {
+    if (pendingShowTimeoutId !== null) {
+      window.clearTimeout(pendingShowTimeoutId);
+      pendingShowTimeoutId = null;
+    }
+
+    pendingTarget = null;
+  };
 
   const stopPointerWatchdog = (): void => {
     if (pointerWatchdogId !== null) {
@@ -176,8 +188,8 @@ export const initAppTooltipSystem = (): void => {
     hasPointerPosition = false;
   };
 
-  const isPointerOverActiveTarget = (): boolean => {
-    if (!activeTarget || !hasPointerPosition || !document.body.contains(activeTarget)) {
+  const isPointerOverTarget = (target: HTMLElement | null): boolean => {
+    if (!target || !hasPointerPosition || !document.body.contains(target)) {
       return false;
     }
 
@@ -189,7 +201,7 @@ export const initAppTooltipSystem = (): void => {
     );
 
     return hitTarget instanceof Element
-      ? hitTarget === activeTarget || activeTarget.contains(hitTarget)
+      ? hitTarget === target || target.contains(hitTarget)
       : false;
   };
 
@@ -209,13 +221,14 @@ export const initAppTooltipSystem = (): void => {
         return;
       }
 
-      if (activeSource === 'pointer' && (!hasPointerPosition || !isPointerOverActiveTarget())) {
+      if (activeSource === 'pointer' && (!hasPointerPosition || !isPointerOverTarget(activeTarget))) {
         hideTooltip();
       }
     }, POINTER_WATCHDOG_INTERVAL_MS);
   };
 
   const hideTooltip = (): void => {
+    clearPendingTooltip();
     activeTarget = null;
     activeSource = null;
     stopPointerWatchdog();
@@ -232,7 +245,7 @@ export const initAppTooltipSystem = (): void => {
     tooltipElement.textContent = '';
   };
 
-  const showTooltip = (target: HTMLElement, source: TTooltipActivationSource): void => {
+  const renderTooltip = (target: HTMLElement, source: TTooltipActivationSource): void => {
     const tooltipText = target.dataset.tooltip?.trim();
     if (!tooltipText) {
       hideTooltip();
@@ -278,13 +291,42 @@ export const initAppTooltipSystem = (): void => {
     ensurePointerWatchdog();
   };
 
+  const schedulePointerTooltip = (target: HTMLElement): void => {
+    if (activeTarget === target && activeSource === 'pointer') {
+      return;
+    }
+
+    if (pendingTarget === target) {
+      return;
+    }
+
+    hideTooltip();
+    pendingTarget = target;
+    pendingShowTimeoutId = window.setTimeout(() => {
+      const nextTarget = pendingTarget;
+      pendingShowTimeoutId = null;
+      pendingTarget = null;
+
+      if (!nextTarget || !isPointerOverTarget(nextTarget)) {
+        return;
+      }
+
+      renderTooltip(nextTarget, 'pointer');
+    }, POINTER_TOOLTIP_DELAY_MS);
+  };
+
   const syncTooltipPosition = (): void => {
+    if (pendingTarget && !document.body.contains(pendingTarget)) {
+      hideTooltip();
+      return;
+    }
+
     if (!activeTarget || !document.body.contains(activeTarget)) {
       hideTooltip();
       return;
     }
 
-    showTooltip(activeTarget, activeSource ?? 'pointer');
+    renderTooltip(activeTarget, activeSource ?? 'pointer');
   };
 
   const handlePointerMove = (event: PointerEvent): void => {
@@ -308,21 +350,26 @@ export const initAppTooltipSystem = (): void => {
       return;
     }
 
-    showTooltip(tooltipTarget, 'pointer');
+    if (tooltipTarget === pendingTarget) {
+      return;
+    }
+
+    schedulePointerTooltip(tooltipTarget);
   };
 
   const handlePointerOut = (event: PointerEvent): void => {
-    if (!activeTarget) {
+    const trackedTarget = activeTarget ?? pendingTarget;
+    if (!trackedTarget) {
       return;
     }
 
     const relatedTarget = event.relatedTarget;
-    if (relatedTarget instanceof Node && activeTarget.contains(relatedTarget)) {
+    if (relatedTarget instanceof Node && trackedTarget.contains(relatedTarget)) {
       return;
     }
 
     const target = event.target;
-    if (!(target instanceof Node) || !activeTarget.contains(target)) {
+    if (!(target instanceof Node) || !trackedTarget.contains(target)) {
       return;
     }
 
@@ -337,7 +384,7 @@ export const initAppTooltipSystem = (): void => {
 
     const tooltipTarget = target.closest<HTMLElement>(TOOLTIP_SELECTOR);
     if (tooltipTarget) {
-      showTooltip(tooltipTarget, 'focus');
+      renderTooltip(tooltipTarget, 'focus');
     }
   };
 

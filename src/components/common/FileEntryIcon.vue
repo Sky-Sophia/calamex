@@ -1,16 +1,13 @@
 <template>
   <span class="file-entry-icon" aria-hidden="true">
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      :viewBox="iconGlyph.viewBox"
-      :innerHTML="iconGlyph.body"
-    />
+    <img class="file-entry-icon__image" :src="iconSrc" alt="" draggable="false" decoding="async">
   </span>
 </template>
 
 <script setup lang="ts">
+import { useAppStore } from '@/store/app';
 import type { TFileIconEntryKind } from '@/types/file-icon';
-import { resolveFileIconGlyph } from '@/utils/file-icons';
+import { resolveFileIconAsset } from '@/utils/file-icons';
 import { computed } from 'vue';
 
 const props = withDefaults(
@@ -25,12 +22,18 @@ const props = withDefaults(
   },
 );
 
-const iconGlyph = computed(() =>
-  resolveFileIconGlyph({
+const appStore = useAppStore();
+
+const iconAsset = computed(() =>
+  resolveFileIconAsset({
     kind: props.kind,
     path: props.path,
     expanded: props.expanded,
   }),
+);
+
+const iconSrc = computed(() =>
+  appStore.theme === 'light' ? iconAsset.value.lightSrc : iconAsset.value.darkSrc,
 );
 </script>
 
@@ -46,24 +49,10 @@ const iconGlyph = computed(() =>
   line-height: 0;
 }
 
-.file-entry-icon svg {
+.file-entry-icon__image {
   display: block;
   width: 100%;
   height: 100%;
-  overflow: visible;
-}
-
-.file-entry-icon :deep([data-stroke]) {
-  fill: none;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
-}
-
-.file-entry-icon :deep(text) {
-  font-family: var(--font-sans);
-  font-weight: 700;
-  text-anchor: middle;
+  object-fit: contain;
 }
 </style>

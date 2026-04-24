@@ -21,5 +21,20 @@
     backdrop-filter: none !important;
     box-shadow: none !important;
   }
+
+  html.is-resizing .app-shell-pane,
+  html.is-resizing .workbench-editor-viewport,
+  html.is-resizing .shell-editor-surface,
+  html.is-resizing .embedded-terminal-host,
+  html.is-resizing .diagnostics-overlay-panel {
+    contain: layout paint !important;
+  }
+
+  html,
+  body,
+  #app {
+    background-color: #08090a;
+  }
+
   /* stylelint-enable declaration-no-important */
 }

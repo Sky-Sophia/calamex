@@ -238,14 +238,6 @@ body,
   color: var(--text-primary);
 }
 
-html.splash-window-mode,
-html.splash-window-mode body,
-html.splash-window-mode #app,
-body.splash-window-mode,
-body.splash-window-mode #app {
-  background: transparent;
-}
-
 body {
   overflow: hidden;
 }
@@ -300,7 +292,8 @@ button:disabled,
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    background: var(--app-bg);
   }
 }
 
@@ -407,7 +400,9 @@ button:disabled,
   color: var(--text-tertiary);
   font-size: 13px;
   font-weight: 500;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
 .menubar-menu-item:hover,
@@ -921,7 +916,8 @@ button:disabled,
   --explorer-text-dim: #8a8a94;
   --explorer-text-faint: #5c5c66;
   --explorer-radius: 6px;
-  --explorer-font: ui-sans-serif, -apple-system, 'Inter', 'SF Pro Text', 'PingFang SC', system-ui, sans-serif;
+  --explorer-font:
+    ui-sans-serif, -apple-system, 'Inter', 'SF Pro Text', 'PingFang SC', system-ui, sans-serif;
   display: flex;
   height: 100%;
   min-height: 0;
@@ -964,7 +960,9 @@ button:disabled,
   place-items: center;
   border-radius: 4px;
   color: var(--explorer-text-faint);
-  transition: background 0.12s ease, color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
 .explorer-icon-btn:hover {
@@ -1221,7 +1219,9 @@ button:disabled,
   height: 22px;
   border-radius: var(--search-radius-sm);
   color: var(--search-icon);
-  transition: background 0.12s ease, color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
 .search-panel-icon-btn:hover {
@@ -1248,7 +1248,9 @@ button:disabled,
   border-radius: var(--search-radius);
   background: var(--search-bg-elev);
   color: var(--search-text);
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
 }
 
 .search-panel-input-shell:hover,
@@ -1296,7 +1298,9 @@ button:disabled,
   height: 18px;
   border-radius: 999px;
   color: var(--search-text-subtle);
-  transition: background 0.12s ease, color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
 .search-panel-clear-btn:hover {
@@ -1327,7 +1331,10 @@ button:disabled,
   background: transparent;
   color: var(--search-text-muted);
   font-size: 11.5px;
-  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+  transition:
+    color 0.12s ease,
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 
 .search-panel-chip:hover {
@@ -1364,7 +1371,9 @@ button:disabled,
   height: 22px;
   border-radius: var(--search-radius-sm);
   color: var(--search-icon);
-  transition: background 0.12s ease, color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
 .search-panel-option-btn:hover {
@@ -1581,7 +1590,8 @@ button:disabled,
   --scm-red: #f87171;
   --scm-blue: #60a5fa;
   --scm-radius: 6px;
-  --scm-font: ui-sans-serif, -apple-system, 'Inter', 'SF Pro Text', 'PingFang SC', system-ui, sans-serif;
+  --scm-font:
+    ui-sans-serif, -apple-system, 'Inter', 'SF Pro Text', 'PingFang SC', system-ui, sans-serif;
   display: flex;
   height: 100%;
   min-height: 0;
@@ -1687,7 +1697,8 @@ button:disabled,
   padding: 2px 5px;
   color: rgba(255, 255, 255, 0.35);
   font-size: 11px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 .source-control-setup-empty-state {
@@ -2018,10 +2029,12 @@ button:disabled,
   padding: 6px 8px;
   color: var(--scm-text-dim);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
-.source-control-nav-item+.source-control-nav-item {
+.source-control-nav-item + .source-control-nav-item {
   margin-top: 2px;
 }
 
@@ -2075,7 +2088,7 @@ button:disabled,
   padding: 8px 6px;
 }
 
-.source-control-section+.source-control-section {
+.source-control-section + .source-control-section {
   border-top: 1px solid var(--scm-border);
 }
 
@@ -2227,7 +2240,9 @@ button:disabled,
   background: transparent;
   color: var(--scm-text-faint);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
 .source-control-icon-btn:hover:not(:disabled) {
@@ -2285,7 +2300,9 @@ button:disabled,
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease;
 }
 
 .source-control-btn:hover:not(:disabled) {
@@ -2901,8 +2918,11 @@ button:disabled,
   padding: 0;
   box-sizing: border-box;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--terminal-fill, var(--panel-bg)) 98%, rgba(255, 255, 255, 0.02)), var(--terminal-fill, var(--panel-bg)));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--terminal-fill, var(--panel-bg)) 98%, rgba(255, 255, 255, 0.02)),
+    var(--terminal-fill, var(--panel-bg))
+  );
   contain: layout;
   overscroll-behavior: contain;
   isolation: isolate;
@@ -2975,7 +2995,9 @@ button:disabled,
 }
 
 .embedded-terminal-shell:hover .embedded-terminal-host .xterm-viewport::-webkit-scrollbar-thumb,
-.embedded-terminal-shell:focus-within .embedded-terminal-host .xterm-viewport::-webkit-scrollbar-thumb {
+.embedded-terminal-shell:focus-within
+  .embedded-terminal-host
+  .xterm-viewport::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--shell-divider) 92%, transparent);
 }
 
@@ -3032,7 +3054,8 @@ button:disabled,
   gap: 14px;
   width: 100%;
   height: 100%;
-  padding: clamp(14px, 1.8vw, 18px) clamp(20px, 2.4vw, 26px) clamp(16px, 2vw, 20px) clamp(10px, 1.3vw, 14px);
+  padding: clamp(14px, 1.8vw, 18px) clamp(20px, 2.4vw, 26px) clamp(16px, 2vw, 20px)
+    clamp(10px, 1.3vw, 14px);
 }
 
 .embedded-terminal-skeleton-layout {
@@ -3646,6 +3669,47 @@ button:disabled,
   opacity: 0.85;
 }
 
+.statusbar-diagnostics {
+  gap: 11px;
+  padding: 0 8px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.statusbar-diagnostics-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1;
+}
+
+.statusbar-diagnostics-item svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.statusbar-diagnostics-item.is-ok {
+  color: var(--success);
+}
+
+.statusbar-diagnostics-item.is-error {
+  color: var(--danger);
+}
+
+.statusbar-diagnostics-item.is-warning {
+  color: var(--warning);
+}
+
+.statusbar-diagnostics-item.is-info {
+  color: color-mix(in srgb, var(--statusbar-accent) 78%, var(--text-secondary));
+}
+
+.statusbar-diagnostics:hover {
+  color: var(--text-secondary);
+}
+
 /* ============================================================
  * 17. Settings overlay
  * ============================================================ */
@@ -3657,8 +3721,7 @@ button:disabled,
   overflow: hidden;
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.05), transparent 30%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0.01)),
-    #0e0f11;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0.01)), #0e0f11;
   color: #e6e7ea;
 }
 
@@ -3687,7 +3750,7 @@ button:disabled,
   background: rgba(255, 255, 255, 0.08);
 }
 
-.workbench-settings-nav-group+.workbench-settings-nav-group {
+.workbench-settings-nav-group + .workbench-settings-nav-group {
   margin-top: 8px;
 }
 
@@ -3843,7 +3906,7 @@ button:disabled,
   padding: 24px 40px 60px;
 }
 
-.workbench-settings-page+.workbench-settings-page {
+.workbench-settings-page + .workbench-settings-page {
   margin-top: 48px;
   padding-top: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
@@ -3995,7 +4058,9 @@ button:disabled,
   background-position:
     calc(100% - 14px) 12px,
     calc(100% - 9px) 12px;
-  background-size: 5px 5px, 5px 5px;
+  background-size:
+    5px 5px,
+    5px 5px;
   background-repeat: no-repeat;
 }
 
@@ -4188,7 +4253,11 @@ button:disabled,
   align-items: center;
   justify-content: center;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--settings-accent), color-mix(in srgb, var(--settings-accent) 68%, #a855f7));
+  background: linear-gradient(
+    135deg,
+    var(--settings-accent),
+    color-mix(in srgb, var(--settings-accent) 68%, #a855f7)
+  );
   color: #fff;
   font-family: var(--font-mono);
   font-weight: 700;
@@ -4382,27 +4451,8 @@ button:disabled,
   isolation: isolate;
 }
 
-.app-root-stage.is-splash-mode {
-  background: transparent;
-}
-
-.app-content-entry {
-  min-height: 100vh;
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-  transform: none;
-  transform-origin: center top;
-  transition:
-    opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
-    visibility 0s linear 0.2s;
-}
-
-.app-content-entry.is-visible {
-  opacity: 1;
-  pointer-events: auto;
-  visibility: visible;
-  transition-delay: 0s;
+.app-root-stage.is-welcome-window {
+  background: #08090a;
 }
 
 .startup-veil {
@@ -4410,12 +4460,9 @@ button:disabled,
   inset: 0;
   z-index: 9998;
   pointer-events: none;
-  background:
-    radial-gradient(circle at 50% 42%, rgba(94, 106, 210, 0.16), transparent 42%),
-    radial-gradient(circle at 50% 54%, rgba(255, 255, 255, 0.05), transparent 38%),
-    var(--app-bg);
+  background: #08090a;
   opacity: 1;
-  transition: opacity 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .startup-veil.is-leaving {
@@ -4725,8 +4772,7 @@ button:disabled,
 }
 
 @media (prefers-reduced-motion: reduce) {
-
-  .app-content-entry,
+  .startup-veil,
   .splash-screen,
   .splash-progress {
     transition: none;

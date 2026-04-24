@@ -1,6 +1,7 @@
 import { useMessage } from '@/composables/useMessage';
 import { tauriService } from '@/services/tauri';
 import type { useEditorStore } from '@/store/editor';
+import { useTerminalRegistryStore } from '@/terminal/registry';
 import type { IEditorDocument } from '@/types/editor';
 import {
   DEFAULT_TERMINAL_SESSION_ID,
@@ -54,6 +55,7 @@ const buildTerminalDispatchRequest = (
 
 export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) => {
   const notifier = useMessage();
+  const terminalRegistryStore = useTerminalRegistryStore();
 
   let bufferedTerminalOutput = '';
   let bufferedTerminalOutputTimerId: number | null = null;
@@ -122,8 +124,34 @@ export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) 
     });
   };
 
-  const isCurrentTerminalRun = (runId: string): boolean =>
-    editorStore.pendingTerminalRunId === runId || activeTerminalRunMeta?.runId === runId;
+  const getCurrentTerminalRunId = (): string | null =>
+    activeTerminalRunMeta?.runId
+    ?? editorStore.pendingTerminalRunId
+    ?? editorStore.activeRunSummary?.runId
+    ?? null;
+
+  const resolveTerminalRunId = (runId: string | null | undefined): string | null => {
+    const normalizedRunId = typeof runId === 'string' ? runId.trim() : '';
+    if (
+      normalizedRunId
+      && (
+        editorStore.pendingTerminalRunId === normalizedRunId
+        || activeTerminalRunMeta?.runId === normalizedRunId
+        || editorStore.activeRunSummary?.runId === normalizedRunId
+      )
+    ) {
+      return normalizedRunId;
+    }
+
+    if (!normalizedRunId) {
+      return getCurrentTerminalRunId();
+    }
+
+    return null;
+  };
+
+  const isCurrentTerminalRun = (runId: string | null | undefined): boolean =>
+    resolveTerminalRunId(runId) !== null;
 
   const failTerminalRun = (
     title: string,
@@ -138,7 +166,7 @@ export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) 
       typeof errorOrMessage === 'string'
         ? errorOrMessage
         : toErrorMessage(errorOrMessage, fallbackMessage);
-    const failedRunId = activeTerminalRunMeta?.runId ?? editorStore.pendingTerminalRunId;
+    const failedRunId = getCurrentTerminalRunId();
 
     resetBufferedTerminalOutput();
     clearTerminalRunFallbackTimer();
@@ -180,7 +208,18 @@ export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) 
     hasEnsuredTerminalSession = true;
   };
 
+  const ensureIntegratedTerminalEventBridge = async (): Promise<void> => {
+    const session = terminalRegistryStore.get(DEFAULT_TERMINAL_SESSION_ID);
+    if (!session) {
+      return;
+    }
+
+    await session.registerEventListeners();
+  };
+
   const ensureIntegratedTerminalSessionBeforeDispatch = async (): Promise<void> => {
+    await ensureIntegratedTerminalEventBridge();
+
     if (hasEnsuredTerminalSession) {
       return;
     }
@@ -240,7 +279,6 @@ export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) 
       throw new Error('当前文档不是可执行脚本文本。');
     }
 
-    await ensureIntegratedTerminalSessionBeforeDispatch();
     const runId = primeTerminalRun(document);
 
     try {
@@ -294,11 +332,14 @@ export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) 
     }
   };
 
-  const handleIntegratedTerminalRunComplete = (payload: ITerminalRunCompletePayload): void => {
-    if (isDisposed || !isCurrentTerminalRun(payload.runId)) {
+  const finalizeTerminalRun = (payload: ITerminalRunCompletePayload): void => {
+    const resolvedRunId = resolveTerminalRunId(payload.runId);
+    if (isDisposed || !resolvedRunId) {
       return;
     }
 
+    const normalizedPayload =
+      payload.runId === resolvedRunId ? payload : { ...payload, runId: resolvedRunId };
     const activeRunSummary = editorStore.activeRunSummary;
 
     clearTerminalRunFallbackTimer();
@@ -306,8 +347,8 @@ export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) 
 
     const runResult = buildTerminalRunResult({
       output: editorStore.getTerminalOutputSnapshot(),
-      exitCode: payload.exitCode,
-      finishedAt: payload.finishedAt,
+      exitCode: normalizedPayload.exitCode,
+      finishedAt: normalizedPayload.finishedAt,
       executor: DEFAULT_EXECUTOR,
       activeRunMeta: activeTerminalRunMeta,
       activeRunSummary,
@@ -332,6 +373,10 @@ export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) 
     } else {
       notifier.error('脚本执行失败，请检查终端输出。');
     }
+  };
+
+  const handleIntegratedTerminalRunComplete = (payload: ITerminalRunCompletePayload): void => {
+    finalizeTerminalRun(payload);
   };
 
   const runScript = async (): Promise<void> => {

@@ -8,6 +8,11 @@ import type {
 } from '@/types/editor';
 import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
 import { consumeProgrammaticWindowCloseAllowance } from '@/utils/window-close';
+import {
+  SHELL_WINDOW_RESIZE_END_EVENT,
+  SHELL_WINDOW_RESIZE_START_EVENT,
+  SHELL_WINDOW_RESIZE_SETTLED_EVENT,
+} from '@/utils/window-resize-events';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 export type TEditorExpose = {
@@ -96,6 +101,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   let previousEditorViewportSize = { width: 0, height: 0 };
   let pendingEditorViewportSize: { width: number; height: number } | null = null;
   let isUnmounted = false;
+  let isShellWindowResizing = false;
   let statusbarMessageTimerId: number | null = null;
   let focusBeforeSettingsOpen: HTMLElement | null = null;
   let globalKeydownCleanup: (() => void) | null = null;
@@ -188,11 +194,52 @@ export const useShellWorkbenchView = (onReady: () => void) => {
       height: Math.round(height),
     };
 
+    if (isShellWindowResizing) {
+      return;
+    }
+
     if (editorViewportResizeFrameId !== null) {
       return;
     }
 
     editorViewportResizeFrameId = window.requestAnimationFrame(flushEditorViewportResize);
+  };
+
+  const handleShellWindowResizeStart = (): void => {
+    isShellWindowResizing = true;
+    diagnosticsTransitionsEnabled.value = false;
+
+    if (diagnosticsResizeSettleTimerId !== null) {
+      window.clearTimeout(diagnosticsResizeSettleTimerId);
+      diagnosticsResizeSettleTimerId = null;
+    }
+  };
+
+  const handleShellWindowResizeEnd = (): void => {
+    if (editorViewportRef.value) {
+      pendingEditorViewportSize = {
+        width: Math.round(editorViewportRef.value.clientWidth),
+        height: Math.round(editorViewportRef.value.clientHeight),
+      };
+    }
+  };
+
+  const handleShellWindowResizeSettled = (): void => {
+    isShellWindowResizing = false;
+
+    if (editorViewportResizeFrameId !== null) {
+      window.cancelAnimationFrame(editorViewportResizeFrameId);
+      editorViewportResizeFrameId = null;
+    }
+
+    if (editorViewportRef.value) {
+      pendingEditorViewportSize = {
+        width: Math.round(editorViewportRef.value.clientWidth),
+        height: Math.round(editorViewportRef.value.clientHeight),
+      };
+    }
+    flushEditorViewportResize();
+    scheduleDiagnosticsTransitionRestore();
   };
 
   const handleInsertTemplate = (template: ICommandTemplate): void => {
@@ -513,6 +560,9 @@ export const useShellWorkbenchView = (onReady: () => void) => {
 
   onMounted(() => {
     isUnmounted = false;
+    window.addEventListener(SHELL_WINDOW_RESIZE_START_EVENT, handleShellWindowResizeStart);
+    window.addEventListener(SHELL_WINDOW_RESIZE_END_EVENT, handleShellWindowResizeEnd);
+    window.addEventListener(SHELL_WINDOW_RESIZE_SETTLED_EVENT, handleShellWindowResizeSettled);
 
     if (editorViewportRef.value) {
       previousEditorViewportSize = {
@@ -541,6 +591,9 @@ export const useShellWorkbenchView = (onReady: () => void) => {
 
   onBeforeUnmount(() => {
     isUnmounted = true;
+    window.removeEventListener(SHELL_WINDOW_RESIZE_START_EVENT, handleShellWindowResizeStart);
+    window.removeEventListener(SHELL_WINDOW_RESIZE_END_EVENT, handleShellWindowResizeEnd);
+    window.removeEventListener(SHELL_WINDOW_RESIZE_SETTLED_EVENT, handleShellWindowResizeSettled);
     clearStatusbarMessageTimer();
     globalKeydownCleanup?.();
     nativeCloseRequestedUnlisten?.();

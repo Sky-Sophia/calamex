@@ -179,6 +179,7 @@
         :has-active-document="editorStore.hasActiveDocument"
         :document-kind="editorStore.document.kind"
         :status-message="statusbarMessage"
+        :script-analysis="editorStore.activeScriptAnalysis"
         :encoding="editorStore.document.encoding"
         :executor="editorStore.selectedExecutor"
         :cursor-line="editorStore.cursorLine"
@@ -189,6 +190,7 @@
         :git-removed-count="gitRemovedCount"
         @change-encoding="updateEncoding"
         @open-source-control="handleSelectSidebarView('source-control')"
+        @open-diagnostics="toggleDiagnosticsPanel"
       />
     </template>
 

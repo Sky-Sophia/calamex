@@ -1,136 +1,78 @@
-<template>
-  <div data-testid="app-root-stage" class="app-root-stage" :class="{ 'is-splash-mode': isWindowSplashMode }">
-    <AppDialogHost />
-    <div v-if="isStartupVeilVisible" data-testid="startup-veil" class="startup-veil"
-      :class="{ 'is-leaving': isStartupVeilLeaving }" />
-    <div v-if="isContentMounted && workbenchComponent && !runtimeErrorState" data-testid="app-content-entry"
-      class="app-content-entry" :class="{ 'is-visible': isAppContentVisible }">
-      <component :is="workbenchComponent" @ready="handleWorkbenchReady" />
-    </div>
-    <SplashScreen v-if="isSplashVisible" :ready="isApplicationReady" :error="runtimeErrorState"
-      @leave-start="handleSplashLeaveStart" @after-leave="handleSplashAfterLeave" />
-  </div>
-</template>
-
 <script setup lang="ts">
 import AppDialogHost from '@/components/common/AppDialogHost.vue';
-import SplashScreen from '@/components/common/SplashScreen.vue';
-import { applyWindowStage } from '@/services/modules/window';
-import { runtimeErrorState, setRuntimeError } from '@/utils/runtime-diagnostics';
-import type { Component } from 'vue';
+import startupWelcomeSvgRaw from '@/assets/svg/welcome-isometric.svg?raw';
 import {
-  computed,
-  markRaw,
-  nextTick,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-  shallowRef,
-  watch,
-} from 'vue';
+  beginStartupTransition,
+  finalizeStartupTransition,
+} from '@/services/modules/window';
+import { getCurrentAppWindowLabel, WELCOME_WINDOW_LABEL } from '@/utils/app-window';
+import { runtimeErrorState, setRuntimeError } from '@/utils/runtime-diagnostics';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
-interface IStartupEventSnapshot {
-  name: string;
-  at: number;
-  splashVisible: boolean;
-  veilVisible: boolean;
-  appVisible: boolean;
-}
+const STARTUP_VEIL_FADE_DURATION_MS = 180;
+const STARTUP_WELCOME_EPOCH_STORAGE_KEY = 'sh.startup.welcomeEpochMs';
+const currentWindowLabel = getCurrentAppWindowLabel();
 
-declare global {
-  interface Window {
-    __SH_STARTUP_EVENTS__?: IStartupEventSnapshot[];
-  }
-}
-
-const MAIN_CONTENT_REVEAL_DELAY_MS = 50;
-const STARTUP_VEIL_FADE_DURATION_MS = 140;
-const SPLASH_MODE_CLASS = 'splash-window-mode';
-
-const isSplashMounted = ref(true);
-const isContentMounted = ref(false);
-const isAppContentVisible = ref(false);
-const isStartupVeilVisible = ref(false);
+const isWelcomeWindow = computed(() => currentWindowLabel === WELCOME_WINDOW_LABEL);
+const isStartupVeilVisible = ref(!isWelcomeWindow.value);
 const isStartupVeilLeaving = ref(false);
-const isWorkbenchModuleReady = ref(false);
-const isWorkbenchViewReady = ref(false);
-const workbenchComponent = shallowRef<Component | null>(null);
-const isWindowSplashMode = ref(true);
-let isMainWindowPrepared = false;
+const hasStartedStartupTransition = ref(false);
+const hasFinalizedStartupTransition = ref(false);
+const startupBridgeWrapRef = ref<HTMLElement | null>(null);
 
-let prepareMainWindowPromise: Promise<void> | null = null;
-let revealDelayTimerId: number | null = null;
 let startupVeilTimerId: number | null = null;
-let revealFlowVersion = 0;
 
-// ---------- Tauri window helpers ----------
-
-const applyMainWindowFrame = async (): Promise<void> => {
-  try {
-    await applyWindowStage('main');
-  } catch (error) {
-    console.warn('恢复主窗口尺寸失败', error);
+const getStartupBridgeSvgElement = (): SVGSVGElement | null => {
+  const element = startupBridgeWrapRef.value?.querySelector('svg') ?? null;
+  if (!element) {
+    return null;
   }
+
+  if (typeof SVGSVGElement !== 'undefined' && element instanceof SVGSVGElement) {
+    return element;
+  }
+
+  return element as SVGSVGElement;
 };
 
-// ---------- Lifecycle flow ----------
-
-const loadWorkbenchModule = async (): Promise<void> => {
-  isWorkbenchModuleReady.value = false;
-  isWorkbenchViewReady.value = false;
-  workbenchComponent.value = null;
-  try {
-    const module = await import('@/views/ShellWorkbenchView.vue');
-    workbenchComponent.value = markRaw(module.default);
-    isContentMounted.value = true;
-  } catch (error) {
-    setRuntimeError('工作台模块加载失败', error);
-  } finally {
-    isWorkbenchModuleReady.value = true;
-    recordStartupEvent('workbench-module-ready');
-  }
+const pauseStartupBridgeAnimations = (): void => {
+  getStartupBridgeSvgElement()?.pauseAnimations();
 };
 
-const isApplicationReady = computed(
-  () =>
-    !runtimeErrorState.value &&
-    isWorkbenchModuleReady.value &&
-    isWorkbenchViewReady.value &&
-    Boolean(workbenchComponent.value),
-);
-
-const isSplashVisible = computed(
-  () => isSplashMounted.value || Boolean(runtimeErrorState.value),
-);
-
-const recordStartupEvent = (name: string): void => {
-  if (typeof window === 'undefined') {
+const syncStartupBridgeTimeline = (): void => {
+  const svgElement = getStartupBridgeSvgElement();
+  if (!svgElement) {
     return;
   }
 
-  const events = window.__SH_STARTUP_EVENTS__ ?? (window.__SH_STARTUP_EVENTS__ = []);
-  events.push({
-    name,
-    at: performance.now(),
-    splashVisible: isSplashVisible.value,
-    veilVisible: isStartupVeilVisible.value,
-    appVisible: isAppContentVisible.value,
-  });
-};
-
-const setDocumentSplashMode = (enabled: boolean): void => {
-  if (typeof document === 'undefined') return;
-  const root = document.documentElement;
-  const body = document.body;
-  if (root) root.classList.toggle(SPLASH_MODE_CLASS, enabled);
-  if (body) body.classList.toggle(SPLASH_MODE_CLASS, enabled);
-};
-
-const clearRevealDelayTimer = (): void => {
-  if (revealDelayTimerId !== null) {
-    window.clearTimeout(revealDelayTimerId);
-    revealDelayTimerId = null;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    svgElement.pauseAnimations();
+    return;
   }
+
+  let elapsedSeconds = 0;
+  try {
+    const epochValue = window.localStorage.getItem(STARTUP_WELCOME_EPOCH_STORAGE_KEY);
+    const epochMs = Number(epochValue);
+    if (Number.isFinite(epochMs) && epochMs > 0) {
+      elapsedSeconds = Math.max(0, (Date.now() - epochMs) / 1_000);
+    }
+  } catch {
+    elapsedSeconds = 0;
+  }
+
+  if (elapsedSeconds > 0) {
+    svgElement.setCurrentTime(elapsedSeconds);
+  }
+};
+
+const primeStartupBridge = async (): Promise<void> => {
+  if (isWelcomeWindow.value || !isStartupVeilVisible.value) {
+    return;
+  }
+
+  await nextTick();
+  syncStartupBridgeTimeline();
 };
 
 const clearStartupVeilTimer = (): void => {
@@ -140,180 +82,206 @@ const clearStartupVeilTimer = (): void => {
   }
 };
 
-const waitForMainRevealDelay = (): Promise<void> =>
-  new Promise((resolve) => {
-    clearRevealDelayTimer();
-    revealDelayTimerId = window.setTimeout(() => {
-      revealDelayTimerId = null;
-      resolve();
-    }, MAIN_CONTENT_REVEAL_DELAY_MS);
-  });
-
-const waitForStablePaint = (): Promise<void> =>
-  new Promise((resolve) => {
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => resolve());
-    });
-  });
-
-const prepareMainWindow = async (): Promise<void> => {
-  if (runtimeErrorState.value) {
-    return;
-  }
-  if (isMainWindowPrepared) {
-    return;
-  }
-  if (prepareMainWindowPromise) {
-    await prepareMainWindowPromise;
+const finalizeWelcomeWindowDisposal = async (): Promise<void> => {
+  if (isWelcomeWindow.value || hasFinalizedStartupTransition.value) {
     return;
   }
 
-  const currentRevealFlowVersion = revealFlowVersion;
+  hasFinalizedStartupTransition.value = true;
 
-  prepareMainWindowPromise = (async () => {
-    if (!isContentMounted.value && workbenchComponent.value) {
-      isContentMounted.value = true;
-      await nextTick();
-    }
-
-    if (runtimeErrorState.value || currentRevealFlowVersion !== revealFlowVersion) {
-      return;
-    }
-
-    await nextTick();
-    await waitForStablePaint();
-
-    if (runtimeErrorState.value || currentRevealFlowVersion !== revealFlowVersion) {
-      return;
-    }
-
-    isMainWindowPrepared = true;
-  })().finally(() => {
-    prepareMainWindowPromise = null;
-  });
-
-  await prepareMainWindowPromise;
+  try {
+    await finalizeStartupTransition();
+  } catch (error) {
+    setRuntimeError('Failed to finalize startup transition', error);
+  }
 };
 
-const revealPreparedMainWindow = async (): Promise<void> => {
-  if (runtimeErrorState.value) {
-    return;
-  }
-
-  const currentRevealFlowVersion = revealFlowVersion;
-
-  await prepareMainWindow();
-
-  if (runtimeErrorState.value || currentRevealFlowVersion !== revealFlowVersion) {
-    return;
-  }
-
-  isStartupVeilVisible.value = true;
+const hideStartupVeil = (): void => {
+  clearStartupVeilTimer();
+  pauseStartupBridgeAnimations();
+  isStartupVeilVisible.value = false;
   isStartupVeilLeaving.value = false;
-  isWindowSplashMode.value = false;
-  setDocumentSplashMode(false);
 
-  await Promise.all([applyMainWindowFrame(), waitForMainRevealDelay()]);
+  try {
+    window.localStorage.removeItem(STARTUP_WELCOME_EPOCH_STORAGE_KEY);
+  } catch {
+    // ignore storage cleanup failures
+  }
 
-  if (runtimeErrorState.value || currentRevealFlowVersion !== revealFlowVersion) {
+  void finalizeWelcomeWindowDisposal();
+};
+
+const startStartupVeilLeave = (): void => {
+  if (!isStartupVeilVisible.value) {
     return;
   }
 
-  await nextTick();
-  await waitForStablePaint();
-
-  if (runtimeErrorState.value || currentRevealFlowVersion !== revealFlowVersion) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    hideStartupVeil();
     return;
   }
 
-  isAppContentVisible.value = true;
-  recordStartupEvent('app-content-visible');
-
-  await new Promise<void>((resolve) => {
+  window.requestAnimationFrame(() => {
     window.requestAnimationFrame(() => {
       isStartupVeilLeaving.value = true;
       clearStartupVeilTimer();
       startupVeilTimerId = window.setTimeout(() => {
-        startupVeilTimerId = null;
-        isStartupVeilVisible.value = false;
-        isStartupVeilLeaving.value = false;
-        recordStartupEvent('startup-veil-hidden');
-        resolve();
+        hideStartupVeil();
       }, STARTUP_VEIL_FADE_DURATION_MS);
     });
   });
 };
 
-// ---------- Event handlers ----------
-
-const handleSplashLeaveStart = (): void => {
-  recordStartupEvent('splash-leave-start');
-  void prepareMainWindow();
-};
-
-const handleSplashAfterLeave = async (): Promise<void> => {
-  if (runtimeErrorState.value) {
+const revealMainWindow = async (): Promise<void> => {
+  if (isWelcomeWindow.value || hasStartedStartupTransition.value) {
     return;
   }
 
-  await prepareMainWindow();
-  isSplashMounted.value = false;
-  recordStartupEvent('splash-after-leave');
-  await revealPreparedMainWindow();
+  hasStartedStartupTransition.value = true;
+  let transitionBegan = false;
+
+  try {
+    await beginStartupTransition();
+    transitionBegan = true;
+  } catch (error) {
+    setRuntimeError('Failed to begin startup transition', error);
+  } finally {
+    if (transitionBegan) {
+      startStartupVeilLeave();
+    }
+  }
 };
 
-const handleWorkbenchReady = (): void => {
-  isWorkbenchViewReady.value = true;
-  recordStartupEvent('workbench-view-ready');
-};
-
-// ---------- Watchers ----------
-
-watch(isApplicationReady, (ready: boolean) => {
-  if (!ready || runtimeErrorState.value || !isSplashMounted.value) {
+watch(runtimeErrorState, (error) => {
+  if (!error || isWelcomeWindow.value) {
     return;
   }
 
-  void prepareMainWindow();
+  void revealMainWindow();
 });
-
-watch(runtimeErrorState, (error: unknown, previousError: unknown) => {
-  if (error) {
-    // 进入错误态：回到 splash，并丢弃当前加载流水线
-    revealFlowVersion += 1;
-    prepareMainWindowPromise = null;
-    isMainWindowPrepared = false;
-    clearRevealDelayTimer();
-    clearStartupVeilTimer();
-    isWindowSplashMode.value = true;
-    setDocumentSplashMode(true);
-    isSplashMounted.value = true;
-    isContentMounted.value = false;
-    isAppContentVisible.value = false;
-    isStartupVeilVisible.value = false;
-    isStartupVeilLeaving.value = false;
-    isWorkbenchViewReady.value = false;
-    return;
-  }
-
-  // 从错误态恢复：重新加载 workbench 模块
-  if (previousError) {
-    void loadWorkbenchModule();
-  }
-});
-
-watch(isWindowSplashMode, (visible: boolean) => setDocumentSplashMode(visible), { immediate: true });
-
-// ---------- Mount / Unmount ----------
 
 onMounted(() => {
-  recordStartupEvent('app-mounted');
-  void loadWorkbenchModule();
+  void primeStartupBridge();
 });
 
 onBeforeUnmount(() => {
-  clearRevealDelayTimer();
   clearStartupVeilTimer();
-  setDocumentSplashMode(false);
+  pauseStartupBridgeAnimations();
 });
 </script>
+
+<template>
+  <div class="app-root-stage" :class="{ 'is-welcome-window': isWelcomeWindow }">
+    <AppDialogHost v-if="!isWelcomeWindow" />
+    <div
+      v-if="isStartupVeilVisible && !isWelcomeWindow"
+      data-testid="startup-veil"
+      class="startup-veil"
+      :class="{ 'is-leaving': isStartupVeilLeaving }"
+    >
+      <!-- eslint-disable vue/no-v-html -->
+      <div
+        ref="startupBridgeWrapRef"
+        class="startup-veil__welcome-bridge"
+        v-html="startupWelcomeSvgRaw"
+      />
+      <!-- eslint-enable vue/no-v-html -->
+    </div>
+    <section v-if="runtimeErrorState" class="app-runtime-error" role="alert" aria-live="assertive">
+      <div class="app-runtime-error__panel">
+        <h1 class="app-runtime-error__title">{{ runtimeErrorState.title }}</h1>
+        <p class="app-runtime-error__message">{{ runtimeErrorState.message }}</p>
+        <pre class="app-runtime-error__detail">{{ runtimeErrorState.detail }}</pre>
+      </div>
+    </section>
+    <router-view v-else v-slot="{ Component: RouteComponent, route: routeRecord }">
+      <component :is="RouteComponent" :key="routeRecord.fullPath" @ready="revealMainWindow" />
+    </router-view>
+  </div>
+</template>
+
+<style>
+.app-runtime-error {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #08090a;
+}
+
+.app-runtime-error__panel {
+  width: min(780px, 100%);
+  border: 1px solid rgba(255, 107, 122, 0.28);
+  border-radius: 12px;
+  background: #15171a;
+  padding: 20px 24px;
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.36);
+}
+
+.app-runtime-error__title {
+  margin: 0 0 12px;
+  color: #ff9aa5;
+  font-size: 18px;
+}
+
+.app-runtime-error__message {
+  margin: 0 0 12px;
+  color: #e5e7eb;
+  font-size: 14px;
+}
+
+.app-runtime-error__detail {
+  margin: 0;
+  color: #cbd5e1;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.startup-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  opacity: 1;
+  transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.startup-veil.is-leaving {
+  opacity: 0;
+}
+
+.startup-veil__welcome-bridge {
+  width: min(1024px, 100vw);
+  height: min(680px, 100vh);
+  max-width: 100vw;
+  max-height: 100vh;
+  contain: strict;
+  will-change: opacity, transform;
+}
+
+.startup-veil__welcome-bridge svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  text-rendering: geometricPrecision;
+}
+
+.startup-veil__welcome-bridge text {
+  text-rendering: geometricPrecision;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-veil {
+    transition: none;
+  }
+}
+</style>

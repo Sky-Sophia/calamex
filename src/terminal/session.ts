@@ -20,6 +20,11 @@ import type {
 import { writeClipboardText } from '@/utils/clipboard';
 import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
 import { toErrorMessage } from '@/utils/error';
+import {
+    SHELL_WINDOW_RESIZE_END_EVENT,
+    SHELL_WINDOW_RESIZE_START_EVENT,
+    SHELL_WINDOW_RESIZE_SETTLED_EVENT,
+} from '@/utils/window-resize-events';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -224,6 +229,7 @@ export class TerminalSession {
     private _visibilityChangeCleanup: (() => void) | null = null;
     private _windowFocusCleanup: (() => void) | null = null;
     private _windowResizeCleanup: (() => void) | null = null;
+    private _shellWindowResizeCleanup: (() => void) | null = null;
     private _webglContextLossCleanup: { dispose(): void } | null = null;
     private _resizeObserver: ResizeObserver | null = null;
 
@@ -232,6 +238,8 @@ export class TerminalSession {
     private _shouldRefreshViewportOnViewportSync = false;
     private _shouldScrollToBottomOnViewportSync = false;
     private _pendingLayoutSettleSync = false;
+    private _isShellWindowResizing = false;
+    private _pendingLayoutAfterShellWindowResize = false;
 
     // ── 私有：写缓冲区 ──────────────────────────────────────────────────────────
     private _bufferedTerminalWrite = '';
@@ -554,6 +562,7 @@ export class TerminalSession {
         this._resizeObserver?.disconnect();
         this._resizeObserver = null;
         this._windowResizeCleanup?.();
+        this._shellWindowResizeCleanup?.();
         this._windowFocusCleanup?.();
         this._visibilityChangeCleanup?.();
         this._fontLoadingCleanup?.();
@@ -672,11 +681,49 @@ export class TerminalSession {
 
     // ── 私有：布局与视口调度 ─────────────────────────────────────────────────────
 
+    private _handleShellWindowResizeStart(): void {
+        this._isShellWindowResizing = true;
+        this._pendingLayoutAfterShellWindowResize = false;
+        this._clearLayoutFrame();
+        this._clearLayoutSettleTimeout();
+        this._clearViewportFrame();
+        this._clearTerminalWriteFrame();
+        this._clearTerminalWriteTimeout();
+    }
+
+    private _handleShellWindowResizeEnd(): void {
+        const shouldRelayout =
+            this._pendingLayoutAfterShellWindowResize || this._hostEl !== null;
+        this._pendingLayoutAfterShellWindowResize = shouldRelayout;
+    }
+
+    private _handleShellWindowResizeSettled(): void {
+        this._isShellWindowResizing = false;
+        if (!this._visible) return;
+
+        const shouldRelayout =
+            this._pendingLayoutAfterShellWindowResize || this._hostEl !== null;
+        this._pendingLayoutAfterShellWindowResize = false;
+
+        if (shouldRelayout) {
+            this._scheduleLayoutSync({ settle: true });
+            this._scheduleViewportSync({ refresh: true, scrollToBottom: true });
+        }
+
+        if (this._bufferedTerminalWrite || this._pendingTerminalWriteCallbacks.length > 0) {
+            this._scheduleTerminalWriteFlush();
+        }
+    }
+
     private _scheduleLayoutSync(options?: TTerminalLayoutSyncOptions): void {
         if (options?.settle) {
             this._pendingLayoutSettleSync = true;
         }
         this._clearLayoutSettleTimeout();
+        if (this._isShellWindowResizing) {
+            this._pendingLayoutAfterShellWindowResize = true;
+            return;
+        }
         if (this._layoutFrameId !== null) return;
         this._layoutFrameId = requestAnimationFrame(() => {
             this._layoutFrameId = null;
@@ -691,6 +738,11 @@ export class TerminalSession {
     }
 
     private _syncTerminalLayout(): void {
+        if (this._isShellWindowResizing) {
+            this._pendingLayoutAfterShellWindowResize = true;
+            return;
+        }
+
         const terminal = this._terminalRef.value;
         const fitAddon = this._fitAddonRef.value;
         const hostEl = this._hostEl;
@@ -732,6 +784,7 @@ export class TerminalSession {
         if (options?.clearTextureAtlas) this._shouldClearTextureAtlasOnViewportSync = true;
         if (options?.refresh) this._shouldRefreshViewportOnViewportSync = true;
         if (options?.scrollToBottom) this._shouldScrollToBottomOnViewportSync = true;
+        if (this._isShellWindowResizing) return;
         this._clearViewportFrame();
         this._viewportFrameId = requestAnimationFrame(() => {
             this._viewportFrameId = null;
@@ -789,6 +842,9 @@ export class TerminalSession {
             if (!this._isTerminalWriteInFlight) this._flushPendingTerminalWriteCallbacks();
             return;
         }
+        if (this._isShellWindowResizing && this._visible) {
+            return;
+        }
         if (!this._visible) {
             if (this._bufferedTerminalWrite) {
                 this._hiddenTerminalWriteBacklog += this._bufferedTerminalWrite;
@@ -844,6 +900,9 @@ export class TerminalSession {
     }
 
     private _scheduleTerminalWriteFlush(): void {
+        if (this._isShellWindowResizing && this._visible) {
+            return;
+        }
         if (this._terminalWriteFrameId === null) {
             this._terminalWriteFrameId = requestAnimationFrame(() => {
                 this._terminalWriteFrameId = null;
@@ -1131,13 +1190,53 @@ export class TerminalSession {
             const entry = entries[0];
             if (!entry || !this._didHostSizeChange(entry.contentRect.width, entry.contentRect.height))
                 return;
-            if (this._visible) this._scheduleLayoutSync();
+            if (this._visible) {
+                if (this._isShellWindowResizing) {
+                    this._pendingLayoutAfterShellWindowResize = true;
+                    return;
+                }
+                this._scheduleLayoutSync();
+            }
         });
         this._resizeObserver.observe(this._hostEl);
+
+        if (!this._shellWindowResizeCleanup) {
+            const handleShellWindowResizeStart = (): void => {
+                this._handleShellWindowResizeStart();
+            };
+            const handleShellWindowResizeEnd = (): void => {
+                this._handleShellWindowResizeEnd();
+            };
+            const handleShellWindowResizeSettled = (): void => {
+                this._handleShellWindowResizeSettled();
+            };
+            window.addEventListener(SHELL_WINDOW_RESIZE_START_EVENT, handleShellWindowResizeStart);
+            window.addEventListener(SHELL_WINDOW_RESIZE_END_EVENT, handleShellWindowResizeEnd);
+            window.addEventListener(
+                SHELL_WINDOW_RESIZE_SETTLED_EVENT,
+                handleShellWindowResizeSettled,
+            );
+            this._shellWindowResizeCleanup = () => {
+                window.removeEventListener(
+                    SHELL_WINDOW_RESIZE_START_EVENT,
+                    handleShellWindowResizeStart,
+                );
+                window.removeEventListener(SHELL_WINDOW_RESIZE_END_EVENT, handleShellWindowResizeEnd);
+                window.removeEventListener(
+                    SHELL_WINDOW_RESIZE_SETTLED_EVENT,
+                    handleShellWindowResizeSettled,
+                );
+                this._shellWindowResizeCleanup = null;
+            };
+        }
 
         if (this._windowResizeCleanup) return;
         const handleWindowResize = (): void => {
             if (!this._visible) return;
+            if (this._isShellWindowResizing) {
+                this._pendingLayoutAfterShellWindowResize = true;
+                return;
+            }
             const el = this._hostEl;
             if (!el || !this._didHostSizeChange(el.clientWidth, el.clientHeight)) return;
             this._scheduleLayoutSync();

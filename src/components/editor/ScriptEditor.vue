@@ -12,6 +12,11 @@ import type { IEditorSettings } from '@/types/settings';
 import { useEditorStore } from '@/store/editor';
 import { computeGitLineChanges } from '@/utils/git-diff';
 import { applyMonacoTheme, monaco } from '@/utils/monaco';
+import {
+  SHELL_WINDOW_RESIZE_END_EVENT,
+  SHELL_WINDOW_RESIZE_START_EVENT,
+  SHELL_WINDOW_RESIZE_SETTLED_EVENT,
+} from '@/utils/window-resize-events';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 interface IEditorExpose {
@@ -137,6 +142,8 @@ let shellCompletionRegistrationPromise: Promise<void> | null = null;
 let previousContainerSize = { width: 0, height: 0 };
 let gitDecorationIds: string[] = [];
 let viewStateSaveTimerId: number | null = null;
+let isShellWindowResizing = false;
+let pendingEditorLayoutAfterWindowResize = false;
 
 const clearViewStateSaveTimer = (): void => {
   if (viewStateSaveTimerId !== null) {
@@ -268,6 +275,11 @@ const layoutEditor = (): void => {
 };
 
 const scheduleEditorLayout = (): void => {
+  if (isShellWindowResizing) {
+    pendingEditorLayoutAfterWindowResize = true;
+    return;
+  }
+
   if (editorLayoutFrameId !== null) {
     return;
   }
@@ -276,6 +288,43 @@ const scheduleEditorLayout = (): void => {
     editorLayoutFrameId = null;
     layoutEditor();
   });
+};
+
+const updatePreviousContainerSize = (): void => {
+  if (!containerRef.value) {
+    return;
+  }
+
+  previousContainerSize = {
+    width: Math.round(containerRef.value.clientWidth),
+    height: Math.round(containerRef.value.clientHeight),
+  };
+};
+
+const handleShellWindowResizeStart = (): void => {
+  isShellWindowResizing = true;
+  pendingEditorLayoutAfterWindowResize = false;
+
+  if (editorLayoutFrameId !== null) {
+    window.cancelAnimationFrame(editorLayoutFrameId);
+    editorLayoutFrameId = null;
+  }
+};
+
+const handleShellWindowResizeEnd = (): void => {
+  const shouldRelayout = pendingEditorLayoutAfterWindowResize || editorInstance !== null;
+  pendingEditorLayoutAfterWindowResize = false;
+  pendingEditorLayoutAfterWindowResize = shouldRelayout;
+};
+
+const handleShellWindowResizeSettled = (): void => {
+  isShellWindowResizing = false;
+  updatePreviousContainerSize();
+  const shouldRelayout = pendingEditorLayoutAfterWindowResize || editorInstance !== null;
+  pendingEditorLayoutAfterWindowResize = false;
+  if (shouldRelayout) {
+    scheduleEditorLayout();
+  }
 };
 
 const setTheme = (theme: TThemeMode): void => {
@@ -491,12 +540,12 @@ watch(
 
 onMounted(() => {
   createEditor();
+  window.addEventListener(SHELL_WINDOW_RESIZE_START_EVENT, handleShellWindowResizeStart);
+  window.addEventListener(SHELL_WINDOW_RESIZE_END_EVENT, handleShellWindowResizeEnd);
+  window.addEventListener(SHELL_WINDOW_RESIZE_SETTLED_EVENT, handleShellWindowResizeSettled);
 
   if (typeof ResizeObserver !== 'undefined' && containerRef.value) {
-    previousContainerSize = {
-      width: Math.round(containerRef.value.clientWidth),
-      height: Math.round(containerRef.value.clientHeight),
-    };
+    updatePreviousContainerSize();
 
     resizeObserver = new ResizeObserver(() => {
       if (!containerRef.value) {
@@ -524,6 +573,10 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener(SHELL_WINDOW_RESIZE_START_EVENT, handleShellWindowResizeStart);
+  window.removeEventListener(SHELL_WINDOW_RESIZE_END_EVENT, handleShellWindowResizeEnd);
+  window.removeEventListener(SHELL_WINDOW_RESIZE_SETTLED_EVENT, handleShellWindowResizeSettled);
+
   persistViewState(props.documentPath);
   clearViewStateSaveTimer();
 

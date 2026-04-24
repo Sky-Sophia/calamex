@@ -30,6 +30,48 @@ if (!mode) {
     process.exit(1);
 }
 
+const parseFeatureTokens = (args) => {
+    const features = [];
+
+    for (let index = 0; index < args.length; index += 1) {
+        const current = args[index];
+        if (current === '--features' || current === '-F') {
+            const nextValue = args[index + 1];
+            if (nextValue) {
+                features.push(...nextValue.split(',').map((value) => value.trim()).filter(Boolean));
+                index += 1;
+            }
+            continue;
+        }
+
+        if (current.startsWith('--features=')) {
+            features.push(...current.slice('--features='.length).split(',').map((value) => value.trim()).filter(Boolean));
+            continue;
+        }
+
+        if (current.startsWith('-F') && current.length > 2) {
+            features.push(...current.slice(2).split(',').map((value) => value.trim()).filter(Boolean));
+        }
+    }
+
+    return features;
+};
+
+const hasVisualHostingFeature = (args) => parseFeatureTokens(args).includes('visual-hosting');
+
+const warnIfVisualHostingRequested = () => {
+    if (
+        process.platform !== 'win32'
+        || (mode !== 'dev' && mode !== 'build')
+        || !hasVisualHostingFeature(extraArgs)
+    ) {
+        return;
+    }
+
+    console.warn('[run-tauri] cargo feature "visual-hosting" 已不再作为窗口 resize 方案启用。');
+    console.warn('[run-tauri] 当前会继续使用标准 WebView2 windowed hosting + Windows redirection bitmap 路径。');
+};
+
 const compareVersion = (left, right) => {
     const leftParts = left.split('.').map((value) => Number.parseInt(value, 10) || 0);
     const rightParts = right.split('.').map((value) => Number.parseInt(value, 10) || 0);
@@ -311,6 +353,8 @@ const buildWindowsToolchainEnv = () => {
 };
 
 const runTauri = (env) => {
+    warnIfVisualHostingRequested();
+
     const cliScriptPath = path.join(
         rootDir,
         'node_modules',

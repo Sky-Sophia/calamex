@@ -23,7 +23,9 @@
     "guard": "node_modules/.bin/tsx scripts/run-all-guards.ts",
     "tauri": "tauri",
     "tauri:dev": "node ./scripts/run-tauri.mjs dev",
+    "tauri:dev:visual-hosting": "npm run check:env && node ./scripts/run-tauri.mjs dev --features visual-hosting",
     "tauri:build": "node ./scripts/run-tauri.mjs build",
+    "tauri:build:visual-hosting": "node ./scripts/run-tauri.mjs build --features visual-hosting",
     "prepare": "husky"
   },
   "dependencies": {

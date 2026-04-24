@@ -56,15 +56,10 @@ mod imp {
     dpi_x: *mut u32,
     dpi_y: *mut u32,
   ) -> HRESULT;
-  type GetSystemMetricsForDpi =
-    unsafe extern "system" fn(nindex: SYSTEM_METRICS_INDEX, dpi: u32) -> i32;
-
   static GET_DPI_FOR_WINDOW: Lazy<Option<GetDpiForWindow>> =
     Lazy::new(|| get_function!("user32.dll", GetDpiForWindow));
   static GET_DPI_FOR_MONITOR: Lazy<Option<GetDpiForMonitor>> =
     Lazy::new(|| get_function!("shcore.dll", GetDpiForMonitor));
-  static GET_SYSTEM_METRICS_FOR_DPI: Lazy<Option<GetSystemMetricsForDpi>> =
-    Lazy::new(|| get_function!("user32.dll", GetSystemMetricsForDpi));
 
   #[allow(non_snake_case)]
   pub unsafe fn hwnd_dpi(hwnd: HWND) -> u32 {
@@ -104,15 +99,6 @@ mod imp {
         // application and the WM.
         USER_DEFAULT_SCREEN_DPI
       }
-    }
-  }
-
-  #[allow(non_snake_case)]
-  pub unsafe fn get_system_metrics_for_dpi(nindex: SYSTEM_METRICS_INDEX, dpi: u32) -> i32 {
-    if let Some(GetSystemMetricsForDpi) = *GET_SYSTEM_METRICS_FOR_DPI {
-      GetSystemMetricsForDpi(nindex, dpi)
-    } else {
-      GetSystemMetrics(nindex)
     }
   }
 }

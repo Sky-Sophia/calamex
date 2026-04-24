@@ -1,14 +1,21 @@
 import { logger } from '@/utils/logger';
+import {
+  SHELL_WINDOW_RESIZE_END_EVENT,
+  SHELL_WINDOW_RESIZE_START_EVENT,
+  SHELL_WINDOW_RESIZE_SETTLED_EVENT,
+} from '@/utils/window-resize-events';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { onScopeDispose } from 'vue';
 
-const RESET_DELAY_MS = 120;
+const RESIZE_IDLE_RESET_DELAY_MS = 120;
+const INTERACTIVE_RESIZE_SETTLE_MS = 72;
 const TAURI_INTERNALS_KEY = '__TAURI_INTERNALS__';
-const WINDOW_RESIZE_START_EVENT = 'shell-window-resize-start';
 
 interface IResizeEventSource {
   onResized(handler: () => void): Promise<() => void>;
 }
+
+type TInteractiveResizePhase = 'idle' | 'active' | 'settling';
 
 const readObjectProperty = (source: unknown, key: string): unknown => {
   if (typeof source !== 'object' || source === null) {
@@ -44,6 +51,7 @@ export const useWindowResizeState = () => {
   let unlisten: (() => void) | undefined;
   let detachResizeStartListener: (() => void) | undefined;
   let isDisposed = false;
+  let interactiveResizePhase: TInteractiveResizePhase = 'idle';
 
   const clearResizeTimer = (): void => {
     if (timer === undefined) {
@@ -54,17 +62,41 @@ export const useWindowResizeState = () => {
     timer = undefined;
   };
 
-  const markResizing = (): void => {
-    html.classList.add('is-resizing');
+  const scheduleResizeClassRemoval = (delayMs: number): void => {
     clearResizeTimer();
     timer = window.setTimeout(() => {
+      const wasResizing = html.classList.contains('is-resizing');
       html.classList.remove('is-resizing');
+      interactiveResizePhase = 'idle';
       timer = undefined;
-    }, RESET_DELAY_MS);
+      if (wasResizing) {
+        window.dispatchEvent(new Event(SHELL_WINDOW_RESIZE_SETTLED_EVENT));
+      }
+    }, delayMs);
+  };
+
+  const markResizing = (): void => {
+    html.classList.add('is-resizing');
+    if (interactiveResizePhase !== 'idle') {
+      return;
+    }
+    scheduleResizeClassRemoval(RESIZE_IDLE_RESET_DELAY_MS);
+  };
+
+  const beginInteractiveResize = (): void => {
+    interactiveResizePhase = 'active';
+    clearResizeTimer();
+    html.classList.add('is-resizing');
+  };
+
+  const endInteractiveResize = (): void => {
+    interactiveResizePhase = 'settling';
+    scheduleResizeClassRemoval(INTERACTIVE_RESIZE_SETTLE_MS);
   };
 
   onScopeDispose(() => {
     isDisposed = true;
+    interactiveResizePhase = 'idle';
     clearResizeTimer();
     unlisten?.();
     detachResizeStartListener?.();
@@ -73,12 +105,17 @@ export const useWindowResizeState = () => {
 
   if (typeof window !== 'undefined') {
     const handleResizeStart = (): void => {
-      markResizing();
+      beginInteractiveResize();
+    };
+    const handleResizeEnd = (): void => {
+      endInteractiveResize();
     };
 
-    window.addEventListener(WINDOW_RESIZE_START_EVENT, handleResizeStart);
+    window.addEventListener(SHELL_WINDOW_RESIZE_START_EVENT, handleResizeStart);
+    window.addEventListener(SHELL_WINDOW_RESIZE_END_EVENT, handleResizeEnd);
     detachResizeStartListener = () => {
-      window.removeEventListener(WINDOW_RESIZE_START_EVENT, handleResizeStart);
+      window.removeEventListener(SHELL_WINDOW_RESIZE_START_EVENT, handleResizeStart);
+      window.removeEventListener(SHELL_WINDOW_RESIZE_END_EVENT, handleResizeEnd);
     };
   }
 

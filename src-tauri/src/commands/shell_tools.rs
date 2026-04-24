@@ -1,4 +1,5 @@
 use super::{
+    configure_std_command_for_background, configure_tokio_command_for_background,
     AnalyzeScriptPayload, AnalyzeScriptRequest, FormatScriptPayload, FormatScriptRequest,
     ScriptDiagnosticPayload,
 };
@@ -298,7 +299,9 @@ fn resolve_shellcheck_candidate() -> Option<ShellCheckCandidate> {
     }
 
     let wsl_path = super::find_command_path("wsl.exe", &["C:\\Windows\\System32\\wsl.exe"])?;
-    if StdCommand::new(&wsl_path)
+    let mut command = StdCommand::new(&wsl_path);
+    configure_std_command_for_background(&mut command);
+    if command
         .args(["--", "shellcheck", "--version"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -389,7 +392,9 @@ fn resolve_shfmt_candidate() -> Option<ShfmtCandidate> {
     }
 
     let wsl_path = super::find_command_path("wsl.exe", &["C:\\Windows\\System32\\wsl.exe"])?;
-    if StdCommand::new(&wsl_path)
+    let mut command = StdCommand::new(&wsl_path);
+    configure_std_command_for_background(&mut command);
+    if command
         .args(["--", "shfmt", "--version"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -412,6 +417,7 @@ async fn run_shellcheck(
     dialect: &str,
 ) -> Result<std::process::Output, String> {
     let mut command = Command::new(&candidate.executable);
+    configure_tokio_command_for_background(&mut command);
 
     if candidate.use_wsl {
         let wsl_script_path = super::to_wsl_path(script_path)?;
@@ -461,6 +467,7 @@ async fn run_shfmt(
     _path: Option<&str>,
 ) -> Result<String, String> {
     let mut command = Command::new(&candidate.executable);
+    configure_tokio_command_for_background(&mut command);
 
     if candidate.use_wsl {
         command.args(["--", "shfmt", "-i", "2"]);

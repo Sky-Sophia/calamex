@@ -1,106 +1,125 @@
-use tauri::{window::Color, AppHandle, LogicalSize, Manager, Size};
+use tauri::{AppHandle, LogicalSize, Manager, Size, WebviewWindow};
 
-const SPLASH_WINDOW_WIDTH: f64 = 780.0;
-const SPLASH_WINDOW_HEIGHT: f64 = 520.0;
-const MAIN_WINDOW_WIDTH: f64 = 1500.0;
-const MAIN_WINDOW_HEIGHT: f64 = 960.0;
+const MAIN_WINDOW_LABEL: &str = "main";
+const WELCOME_WINDOW_LABEL: &str = "welcome";
 const MAIN_WINDOW_MIN_WIDTH: f64 = 1220.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 760.0;
-const MAIN_WINDOW_BACKGROUND: Color = Color(0x0D, 0x0F, 0x12, 0xFF);
+const WELCOME_WINDOW_WIDTH: f64 = 1024.0;
+const WELCOME_WINDOW_HEIGHT: f64 = 680.0;
 
-fn apply_window_background(
-    window: &tauri::WebviewWindow,
-    color: Option<Color>,
-    scene: &str,
-) -> Result<(), String> {
+fn resolve_window(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
+    app.get_webview_window(label)
+        .ok_or_else(|| format!("window not found: {label}"))
+}
+
+fn show_main_window(window: &WebviewWindow) -> Result<(), String> {
+    let main_min_size = Size::Logical(LogicalSize::new(
+        MAIN_WINDOW_MIN_WIDTH,
+        MAIN_WINDOW_MIN_HEIGHT,
+    ));
+
+    let _ = window.unminimize();
     window
-        .set_background_color(color)
-        .map_err(|error| format!("failed to set {scene} window background: {error}"))
+        .set_resizable(true)
+        .map_err(|error| format!("failed to restore main window resizable state: {error}"))?;
+    window
+        .set_min_size(Some(main_min_size))
+        .map_err(|error| format!("failed to set main window min size: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show main window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus main window: {error}"))?;
+
+    Ok(())
+}
+
+fn show_welcome_window(window: &WebviewWindow) -> Result<(), String> {
+    window
+        .set_resizable(false)
+        .map_err(|error| format!("failed to lock welcome window resizable state: {error}"))?;
+    window
+        .set_size(Size::Logical(LogicalSize::new(
+            WELCOME_WINDOW_WIDTH,
+            WELCOME_WINDOW_HEIGHT,
+        )))
+        .map_err(|error| format!("failed to set welcome window size: {error}"))?;
+    window
+        .set_min_size(Some(Size::Logical(LogicalSize::new(
+            WELCOME_WINDOW_WIDTH,
+            WELCOME_WINDOW_HEIGHT,
+        ))))
+        .map_err(|error| format!("failed to set welcome window min size: {error}"))?;
+    window
+        .set_max_size(Some(Size::Logical(LogicalSize::new(
+            WELCOME_WINDOW_WIDTH,
+            WELCOME_WINDOW_HEIGHT,
+        ))))
+        .map_err(|error| format!("failed to set welcome window max size: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show welcome window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus welcome window: {error}"))?;
+
+    Ok(())
 }
 
 #[tauri::command]
 pub fn apply_window_stage(app: AppHandle, stage: String) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "未找到主窗口。".to_string())?;
-
     match stage.as_str() {
-        "splash" => {
-            let splash_size =
-                Size::Logical(LogicalSize::new(SPLASH_WINDOW_WIDTH, SPLASH_WINDOW_HEIGHT));
-            apply_window_background(&window, Some(MAIN_WINDOW_BACKGROUND), "startup")?;
-            window
-                .set_min_size(Some(splash_size))
-                .map_err(|error| format!("设置欢迎窗最小尺寸失败：{error}"))?;
-            window
-                .set_size(splash_size)
-                .map_err(|error| format!("设置欢迎窗尺寸失败：{error}"))?;
-            window
-                .set_resizable(false)
-                .map_err(|error| format!("锁定欢迎窗尺寸失败：{error}"))?;
-            window
-                .center()
-                .map_err(|error| format!("居中欢迎窗失败：{error}"))?;
-        }
         "main" => {
-            let main_size = Size::Logical(LogicalSize::new(MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT));
-            let main_min_size = Size::Logical(LogicalSize::new(
-                MAIN_WINDOW_MIN_WIDTH,
-                MAIN_WINDOW_MIN_HEIGHT,
-            ));
-
-            apply_window_background(&window, Some(MAIN_WINDOW_BACKGROUND), "main")?;
-            window
-                .set_resizable(true)
-                .map_err(|error| format!("恢复主窗口缩放失败：{error}"))?;
-            window
-                .set_size(main_size)
-                .map_err(|error| format!("恢复主窗口尺寸失败：{error}"))?;
-            window
-                .set_min_size(Some(main_min_size))
-                .map_err(|error| format!("设置主窗口最小尺寸失败：{error}"))?;
-            window
-                .center()
-                .map_err(|error| format!("居中主窗口失败：{error}"))?;
-            window
-                .show()
-                .map_err(|error| format!("显示主窗口失败：{error}"))?;
-            window
-                .set_focus()
-                .map_err(|error| format!("聚焦主窗口失败：{error}"))?;
+            let window = resolve_window(&app, MAIN_WINDOW_LABEL)?;
+            show_main_window(&window)?;
+            Ok(())
         }
-        _ => return Err(format!("不支持的窗口阶段：{stage}")),
+        "welcome" => {
+            let window = resolve_window(&app, WELCOME_WINDOW_LABEL)?;
+            show_welcome_window(&window)?;
+            Ok(())
+        }
+        _ => Err(format!("unsupported window stage: {stage}")),
+    }
+}
+
+#[tauri::command]
+pub fn begin_startup_transition(app: AppHandle) -> Result<(), String> {
+    let main_window = resolve_window(&app, MAIN_WINDOW_LABEL)?;
+    let welcome_window = app.get_webview_window(WELCOME_WINDOW_LABEL);
+
+    if let Some(welcome_window) = &welcome_window {
+        welcome_window
+            .hide()
+            .map_err(|error| format!("failed to hide welcome window: {error}"))?;
+    }
+
+    if let Err(error) = show_main_window(&main_window) {
+        if let Some(welcome_window) = &welcome_window {
+            let _ = welcome_window.show();
+            let _ = welcome_window.set_focus();
+        }
+
+        return Err(error);
     }
 
     Ok(())
 }
 
 #[tauri::command]
-pub fn show_startup_window(app: AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "未找到主窗口。".to_string())?;
+pub fn finalize_startup_transition(app: AppHandle) -> Result<(), String> {
+    if let Some(welcome_window) = app.get_webview_window(WELCOME_WINDOW_LABEL) {
+        let _ = welcome_window.hide();
+        welcome_window
+            .close()
+            .map_err(|error| format!("failed to close welcome window: {error}"))?;
+    }
 
-    let splash_size = Size::Logical(LogicalSize::new(SPLASH_WINDOW_WIDTH, SPLASH_WINDOW_HEIGHT));
-    apply_window_background(&window, Some(MAIN_WINDOW_BACKGROUND), "startup")?;
-    window
-        .set_min_size(Some(splash_size))
-        .map_err(|error| format!("设置欢迎窗最小尺寸失败：{error}"))?;
-    window
-        .set_size(splash_size)
-        .map_err(|error| format!("设置欢迎窗尺寸失败：{error}"))?;
-    window
-        .set_resizable(false)
-        .map_err(|error| format!("锁定欢迎窗尺寸失败：{error}"))?;
-    window
-        .center()
-        .map_err(|error| format!("居中欢迎窗失败：{error}"))?;
-    window
-        .show()
-        .map_err(|error| format!("显示欢迎窗失败：{error}"))?;
-    window
+    let main_window = resolve_window(&app, MAIN_WINDOW_LABEL)?;
+    main_window
         .set_focus()
-        .map_err(|error| format!("聚焦欢迎窗失败：{error}"))?;
+        .map_err(|error| format!("failed to refocus main window: {error}"))?;
 
     Ok(())
 }

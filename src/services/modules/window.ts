@@ -10,35 +10,56 @@ export const SetWindowBackgroundInput = z.object({
   a: z.number().int().min(0).max(255).default(255),
 });
 
+const StartupTransitionInput = z.void();
+const SetWindowBackgroundOutput = zTauriVoid;
+const BeginStartupTransitionOutput = zTauriVoid;
+const FinalizeStartupTransitionOutput = zTauriVoid;
+
 export type TSetWindowBackgroundInput = z.infer<typeof SetWindowBackgroundInput>;
 export type TSetWindowBackgroundRequest = z.input<typeof SetWindowBackgroundInput>;
 
-const WindowStageInput = z.object({
-  stage: z.enum(['splash', 'main']),
-});
-
-const SetWindowBackgroundOutput = zTauriVoid;
-const WindowStageOutput = zTauriVoid;
-
 /**
- * 同步主窗口原生底色与 Webview 根底色，消除 resize / 主题切换期间的底色撕裂。
+ * Keeps the native window background in sync with the WebView surface background.
  *
  * @throws AppError(scope="ipc")
  */
 export const setWindowBackground = (input: TSetWindowBackgroundRequest): Promise<void> =>
   ipc('set_window_background', input, SetWindowBackgroundInput, SetWindowBackgroundOutput, {
     timeoutMs: 1_000,
-    guardHint: '同步窗口底色',
+    guardHint: 'sync native window background',
     idempotent: true,
     mapArgs: (payload, { traceId }) => ({ input: payload, traceId }),
   });
 
 /**
- * 切换启动 / 工作台窗口阶段；可见性、尺寸和原生窗口副作用保持 Rust 单点驱动。
+ * Hides the standalone welcome window first, then reveals the main window with the
+ * startup bridge still mounted in the DOM so the user never sees both windows together.
  */
-export const applyWindowStage = (stage: 'splash' | 'main'): Promise<void> =>
-  ipc('apply_window_stage', { stage }, WindowStageInput, WindowStageOutput, {
-    timeoutMs: 1_500,
-    guardHint: '切换窗口阶段',
-    mapArgs: (payload) => ({ stage: payload.stage }),
-  });
+export const beginStartupTransition = (): Promise<void> =>
+  ipc(
+    'begin_startup_transition',
+    undefined,
+    StartupTransitionInput,
+    BeginStartupTransitionOutput,
+    {
+      timeoutMs: 1_000,
+      guardHint: 'begin startup transition',
+      idempotent: true,
+    },
+  );
+
+/**
+ * Destroys the hidden welcome window after the startup bridge fade has finished.
+ */
+export const finalizeStartupTransition = (): Promise<void> =>
+  ipc(
+    'finalize_startup_transition',
+    undefined,
+    StartupTransitionInput,
+    FinalizeStartupTransitionOutput,
+    {
+      timeoutMs: 1_000,
+      guardHint: 'finalize startup transition',
+      idempotent: true,
+    },
+  );

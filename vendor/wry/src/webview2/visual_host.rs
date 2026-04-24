@@ -4,7 +4,7 @@
 
 #![cfg(all(windows, feature = "visual-hosting"))]
 
-use std::sync::mpsc;
+use std::{cell::Cell, rc::Rc, sync::mpsc};
 
 use webview2_com::{Microsoft::Web::WebView2::Win32::*, *};
 use windows::{
@@ -14,13 +14,17 @@ use windows::{
     Graphics::{
       Direct3D::D3D_DRIVER_TYPE_HARDWARE,
       Direct3D11::{
-        D3D11CreateDevice, ID3D11Device, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
+        D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11RenderTargetView,
+        ID3D11Resource, ID3D11Texture2D, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION,
       },
       DirectComposition::{
         DCompositionCreateDevice, IDCompositionDevice, IDCompositionRectangleClip,
-        IDCompositionTarget, IDCompositionVisual,
+        IDCompositionTarget, IDCompositionVirtualSurface, IDCompositionVisual,
       },
-      Dxgi::IDXGIDevice,
+      Dxgi::{
+        Common::{DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_B8G8R8A8_UNORM},
+        IDXGIDevice,
+      },
       Gdi::ScreenToClient,
     },
     UI::{
@@ -43,10 +47,15 @@ pub(crate) struct VisualHost {
   pub hwnd: HWND,
   #[allow(dead_code)]
   pub d3d: ID3D11Device,
+  pub d3d_context: ID3D11DeviceContext,
   pub dcomp: IDCompositionDevice,
   #[allow(dead_code)]
   pub target: IDCompositionTarget,
   pub root_visual: IDCompositionVisual,
+  #[allow(dead_code)]
+  pub background_visual: IDCompositionVisual,
+  pub background_surface: IDCompositionVirtualSurface,
+  pub background_color: Rc<Cell<Option<(u8, u8, u8, u8)>>>,
   #[allow(dead_code)]
   pub webview_visual: IDCompositionVisual,
   pub clip: IDCompositionRectangleClip,
@@ -65,6 +74,7 @@ impl VisualHost {
     bounds: RECT,
   ) -> Result<Self> {
     let mut d3d = None;
+    let mut d3d_context = None;
     // SAFETY: Called on the UI thread during WebView creation; WebView2 visual hosting requires
     // a BGRA-capable D3D11 device that stays alive for the lifetime of the composition tree.
     D3D11CreateDevice(
@@ -76,24 +86,39 @@ impl VisualHost {
       D3D11_SDK_VERSION,
       Some(&mut d3d),
       None,
-      None,
+      Some(&mut d3d_context),
     )?;
     let d3d = d3d.ok_or_else(|| windows::core::Error::from(E_POINTER))?;
+    let d3d_context = d3d_context.ok_or_else(|| windows::core::Error::from(E_POINTER))?;
 
     let dxgi: IDXGIDevice = d3d.cast()?;
     // SAFETY: The DXGI device remains alive via `d3d`, satisfying DirectComposition's device lifetime.
     let dcomp: IDCompositionDevice = DCompositionCreateDevice(&dxgi)?;
     let target = dcomp.CreateTargetForHwnd(hwnd, false)?;
     let root_visual = dcomp.CreateVisual()?;
+    let background_visual = dcomp.CreateVisual()?;
     let webview_visual = dcomp.CreateVisual()?;
     let clip = dcomp.CreateRectangleClip()?;
+    let controller_background_color = background_color;
+    let background_surface = dcomp.CreateVirtualSurface(
+      surface_extent(bounds.right - bounds.left),
+      surface_extent(bounds.bottom - bounds.top),
+      DXGI_FORMAT_B8G8R8A8_UNORM,
+      DXGI_ALPHA_MODE_IGNORE,
+    )?;
+    let background_color = Rc::new(Cell::new(normalize_background_color(
+      controller_background_color,
+    )));
 
     root_visual.SetClip(&clip)?;
     target.SetRoot(&root_visual)?;
-    root_visual.AddVisual(&webview_visual, true, None)?;
+    background_visual.SetContent(&background_surface.cast::<windows::core::IUnknown>()?)?;
+    root_visual.AddVisual(&background_visual, false, None)?;
+    root_visual.AddVisual(&webview_visual, true, Some(&background_visual))?;
 
     let env3 = env.cast::<ICoreWebView2Environment3>()?;
-    let comp_controller = create_composition_controller(env, hwnd, incognito, background_color)?;
+    let comp_controller =
+      create_composition_controller(env, hwnd, incognito, controller_background_color)?;
     let controller: ICoreWebView2Controller = comp_controller.cast()?;
     comp_controller.SetRootVisualTarget(&webview_visual.cast::<windows::core::IUnknown>()?)?;
     let automation_provider = comp_controller
@@ -105,9 +130,13 @@ impl VisualHost {
     let host = Self {
       hwnd,
       d3d,
+      d3d_context,
       dcomp,
       target,
       root_visual,
+      background_visual,
+      background_surface,
+      background_color,
       webview_visual,
       clip,
       env3,
@@ -135,6 +164,10 @@ impl VisualHost {
     let height = (bounds.bottom - bounds.top).max(0) as f32;
 
     self.controller.SetBounds(bounds)?;
+    self
+      .background_surface
+      .Resize(surface_extent(bounds.right - bounds.left), surface_extent(bounds.bottom - bounds.top))?;
+    self.paint_background(width as i32, height as i32)?;
     self.root_visual.SetOffsetX2(bounds.left as f32)?;
     self.root_visual.SetOffsetY2(bounds.top as f32)?;
     self.clip.SetLeft2(0.0)?;
@@ -145,6 +178,64 @@ impl VisualHost {
     let _ = self.controller.NotifyParentWindowPositionChanged();
 
     Ok(())
+  }
+
+  pub(crate) unsafe fn set_background_color(&self, background_color: (u8, u8, u8, u8)) -> Result<()> {
+    self
+      .background_color
+      .set(normalize_background_color(Some(background_color)));
+
+    let mut client_rect = RECT::default();
+    GetClientRect(self.hwnd, &mut client_rect)?;
+    self
+      .background_surface
+      .Resize(surface_extent(client_rect.right - client_rect.left), surface_extent(client_rect.bottom - client_rect.top))?;
+    self.paint_background(client_rect.right - client_rect.left, client_rect.bottom - client_rect.top)?;
+    self.dcomp.Commit()?;
+
+    Ok(())
+  }
+
+  unsafe fn paint_background(&self, width: i32, height: i32) -> Result<()> {
+    let Some((r, g, b, _a)) = self.background_color.get() else {
+      return Ok(());
+    };
+
+    let draw_width = width.max(1);
+    let draw_height = height.max(1);
+    let update_rect = RECT {
+      left: 0,
+      top: 0,
+      right: draw_width,
+      bottom: draw_height,
+    };
+    let mut update_offset = POINT::default();
+    let texture = self
+      .background_surface
+      .BeginDraw::<ID3D11Texture2D>(Some(&update_rect), &mut update_offset)?;
+
+    let draw_result = (|| -> Result<()> {
+      let resource: ID3D11Resource = texture.cast()?;
+      let mut render_target: Option<ID3D11RenderTargetView> = None;
+      self
+        .d3d
+        .CreateRenderTargetView(&resource, None, Some(&mut render_target))?;
+      let render_target = render_target.ok_or_else(|| windows::core::Error::from(E_POINTER))?;
+      self.d3d_context.ClearRenderTargetView(
+        &render_target,
+        &[
+          f32::from(r) / 255.0,
+          f32::from(g) / 255.0,
+          f32::from(b) / 255.0,
+          1.0,
+        ],
+      );
+
+      Ok(())
+    })();
+
+    let _ = self.background_surface.EndDraw();
+    draw_result
   }
 
   pub(crate) unsafe fn on_dpi_changed(&self) -> Result<()> {
@@ -213,6 +304,22 @@ impl VisualHost {
     }
 
     Ok(pointer_info)
+  }
+}
+
+#[inline]
+fn surface_extent(value: i32) -> u32 {
+  value.max(1) as u32
+}
+
+#[inline]
+fn normalize_background_color(
+  background_color: Option<(u8, u8, u8, u8)>,
+) -> Option<(u8, u8, u8, u8)> {
+  match background_color {
+    Some((_, _, _, 0)) => None,
+    Some((r, g, b, _)) => Some((r, g, b, 255)),
+    None => Some((255, 255, 255, 255)),
   }
 }
 

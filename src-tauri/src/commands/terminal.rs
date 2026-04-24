@@ -1,4 +1,4 @@
-use super::find_command_path;
+use super::{configure_std_command_for_background, find_command_path};
 use chrono::Utc;
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -572,10 +572,9 @@ fn resolve_terminal_start_directory(path: Option<&str>) -> Result<Option<PathBuf
 }
 
 fn resolve_wsl_home_directory(wsl_command_path: &Path) -> Option<String> {
-    let output = StdCommand::new(wsl_command_path)
-        .args(["--cd", "~", "--", "pwd"])
-        .output()
-        .ok()?;
+    let mut command = StdCommand::new(wsl_command_path);
+    configure_std_command_for_background(&mut command);
+    let output = command.args(["--cd", "~", "--", "pwd"]).output().ok()?;
 
     if !output.status.success() {
         return None;
@@ -616,6 +615,7 @@ fn write_wsl_file(path: &str, content: &[u8]) -> Result<(), String> {
         bash_quote(path),
     );
     let mut command = StdCommand::new(wsl_command_path);
+    configure_std_command_for_background(&mut command);
     command
         .args(["--", "sh", "-lc", &shell_command])
         .stdin(Stdio::piped())
@@ -1127,10 +1127,11 @@ impl TerminalRunStreamParser {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_terminal_run_marker_token, TerminalEmitterMessage, TerminalRunCompleteEvent,
-        TerminalRunMarkerToken, TerminalRunOutputEvent, TerminalRunStreamParser,
-        TerminalRunStreamUpdate, TERMINAL_RUN_END_MARKER_PREFIX, TERMINAL_RUN_MARKER_PREFIX,
-        TERMINAL_RUN_MARKER_SUFFIX, TERMINAL_RUN_START_MARKER_PREFIX,
+        build_terminal_dispatch_runner_content, parse_terminal_run_marker_token,
+        DispatchTerminalScriptRequest, TerminalEmitterMessage, TerminalPreparedScript,
+        TerminalRunCompleteEvent, TerminalRunMarkerToken, TerminalRunOutputEvent,
+        TerminalRunStreamParser, TerminalRunStreamUpdate, TERMINAL_RUN_END_MARKER_PREFIX,
+        TERMINAL_RUN_MARKER_PREFIX, TERMINAL_RUN_MARKER_SUFFIX, TERMINAL_RUN_START_MARKER_PREFIX,
     };
 
     fn build_marker(token: &str) -> String {
@@ -1280,6 +1281,34 @@ mod tests {
             _ => panic!("expected prompt after completion marker"),
         }
     }
+
+    #[test]
+    fn dispatch_runner_uses_exit_trap_to_emit_completion_marker() {
+        let payload = DispatchTerminalScriptRequest {
+            session_id: "main-terminal".to_string(),
+            path: Some("D:/workspace/test.sh".to_string()),
+            content: "#!/usr/bin/env bash\necho ok\n".to_string(),
+            is_dirty: false,
+            run_id: "terminal-run-trap".to_string(),
+        };
+        let prepared = TerminalPreparedScript {
+            execution_path: "/mnt/d/workspace/test.sh".to_string(),
+            working_directory: "/mnt/d/workspace".to_string(),
+            used_temp_file: false,
+            should_cleanup_execution_path: false,
+            should_materialize_inline_content: false,
+        };
+
+        let content =
+            build_terminal_dispatch_runner_content(&payload, &prepared, "rm -f \"$0\"", "");
+
+        assert!(content.contains("trap '__sh_editor_exit_code=$?; __sh_editor_cleanup' EXIT"));
+        assert!(content.contains("trap '__sh_editor_exit_code=130; exit 130' INT"));
+        assert!(content.contains("trap '__sh_editor_exit_code=143; exit 143' TERM"));
+        assert!(content.contains("__sh_editor_finish() {"));
+        assert!(content.contains(TERMINAL_RUN_END_MARKER_PREFIX));
+        assert!(content.contains("exit \"$__sh_editor_exit_code\""));
+    }
 }
 
 fn prepare_terminal_dispatch_script(
@@ -1343,6 +1372,61 @@ fn build_terminal_run_command(
     })
 }
 
+fn build_terminal_dispatch_runner_content(
+    payload: &DispatchTerminalScriptRequest,
+    prepared: &TerminalPreparedScript,
+    cleanup_command: &str,
+    materialize_inline_script: &str,
+) -> String {
+    format!(
+        concat!(
+            "#!/usr/bin/env bash\n",
+            "set +x\n",
+            "i={}\n",
+            "t={}\n",
+            "wd={}\n",
+            "__sh_editor_exit_code=0\n",
+            "__sh_editor_finalized=0\n",
+            "__sh_editor_finish() {{\n",
+            "  local exit_code=\"${{__sh_editor_exit_code:-$?}}\"\n",
+            "  if [ \"${{__sh_editor_finalized:-0}}\" -eq 1 ]; then\n",
+            "    return\n",
+            "  fi\n",
+            "  __sh_editor_finalized=1\n",
+            "  printf '%b%s%s:%s%b' {} {} \"$i\" \"$exit_code\" {}\n",
+            "}}\n",
+            "__sh_editor_cleanup() {{\n",
+            "  __sh_editor_finish\n",
+            "  {}\n",
+            "}}\n",
+            "trap '__sh_editor_exit_code=$?; __sh_editor_cleanup' EXIT\n",
+            "trap '__sh_editor_exit_code=129; exit 129' HUP\n",
+            "trap '__sh_editor_exit_code=130; exit 130' INT\n",
+            "trap '__sh_editor_exit_code=143; exit 143' TERM\n",
+            "{}",
+            "printf '%b%s%s%b' {} {} \"$i\" {}\n",
+            "if cd \"$wd\"; then\n",
+            "  bash \"$t\"\n",
+            "  __sh_editor_exit_code=$?\n",
+            "else\n",
+            "  __sh_editor_exit_code=$?\n",
+            "fi\n",
+            "exit \"$__sh_editor_exit_code\"\n",
+        ),
+        bash_quote(&payload.run_id),
+        bash_quote(&prepared.execution_path),
+        bash_quote(&prepared.working_directory),
+        bash_quote(TERMINAL_RUN_MARKER_ESCAPED_PREFIX),
+        bash_quote(TERMINAL_RUN_END_MARKER_PREFIX),
+        bash_quote(TERMINAL_RUN_MARKER_ESCAPED_SUFFIX),
+        cleanup_command,
+        materialize_inline_script,
+        bash_quote(TERMINAL_RUN_MARKER_ESCAPED_PREFIX),
+        bash_quote(TERMINAL_RUN_START_MARKER_PREFIX),
+        bash_quote(TERMINAL_RUN_MARKER_ESCAPED_SUFFIX),
+    )
+}
+
 fn create_terminal_dispatch_runner(
     payload: &DispatchTerminalScriptRequest,
     prepared: &TerminalPreparedScript,
@@ -1358,35 +1442,11 @@ fn create_terminal_dispatch_runner(
     } else {
         String::new()
     };
-    let runner_content = format!(
-        "#!/usr/bin/env bash\n\
-set +x\n\
-trap '{}' EXIT\n\
-i={}\n\
-t={}\n\
-wd={}\n\
-{}\
-printf '%b%s%s%b' {} {} \"$i\" {}\n\
-if cd \"$wd\"; then\n\
-  bash \"$t\"\n\
-  e=$?\n\
-else\n\
-  e=$?\n\
-fi\n\
-printf '%b%s%s:%s%b' {} {} \"$i\" \"$e\" {}\n\
-exit \"$e\"\n\
-",
+    let runner_content = build_terminal_dispatch_runner_content(
+        payload,
+        prepared,
         cleanup_command,
-        bash_quote(&payload.run_id),
-        bash_quote(&prepared.execution_path),
-        bash_quote(&prepared.working_directory),
-        materialize_inline_script,
-        bash_quote(TERMINAL_RUN_MARKER_ESCAPED_PREFIX),
-        bash_quote(TERMINAL_RUN_START_MARKER_PREFIX),
-        bash_quote(TERMINAL_RUN_MARKER_ESCAPED_SUFFIX),
-        bash_quote(TERMINAL_RUN_MARKER_ESCAPED_PREFIX),
-        bash_quote(TERMINAL_RUN_END_MARKER_PREFIX),
-        bash_quote(TERMINAL_RUN_MARKER_ESCAPED_SUFFIX),
+        &materialize_inline_script,
     );
 
     write_wsl_file(&runner_path, runner_content.as_bytes())

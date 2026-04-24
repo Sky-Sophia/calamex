@@ -21,6 +21,10 @@ export default defineConfig(({ command }) => ({
   },
   build: {
     rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        welcome: fileURLToPath(new URL('./welcome.html', import.meta.url)),
+      },
       output: {
         manualChunks(id) {
           const normalizedId = id.replace(/\\/g, '/');

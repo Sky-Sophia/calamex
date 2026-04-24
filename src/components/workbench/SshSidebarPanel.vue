@@ -362,7 +362,8 @@ onBeforeUnmount(() => {
   <section class="ssh-sidebar-panel" aria-label="SSH 连接侧边栏">
     <header class="ssh-sidebar-header">
       <h2>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        <svg
+width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="2" y="2" width="20" height="20" rx="3" />
           <path d="M7 8l4 4-4 4" />
@@ -371,7 +372,8 @@ onBeforeUnmount(() => {
         SSH 资源管理器
       </h2>
 
-      <div class="ssh-connection-status" :class="{ 'ssh-connection-status--disconnected': isDisconnected }"
+      <div
+class="ssh-connection-status" :class="{ 'ssh-connection-status--disconnected': isDisconnected }"
         aria-live="polite">
         <span class="ssh-status-dot" :class="{ 'is-offline': isDisconnected }" />
         {{ connectionStatusLabel }}
@@ -379,7 +381,8 @@ onBeforeUnmount(() => {
     </header>
 
     <div class="ssh-tabs" :class="{ 'ssh-tabs--disconnected': isDisconnected }" role="tablist" aria-label="SSH 侧边栏分组">
-      <button type="button" class="ssh-tab" :class="{
+      <button
+type="button" class="ssh-tab" :class="{
         'ssh-tab--disconnected': isDisconnected,
         'is-active': isTabActive('explorer'),
         'is-disabled': isDisconnected,
@@ -387,7 +390,8 @@ onBeforeUnmount(() => {
         :disabled="isDisconnected" title="连接后可用" @click="setContentTab('explorer')">
         文件
       </button>
-      <button type="button" class="ssh-tab" :class="{
+      <button
+type="button" class="ssh-tab" :class="{
         'ssh-tab--disconnected': isDisconnected,
         'is-active': isTabActive('transfer'),
         'is-disabled': isDisconnected,
@@ -395,7 +399,8 @@ onBeforeUnmount(() => {
         :disabled="isDisconnected" title="连接后可用" @click="setContentTab('transfer')">
         传输
       </button>
-      <button type="button" class="ssh-tab" :class="{
+      <button
+type="button" class="ssh-tab" :class="{
         'ssh-tab--disconnected': isDisconnected,
         'is-active': isTabActive('connect'),
       }" role="tab" :aria-selected="isTabActive('connect')" @click="toggleConnectForm">
@@ -404,7 +409,8 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="ssh-panel-body" :class="isDisconnected ? 'ssh-panel-body--disconnected' : 'ssh-panel-body--connected'">
-      <form v-if="isConnectFormVisible" class="ssh-connect-form"
+      <form
+v-if="isConnectFormVisible" class="ssh-connect-form"
         :class="{ 'ssh-connect-form--disconnected': isDisconnected }" @submit.prevent="handleConnect">
         <div class="ssh-form-row">
           <label class="ssh-form-group">
@@ -444,7 +450,8 @@ onBeforeUnmount(() => {
 
       <section v-else-if="isDisconnected" class="ssh-empty-state ssh-empty-state--disconnected" aria-label="SSH 未连接状态">
         <div class="ssh-empty-illustration ssh-empty-illustration--disconnected" aria-hidden="true">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+          <svg
+width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M4 17h3m4 0h9" />
             <path d="M7 7l3 3-3 3" />
@@ -460,10 +467,12 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="ssh-empty-actions ssh-empty-actions--disconnected">
-          <button type="button"
+          <button
+type="button"
             class="ssh-button ssh-button--primary ssh-button--stacked ssh-button--disconnected-primary"
             @click="openConnectForm">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            <svg
+viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round" aria-hidden="true">
               <path d="M5 12h14" />
               <path d="M12 5l7 7-7 7" />
@@ -471,9 +480,11 @@ onBeforeUnmount(() => {
             新建连接
           </button>
 
-          <button type="button" class="ssh-button ssh-button--ghost ssh-button--stacked ssh-button--disconnected-ghost"
+          <button
+type="button" class="ssh-button ssh-button--ghost ssh-button--stacked ssh-button--disconnected-ghost"
             @click="handleImportConfig">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            <svg
+viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="17 8 12 3 7 8" />
@@ -486,10 +497,12 @@ onBeforeUnmount(() => {
         <section class="ssh-recent-section ssh-recent-section--disconnected" aria-label="最近使用 SSH 连接">
           <div class="ssh-recent-title ssh-recent-title--disconnected">最近使用</div>
 
-          <button v-for="connection in SSH_RECENT_CONNECTIONS" :key="connection.id" type="button"
+          <button
+v-for="connection in SSH_RECENT_CONNECTIONS" :key="connection.id" type="button"
             class="ssh-recent-item ssh-recent-item--disconnected" @click="handleSelectRecentConnection(connection)">
             <span class="ssh-recent-icon ssh-recent-icon--disconnected" aria-hidden="true">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              <svg
+width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                 stroke-linecap="round" stroke-linejoin="round">
                 <rect x="2" y="4" width="20" height="16" rx="2" />
                 <line x1="6" y1="8" x2="6.01" y2="8" />
@@ -510,7 +523,8 @@ onBeforeUnmount(() => {
       <template v-else>
         <div v-if="isExplorerActive" class="ssh-path-bar" aria-label="远端路径">
           <template v-for="(segment, index) in SSH_PATH_SEGMENTS" :key="segment.id">
-            <button type="button" class="ssh-path-segment"
+            <button
+type="button" class="ssh-path-segment"
               :class="{ 'is-current': segment.id === CURRENT_PATH_SEGMENT_ID }"
               @click="handlePathSegmentClick(segment)">
               {{ segment.label }}
@@ -520,7 +534,8 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-if="isExplorerActive" class="ssh-file-list" role="list" aria-label="远端文件列表">
-          <button v-for="item in SSH_FILE_ITEMS" :key="item.id" type="button" class="ssh-file-item" :class="{
+          <button
+v-for="item in SSH_FILE_ITEMS" :key="item.id" type="button" class="ssh-file-item" :class="{
             'is-folder': item.kind === 'folder',
             'is-selected': selectedFileId === item.id,
           }" :aria-label="`${item.name}，${item.metaLabel}`" @click="handleSelectFile(item.id)"
@@ -530,12 +545,14 @@ onBeforeUnmount(() => {
                 <path d="M2 6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6z" />
               </svg>
               <span v-else-if="item.kind === 'rust'">⚙</span>
-              <svg v-else-if="item.kind === 'lock'" width="13" height="13" viewBox="0 0 24 24" fill="none"
+              <svg
+v-else-if="item.kind === 'lock'" width="13" height="13" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                 <path d="M7 11V7a5 5 0 0 1 10 0v4" />
               </svg>
-              <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              <svg
+v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                 stroke-linecap="round" stroke-linejoin="round">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                 <polyline points="14 2 14 8 20 8" />
@@ -575,11 +592,13 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="ssh-sidebar-footer" :class="{ 'ssh-sidebar-footer--disconnected': isDisconnected }">
-      <button type="button" class="ssh-footer-button" :class="{
+      <button
+type="button" class="ssh-footer-button" :class="{
         'ssh-footer-button--disconnected': isDisconnected,
         'is-disabled': isDisconnected,
       }" :disabled="isDisconnected" title="连接后可用" @click="handleFooterAction('upload')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+        <svg
+viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
           stroke-linejoin="round" aria-hidden="true">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
           <polyline points="17 8 12 3 7 8" />
@@ -588,11 +607,13 @@ onBeforeUnmount(() => {
         上传
       </button>
 
-      <button type="button" class="ssh-footer-button" :class="{
+      <button
+type="button" class="ssh-footer-button" :class="{
         'ssh-footer-button--disconnected': isDisconnected,
         'is-disabled': isDisconnected,
       }" :disabled="isDisconnected" title="连接后可用" @click="handleFooterAction('download')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+        <svg
+viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
           stroke-linejoin="round" aria-hidden="true">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
           <polyline points="7 10 12 15 17 10" />
@@ -604,30 +625,35 @@ onBeforeUnmount(() => {
   </section>
 
   <Teleport to="body">
-    <div v-if="isConnected && contextMenu.open" ref="contextMenuRef" class="ssh-context-menu" :style="{
+    <div
+v-if="isConnected && contextMenu.open" ref="contextMenuRef" class="ssh-context-menu" :style="{
       left: `${contextMenu.x}px`,
       top: `${contextMenu.y}px`,
     }" @click.stop>
       <template v-for="action in SSH_CONTEXT_ACTIONS" :key="action.key">
         <div v-if="action.separatorBefore" class="ssh-context-separator" />
-        <button type="button" class="ssh-context-item" :class="{ 'is-danger': action.tone === 'danger' }"
+        <button
+type="button" class="ssh-context-item" :class="{ 'is-danger': action.tone === 'danger' }"
           @click="handleContextAction(action)">
           <svg v-if="action.key === 'rename'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
           </svg>
-          <svg v-else-if="action.key === 'copy-path'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          <svg
+v-else-if="action.key === 'copy-path'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
           </svg>
-          <svg v-else-if="action.key === 'download'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          <svg
+v-else-if="action.key === 'download'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="7 10 12 15 17 10" />
             <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
-          <svg v-else-if="action.key === 'upload'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          <svg
+v-else-if="action.key === 'upload'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="17 8 12 3 7 8" />

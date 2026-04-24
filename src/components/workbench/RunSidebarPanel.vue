@@ -386,9 +386,11 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
                 <span class="run-sidebar-title">运行</span>
 
                 <div class="run-sidebar-actions">
-                    <button type="button" class="run-sidebar-icon-button" aria-label="新建脚本" title="新建脚本"
+                    <button
+type="button" class="run-sidebar-icon-button" aria-label="新建脚本" title="新建脚本"
                         @click="emit('create-document')">
-                        <svg viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm" fill="none"
+                        <svg
+viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm" fill="none"
                             stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
                             aria-hidden="true">
                             <path d="M8 3.5v9" />
@@ -396,9 +398,11 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
                         </svg>
                     </button>
 
-                    <button type="button" class="run-sidebar-icon-button" aria-label="打开终端" title="打开终端"
+                    <button
+type="button" class="run-sidebar-icon-button" aria-label="打开终端" title="打开终端"
                         @click="emit('open-terminal')">
-                        <svg viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm" fill="none"
+                        <svg
+viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm" fill="none"
                             stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
                             aria-hidden="true">
                             <circle cx="3.5" cy="8" r="0.9" fill="currentColor" stroke="none" />
@@ -410,7 +414,8 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
             </div>
 
             <label class="run-sidebar-search" aria-label="搜索运行项">
-                <svg viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm" fill="none" stroke="currentColor"
+                <svg
+viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm" fill="none" stroke="currentColor"
                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <circle cx="7" cy="7" r="4.5" />
                     <path d="M10.5 10.5L13.5 13.5" />
@@ -426,7 +431,8 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
         <div class="run-sidebar-scroll">
             <section class="run-sidebar-section" :class="{ 'is-collapsed': collapsedSections.configs }">
                 <button type="button" class="run-sidebar-section-head" @click="toggleSection('configs')">
-                    <svg viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm run-sidebar-chevron"
+                    <svg
+viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm run-sidebar-chevron"
                         fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
                         stroke-linejoin="round" aria-hidden="true">
                         <path d="M6 4l4 4-4 4" />
@@ -440,25 +446,29 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
                         {{ normalizedSearchQuery ? '无匹配结果' : '暂无运行配置' }}
                     </div>
 
-                    <div v-for="row in filteredConfigRows" :key="row.id" class="run-sidebar-row" :class="{
+                    <div
+v-for="row in filteredConfigRows" :key="row.id" class="run-sidebar-row" :class="{
                         'is-running': row.running,
                         'is-disabled': row.disabled,
                     }" @click="void handleConfigAction(row)">
                         <span class="run-sidebar-row-icon">
-                            <svg v-if="row.running" viewBox="0 0 16 16" class="run-sidebar-status-icon is-running"
+                            <svg
+v-if="row.running" viewBox="0 0 16 16" class="run-sidebar-status-icon is-running"
                                 fill="none" aria-hidden="true">
                                 <circle cx="8" cy="8" r="6" stroke="var(--accent-strong)" stroke-width="1.6" />
                                 <circle cx="8" cy="8" r="2.4" fill="var(--accent-strong)" stroke="none" />
                             </svg>
 
-                            <svg v-else-if="row.icon === 'monitor'" viewBox="0 0 16 16" class="run-sidebar-icon"
+                            <svg
+v-else-if="row.icon === 'monitor'" viewBox="0 0 16 16" class="run-sidebar-icon"
                                 fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
                                 stroke-linejoin="round" aria-hidden="true">
                                 <rect x="2.5" y="3.5" width="11" height="8" rx="1.5" />
                                 <path d="M6 13h4" />
                             </svg>
 
-                            <svg v-else viewBox="0 0 16 16" class="run-sidebar-icon" fill="none" stroke="currentColor"
+                            <svg
+v-else viewBox="0 0 16 16" class="run-sidebar-icon" fill="none" stroke="currentColor"
                                 stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M3 5l2.5 2.5L3 10" />
                                 <path d="M7.5 11h5.5" />
@@ -474,23 +484,27 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
                             {{ activeElapsedLabel }}
                         </span>
 
-                        <button type="button" class="run-sidebar-row-action"
+                        <button
+type="button" class="run-sidebar-row-action"
                             :class="row.running ? 'is-stop' : 'is-play'" :disabled="row.disabled"
                             :aria-label="row.running ? '停止' : row.action === 'open-terminal' ? '打开终端' : '运行'"
                             @click.stop="void handleConfigAction(row)">
-                            <svg v-if="row.running" viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm"
+                            <svg
+v-if="row.running" viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm"
                                 fill="currentColor" aria-hidden="true">
                                 <rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1" />
                             </svg>
 
-                            <svg v-else-if="row.action === 'open-terminal'" viewBox="0 0 16 16"
+                            <svg
+v-else-if="row.action === 'open-terminal'" viewBox="0 0 16 16"
                                 class="run-sidebar-icon run-sidebar-icon-sm" fill="none" stroke="currentColor"
                                 stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M3 5l2.5 2.5L3 10" />
                                 <path d="M7.5 11h5.5" />
                             </svg>
 
-                            <svg v-else viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm"
+                            <svg
+v-else viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm"
                                 fill="currentColor" aria-hidden="true">
                                 <path d="M5.5 3.5l7 4.5-7 4.5z" />
                             </svg>
@@ -501,7 +515,8 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
 
             <section class="run-sidebar-section" :class="{ 'is-collapsed': collapsedSections.quick }">
                 <button type="button" class="run-sidebar-section-head" @click="toggleSection('quick')">
-                    <svg viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm run-sidebar-chevron"
+                    <svg
+viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm run-sidebar-chevron"
                         fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
                         stroke-linejoin="round" aria-hidden="true">
                         <path d="M6 4l4 4-4 4" />
@@ -514,19 +529,22 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
                         未找到匹配项
                     </div>
 
-                    <div v-for="row in filteredQuickRows" :key="row.id" class="run-sidebar-row run-sidebar-quick-row"
+                    <div
+v-for="row in filteredQuickRows" :key="row.id" class="run-sidebar-row run-sidebar-quick-row"
                         :class="{
                             'is-running': row.running,
                             'is-disabled': row.disabled,
                         }" @click="void handleQuickAction(row)">
                         <span class="run-sidebar-row-icon">
-                            <svg v-if="row.running" viewBox="0 0 16 16" class="run-sidebar-status-icon is-running"
+                            <svg
+v-if="row.running" viewBox="0 0 16 16" class="run-sidebar-status-icon is-running"
                                 fill="none" aria-hidden="true">
                                 <circle cx="8" cy="8" r="6" stroke="var(--accent-strong)" stroke-width="1.6" />
                                 <circle cx="8" cy="8" r="2.4" fill="var(--accent-strong)" stroke="none" />
                             </svg>
 
-                            <svg v-else-if="row.icon === 'history'" viewBox="0 0 16 16" class="run-sidebar-icon"
+                            <svg
+v-else-if="row.icon === 'history'" viewBox="0 0 16 16" class="run-sidebar-icon"
                                 fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
                                 stroke-linejoin="round" aria-hidden="true">
                                 <path d="M8 3.25a4.75 4.75 0 1 1-3.95 2.1" />
@@ -534,7 +552,8 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
                                 <path d="M8 5.25v3l2 1.25" />
                             </svg>
 
-                            <svg v-else-if="row.icon === 'trash'" viewBox="0 0 16 16" class="run-sidebar-icon"
+                            <svg
+v-else-if="row.icon === 'trash'" viewBox="0 0 16 16" class="run-sidebar-icon"
                                 fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
                                 stroke-linejoin="round" aria-hidden="true">
                                 <path d="M2.5 4.5h11" />
@@ -542,20 +561,23 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
                                 <path d="M4.25 4.5l.7 8a1 1 0 0 0 1 .91h4.1a1 1 0 0 0 1-.91l.7-8" />
                             </svg>
 
-                            <svg v-else-if="row.icon === 'monitor'" viewBox="0 0 16 16" class="run-sidebar-icon"
+                            <svg
+v-else-if="row.icon === 'monitor'" viewBox="0 0 16 16" class="run-sidebar-icon"
                                 fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
                                 stroke-linejoin="round" aria-hidden="true">
                                 <rect x="2.5" y="3.5" width="11" height="8" rx="1.5" />
                                 <path d="M6 13h4" />
                             </svg>
 
-                            <svg v-else-if="row.icon === 'spark'" viewBox="0 0 16 16" class="run-sidebar-icon"
+                            <svg
+v-else-if="row.icon === 'spark'" viewBox="0 0 16 16" class="run-sidebar-icon"
                                 fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
                                 stroke-linejoin="round" aria-hidden="true">
                                 <path d="M9 2L4.5 8H8l-1 6 4.5-6H8l1-6z" />
                             </svg>
 
-                            <svg v-else viewBox="0 0 16 16" class="run-sidebar-icon" fill="none" stroke="currentColor"
+                            <svg
+v-else viewBox="0 0 16 16" class="run-sidebar-icon" fill="none" stroke="currentColor"
                                 stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M3 5l2.5 2.5L3 10" />
                                 <path d="M7.5 11h5.5" />
@@ -565,9 +587,11 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
                         <span class="run-sidebar-quick-name">{{ row.name }}</span>
                         <span class="run-sidebar-quick-command mono-text">{{ row.command }}</span>
 
-                        <button v-if="row.running" type="button" class="run-sidebar-row-action is-stop" aria-label="停止"
+                        <button
+v-if="row.running" type="button" class="run-sidebar-row-action is-stop" aria-label="停止"
                             @click.stop="void handleQuickAction(row)">
-                            <svg viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm" fill="currentColor"
+                            <svg
+viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm" fill="currentColor"
                                 aria-hidden="true">
                                 <rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1" />
                             </svg>
@@ -580,7 +604,8 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
 
             <section class="run-sidebar-section" :class="{ 'is-collapsed': collapsedSections.templates }">
                 <button type="button" class="run-sidebar-section-head" @click="toggleSection('templates')">
-                    <svg viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm run-sidebar-chevron"
+                    <svg
+viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm run-sidebar-chevron"
                         fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
                         stroke-linejoin="round" aria-hidden="true">
                         <path d="M6 4l4 4-4 4" />
@@ -593,10 +618,12 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
                         {{ normalizedSearchQuery ? '无匹配模板' : '暂无可用模板' }}
                     </div>
 
-                    <div v-for="template in filteredTemplates" :key="template.id" class="run-sidebar-row"
+                    <div
+v-for="template in filteredTemplates" :key="template.id" class="run-sidebar-row"
                         @click="handleTemplateClick(template)">
                         <span class="run-sidebar-row-icon">
-                            <svg viewBox="0 0 16 16" class="run-sidebar-icon" fill="none" stroke="currentColor"
+                            <svg
+viewBox="0 0 16 16" class="run-sidebar-icon" fill="none" stroke="currentColor"
                                 stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <path d="M9 2L4.5 8H8l-1 6 4.5-6H8l1-6z" />
                             </svg>
@@ -608,7 +635,8 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
                         </div>
 
                         <span class="run-sidebar-template-add" aria-hidden="true">
-                            <svg viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm" fill="none"
+                            <svg
+viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm" fill="none"
                                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M8 4v8" />
                                 <path d="M4 8h8" />
@@ -620,7 +648,8 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
 
             <section class="run-sidebar-section" :class="{ 'is-collapsed': collapsedSections.history }">
                 <button type="button" class="run-sidebar-section-head" @click="toggleSection('history')">
-                    <svg viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm run-sidebar-chevron"
+                    <svg
+viewBox="0 0 16 16" class="run-sidebar-icon run-sidebar-icon-sm run-sidebar-chevron"
                         fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
                         stroke-linejoin="round" aria-hidden="true">
                         <path d="M6 4l4 4-4 4" />
@@ -634,27 +663,34 @@ function resolveHistoryExitLabel(entry: IRunHistoryEntry): string {
                         {{ normalizedSearchQuery ? '无匹配记录' : '暂无运行记录' }}
                     </div>
 
-                    <div v-for="entry in filteredRunHistory" :key="entry.id" class="run-sidebar-history-row"
+                    <div
+v-for="entry in filteredRunHistory" :key="entry.id" class="run-sidebar-history-row"
                         @click="handleHistoryClick()">
                         <span class="run-sidebar-history-status" :class="`is-${entry.status}`">
-                            <svg v-if="entry.status === 'success'" viewBox="0 0 16 16" class="run-sidebar-status-icon"
+                            <svg
+v-if="entry.status === 'success'" viewBox="0 0 16 16" class="run-sidebar-status-icon"
                                 fill="none" aria-hidden="true">
                                 <circle cx="8" cy="8" r="6" fill="var(--success)" stroke="none" />
-                                <path d="M5.2 8.1l1.8 1.9L10.8 6" stroke="var(--panel-bg)" stroke-width="1.6"
+                                <path
+d="M5.2 8.1l1.8 1.9L10.8 6" stroke="var(--panel-bg)" stroke-width="1.6"
                                     stroke-linecap="round" stroke-linejoin="round" />
                             </svg>
 
-                            <svg v-else-if="entry.status === 'canceled'" viewBox="0 0 16 16"
+                            <svg
+v-else-if="entry.status === 'canceled'" viewBox="0 0 16 16"
                                 class="run-sidebar-status-icon" fill="none" aria-hidden="true">
                                 <circle cx="8" cy="8" r="5.5" stroke="var(--text-quaternary)" stroke-width="1.4" />
-                                <path d="M5.5 5.5l5 5" stroke="var(--text-quaternary)" stroke-width="1.4"
+                                <path
+d="M5.5 5.5l5 5" stroke="var(--text-quaternary)" stroke-width="1.4"
                                     stroke-linecap="round" />
                             </svg>
 
-                            <svg v-else viewBox="0 0 16 16" class="run-sidebar-status-icon" fill="none"
+                            <svg
+v-else viewBox="0 0 16 16" class="run-sidebar-status-icon" fill="none"
                                 aria-hidden="true">
                                 <circle cx="8" cy="8" r="6" fill="var(--danger)" stroke="none" />
-                                <path d="M6 6l4 4M10 6l-4 4" stroke="var(--panel-bg)" stroke-width="1.6"
+                                <path
+d="M6 6l4 4M10 6l-4 4" stroke="var(--panel-bg)" stroke-width="1.6"
                                     stroke-linecap="round" />
                             </svg>
                         </span>

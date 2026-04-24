@@ -5,6 +5,7 @@
  */
 import { useAppStore } from '@/store/app';
 import { useEditorStore } from '@/store/editor';
+import { useTerminalRegistryStore } from '@/terminal/registry';
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { effectScope, type EffectScope } from 'vue';
@@ -460,6 +461,30 @@ describe('useWorkbench 特征化快照', () => {
       expect(mockTauriService.dispatchScriptToTerminal).toHaveBeenCalledOnce();
     });
 
+    it('派发前先确保终端事件监听已注册，避免遗漏完成事件', async () => {
+      editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
+      editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
+
+      const terminalRegistryStore = useTerminalRegistryStore();
+      const registerEventListeners = vi.fn(() => Promise.resolve());
+      terminalRegistryStore.set('main-terminal', {
+        registerEventListeners,
+      } as never);
+
+      mockTauriService.dispatchScriptToTerminal.mockResolvedValueOnce({
+        sessionId: 'main-terminal',
+        cwd: '/home',
+        commandLine: 'bash /tmp/script.sh',
+        usedTempFile: true,
+        startedAt: new Date().toISOString(),
+      });
+
+      await workbench.runScript();
+
+      expect(registerEventListeners).toHaveBeenCalledOnce();
+      expect(mockTauriService.dispatchScriptToTerminal).toHaveBeenCalledOnce();
+    });
+
     it('运行中重复触发时不重复派发脚本', async () => {
       editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
       editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
@@ -530,6 +555,94 @@ describe('useWorkbench 特征化快照', () => {
       expect(editorStore.isRunning).toBe(false);
       expect(editorStore.runHistory.length).toBe(1);
       expect(editorStore.runHistory[0]?.exitCode).toBe(0);
+    });
+
+    it('完成事件缺失 runId 时回退到当前活跃运行进行收口', async () => {
+      editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
+      editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
+
+      mockTauriService.dispatchScriptToTerminal.mockResolvedValueOnce({
+        sessionId: 'main-terminal',
+        cwd: '/home',
+        commandLine: 'bash /tmp/script.sh',
+        usedTempFile: true,
+        startedAt: new Date().toISOString(),
+      });
+
+      await workbench.runScript();
+
+      expect(editorStore.isRunning).toBe(true);
+      expect(editorStore.pendingTerminalRunId).not.toBeNull();
+
+      workbench.handleIntegratedTerminalRunComplete({
+        sessionId: 'main-terminal',
+        runId: '',
+        exitCode: 0,
+        finishedAt: new Date().toISOString(),
+      });
+
+      expect(editorStore.isRunning).toBe(false);
+      expect(editorStore.pendingTerminalRunId).toBeNull();
+      expect(editorStore.runHistory.length).toBe(1);
+      expect(editorStore.lastRunResult?.exitCode).toBe(0);
+    });
+
+    it('runId 不匹配当前运行时不误清新的运行态', async () => {
+      editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
+      editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
+
+      mockTauriService.dispatchScriptToTerminal.mockResolvedValueOnce({
+        sessionId: 'main-terminal',
+        cwd: '/home',
+        commandLine: 'bash /tmp/script.sh',
+        usedTempFile: true,
+        startedAt: new Date().toISOString(),
+      });
+
+      await workbench.runScript();
+
+      workbench.handleIntegratedTerminalRunComplete({
+        sessionId: 'main-terminal',
+        runId: 'another-run-id',
+        exitCode: 0,
+        finishedAt: new Date().toISOString(),
+      });
+
+      expect(editorStore.isRunning).toBe(true);
+      expect(editorStore.pendingTerminalRunId).not.toBeNull();
+      expect(editorStore.runHistory.length).toBe(0);
+    });
+
+    it('重复完成事件保持幂等，不重复追加运行历史', async () => {
+      editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
+      editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
+
+      let capturedRunId = '';
+      mockTauriService.dispatchScriptToTerminal.mockImplementation((req: { runId: string }) => {
+        capturedRunId = req.runId;
+        return Promise.resolve({
+          sessionId: 'main-terminal',
+          cwd: '/home',
+          commandLine: 'bash /tmp/script.sh',
+          usedTempFile: true,
+          startedAt: new Date().toISOString(),
+        });
+      });
+
+      await workbench.runScript();
+
+      const payload = {
+        sessionId: 'main-terminal',
+        runId: capturedRunId,
+        exitCode: 0,
+        finishedAt: new Date().toISOString(),
+      };
+
+      workbench.handleIntegratedTerminalRunComplete(payload);
+      workbench.handleIntegratedTerminalRunComplete(payload);
+
+      expect(editorStore.isRunning).toBe(false);
+      expect(editorStore.runHistory.length).toBe(1);
     });
   });
 

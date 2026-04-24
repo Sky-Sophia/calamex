@@ -75,6 +75,11 @@ v-if="props.contentOverlayVisible" class="pointer-events-none absolute inset-y-0
 </template>
 
 <script setup lang="ts">
+import {
+  SHELL_WINDOW_RESIZE_END_EVENT,
+  SHELL_WINDOW_RESIZE_START_EVENT,
+  SHELL_WINDOW_RESIZE_SETTLED_EVENT,
+} from '@/utils/window-resize-events';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 type TResizeDirection =
@@ -116,7 +121,6 @@ const emit = defineEmits<{
 }>();
 
 const WINDOW_RESIZE_SETTLE_MS = 140;
-const WINDOW_RESIZE_START_EVENT = 'shell-window-resize-start';
 const mainRef = ref<HTMLElement | null>(null);
 const shellRef = ref<HTMLElement | null>(null);
 const layoutTransitionsEnabled = ref(true);
@@ -130,6 +134,8 @@ let terminalResizeFrameId: number | null = null;
 let previousShellSize = { width: 0, height: 0 };
 let pendingShellSize: { width: number; height: number } | null = null;
 let pendingTerminalResizeHeight: number | null = null;
+let isShellWindowResizing = false;
+let pendingTerminalViewportSync = false;
 
 const resizeHandles: Array<{ direction: TResizeDirection; className: string }> = [
   { direction: 'North', className: 'is-top' },
@@ -186,6 +192,10 @@ const surfaceTransitionClass =
   'transition-[opacity,transform,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]';
 
 const scheduleLayoutTransitionRestore = (): void => {
+  if (isShellWindowResizing) {
+    return;
+  }
+
   if (resizeSettleTimerId !== null) {
     window.clearTimeout(resizeSettleTimerId);
   }
@@ -233,6 +243,11 @@ const queueShellResize = (width: number, height: number): void => {
     height: Math.round(height),
   };
 
+  if (isShellWindowResizing) {
+    layoutTransitionsEnabled.value = false;
+    return;
+  }
+
   if (shellResizeFrameId !== null) {
     return;
   }
@@ -241,6 +256,11 @@ const queueShellResize = (width: number, height: number): void => {
 };
 
 const scheduleTerminalViewportSync = (): void => {
+  if (isShellWindowResizing) {
+    pendingTerminalViewportSync = true;
+    return;
+  }
+
   if (terminalViewportSyncFrameId !== null) {
     return;
   }
@@ -326,14 +346,58 @@ const startWindowResize = async (direction: TResizeDirection, event: MouseEvent)
   }
 
   layoutTransitionsEnabled.value = false;
-  window.dispatchEvent(new Event(WINDOW_RESIZE_START_EVENT));
+  window.dispatchEvent(new Event(SHELL_WINDOW_RESIZE_START_EVENT));
 
   try {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
     await getCurrentWindow().startResizeDragging(direction);
   } catch (error) {
+    window.dispatchEvent(new Event(SHELL_WINDOW_RESIZE_END_EVENT));
     console.warn('窗口边缘拉伸失败', error);
   }
+};
+
+const handleShellWindowResizeStart = (): void => {
+  isShellWindowResizing = true;
+  layoutTransitionsEnabled.value = false;
+
+  if (resizeSettleTimerId !== null) {
+    window.clearTimeout(resizeSettleTimerId);
+    resizeSettleTimerId = null;
+  }
+};
+
+const handleShellWindowResizeEnd = (): void => {
+  if (shellRef.value) {
+    pendingShellSize = {
+      width: Math.round(shellRef.value.clientWidth),
+      height: Math.round(shellRef.value.clientHeight),
+    };
+  }
+};
+
+const handleShellWindowResizeSettled = (): void => {
+  isShellWindowResizing = false;
+
+  if (shellResizeFrameId !== null) {
+    window.cancelAnimationFrame(shellResizeFrameId);
+    shellResizeFrameId = null;
+  }
+
+  if (shellRef.value) {
+    pendingShellSize = {
+      width: Math.round(shellRef.value.clientWidth),
+      height: Math.round(shellRef.value.clientHeight),
+    };
+  }
+  flushShellResize();
+
+  if (pendingTerminalViewportSync) {
+    pendingTerminalViewportSync = false;
+    scheduleTerminalViewportSync();
+  }
+
+  scheduleLayoutTransitionRestore();
 };
 
 watch(
@@ -345,6 +409,9 @@ watch(
 
 onMounted(() => {
   syncTerminalHeightWithinViewport();
+  window.addEventListener(SHELL_WINDOW_RESIZE_START_EVENT, handleShellWindowResizeStart);
+  window.addEventListener(SHELL_WINDOW_RESIZE_END_EVENT, handleShellWindowResizeEnd);
+  window.addEventListener(SHELL_WINDOW_RESIZE_SETTLED_EVENT, handleShellWindowResizeSettled);
 
   if (shellRef.value) {
     previousShellSize = {
@@ -376,6 +443,10 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener(SHELL_WINDOW_RESIZE_START_EVENT, handleShellWindowResizeStart);
+  window.removeEventListener(SHELL_WINDOW_RESIZE_END_EVENT, handleShellWindowResizeEnd);
+  window.removeEventListener(SHELL_WINDOW_RESIZE_SETTLED_EVENT, handleShellWindowResizeSettled);
+
   resizeObserver?.disconnect();
   shellResizeObserver?.disconnect();
   terminalResizeCleanup?.();
