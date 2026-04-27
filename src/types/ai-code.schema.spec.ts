@@ -40,6 +40,7 @@ describe('AI Chat code rendering', () => {
 
     expect(codeSegment?.kind).toBe('code');
     if (codeSegment?.kind === 'code') {
+      expect(codeSegment.id).toBe(codeSegment.block.id);
       expect(aiCodeBlockSchema.parse(codeSegment.block).fence.lang).toBe('sh');
     }
   });

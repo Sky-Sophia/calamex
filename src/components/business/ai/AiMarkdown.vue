@@ -1,8 +1,8 @@
 ﻿<script setup lang="ts">
-import { computed } from 'vue';
 import AiCodeBlock from '@/components/business/ai/AiCodeBlock.vue';
 import { renderAiMarkdown } from '@/services/modules/ai-render';
 import type { IAiCodeBlock, IAiCodePathTarget } from '@/types/ai-code';
+import { computed } from 'vue';
 
 const props = defineProps<{
   messageId: string;
@@ -19,29 +19,30 @@ const emit = defineEmits<{
 
 const markdownContent = computed(() => props.stableContent ?? props.content);
 const segments = computed(() => renderAiMarkdown(props.messageId, markdownContent.value));
+const renderedSegments = computed(() => {
+  if (!props.openBlock) {
+    return segments.value;
+  }
+  return [
+    ...segments.value,
+    {
+      id: props.openBlock.id,
+      kind: 'code' as const,
+      block: props.openBlock,
+    },
+  ];
+});
 </script>
 
 <template>
   <div class="ai-markdown">
-    <template v-for="segment in segments" :key="segment.id">
+    <template v-for="segment in renderedSegments" :key="segment.id">
       <!-- eslint-disable-next-line vue/no-v-html -- HTML 已由 markdown-it(html:false) 与 DOMPurify 白名单净化。 -->
       <div v-if="segment.kind === 'html'" class="ai-markdown-html" v-html="segment.html"></div>
       <AiCodeBlock
-        v-else
-        :block="segment.block"
-        :can-apply="canApplyCode"
-        @apply="emit('applyCode', $event)"
-        @open-path="emit('openCodePath', $event)"
-      />
+v-else :block="segment.block" :can-apply="canApplyCode" @apply="emit('applyCode', $event)"
+        @open-path="emit('openCodePath', $event)" />
     </template>
-    <AiCodeBlock
-      v-if="openBlock"
-      :key="openBlock.id"
-      :block="openBlock"
-      :can-apply="false"
-      @apply="emit('applyCode', $event)"
-      @open-path="emit('openCodePath', $event)"
-    />
   </div>
 </template>
 
