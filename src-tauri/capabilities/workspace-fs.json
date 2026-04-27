@@ -1,7 +1,7 @@
 {
     "$schema": "../gen/schemas/desktop-schema.json",
     "identifier": "workspace-fs",
-    "description": "工作区/文件系统域能力：对话框选择路径、脚本加载/保存、工作区条目列举、图片资产加载。对应命令：get_startup_workspace / load_script / save_script / list_workspace_entries / load_image_asset。参见 ADR-0005。",
+    "description": "工作区/文件系统域能力：对话框选择路径、脚本加载/保存、工作区条目列举、图片资产加载、资源管理器新建/重命名/删除。对应命令：load_script / save_script / list_workspace_entries / load_image_asset / create_workspace_path / rename_workspace_path / delete_workspace_path。参见 ADR-0005。注意：delete_workspace_path 为破坏性操作，前端调用前 MUST 经用户确认。",
     "windows": [
         "main"
     ],

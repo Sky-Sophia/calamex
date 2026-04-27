@@ -1,5 +1,7 @@
 [workspace]
-members = ["src-tauri"]
+members = [
+  "src-tauri",
+]
 resolver = "2"
 
 [patch.crates-io]

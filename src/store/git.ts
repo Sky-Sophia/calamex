@@ -4,7 +4,7 @@ import type {
   IGitFileBaselinePayload,
   IGitRepositoryStatusPayload,
 } from '@/types/git';
-import { normalizeFileSystemPath } from '@/utils/path';
+import { areFileSystemPathsEqual, normalizeFileSystemPath } from '@/utils/path';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
@@ -89,6 +89,21 @@ export const useGitStore = defineStore('git', () => {
     return payload;
   };
 
+  const assertInitializedRepositoryStatus = (
+    payload: IGitRepositoryStatusPayload,
+    workspaceRootPath: string,
+  ): void => {
+    if (!payload.available || !payload.repositoryRootPath) {
+      throw new Error(payload.message ?? 'Git 初始化后仍未检测到仓库。');
+    }
+
+    if (!areFileSystemPathsEqual(payload.repositoryRootPath, workspaceRootPath)) {
+      throw new Error(
+        `Git 初始化目标不一致：期望 ${workspaceRootPath}，实际 ${payload.repositoryRootPath}。`,
+      );
+    }
+  };
+
   const refreshRepositoryStatus = async (
     workspaceRootPath?: string | null,
   ): Promise<IGitRepositoryStatusPayload> => {
@@ -118,8 +133,28 @@ export const useGitStore = defineStore('git', () => {
   const initRepository = async (
     workspaceRootPath?: string | null,
   ): Promise<IGitRepositoryStatusPayload> => {
-    const payload = await tauriService.initGitRepository(workspaceRootPath);
-    return applyStatus(payload);
+    if (!workspaceRootPath) {
+      reset();
+      return status.value;
+    }
+
+    const requestId = statusRequestId + 1;
+    statusRequestId = requestId;
+    isLoading.value = true;
+
+    try {
+      const payload = await tauriService.initGitRepository(workspaceRootPath);
+      if (requestId !== statusRequestId) {
+        return status.value;
+      }
+
+      assertInitializedRepositoryStatus(payload, workspaceRootPath);
+      return applyStatus(payload);
+    } finally {
+      if (requestId === statusRequestId) {
+        isLoading.value = false;
+      }
+    }
   };
 
   const getFileBaseline = async (path: string): Promise<IGitFileBaselinePayload> => {
@@ -205,6 +240,20 @@ export const useGitStore = defineStore('git', () => {
     return applyStatus(payload);
   };
 
+  const discardPaths = async (paths: string[]): Promise<IGitRepositoryStatusPayload> => {
+    const deduplicatedPaths = deduplicatePaths(paths);
+    if (deduplicatedPaths.length === 0) {
+      return status.value;
+    }
+
+    const payload = await tauriService.discardGitPaths({
+      repositoryRootPath: requireRepositoryRootPath(),
+      paths: deduplicatedPaths,
+    });
+    deduplicatedPaths.forEach(invalidateFileBaseline);
+    return applyStatus(payload);
+  };
+
   const commitIndex = async (message: string): Promise<IGitCommitResultPayload> => {
     const payload = await tauriService.commitGitIndex({
       repositoryRootPath: requireRepositoryRootPath(),
@@ -228,6 +277,7 @@ export const useGitStore = defineStore('git', () => {
     clearBaselineCache,
     stagePaths,
     unstagePaths,
+    discardPaths,
     commitIndex,
     reset,
   };

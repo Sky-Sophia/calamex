@@ -717,7 +717,7 @@ d="M6 6l4 4M10 6l-4 4" stroke="var(--panel-bg)" stroke-width="1.6"
     height: 100%;
     min-height: 0;
     flex-direction: column;
-    background: #0e0e10;
+    background: var(--sidebar-bg);
     color: var(--text-primary);
 }
 

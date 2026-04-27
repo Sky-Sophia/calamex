@@ -132,6 +132,7 @@ function buildMonacoColors(
     const accent = tokens.accent.strong;
     const accentBase = tokens.accent.default;
     const editorBg = tokens.editor.background;
+    const editorGutterBg = tokens.editor.gutter;
     const widgetBg = tokens.editor.surface;
     const overlayBg = tokens.overlay.background;
     const overlayDepth = tokens.overlay.backgroundDepth;
@@ -218,7 +219,7 @@ function buildMonacoColors(
         'editorBracketMatch.background': withAlpha(accentBase, isDark ? '18' : '12'),
         'editorBracketMatch.border': withAlpha(accent, isDark ? '73' : '59'),
         'editor.foldBackground': withAlpha(accentBase, isDark ? '1f' : '12'),
-        'editorGutter.background': editorBg,
+        'editorGutter.background': editorGutterBg,
         'editorGutter.modifiedBackground': tokens.diff.modified,
         'editorGutter.addedBackground': tokens.diff.added,
         'editorGutter.deletedBackground': tokens.diff.deleted,

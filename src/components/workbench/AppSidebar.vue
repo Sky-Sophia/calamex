@@ -149,6 +149,7 @@
             class="explorer-root-row w-full text-left"
             :class="{ 'is-open': isRootOpen }"
             @click="toggleRoot"
+            @contextmenu.prevent.stop="handleRootContextMenu"
           >
             <span class="explorer-chevron">
               <svg
@@ -207,15 +208,21 @@
               :search-query="explorerSearchQuery"
               @toggle-directory="toggleDirectory"
               @open-file="handleOpenFile"
+              @context-menu="handleEntryContextMenu"
             />
           </div>
         </template>
       </div>
 
-      <footer class="explorer-statusbar">
-        <span class="explorer-status-dot"></span>
-        <span>{{ explorerStatusText }}</span>
-      </footer>
+      <LinearContextMenu
+        :open="explorerContextMenu.open"
+        :x="explorerContextMenu.x"
+        :y="explorerContextMenu.y"
+        :groups="explorerContextMenuGroups"
+        :theme="appStore.theme"
+        :submenu-direction="explorerContextMenu.x > 280 ? 'left' : 'right'"
+        @select="handleExplorerContextMenuSelect"
+      />
     </section>
 
     <SearchSidebarPanel
@@ -246,7 +253,7 @@
       @clear-run-history="emit('clear-run-history')"
     />
 
-    <SshSidebarPanel v-else-if="isSshView" />
+    <SshSidebarPanel v-else-if="isSshView" @open-terminal="emit('open-terminal')" />
 
     <template v-else>
       <div class="border-b border-(--shell-divider) px-3 py-3">
@@ -299,6 +306,8 @@
 </template>
 
 <script setup lang="ts">
+import type { ILinearContextMenuGroup, ILinearContextMenuItem } from '@/components/common/linear-context-menu.types';
+import LinearContextMenu from '@/components/common/LinearContextMenu.vue';
 import { Button } from '@/components/ui/button';
 import ExplorerEntryIcon from '@/components/workbench/ExplorerEntryIcon.vue';
 import RunSidebarPanel from '@/components/workbench/RunSidebarPanel.vue';
@@ -308,6 +317,7 @@ import SshSidebarPanel from '@/components/workbench/SshSidebarPanel.vue';
 import WorkspaceTreeNode from '@/components/workbench/WorkspaceTreeNode.vue';
 import { useMessage } from '@/composables/useMessage';
 import { tauriService } from '@/services/tauri';
+import { useAppStore } from '@/store/app';
 import type { TWorkbenchSidebarView } from '@/types/app';
 import type {
   IActiveRunSummary,
@@ -319,13 +329,14 @@ import type {
   TExecutorKind,
 } from '@/types/editor';
 import { toErrorMessage } from '@/utils/error';
+import { writeClipboardText } from '@/utils/clipboard';
+import { getPathDirectory } from '@/utils/path';
 import {
-  countLoadedWorkspaceEntries,
   filterWorkspaceEntriesByQuery,
   resolveWorkspaceKey,
   resolveWorkspaceRootPayload,
 } from '@/utils/workspace';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 const props = defineProps<{
   document: IEditorDocument;
@@ -352,6 +363,7 @@ const emit = defineEmits<{
 }>();
 
 const message = useMessage();
+const appStore = useAppStore();
 const root = ref<IWorkspaceDirectoryPayload | null>(null);
 const rootExpanded = ref(true);
 const rootLoading = ref(false);
@@ -362,6 +374,109 @@ const expandedPaths = reactive<Record<string, boolean>>({});
 const loadingPaths = reactive<Record<string, boolean>>({});
 const loadedWorkspaceKey = ref<string | null>(null);
 let rootRequestId = 0;
+
+type TExplorerContextMenuAction =
+  | 'open'
+  | 'new-file'
+  | 'new-directory'
+  | 'rename'
+  | 'delete'
+  | 'copy-path'
+  | 'refresh';
+
+interface IExplorerContextMenuItem extends ILinearContextMenuItem {
+  action: TExplorerContextMenuAction;
+}
+
+interface IExplorerContextTarget {
+  path: string;
+  name: string;
+  kind: 'directory' | 'file';
+  isRoot: boolean;
+}
+
+const explorerContextMenu = reactive({
+  open: false,
+  x: 0,
+  y: 0,
+});
+const explorerContextTarget = ref<IExplorerContextTarget | null>(null);
+
+const explorerContextMenuGroups = computed<ILinearContextMenuGroup<IExplorerContextMenuItem>[]>(() => {
+  const target = explorerContextTarget.value;
+  const canCreate = target?.kind === 'directory';
+  const canMutate = Boolean(target && !target.isRoot);
+
+  return [
+    {
+      key: 'primary',
+      title: 'EXPLORER',
+      items: [
+        {
+          key: 'open',
+          label: '打开',
+          icon: 'goto',
+          shortcut: ['Enter'],
+          action: 'open',
+          disabled: !target,
+        },
+        {
+          key: 'new-file',
+          label: '新建文件',
+          icon: 'plus',
+          shortcut: ['Ctrl', 'N'],
+          action: 'new-file',
+          disabled: !canCreate,
+        },
+        {
+          key: 'new-directory',
+          label: '新建文件夹',
+          icon: 'plus',
+          shortcut: ['Ctrl', 'Shift', 'N'],
+          action: 'new-directory',
+          disabled: !canCreate,
+        },
+        {
+          key: 'rename',
+          label: '重命名',
+          icon: 'comment',
+          shortcut: ['F2'],
+          action: 'rename',
+          disabled: !canMutate,
+        },
+      ],
+    },
+    {
+      key: 'secondary',
+      title: 'ACTIONS',
+      items: [
+        {
+          key: 'delete',
+          label: '删除',
+          icon: 'trash',
+          shortcut: ['Del'],
+          action: 'delete',
+          disabled: !canMutate,
+        },
+        {
+          key: 'copy-path',
+          label: '复制路径',
+          icon: 'copy',
+          shortcut: ['Ctrl', 'Shift', 'C'],
+          action: 'copy-path',
+          disabled: !target,
+        },
+        {
+          key: 'refresh',
+          label: '刷新',
+          icon: 'refresh',
+          shortcut: ['F5'],
+          action: 'refresh',
+        },
+      ],
+    },
+  ];
+});
 
 const SIDEBAR_META: Record<
   TWorkbenchSidebarView,
@@ -457,26 +572,6 @@ const filteredRootEntries = computed(() => {
 });
 
 const hasVisibleRootEntries = computed(() => filteredRootEntries.value.length > 0);
-const indexedEntryCount = computed(() => countLoadedWorkspaceEntries(childrenMap));
-const explorerStatusText = computed(() => {
-  if (!props.isDesktopRuntime) {
-    return '桌面端可用';
-  }
-
-  if (loadError.value) {
-    return loadError.value;
-  }
-
-  if (rootLoading.value) {
-    return '正在索引工作区…';
-  }
-
-  if (!props.workspaceRootPath) {
-    return '未打开工作区';
-  }
-
-  return `${indexedEntryCount.value} 个项目 · 已索引`;
-});
 
 const clearTreeState = (): void => {
   Object.keys(childrenMap).forEach((path) => {
@@ -575,6 +670,43 @@ const toggleRoot = (): void => {
   rootExpanded.value = !rootExpanded.value;
 };
 
+const closeExplorerContextMenu = (): void => {
+  explorerContextMenu.open = false;
+  explorerContextTarget.value = null;
+};
+
+const openExplorerContextMenu = (
+  event: MouseEvent,
+  target: IExplorerContextTarget,
+): void => {
+  explorerContextMenu.x = Math.min(event.clientX, Math.max(12, window.innerWidth - 236));
+  explorerContextMenu.y = Math.min(event.clientY, Math.max(12, window.innerHeight - 300));
+  explorerContextTarget.value = target;
+  explorerContextMenu.open = true;
+};
+
+const handleRootContextMenu = (event: MouseEvent): void => {
+  if (!root.value) {
+    return;
+  }
+
+  openExplorerContextMenu(event, {
+    path: root.value.rootPath,
+    name: root.value.rootName,
+    kind: 'directory',
+    isRoot: true,
+  });
+};
+
+const handleEntryContextMenu = (payload: { event: MouseEvent; entry: IWorkspaceEntry }): void => {
+  openExplorerContextMenu(payload.event, {
+    path: payload.entry.path,
+    name: payload.entry.name,
+    kind: payload.entry.kind,
+    isRoot: false,
+  });
+};
+
 const toggleDirectory = async (path: string): Promise<void> => {
   const nextExpanded = !expandedPaths[path];
   expandedPaths[path] = nextExpanded;
@@ -590,8 +722,83 @@ const handleOpenFile = (path: string): void => {
   emit('open-file', path);
 };
 
+const resolveCreationParentPath = (target: IExplorerContextTarget | null): string | null => {
+  if (target?.kind === 'directory') {
+    return target.path;
+  }
+
+  return root.value?.rootPath ?? props.workspaceRootPath;
+};
+
+const promptWorkspaceEntryName = (
+  title: string,
+  defaultName: string,
+): string | null => {
+  const name = window.prompt(title, defaultName)?.trim();
+  return name && name.length > 0 ? name : null;
+};
+
+const refreshDirectoryAfterMutation = async (path: string | null): Promise<void> => {
+  if (!root.value || !path) {
+    await handleRefreshExplorer();
+    return;
+  }
+
+  if (path === root.value.rootPath) {
+    await handleRefreshExplorer();
+    return;
+  }
+
+  await loadDirectoryEntries(path);
+};
+
+const handleCreateWorkspaceEntry = async (
+  kind: 'file' | 'directory',
+  target: IExplorerContextTarget | null,
+): Promise<void> => {
+  if (!root.value) {
+    message.error('请先打开工作区。');
+    return;
+  }
+
+  const parentPath = resolveCreationParentPath(target);
+  if (!parentPath) {
+    message.error('无法解析新建位置。');
+    return;
+  }
+
+  const name = promptWorkspaceEntryName(
+    kind === 'file' ? '请输入文件名' : '请输入文件夹名',
+    kind === 'file' ? 'untitled.sh' : '新建文件夹',
+  );
+  if (!name) {
+    return;
+  }
+
+  try {
+    const payload = await tauriService.createWorkspacePath({
+      parentPath,
+      rootPath: root.value.rootPath,
+      name,
+      kind,
+    });
+    await refreshDirectoryAfterMutation(parentPath);
+    message.success(kind === 'file' ? '已创建文件' : '已创建文件夹');
+    if (payload.kind === 'file') {
+      handleOpenFile(payload.path);
+    }
+  } catch (error) {
+    message.error(toErrorMessage(error, kind === 'file' ? '创建文件失败' : '创建文件夹失败'));
+  }
+};
+
 const handleCreatePlaceholder = (kind: 'file' | 'directory'): void => {
-  message.info(kind === 'file' ? '新建文件待接入' : '新建文件夹待接入');
+  void handleCreateWorkspaceEntry(kind, {
+    path: root.value?.rootPath ?? props.workspaceRootPath ?? '',
+    name: root.value?.rootName ?? 'workspace',
+    kind: 'directory',
+    isRoot: true,
+  });
 };
 
 const handleRefreshExplorer = async (): Promise<void> => {
@@ -605,6 +812,129 @@ const handleCollapseAll = (): void => {
   });
   rootExpanded.value = true;
 };
+
+const handleRenameWorkspaceEntry = async (target: IExplorerContextTarget): Promise<void> => {
+  if (!root.value || target.isRoot) {
+    return;
+  }
+
+  const newName = promptWorkspaceEntryName('请输入新名称', target.name);
+  if (!newName || newName === target.name) {
+    return;
+  }
+
+  try {
+    await tauriService.renameWorkspacePath({
+      path: target.path,
+      rootPath: root.value.rootPath,
+      newName,
+    });
+    await refreshDirectoryAfterMutation(getPathDirectory(target.path));
+    message.success('已重命名');
+  } catch (error) {
+    message.error(toErrorMessage(error, '重命名失败'));
+  }
+};
+
+const handleDeleteWorkspaceEntry = async (target: IExplorerContextTarget): Promise<void> => {
+  if (!root.value || target.isRoot) {
+    return;
+  }
+
+  const confirmed = window.confirm(`确认删除“${target.name}”？此操作不可撤销。`);
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await tauriService.deleteWorkspacePath({
+      path: target.path,
+      rootPath: root.value.rootPath,
+    });
+    await refreshDirectoryAfterMutation(getPathDirectory(target.path));
+    message.success('已删除');
+  } catch (error) {
+    message.error(toErrorMessage(error, '删除失败'));
+  }
+};
+
+const handleExplorerContextMenuSelect = async (
+  item: ILinearContextMenuItem,
+): Promise<void> => {
+  const actionItem = item as IExplorerContextMenuItem;
+  const target = explorerContextTarget.value;
+  closeExplorerContextMenu();
+
+  if (actionItem.disabled) {
+    return;
+  }
+
+  switch (actionItem.action) {
+    case 'open':
+      if (!target) return;
+      if (target.isRoot) {
+        toggleRoot();
+        return;
+      }
+      if (target.kind === 'directory') {
+        await toggleDirectory(target.path);
+        return;
+      }
+      handleOpenFile(target.path);
+      return;
+    case 'new-file':
+      await handleCreateWorkspaceEntry('file', target);
+      return;
+    case 'new-directory':
+      await handleCreateWorkspaceEntry('directory', target);
+      return;
+    case 'rename':
+      if (target) await handleRenameWorkspaceEntry(target);
+      return;
+    case 'delete':
+      if (target) await handleDeleteWorkspaceEntry(target);
+      return;
+    case 'copy-path':
+      if (target) {
+        await writeClipboardText(target.path);
+        message.success('已复制路径');
+      }
+      return;
+    case 'refresh':
+      await handleRefreshExplorer();
+      return;
+    default:
+      return;
+  }
+};
+
+const handleWindowPointerDown = (event: PointerEvent): void => {
+  if (
+    explorerContextMenu.open &&
+    event.target instanceof Element &&
+    event.target.closest('.linear-context-menu-root') === null
+  ) {
+    closeExplorerContextMenu();
+  }
+};
+
+const handleWindowKeydown = (event: KeyboardEvent): void => {
+  if (explorerContextMenu.open && event.key === 'Escape') {
+    closeExplorerContextMenu();
+  }
+};
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointerdown', handleWindowPointerDown, true);
+  window.addEventListener('keydown', handleWindowKeydown);
+}
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('pointerdown', handleWindowPointerDown, true);
+    window.removeEventListener('keydown', handleWindowKeydown);
+  }
+});
 
 watch(
   [

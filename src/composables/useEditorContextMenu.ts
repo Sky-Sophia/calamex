@@ -3,6 +3,7 @@ import type {
   IEditorContextMenuItem,
   TEditorContextMenuAction,
 } from '@/components/editor/editor-context-menu.types';
+import { tryReadClipboardText, writeClipboardText } from '@/utils/clipboard';
 import { monaco } from '@/utils/monaco';
 import { onBeforeUnmount, reactive, ref } from 'vue';
 
@@ -31,6 +32,8 @@ const createShortcutMap = (): Record<TEditorContextMenuAction, string[]> => {
   const labels = resolveShortcutModifierLabels();
 
   return {
+    undo: [labels.primary, 'Z'],
+    redo: [labels.primary, labels.shift, 'Z'],
     'format-with-shfmt': [labels.alt, labels.shift, 'F'],
     'toggle-comment-line': [labels.primary, '/'],
     find: [labels.primary, 'F'],
@@ -48,6 +51,7 @@ const SHORTCUT_MAP = createShortcutMap();
 interface IUseEditorContextMenuOptions {
   getEditor: () => monaco.editor.IStandaloneCodeEditor | null;
   onFormatRequest: () => void;
+  onCommandPaletteRequest: () => void;
 }
 
 interface IEditorContextMenuState {
@@ -100,6 +104,161 @@ const runMonacoAction = async (
   await action.run();
 };
 
+const isSelectionEmpty = (selection: monaco.Selection): boolean =>
+  selection.startLineNumber === selection.endLineNumber &&
+  selection.startColumn === selection.endColumn;
+
+const resolvePrimarySelection = (
+  editor: monaco.editor.IStandaloneCodeEditor,
+): monaco.Selection | null => editor.getSelection();
+
+const resolveTextSelections = (
+  editor: monaco.editor.IStandaloneCodeEditor,
+): monaco.Selection[] => {
+  const selections = editor.getSelections() ?? [];
+  return selections.filter((selection) => !isSelectionEmpty(selection));
+};
+
+const resolveCurrentLineRange = (
+  editor: monaco.editor.IStandaloneCodeEditor,
+): monaco.Range | null => {
+  const model = editor.getModel();
+  const position = editor.getPosition();
+
+  if (!model || !position) {
+    return null;
+  }
+
+  const lineNumber = Math.min(Math.max(position.lineNumber, 1), model.getLineCount());
+  if (lineNumber < model.getLineCount()) {
+    return new monaco.Range(lineNumber, 1, lineNumber + 1, 1);
+  }
+
+  return new monaco.Range(lineNumber, 1, lineNumber, model.getLineMaxColumn(lineNumber));
+};
+
+const resolveEditorSelectionText = (
+  editor: monaco.editor.IStandaloneCodeEditor,
+): string | null => {
+  const model = editor.getModel();
+  if (!model) {
+    return null;
+  }
+
+  const textSelections = resolveTextSelections(editor);
+  if (textSelections.length > 0) {
+    return textSelections
+      .map((selection) => model.getValueInRange(selection))
+      .join(model.getEOL());
+  }
+
+  const lineRange = resolveCurrentLineRange(editor);
+  return lineRange ? model.getValueInRange(lineRange) : null;
+};
+
+const pushEditorUndoBoundary = (editor: monaco.editor.IStandaloneCodeEditor): void => {
+  editor.pushUndoStop();
+};
+
+const copyEditorSelection = async (
+  editor: monaco.editor.IStandaloneCodeEditor,
+): Promise<void> => {
+  const text = resolveEditorSelectionText(editor);
+  if (text === null) {
+    await runMonacoAction(editor, 'editor.action.clipboardCopyAction');
+    return;
+  }
+
+  try {
+    await writeClipboardText(text);
+  } catch {
+    await runMonacoAction(editor, 'editor.action.clipboardCopyAction');
+  }
+};
+
+const cutEditorSelection = async (
+  editor: monaco.editor.IStandaloneCodeEditor,
+): Promise<void> => {
+  const model = editor.getModel();
+  if (!model) {
+    return;
+  }
+
+  const textSelections = resolveTextSelections(editor);
+  const targetRanges: monaco.Selection[] | monaco.Range[] =
+    textSelections.length > 0
+      ? textSelections
+      : (() => {
+        const lineRange = resolveCurrentLineRange(editor);
+        return lineRange ? [lineRange] : [];
+      })();
+
+  if (targetRanges.length === 0) {
+    return;
+  }
+
+  try {
+    await writeClipboardText(
+      targetRanges.map((range) => model.getValueInRange(range)).join(model.getEOL()),
+    );
+  } catch {
+    await runMonacoAction(editor, 'editor.action.clipboardCutAction');
+    return;
+  }
+
+  pushEditorUndoBoundary(editor);
+  editor.executeEdits(
+    'context-menu.cut',
+    targetRanges.map((range) => ({
+      range,
+      text: '',
+      forceMoveMarkers: true,
+    })),
+  );
+  pushEditorUndoBoundary(editor);
+};
+
+const pasteIntoEditor = async (
+  editor: monaco.editor.IStandaloneCodeEditor,
+): Promise<void> => {
+  const clipboardText = await tryReadClipboardText();
+  if (clipboardText === null) {
+    await runMonacoAction(editor, 'editor.action.clipboardPasteAction');
+    return;
+  }
+
+  const selection = resolvePrimarySelection(editor);
+  if (!selection) {
+    return;
+  }
+
+  pushEditorUndoBoundary(editor);
+  editor.executeEdits('context-menu.paste', [
+    {
+      range: selection,
+      text: clipboardText,
+      forceMoveMarkers: true,
+    },
+  ]);
+  pushEditorUndoBoundary(editor);
+};
+
+const selectAllEditorText = (editor: monaco.editor.IStandaloneCodeEditor): void => {
+  const model = editor.getModel();
+  if (!model) {
+    return;
+  }
+
+  editor.setSelection(model.getFullModelRange());
+};
+
+const triggerEditorCommand = (
+  editor: monaco.editor.IStandaloneCodeEditor,
+  commandId: string,
+): void => {
+  editor.trigger('context-menu', commandId, null);
+};
+
 export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
   const state = reactive<IEditorContextMenuState>({
     open: false,
@@ -126,14 +285,10 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
     editor: monaco.editor.IStandaloneCodeEditor,
   ): IEditorContextMenuGroup[] => {
     const isReadOnly = editor.getOption(monaco.editor.EditorOption.readOnly);
-    const supportsQuickCommand = supportsAction(editor, 'editor.action.quickCommand');
     const supportsFind = supportsAction(editor, 'actions.find');
     const supportsGotoLine = supportsAction(editor, 'editor.action.gotoLine');
     const supportsCommentLine = supportsAction(editor, 'editor.action.commentLine');
-    const supportsCut = supportsAction(editor, 'editor.action.clipboardCutAction');
-    const supportsCopy = supportsAction(editor, 'editor.action.clipboardCopyAction');
-    const supportsPaste = supportsAction(editor, 'editor.action.clipboardPasteAction');
-    const supportsSelectAll = supportsAction(editor, 'editor.action.selectAll');
+    const hasModel = editor.getModel() !== null;
 
     const formatChildren: IEditorContextMenuItem[] = [
       {
@@ -175,6 +330,28 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
 
     return [
       {
+        key: 'history-actions',
+        title: 'EDIT',
+        items: [
+          {
+            key: 'undo',
+            label: '撤销',
+            icon: 'undo',
+            shortcut: SHORTCUT_MAP.undo,
+            action: 'undo',
+            disabled: isReadOnly || !hasModel,
+          },
+          {
+            key: 'redo',
+            label: '重做',
+            icon: 'redo',
+            shortcut: SHORTCUT_MAP.redo,
+            action: 'redo',
+            disabled: isReadOnly || !hasModel,
+          },
+        ],
+      },
+      {
         key: 'code-actions',
         title: 'EDITOR ACTIONS',
         items: [
@@ -198,7 +375,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
             icon: 'command',
             shortcut: SHORTCUT_MAP['quick-command'],
             action: 'quick-command',
-            disabled: !supportsQuickCommand,
+            disabled: false,
           },
         ],
       },
@@ -212,7 +389,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
             icon: 'cut',
             shortcut: SHORTCUT_MAP.cut,
             action: 'cut',
-            disabled: !supportsCut || isReadOnly,
+            disabled: isReadOnly || !hasModel,
           },
           {
             key: 'copy',
@@ -220,7 +397,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
             icon: 'copy',
             shortcut: SHORTCUT_MAP.copy,
             action: 'copy',
-            disabled: !supportsCopy,
+            disabled: !hasModel,
           },
           {
             key: 'paste',
@@ -228,7 +405,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
             icon: 'paste',
             shortcut: SHORTCUT_MAP.paste,
             action: 'paste',
-            disabled: !supportsPaste || isReadOnly,
+            disabled: isReadOnly || !hasModel,
           },
           {
             key: 'select-all',
@@ -236,7 +413,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
             icon: 'select-all',
             shortcut: SHORTCUT_MAP['select-all'],
             action: 'select-all',
-            disabled: !supportsSelectAll,
+            disabled: !hasModel,
           },
         ],
       },
@@ -288,6 +465,12 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
     editor.focus();
 
     switch (item.action) {
+      case 'undo':
+        triggerEditorCommand(editor, 'undo');
+        return;
+      case 'redo':
+        triggerEditorCommand(editor, 'redo');
+        return;
       case 'format-with-shfmt':
         options.onFormatRequest();
         return;
@@ -301,19 +484,19 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
         await runMonacoAction(editor, 'editor.action.gotoLine');
         return;
       case 'quick-command':
-        await runMonacoAction(editor, 'editor.action.quickCommand');
+        options.onCommandPaletteRequest();
         return;
       case 'cut':
-        await runMonacoAction(editor, 'editor.action.clipboardCutAction');
+        await cutEditorSelection(editor);
         return;
       case 'copy':
-        await runMonacoAction(editor, 'editor.action.clipboardCopyAction');
+        await copyEditorSelection(editor);
         return;
       case 'paste':
-        await runMonacoAction(editor, 'editor.action.clipboardPasteAction');
+        await pasteIntoEditor(editor);
         return;
       case 'select-all':
-        await runMonacoAction(editor, 'editor.action.selectAll');
+        selectAllEditorText(editor);
         return;
       default:
         return;

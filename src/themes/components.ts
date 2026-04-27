@@ -42,6 +42,7 @@ export function buildComponentTokens(roles: IRoles) {
         // ── 代码编辑器 ────────────────────────────────────────────────────────────
         editor: {
             background: roles.surface.editor,
+            gutter: roles.surface.editorGutter,
             /** 内嵌 Widget 背景（悬浮提示、补全框、标题查找等） */
             surface: roles.surface.editorWidget,
             lineHighlight: roles.surface.soft,

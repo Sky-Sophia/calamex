@@ -17,7 +17,7 @@
             {{ errorState?.message ?? '未获取到错误摘要' }}
           </p>
         </div>
-        <div class="rounded-2xl border border-white/[0.08] bg-[#0b0c0e] px-4 py-4">
+        <div class="rounded-2xl border border-white/[0.08] bg-[var(--bg-code)] px-4 py-4">
           <p class="mb-3 text-sm font-medium text-[var(--text-primary)]">详细堆栈</p>
           <pre class="mono-text max-h-[420px] overflow-auto whitespace-pre-wrap break-words text-[13px] leading-6 text-[var(--text-secondary)]">{{ errorState?.detail ?? '无详细堆栈信息' }}</pre>
         </div>

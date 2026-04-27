@@ -208,10 +208,12 @@ onBeforeUnmount(() => {
   z-index: 1401;
   width: min(360px, calc(100vw - 32px));
   transform: translate(-50%, -50%);
-  border: 1px solid #3c3c3c;
+  border: 1px solid var(--overlay-border, var(--border-strong));
   border-radius: 8px;
-  background: #252526;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  background: var(--overlay-bg, var(--bg-4));
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.36),
+    0 0 0 0.5px rgba(255, 255, 255, 0.06);
   padding: 20px 20px 14px;
   outline: none;
   -webkit-font-smoothing: antialiased;
@@ -223,7 +225,7 @@ onBeforeUnmount(() => {
 }
 
 .app-dialog-panel[data-variant='danger'] {
-  border-color: #5a2f35;
+  border-color: color-mix(in srgb, var(--danger) 38%, transparent);
 }
 
 .app-dialog-copy {
@@ -232,7 +234,7 @@ onBeforeUnmount(() => {
 
 .app-dialog-title {
   margin: 0 0 4px;
-  color: #ffffff;
+  color: var(--text-primary);
   font-size: 13.5px;
   font-weight: 500;
   letter-spacing: -0.01em;
@@ -240,7 +242,7 @@ onBeforeUnmount(() => {
 
 .app-dialog-description {
   margin: 0;
-  color: #8a8a8a;
+  color: var(--text-tertiary);
   font-size: 12.5px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -271,24 +273,24 @@ onBeforeUnmount(() => {
 .app-dialog-secondary-button {
   border-color: transparent;
   background: transparent;
-  color: #8a8a8a;
+  color: var(--text-tertiary);
 }
 
 .app-dialog-secondary-button:hover {
-  background: transparent;
-  color: #cccccc;
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .app-dialog-primary-button {
   border-color: transparent;
-  background: #ffffff;
-  color: #1e1e1e;
+  background: var(--primary, var(--settings-accent));
+  color: var(--primary-foreground, #f8fafc);
   font-weight: 500;
 }
 
 .app-dialog-primary-button:hover {
-  background: #e8e8e8;
-  color: #1e1e1e;
+  background: var(--accent-strong);
+  color: var(--primary-foreground, #f8fafc);
 }
 
 .app-dialog-overlay[data-state='closed'] {

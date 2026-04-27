@@ -1,26 +1,27 @@
 /**
  * src/terminal/session.ts
- * TerminalSession — 终端会话核心实现（R-20.2.1 / R-20.2.3）
- *
- * 持有全部会话状态；与 UI 层完全解耦，可通过构造参数注入 fake 服务用于单测（R-20.2.6）。
- * UI 层（useIntegratedTerminal.ts）仅负责 DOM 挂载 / Vue 生命周期 / 响应式 watcher。
+ * TerminalSession：终端会话核心实现（R-20.2.1 / R-20.2.3）。
+ * 持有全部会话状态；与 UI 层解耦，可通过构造参数注入 fake 服务用于单测（R-20.2.6）。
  */
 import { getThemeManager } from '@/themes';
 import type { TThemeMode } from '@/types/app';
 import type { ITerminalSettings } from '@/types/settings';
 import type {
     ITerminalDataEvent,
+    ITerminalBufferDiagnostic,
     ITerminalExitEvent,
-    ITerminalRunCompletePayload,
-    ITerminalRunOutputEvent,
+    ITerminalRunCompletedPayload,
+    ITerminalRunChunkPayload,
     ITerminalSessionPayload,
     ITerminalStatusChangePayload,
+    ITerminalInputRoutePayload,
+    ITerminalVisualWritePayload,
     TTerminalConnectionState,
+    TTerminalInputRoute,
 } from '@/types/terminal';
 import { readClipboardText, writeClipboardText } from '@/utils/clipboard';
 import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
 import { toErrorMessage } from '@/utils/error';
-import { stripInternalDispatchEcho } from '@/utils/terminal-output';
 import {
     SHELL_WINDOW_RESIZE_END_EVENT,
     SHELL_WINDOW_RESIZE_START_EVENT,
@@ -30,7 +31,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
-import { nextTick, ref, shallowRef, type Ref } from 'vue';
+import { markRaw, nextTick, ref, shallowRef, type Ref } from 'vue';
 
 // ─── 本地常量 ─────────────────────────────────────────────────────────────────
 
@@ -42,21 +43,45 @@ const TERMINAL_ENABLE_WEBGL_RENDERER = false;
 const TERMINAL_WEBGL_RECOVERY_DELAY_MS = 180;
 const TERMINAL_LAYOUT_SETTLE_DELAY_MS = 72;
 const TERMINAL_OUTPUT_FLUSH_DELAY_MS = 16;
-const TERMINAL_RUN_COMPLETE_FLUSH_TIMEOUT_MS = 160;
+const TERMINAL_RUN_COMPLETED_FLUSH_TIMEOUT_MS = 160;
+const TERMINAL_RUN_VISUAL_REORDER_TIMEOUT_MS = 2000;
 const TERMINAL_SCROLL_RECOVERY_DELAY_MS = 64;
-const TERMINAL_PROMPT_WAKE_DELAY_MS = 320;
+const TERMINAL_LAYOUT_SCROLL_GUARD_RELEASE_MS = 180;
+const TERMINAL_RESIZE_REPAINT_SUPPRESSION_MS = 240;
+const TERMINAL_RUN_SEPARATOR_PREFIX = '──── run #';
+const TERMINAL_BUFFER_DIAGNOSTIC_LINE_COUNT = 14;
+const TERMINAL_BUFFER_DIAGNOSTIC_PREVIEW_LENGTH = 160;
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_ESCAPE_CHARACTER_PATTERN = new RegExp(ANSI_ESCAPE, 'gu');
+const ANSI_CSI_HOME_CURSOR_PATTERN = new RegExp(
+    `${ANSI_ESCAPE}\\[(?:\\d{0,4}(?:;\\d{0,4})?)?H`,
+    'u',
+);
+const ANSI_CSI_ERASE_PATTERN = new RegExp(
+    `${ANSI_ESCAPE}\\[(?:\\??\\d{0,4}(?:;\\d{0,4})*)?[JK]`,
+    'u',
+);
+const ANSI_CSI_HIDE_CURSOR_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[\\?25l`, 'u');
+const ANSI_ALT_SCREEN_SWITCH_PATTERN = new RegExp(
+    `${ANSI_ESCAPE}\\[\\?(?:47|1047|1049)([hl])`,
+    'gu',
+);
 const DEFAULT_TERMINAL_FONT_FAMILY =
     "Berkeley Mono, JetBrains Mono, 'SFMono-Regular', Consolas, 'Courier New', monospace";
 
 type TTerminalBellStyle = 'none' | 'sound' | 'visual';
 type TTerminalLayoutSyncOptions = { settle?: boolean };
 
+interface IRunVisualTransaction {
+    nextSeq: number;
+    pending: Map<number, ITerminalDataEvent>;
+    gapTimerId: number | null;
+}
+
 // ─── 终端主题 helper ───────────────────────────────────────────────────────────
 
 /**
- * 从 ThemeManager 获取当前 xterm 主题。
- * ThemeManager.init() 在 main.ts 同步调用，运行时永远非 null；
- * 单测中若未初始化则返回空对象，xterm 使用内置默认色。
+ * 从 ThemeManager 获取当前 xterm 主题；未初始化时返回空对象，由 xterm 使用内置默认色。
  */
 const getXtermTheme = () => getThemeManager().getTerminalTheme() ?? {};
 
@@ -118,6 +143,66 @@ const isPrintableTerminalInput = (data: string): boolean => {
     return code >= 0x20 && code !== 0x7f;
 };
 
+const encodeTerminalInputForDiagnostics = (data: string): Uint8Array => {
+    if (typeof TextEncoder === 'undefined') {
+        return new Uint8Array();
+    }
+    return new TextEncoder().encode(data);
+};
+
+const isFirstRunChunkFrame = (payload: ITerminalDataEvent): boolean =>
+    payload.source === 'run' &&
+    typeof payload.runSeq === 'number' &&
+    payload.runSeq === 1;
+
+const hasAltScreenSwitch = (data: string): boolean => {
+    ANSI_ALT_SCREEN_SWITCH_PATTERN.lastIndex = 0;
+    return ANSI_ALT_SCREEN_SWITCH_PATTERN.test(data);
+};
+
+const resolveAltScreenActiveAfterData = (current: boolean, data: string): boolean => {
+    let next = current;
+    ANSI_ALT_SCREEN_SWITCH_PATTERN.lastIndex = 0;
+    for (
+        let match = ANSI_ALT_SCREEN_SWITCH_PATTERN.exec(data);
+        match !== null;
+        match = ANSI_ALT_SCREEN_SWITCH_PATTERN.exec(data)
+    ) {
+        next = match[1] === 'h';
+    }
+    return next;
+};
+
+const isLikelyInteractiveResizeRepaintFrame = (data: string): boolean =>
+    ANSI_CSI_HOME_CURSOR_PATTERN.test(data) &&
+    ANSI_CSI_ERASE_PATTERN.test(data) &&
+    (ANSI_CSI_HIDE_CURSOR_PATTERN.test(data) || data.includes('\x1b[H'));
+
+const previewTerminalDiagnosticText = (value: string): string =>
+    value
+        .replaceAll('\r', '\\r')
+        .replaceAll('\n', '\\n')
+        .replace(ANSI_ESCAPE_CHARACTER_PATTERN, '\\x1b')
+        .slice(0, TERMINAL_BUFFER_DIAGNOSTIC_PREVIEW_LENGTH);
+
+export const stripInjectedRunSeparatorForTerminalData = (data: string): string => {
+    const markerIndex = data.indexOf(TERMINAL_RUN_SEPARATOR_PREFIX);
+    if (markerIndex < 0) {
+        return data;
+    }
+
+    const crlfIndex = data.indexOf('\r\n', markerIndex);
+    const lfIndex = data.indexOf('\n', markerIndex);
+    const separatorEndIndex =
+        crlfIndex >= 0
+            ? crlfIndex + 2
+            : lfIndex >= 0
+                ? lfIndex + 1
+                : data.length;
+
+    return `${data.slice(0, markerIndex)}${data.slice(separatorEndIndex)}`;
+};
+
 // ─── 可注入的 Tauri PTY 服务接口（使 TerminalSession 可测试） ─────────────────
 
 export interface ITerminalTauriService {
@@ -136,8 +221,12 @@ export interface ITerminalTauriService {
 
 export interface ITerminalSessionCallbacks {
     onStatusChange?: (payload: ITerminalStatusChangePayload) => void;
-    onOutput?: (payload: ITerminalRunOutputEvent) => void;
-    onRunComplete?: (payload: ITerminalRunCompletePayload) => void;
+    onOutput?: (payload: ITerminalRunChunkPayload) => void;
+    onRunCompleted?: (payload: ITerminalRunCompletedPayload) => void;
+    onInputRoute?: (payload: ITerminalInputRoutePayload) => void;
+    onTerminalData?: (payload: ITerminalDataEvent) => void;
+    onVisualWrite?: (payload: ITerminalVisualWritePayload) => void;
+    onBufferDiagnostic?: (payload: ITerminalBufferDiagnostic) => void;
 }
 
 // ─── 构造选项 ─────────────────────────────────────────────────────────────────
@@ -148,34 +237,36 @@ export interface ITerminalSessionOptions extends ITerminalSessionCallbacks {
     resetOrphanedBackendSession?: boolean;
     /**
      * 由 registry 注入的外部 status ref。
-     * 确保 useIntegratedTerminalStatus 在 session 创建前后读同一个 ref（Fix-3）。
      */
     statusRef?: Ref<TTerminalConnectionState>;
-    /** 由 registry 注入的外部 statusMessage ref */
+    /** 由 registry 注入的外部 statusMessage ref。 */
     statusMessageRef?: Ref<string>;
 }
 
 // ─── TerminalSession 类 ───────────────────────────────────────────────────────
 
 /**
- * 终端会话实体，遵循 R-20.2.3 定义的接口契约。
- * 一个实例对应一个 PTY 连接；所有可变状态均封装为实例属性，严禁模块级共享变量。
+ * 终端会话实体，遵循 R-20.2.3 定义的接口契约；一个实例对应一个 PTY 连接。
  */
 export class TerminalSession {
-    // ── 公共响应式状态 ──────────────────────────────────────────────────────────
+    // ── 公共响应式状态 ─────────────────────────────────────────────────────────
     readonly id: string;
     readonly status: Ref<TTerminalConnectionState>;
     readonly statusMessage: Ref<string>;
     readonly session: Ref<ITerminalSessionPayload | null>;
 
-    // ── 私有：服务依赖 ──────────────────────────────────────────────────────────
+    // ── 私有：服务依赖 ─────────────────────────────────────────────────────────
     private readonly _tauri: ITerminalTauriService;
     private readonly _resetOrphanedBackendSession: boolean;
 
-    // ── 私有：回调 ─────────────────────────────────────────────────────────────
+    // ── 私有：回调 ────────────────────────────────────────────────────────────
     private _onStatusChange: ((p: ITerminalStatusChangePayload) => void) | null = null;
-    private _onOutput: ((p: ITerminalRunOutputEvent) => void) | null = null;
-    private _onRunComplete: ((p: ITerminalRunCompletePayload) => void) | null = null;
+    private _onOutput: ((p: ITerminalRunChunkPayload) => void) | null = null;
+    private _onRunCompleted: ((p: ITerminalRunCompletedPayload) => void) | null = null;
+    private _onInputRoute: ((p: ITerminalInputRoutePayload) => void) | null = null;
+    private _onTerminalData: ((p: ITerminalDataEvent) => void) | null = null;
+    private _onVisualWrite: ((p: ITerminalVisualWritePayload) => void) | null = null;
+    private _onBufferDiagnostic: ((p: ITerminalBufferDiagnostic) => void) | null = null;
 
     // ── 私有：xterm 实例 ────────────────────────────────────────────────────────
     private _terminalRef = shallowRef<Terminal | null>(null);
@@ -189,8 +280,9 @@ export class TerminalSession {
     private _theme: TThemeMode = 'dark';
     private _settings: ITerminalSettings | null = null;
 
-    // ── 私有：可见性 ────────────────────────────────────────────────────────────
+    // -- Private: visibility --------------------------------------------------
     private _visible = false;
+    private _showRunSeparator = true;
 
     // ── 私有：定时器 ────────────────────────────────────────────────────────────
     private _layoutFrameId: number | null = null;
@@ -200,12 +292,12 @@ export class TerminalSession {
     private _terminalWriteFrameId: number | null = null;
     private _terminalWriteTimeoutId: number | null = null;
     private _scrollRecoveryTimeoutId: number | null = null;
-    private _promptWakeTimeoutId: number | null = null;
+    private _layoutScrollGuardTimeoutId: number | null = null;
 
-    // ── 私有：Tauri 事件监听器 ──────────────────────────────────────────────────
+    // -- Private: Tauri event listeners --------------------------------------
     private _dataUnlisten: UnlistenFn | null = null;
-    private _runOutputUnlisten: UnlistenFn | null = null;
-    private _runCompleteUnlisten: UnlistenFn | null = null;
+    private _runChunkUnlisten: UnlistenFn | null = null;
+    private _runCompletedUnlisten: UnlistenFn | null = null;
     private _exitUnlisten: UnlistenFn | null = null;
     private _eventListenerRegistration: Promise<void> | null = null;
     /**
@@ -214,7 +306,7 @@ export class TerminalSession {
      */
     private _listenerVersion = 0;
 
-    // ── 私有：DOM 副作用清理函数 ────────────────────────────────────────────────
+    // ── 私有：DOM 副作用清理函数 ───────────────────────────────────────────────
     private _fontLoadingCleanup: (() => void) | null = null;
     private _visibilityChangeCleanup: (() => void) | null = null;
     private _windowFocusCleanup: (() => void) | null = null;
@@ -223,7 +315,7 @@ export class TerminalSession {
     private _webglContextLossCleanup: { dispose(): void } | null = null;
     private _resizeObserver: ResizeObserver | null = null;
 
-    // ── 私有：视口同步标志 ──────────────────────────────────────────────────────
+    // ── 私有：视口同步标记 ─────────────────────────────────────────────────────
     private _shouldClearTextureAtlasOnViewportSync = false;
     private _shouldRefreshViewportOnViewportSync = false;
     private _shouldScrollToBottomOnViewportSync = false;
@@ -231,7 +323,7 @@ export class TerminalSession {
     private _isShellWindowResizing = false;
     private _pendingLayoutAfterShellWindowResize = false;
 
-    // ── 私有：写缓冲区 ──────────────────────────────────────────────────────────
+    // -- Private: write buffer -----------------------------------------------
     private _bufferedTerminalWrite = '';
     private _hiddenTerminalWriteBacklog = '';
     private _pendingScrollToBottomAfterWrite = false;
@@ -239,26 +331,30 @@ export class TerminalSession {
     private _shouldFitBeforeNextVisibleWrite = false;
     private _pendingInitialPaintRecovery = true;
     private readonly _pendingTerminalWriteCallbacks: Array<() => void> = [];
+    private readonly _runVisualTransactions = new Map<string, IRunVisualTransaction>();
 
-    // ── 私有：终端状态标志 ──────────────────────────────────────────────────────
+    // -- Private: terminal state flags ---------------------------------------
     private _isTerminalWriteInFlight = false;
     private _isProgrammaticScrollSync = false;
     private _isAutoFollowEnabled = true;
+    private _keepViewportAtBottomDuringLayout = false;
+    private _interactiveAltScreenActive = false;
+    private _interactiveResizeRepaintSuppressUntilMs = 0;
 
-    // ── 私有：运行追踪 ──────────────────────────────────────────────────────────
+    // -- Private: run tracking ------------------------------------------------
     private _activeRunId: string | null = null;
-    private _hasStructuredRunOutputForActiveRun = false;
+    private _hasStructuredRunChunkForActiveRun = false;
 
-    // ── 私有：渲染器状态 ────────────────────────────────────────────────────────
+    // -- Private: renderer state ---------------------------------------------
     private _webglRendererBlocked = false;
     private _previousHostSize = { width: 0, height: 0 };
     private _previousTerminalSize = { cols: 0, rows: 0 };
 
-    // ── 构造 ────────────────────────────────────────────────────────────────────
+    // -- Constructor ----------------------------------------------------------
 
     constructor(options: ITerminalSessionOptions) {
         this.id = options.sessionId;
-        // 优先使用 registry 注入的共享 ref，保证状态钩子与实例同源（Fix-3）
+        // 优先使用 registry 注入的共享 ref，保证状态钩子与实例同源（Fix-3）。
         this.status = options.statusRef ?? ref<TTerminalConnectionState>('connecting');
         this.statusMessage = options.statusMessageRef ?? ref('正在连接 WSL2 终端…');
         this.session = ref<ITerminalSessionPayload | null>(null);
@@ -266,18 +362,30 @@ export class TerminalSession {
         this._resetOrphanedBackendSession = options.resetOrphanedBackendSession ?? false;
         this._onStatusChange = options.onStatusChange ?? null;
         this._onOutput = options.onOutput ?? null;
-        this._onRunComplete = options.onRunComplete ?? null;
+        this._onRunCompleted = options.onRunCompleted ?? null;
+        this._onInputRoute = options.onInputRoute ?? null;
+        this._onTerminalData = options.onTerminalData ?? null;
+        this._onVisualWrite = options.onVisualWrite ?? null;
+        this._onBufferDiagnostic = options.onBufferDiagnostic ?? null;
     }
 
-    // ── 公共：更新回调（组件重挂载时） ──────────────────────────────────────────
+    // -- Public: update callbacks --------------------------------------------
 
     updateCallbacks(callbacks: ITerminalSessionCallbacks): void {
         this._onStatusChange = callbacks.onStatusChange ?? null;
         this._onOutput = callbacks.onOutput ?? null;
-        this._onRunComplete = callbacks.onRunComplete ?? null;
+        this._onRunCompleted = callbacks.onRunCompleted ?? null;
+        this._onInputRoute = callbacks.onInputRoute ?? null;
+        this._onTerminalData = callbacks.onTerminalData ?? null;
+        this._onVisualWrite = callbacks.onVisualWrite ?? null;
+        this._onBufferDiagnostic = callbacks.onBufferDiagnostic ?? null;
     }
 
-    // ── 公共：初始化并挂载到 DOM（由 UI 层在 onMounted 调用） ───────────────────
+    setRunSeparatorVisible(visible: boolean): void {
+        this._showRunSeparator = visible;
+    }
+
+    // -- Public: initialize and attach to DOM --------------------------------
 
     initWithHost(el: HTMLElement, theme: TThemeMode, settings: ITerminalSettings): void {
         this._hostEl = el;
@@ -286,7 +394,7 @@ export class TerminalSession {
         this._createTerminal();
     }
 
-    // ── 公共：设置可见性 ────────────────────────────────────────────────────────
+    // -- Public: set visibility ----------------------------------------------
 
     setVisible(visible: boolean): void {
         this._visible = visible;
@@ -300,7 +408,7 @@ export class TerminalSession {
         this._applyTerminalSettings();
     }
 
-    // ── 公共：处理面板显示事件（visible 从 false 变 true 时由 UI watcher 调用） ──
+    // -- Public: handle panel visibility -------------------------------------
 
     handleBecomeVisible(): void {
         this._createTerminal();
@@ -315,13 +423,13 @@ export class TerminalSession {
         this.focusTerminal();
     }
 
-    // ── 公共：订阅 Tauri 事件（由 UI 层在 onMounted 调用） ──────────────────────
+    // -- Public: subscribe Tauri events --------------------------------------
 
     registerEventListeners(): Promise<void> {
         if (
             this._dataUnlisten &&
-            this._runOutputUnlisten &&
-            this._runCompleteUnlisten &&
+            this._runChunkUnlisten &&
+            this._runCompletedUnlisten &&
             this._exitUnlisten
         ) {
             return Promise.resolve();
@@ -329,7 +437,7 @@ export class TerminalSession {
         if (this._eventListenerRegistration) {
             return this._eventListenerRegistration;
         }
-        // 捕获当前版本号；若异步期间 detach 使版本递增，则丢弃本次注册（Fix-2）
+        // 捕获当前版本号；若异步期间 detach 使版本递增，则丢弃本次注册（Fix-2）。
         const version = this._listenerVersion;
         this._eventListenerRegistration = (async () => {
             const runtimeReady = await waitForDesktopRuntime();
@@ -339,13 +447,15 @@ export class TerminalSession {
 
             const [dl, rl, cl, el] = await Promise.all([
                 listen<ITerminalDataEvent>('terminal:data', (e) => this._handleDataEvent(e)),
-                listen<ITerminalRunOutputEvent>('terminal:run-output', (e) =>
-                    this._handleRunOutputEvent(e),
+                listen<ITerminalRunChunkPayload>('terminal:run-chunk', (e) =>
+                    this._handleRunChunkEvent(e),
                 ),
-                listen<ITerminalRunCompletePayload>('terminal:run-complete', (e) =>
-                    this._handleRunCompleteEvent(e),
+                listen<ITerminalRunCompletedPayload>('terminal:run-completed', (e) =>
+                    this._handleRunCompletedEvent(e),
                 ),
-                listen<ITerminalExitEvent>('terminal:exit', (e) => this._handleExitEvent(e)),
+                listen<ITerminalExitEvent>('terminal:interactive-exited', (e) =>
+                    this._handleExitEvent(e),
+                ),
             ]);
             if (this._listenerVersion !== version) {
                 // detach 在注册期间被调用，立即释放这批监听器避免泄漏
@@ -353,8 +463,8 @@ export class TerminalSession {
                 return;
             }
             this._dataUnlisten = dl;
-            this._runOutputUnlisten = rl;
-            this._runCompleteUnlisten = cl;
+            this._runChunkUnlisten = rl;
+            this._runCompletedUnlisten = cl;
             this._exitUnlisten = el;
         })().finally(() => {
             this._eventListenerRegistration = null;
@@ -362,7 +472,7 @@ export class TerminalSession {
         return this._eventListenerRegistration;
     }
 
-    // ── 公共：建立 PTY 连接 ─────────────────────────────────────────────────────
+    // -- Public: establish PTY connection ------------------------------------
 
     async ensureConnect(): Promise<void> {
         const runtimeReady = await waitForDesktopRuntime();
@@ -385,6 +495,7 @@ export class TerminalSession {
 
         this._emitStatus('connecting', '正在连接 WSL2 终端…');
         await nextTick();
+        this._emitBufferDiagnostic('ensure-connect:before-initial-layout');
         this._syncTerminalLayout();
         try {
             let payload = await this._tauri.ensureTerminalSession({
@@ -403,6 +514,12 @@ export class TerminalSession {
                 });
             }
             this.session.value = payload;
+            this._emitBufferDiagnostic(
+                payload.created
+                    ? 'ensure-connect:created-session'
+                    : 'ensure-connect:existing-session-before-replay',
+                payload.initialOutput ?? null,
+            );
             if (!payload.created && payload.initialOutput) {
                 terminal.reset();
                 this._bufferedTerminalWrite = '';
@@ -413,10 +530,10 @@ export class TerminalSession {
                 this._pendingInitialPaintRecovery = true;
                 this._queueTerminalWrite(payload.initialOutput, { scrollToBottom: true });
                 this._flushTerminalWriteBufferNow({ forceLayout: true });
+                this._emitBufferDiagnostic('ensure-connect:existing-session-after-replay');
             }
             if (payload.created && !payload.initialOutput) {
                 this._pendingInitialPaintRecovery = true;
-                this._schedulePromptWake();
             }
             this._emitStatus('ready', `${payload.shellLabel} 已连接`);
             this._ensurePreferredRenderer();
@@ -433,7 +550,7 @@ export class TerminalSession {
         }
     }
 
-    // ── 公共：重试连接 ──────────────────────────────────────────────────────────
+    // -- Public: retry connection --------------------------------------------
 
     async retry(): Promise<void> {
         this._terminalRef.value?.reset();
@@ -447,7 +564,7 @@ export class TerminalSession {
         await this.ensureConnect();
     }
 
-    // ── 公共：聚焦终端 ──────────────────────────────────────────────────────────
+    // -- Public: focus terminal ----------------------------------------------
 
     focusTerminal(): void {
         this._terminalRef.value?.focus();
@@ -495,7 +612,7 @@ export class TerminalSession {
         this.pasteText(text);
     }
 
-    // ── 公共：清屏 ──────────────────────────────────────────────────────────────
+    // -- Public: clear screen -------------------------------------------------
 
     async clearScreen(): Promise<void> {
         this._terminalRef.value?.clear();
@@ -506,7 +623,7 @@ export class TerminalSession {
         this.focusTerminal();
     }
 
-    // ── 公共：中断执行 ──────────────────────────────────────────────────────────
+    // -- Public: interrupt run ------------------------------------------------
 
     async interrupt(): Promise<void> {
         if (!this.session.value) return;
@@ -516,7 +633,7 @@ export class TerminalSession {
         this.focusTerminal();
     }
 
-    // ── 公共：发送命令 ──────────────────────────────────────────────────────────
+    // -- Public: send command -------------------------------------------------
 
     async sendCommand(command: string): Promise<void> {
         const normalized = command.trim();
@@ -533,25 +650,25 @@ export class TerminalSession {
         this.focusTerminal();
     }
 
-    // ── 公共：追踪运行 ID ────────────────────────────────────────────────────────
+    // -- Public: track run id -------------------------------------------------
 
     trackRun(nextRunId: string | null): void {
         if (this._activeRunId && this._activeRunId !== nextRunId) {
-            this._emitRunComplete(this._buildRunCompletePayload(this._activeRunId, -1));
+            this._emitRunCompleted(this._buildRunCompletedPayload(this._activeRunId, -1));
         }
         if (!nextRunId) {
             this._clearTrackedRunState();
             return;
         }
+        this._emitBufferDiagnostic('track-run:before-running-state');
         this._activeRunId = nextRunId;
-        this._hasStructuredRunOutputForActiveRun = false;
+        this._hasStructuredRunChunkForActiveRun = false;
         this._isAutoFollowEnabled = true;
-        this._shouldFitBeforeNextVisibleWrite = true;
         this._scheduleLayoutSync();
         this._scheduleViewportSync({ scrollToBottom: true });
     }
 
-    // ── 公共：注册渲染恢复监听器（由 UI 层 onMounted 调用） ─────────────────────
+    // -- Public: bind render recovery listeners ------------------------------
 
     bindRenderRecoveryListeners(): void {
         if (!this._windowFocusCleanup) {
@@ -609,10 +726,10 @@ export class TerminalSession {
         }
     }
 
-    // ── 公共：分离（清理 DOM / 事件，但不销毁 PTY） ─────────────────────────────
+    // -- Public: detach DOM/listeners while keeping PTY ----------------------
 
     detach(): void {
-        // 版本递增；令任何尚在飞行中的 registerEventListeners 异步自行丢弃（Fix-2）
+        // 版本递增；令任何尚在飞行中的 registerEventListeners 异步自行丢弃（Fix-2）。
         this._listenerVersion++;
 
         this._resizeObserver?.disconnect();
@@ -624,12 +741,12 @@ export class TerminalSession {
         this._fontLoadingCleanup?.();
 
         this._dataUnlisten?.();
-        this._runOutputUnlisten?.();
-        this._runCompleteUnlisten?.();
+        this._runChunkUnlisten?.();
+        this._runCompletedUnlisten?.();
         this._exitUnlisten?.();
         this._dataUnlisten = null;
-        this._runOutputUnlisten = null;
-        this._runCompleteUnlisten = null;
+        this._runChunkUnlisten = null;
+        this._runCompletedUnlisten = null;
         this._exitUnlisten = null;
 
         this._clearLayoutFrame();
@@ -639,7 +756,8 @@ export class TerminalSession {
         this._clearTerminalWriteFrame();
         this._clearTerminalWriteTimeout();
         this._clearScrollRecoveryTimeout();
-        this._clearPromptWakeTimeout();
+        this._clearLayoutScrollGuardTimeout();
+        this._clearRunVisualTransactions();
 
         this._resetTerminalRunCapture();
         this._bufferedTerminalWrite = '';
@@ -650,6 +768,8 @@ export class TerminalSession {
         this._pendingHiddenScrollToBottom = false;
         this._shouldFitBeforeNextVisibleWrite = false;
         this._pendingInitialPaintRecovery = true;
+        this._keepViewportAtBottomDuringLayout = false;
+        this._interactiveResizeRepaintSuppressUntilMs = 0;
         this._previousHostSize = { width: 0, height: 0 };
 
         this._disposeWebglRenderer();
@@ -658,7 +778,7 @@ export class TerminalSession {
         this._visible = false;
     }
 
-    // ── 公共：完全销毁（含 Terminal 实例，由 registry.dispose() 调用） ───────────
+    // -- Public: dispose terminal instance -----------------------------------
 
     async dispose(): Promise<void> {
         this.detach();
@@ -676,12 +796,76 @@ export class TerminalSession {
         this._onStatusChange?.({ state, message });
     }
 
-    private _emitOutput(payload: ITerminalRunOutputEvent): void {
+    private _emitOutput(payload: ITerminalRunChunkPayload): void {
         this._onOutput?.(payload);
     }
 
-    private _emitRunComplete(payload: ITerminalRunCompletePayload): void {
-        this._onRunComplete?.(payload);
+    private _emitRunCompleted(payload: ITerminalRunCompletedPayload): void {
+        this._onRunCompleted?.(payload);
+    }
+
+    private _emitInputRoute(route: TTerminalInputRoute, data: string): void {
+        this._onInputRoute?.({
+            route,
+            data: encodeTerminalInputForDiagnostics(data),
+        });
+    }
+
+    private _emitVisualWrite(payload: ITerminalVisualWritePayload): void {
+        this._onVisualWrite?.(payload);
+    }
+
+    private _emitTerminalDataReceived(payload: ITerminalDataEvent): void {
+        this._onTerminalData?.(payload);
+    }
+
+    private _emitBufferDiagnostic(label: string, writePreview?: string): void {
+        if (!this._onBufferDiagnostic) return;
+        const diagnostic = this._buildBufferDiagnostic(label, writePreview ?? null);
+        if (diagnostic) {
+            this._onBufferDiagnostic?.(diagnostic);
+        }
+    }
+
+    private _buildBufferDiagnostic(
+        label: string,
+        writePreview: string | null,
+    ): ITerminalBufferDiagnostic | null {
+        const terminal = this._terminalRef.value;
+        if (!terminal) {
+            return null;
+        }
+
+        const buffer = terminal.buffer.active;
+        const cursorLineIndex = Math.max(0, buffer.baseY + buffer.cursorY);
+        const bufferLength = Math.max(0, buffer.length);
+        const lastIndex = bufferLength > 0 ? Math.min(bufferLength - 1, cursorLineIndex) : 0;
+        const startIndex = Math.max(0, lastIndex - TERMINAL_BUFFER_DIAGNOSTIC_LINE_COUNT + 1);
+        const lastLines: string[] = [];
+        for (let index = startIndex; index <= lastIndex; index += 1) {
+            const line = buffer.getLine(index)?.translateToString(true) ?? '';
+            lastLines.push(`${index}:${line}`);
+        }
+
+        return {
+            label,
+            at: new Date().toISOString(),
+            cursorX: buffer.cursorX,
+            cursorY: buffer.cursorY,
+            baseY: buffer.baseY,
+            viewportY: buffer.viewportY,
+            rows: terminal.rows,
+            cols: terminal.cols,
+            bufferLength,
+            visible: this._visible,
+            activeRunId: this._activeRunId,
+            pendingWriteChars: this._bufferedTerminalWrite.length,
+            hiddenBacklogChars: this._hiddenTerminalWriteBacklog.length,
+            hostWidth: this._hostEl?.clientWidth ?? null,
+            hostHeight: this._hostEl?.clientHeight ?? null,
+            writePreview: writePreview === null ? null : previewTerminalDiagnosticText(writePreview),
+            lastLines,
+        };
     }
 
     // ── 私有：定时器清理 ─────────────────────────────────────────────────────────
@@ -722,10 +906,10 @@ export class TerminalSession {
             this._scrollRecoveryTimeoutId = null;
         }
     }
-    private _clearPromptWakeTimeout(): void {
-        if (this._promptWakeTimeoutId !== null) {
-            window.clearTimeout(this._promptWakeTimeoutId);
-            this._promptWakeTimeoutId = null;
+    private _clearLayoutScrollGuardTimeout(): void {
+        if (this._layoutScrollGuardTimeoutId !== null) {
+            window.clearTimeout(this._layoutScrollGuardTimeoutId);
+            this._layoutScrollGuardTimeoutId = null;
         }
     }
     private _clearProgrammaticScrollReleaseFrame(): void {
@@ -734,8 +918,16 @@ export class TerminalSession {
             this._programmaticScrollReleaseFrameId = null;
         }
     }
+    private _clearRunVisualTransactions(): void {
+        for (const transaction of this._runVisualTransactions.values()) {
+            if (transaction.gapTimerId !== null) {
+                window.clearTimeout(transaction.gapTimerId);
+            }
+        }
+        this._runVisualTransactions.clear();
+    }
 
-    // ── 私有：布局与视口调度 ─────────────────────────────────────────────────────
+    // -- Private: layout and viewport scheduling -----------------------------
 
     private _handleShellWindowResizeStart(): void {
         this._isShellWindowResizing = true;
@@ -811,17 +1003,37 @@ export class TerminalSession {
         try {
             const prevCols = terminal.cols;
             const prevRows = terminal.rows;
-            fitAddon.fit();
+            const shouldKeepViewportAtBottom =
+                this._visible &&
+                (this._isAutoFollowEnabled || this._isViewportNearBottom(terminal));
+            this._beginLayoutScrollGuard(shouldKeepViewportAtBottom);
+            this._emitBufferDiagnostic(`layout:before-fit:${prevCols}x${prevRows}`);
+            this._runWithProgrammaticScrollLock(() => {
+                fitAddon.fit();
+            });
+            if (shouldKeepViewportAtBottom) {
+                this._isAutoFollowEnabled = true;
+            }
             if (terminal.cols === prevCols && terminal.rows === prevRows) {
+                if (shouldKeepViewportAtBottom) {
+                    this._scheduleViewportSync({ scrollToBottom: true });
+                }
                 return;
             }
+            this._emitBufferDiagnostic(`layout:after-fit:${terminal.cols}x${terminal.rows}`);
             if (!this._didTerminalSizeChange(terminal.cols, terminal.rows)) {
+                if (shouldKeepViewportAtBottom) {
+                    this._scheduleViewportSync({ scrollToBottom: true });
+                }
                 return;
             }
-            this._scheduleViewportSync({ scrollToBottom: true });
+            this._scheduleViewportSync({ scrollToBottom: shouldKeepViewportAtBottom });
+            this._markInteractiveResizeRepaintSuppression();
             this._syncPtySize(terminal.cols, terminal.rows);
         } catch (error) {
             console.warn('终端尺寸同步失败', error);
+        } finally {
+            this._endLayoutScrollGuardSoon();
         }
     }
 
@@ -873,7 +1085,7 @@ export class TerminalSession {
         }
     }
 
-    // ── 私有：写缓冲区 ───────────────────────────────────────────────────────────
+    // -- Private: write buffer -----------------------------------------------
 
     private _flushPendingTerminalWriteCallbacks(): void {
         if (this._pendingTerminalWriteCallbacks.length === 0) return;
@@ -939,12 +1151,16 @@ export class TerminalSession {
         this._bufferedTerminalWrite = '';
         this._pendingScrollToBottomAfterWrite = false;
         this._isTerminalWriteInFlight = true;
+        this._emitBufferDiagnostic('xterm-write:before', chunk);
         terminal.write(chunk, () => {
             this._isTerminalWriteInFlight = false;
+            this._emitBufferDiagnostic('xterm-write:after', chunk);
             this._scheduleViewportSync({ scrollToBottom: shouldScroll });
             if (this._pendingInitialPaintRecovery && this._hasTerminalRenderableContent()) {
                 this._pendingInitialPaintRecovery = false;
+                this._emitBufferDiagnostic('initial-paint-recovery:before-layout');
                 this._syncTerminalLayout();
+                this._emitBufferDiagnostic('initial-paint-recovery:after-layout');
                 this._scheduleViewportSync({ refresh: true, scrollToBottom: true });
             }
             if (this._bufferedTerminalWrite) {
@@ -984,45 +1200,194 @@ export class TerminalSession {
         this._scheduleTerminalWriteFlush();
     }
 
-    // ── 私有：终端事件处理 ────────────────────────────────────────────────────────
+    private _writeTerminalDataPayload(payload: ITerminalDataEvent): void {
+        const data =
+            payload.source === 'injected_separator' && !this._showRunSeparator
+                ? stripInjectedRunSeparatorForTerminalData(payload.data)
+                : payload.data;
+        if (!data) return;
+        if (isFirstRunChunkFrame(payload)) {
+            this._emitBufferDiagnostic('before-first-run-visual-frame', data);
+        }
+        this._emitVisualWrite({ ...payload, data });
+        this._queueTerminalWrite(data, { scrollToBottom: true });
+    }
+
+    private _getRunVisualTransaction(runId: string): IRunVisualTransaction {
+        const existing = this._runVisualTransactions.get(runId);
+        if (existing) {
+            return existing;
+        }
+
+        const transaction: IRunVisualTransaction = {
+            nextSeq: 1,
+            pending: new Map<number, ITerminalDataEvent>(),
+            gapTimerId: null,
+        };
+        this._runVisualTransactions.set(runId, transaction);
+        return transaction;
+    }
+
+    private _clearRunVisualTransaction(runId: string): void {
+        const transaction = this._runVisualTransactions.get(runId);
+        if (!transaction) {
+            return;
+        }
+        if (transaction.gapTimerId !== null) {
+            window.clearTimeout(transaction.gapTimerId);
+        }
+        this._runVisualTransactions.delete(runId);
+    }
+
+    private _scheduleRunVisualGapRecovery(runId: string, transaction: IRunVisualTransaction): void {
+        if (transaction.gapTimerId !== null) {
+            return;
+        }
+        transaction.gapTimerId = window.setTimeout(() => {
+            transaction.gapTimerId = null;
+            this._recoverRunVisualSeqGap(runId);
+        }, TERMINAL_RUN_VISUAL_REORDER_TIMEOUT_MS);
+    }
+
+    private _recoverRunVisualSeqGap(runId: string): void {
+        const transaction = this._runVisualTransactions.get(runId);
+        if (!transaction || transaction.pending.size === 0) {
+            return;
+        }
+        const lowestPendingSeq = Math.min(...transaction.pending.keys());
+        if (!transaction.pending.has(transaction.nextSeq)) {
+            transaction.nextSeq = lowestPendingSeq;
+            console.warn('[terminal] terminal:data runSeq 缺口，已按当前可见事务放行。', {
+                runId,
+                nextSeq: transaction.nextSeq,
+            });
+        }
+        this._drainRunVisualTransaction(runId, transaction);
+    }
+
+    private _drainRunVisualTransaction(
+        runId: string,
+        transaction: IRunVisualTransaction,
+    ): void {
+        while (true) {
+            const payload = transaction.pending.get(transaction.nextSeq);
+            if (!payload) {
+                break;
+            }
+            transaction.pending.delete(transaction.nextSeq);
+            transaction.nextSeq += 1;
+            this._writeTerminalDataPayload(payload);
+            if (payload.source === 'injected_separator') {
+                this._clearRunVisualTransaction(runId);
+                return;
+            }
+        }
+
+        if (transaction.pending.size > 0) {
+            this._scheduleRunVisualGapRecovery(runId, transaction);
+            return;
+        }
+
+        if (transaction.gapTimerId !== null) {
+            window.clearTimeout(transaction.gapTimerId);
+            transaction.gapTimerId = null;
+        }
+    }
+
+    private _handleRunVisualDataPayload(payload: ITerminalDataEvent): void {
+        const runId = payload.runId;
+        const runSeq = payload.runSeq;
+        if (
+            typeof runId !== 'string' ||
+            runId.length === 0 ||
+            typeof runSeq !== 'number' ||
+            !Number.isSafeInteger(runSeq) ||
+            runSeq <= 0
+        ) {
+            this._writeTerminalDataPayload(payload);
+            return;
+        }
+
+        const transaction = this._getRunVisualTransaction(runId);
+        if (runSeq < transaction.nextSeq) {
+            return;
+        }
+
+        transaction.pending.set(runSeq, payload);
+        this._drainRunVisualTransaction(runId, transaction);
+    }
+
+    // -- Private: terminal event handling ------------------------------------
 
     private _handleDataEvent(event: { payload: ITerminalDataEvent }): void {
         if (event.payload.sessionId !== this.id || !event.payload.data) return;
-        if (this._activeRunId && !this._hasStructuredRunOutputForActiveRun) {
-            const fallbackOutput = stripInternalDispatchEcho(event.payload.data);
-            if (fallbackOutput) {
-                this._emitOutput({
-                    sessionId: this.id,
-                    runId: this._activeRunId,
-                    data: fallbackOutput,
-                });
+        this._emitTerminalDataReceived(event.payload);
+        if (
+            event.payload.source === 'run' ||
+            event.payload.source === 'injected_reset' ||
+            event.payload.source === 'injected_separator'
+        ) {
+            this._handleRunVisualDataPayload(event.payload);
+            return;
+        }
+
+        if (event.payload.source === 'interactive' || !event.payload.source) {
+            const wasAltScreenActive = this._interactiveAltScreenActive;
+            const hasAltScreenControl = hasAltScreenSwitch(event.payload.data);
+            this._interactiveAltScreenActive = resolveAltScreenActiveAfterData(
+                this._interactiveAltScreenActive,
+                event.payload.data,
+            );
+            if (
+                !wasAltScreenActive &&
+                !hasAltScreenControl &&
+                this._shouldSuppressInteractiveResizeRepaint(event.payload.data)
+            ) {
+                this._emitBufferDiagnostic(
+                    'interactive-resize-repaint-suppressed',
+                    event.payload.data,
+                );
+                return;
             }
         }
-        this._queueTerminalWrite(event.payload.data, { scrollToBottom: true });
+
+        if (
+            this._activeRunId &&
+            (event.payload.source === 'interactive' || !event.payload.source)
+        ) {
+            this._emitBufferDiagnostic(
+                'interactive-frame-suppressed-during-run',
+                event.payload.data,
+            );
+            return;
+        }
+
+        this._writeTerminalDataPayload(event.payload);
     }
 
-    private _handleRunOutputEvent(event: { payload: ITerminalRunOutputEvent }): void {
+    private _handleRunChunkEvent(event: { payload: ITerminalRunChunkPayload }): void {
         if (event.payload.sessionId !== this.id || !event.payload.data) return;
-        this._hasStructuredRunOutputForActiveRun = true;
-        this._queueTerminalWrite(event.payload.data, { scrollToBottom: true });
+        this._hasStructuredRunChunkForActiveRun = true;
         this._emitOutput(event.payload);
     }
 
-    private _handleRunCompleteEvent(event: { payload: ITerminalRunCompletePayload }): void {
+    private _handleRunCompletedEvent(event: { payload: ITerminalRunCompletedPayload }): void {
         if (event.payload.sessionId !== this.id) return;
-        this._emitTerminalRunComplete(event.payload);
+        this._emitTerminalRunCompleted(event.payload);
     }
 
     private _handleExitEvent(event: { payload: ITerminalExitEvent }): void {
         if (event.payload.sessionId !== this.id) return;
         this.session.value = null;
+        this._interactiveAltScreenActive = false;
+        this._interactiveResizeRepaintSuppressUntilMs = 0;
         const message =
             event.payload.exitCode === null
                 ? 'WSL2 终端已断开。'
                 : `WSL2 终端已退出（代码 ${event.payload.exitCode}）。`;
         if (this._activeRunId) {
-            this._emitRunComplete(
-                this._buildRunCompletePayload(this._activeRunId, event.payload.exitCode ?? -1),
+            this._emitRunCompleted(
+                this._buildRunCompletedPayload(this._activeRunId, event.payload.exitCode ?? -1),
             );
             this._resetTerminalRunCapture();
         }
@@ -1032,10 +1397,10 @@ export class TerminalSession {
         this._emitStatus('closed', message);
     }
 
-    private _emitTerminalRunComplete(payload: ITerminalRunCompletePayload): void {
+    private _emitTerminalRunCompleted(payload: ITerminalRunCompletedPayload): void {
         this._clearTrackedRunState(payload.runId);
         if (!this._visible) {
-            this._emitRunComplete(payload);
+            this._emitRunCompleted(payload);
             return;
         }
         let didEmit = false;
@@ -1047,13 +1412,13 @@ export class TerminalSession {
                 window.clearTimeout(fallbackId);
                 fallbackId = null;
             }
-            this._emitRunComplete(payload);
+            this._emitRunCompleted(payload);
         };
         fallbackId = window.setTimeout(
             () => {
                 finalize();
             },
-            TERMINAL_RUN_COMPLETE_FLUSH_TIMEOUT_MS,
+            TERMINAL_RUN_COMPLETED_FLUSH_TIMEOUT_MS,
         );
         this.focusTerminal();
         this._flushTerminalWriteBufferNow({
@@ -1065,24 +1430,24 @@ export class TerminalSession {
         });
     }
 
-    // ── 私有：运行追踪 ───────────────────────────────────────────────────────────
+    // -- Private: run tracking ------------------------------------------------
 
-    private _buildRunCompletePayload(
+    private _buildRunCompletedPayload(
         runId: string,
         exitCode: number | null,
-    ): ITerminalRunCompletePayload {
+    ): ITerminalRunCompletedPayload {
         return {
             sessionId: this.id,
             runId,
             exitCode,
             finishedAt: new Date().toISOString(),
-        } as ITerminalRunCompletePayload;
+        } as ITerminalRunCompletedPayload;
     }
 
     private _clearTrackedRunState(runId?: string): void {
         if (runId && this._activeRunId !== runId) return;
         this._activeRunId = null;
-        this._hasStructuredRunOutputForActiveRun = false;
+        this._hasStructuredRunChunkForActiveRun = false;
     }
 
     private _resetTerminalRunCapture(): void {
@@ -1104,7 +1469,7 @@ export class TerminalSession {
         const terminal = this._terminalRef.value;
         if (!terminal || this._webglAddonRef.value || !this._canUseWebglRenderer()) return;
         try {
-            const addon = new WebglAddon();
+            const addon = markRaw(new WebglAddon());
             this._webglContextLossCleanup = addon.onContextLoss(() => {
                 this._disposeWebglRenderer();
                 window.setTimeout(() => {
@@ -1121,7 +1486,7 @@ export class TerminalSession {
             this._webglAddonRef.value = addon;
         } catch (error) {
             this._webglRendererBlocked = true;
-            console.warn('WebGL 终端渲染器初始化失败，已回退默认渲染器', error);
+            console.warn('WebGL 终端渲染器初始化失败，已回退默认渲染。', error);
         }
     }
 
@@ -1140,7 +1505,7 @@ export class TerminalSession {
         this._terminalRef.value?.clearTextureAtlas();
     }
 
-    // ── 私有：视口辅助 ────────────────────────────────────────────────────────────
+    // -- Private: viewport helpers -------------------------------------------
 
     private _isViewportNearBottom(terminal: Terminal): boolean {
         const buffer = terminal.buffer.active;
@@ -1159,6 +1524,32 @@ export class TerminalSession {
         this._isProgrammaticScrollSync = true;
         callback();
         this._releaseProgrammaticScrollLock();
+    }
+
+    private _beginLayoutScrollGuard(shouldKeepViewportAtBottom: boolean): void {
+        this._clearLayoutScrollGuardTimeout();
+        this._keepViewportAtBottomDuringLayout = shouldKeepViewportAtBottom;
+    }
+
+    private _endLayoutScrollGuardSoon(): void {
+        if (!this._keepViewportAtBottomDuringLayout) return;
+        this._clearLayoutScrollGuardTimeout();
+        this._layoutScrollGuardTimeoutId = window.setTimeout(() => {
+            this._keepViewportAtBottomDuringLayout = false;
+            this._layoutScrollGuardTimeoutId = null;
+        }, TERMINAL_LAYOUT_SCROLL_GUARD_RELEASE_MS);
+    }
+
+    private _markInteractiveResizeRepaintSuppression(): void {
+        this._interactiveResizeRepaintSuppressUntilMs =
+            Date.now() + TERMINAL_RESIZE_REPAINT_SUPPRESSION_MS;
+    }
+
+    private _shouldSuppressInteractiveResizeRepaint(data: string): boolean {
+        if (this._interactiveAltScreenActive) return false;
+        if (Date.now() > this._interactiveResizeRepaintSuppressUntilMs) return false;
+        if (hasAltScreenSwitch(data)) return false;
+        return isLikelyInteractiveResizeRepaintFrame(data);
     }
 
     private _scheduleScrollRecovery(): void {
@@ -1181,10 +1572,10 @@ export class TerminalSession {
         return false;
     }
 
-    // ── 私有：外观同步 ────────────────────────────────────────────────────────────
+    // -- Private: appearance sync --------------------------------------------
 
     private _syncTerminalSurfaceTone(): void {
-        const background = getXtermTheme().background ?? '#15191e';
+        const background = getXtermTheme().background ?? '#1a1b1e';
         if (this._hostEl) {
             this._hostEl.style.setProperty('--terminal-fill', background);
             this._hostEl.style.backgroundColor = background;
@@ -1219,17 +1610,6 @@ export class TerminalSession {
         const selection = this.getSelectionText();
         if (!selection) return;
         void writeClipboardText(selection).catch(() => { });
-    }
-
-    // ── 私有：提示符唤醒 ─────────────────────────────────────────────────────────
-
-    private _schedulePromptWake(): void {
-        this._clearPromptWakeTimeout();
-        this._promptWakeTimeoutId = window.setTimeout(() => {
-            this._promptWakeTimeoutId = null;
-            if (!this.session.value || this._hasTerminalRenderableContent()) return;
-            void this._tauri.writeTerminalInput({ sessionId: this.id, data: '\n' }).catch(() => { });
-        }, TERMINAL_PROMPT_WAKE_DELAY_MS);
     }
 
     // ── 私有：ResizeObserver 绑定 ─────────────────────────────────────────────────
@@ -1299,7 +1679,7 @@ export class TerminalSession {
         };
     }
 
-    // ── 私有：尺寸变化检测 ────────────────────────────────────────────────────────
+    // -- Private: size change detection --------------------------------------
 
     private _didHostSizeChange(width: number, height: number): boolean {
         const w = Math.round(width);
@@ -1320,7 +1700,7 @@ export class TerminalSession {
         return true;
     }
 
-    // ── 私有：终端创建 ────────────────────────────────────────────────────────────
+    // -- Private: terminal creation ------------------------------------------
 
     private _attachTerminalToHost(): void {
         const terminal = this._terminalRef.value;
@@ -1346,10 +1726,10 @@ export class TerminalSession {
     private _createTerminal(): void {
         if (!this._hostEl) return;
         if (!this._terminalRef.value) {
-            const terminal = new Terminal(
+            const terminal = markRaw(new Terminal(
                 buildTerminalOptions(this._settings ?? this._fallbackSettings()),
-            );
-            const fitAddon = new FitAddon();
+            ));
+            const fitAddon = markRaw(new FitAddon());
             terminal.loadAddon(fitAddon);
             this._terminalRef.value = terminal;
             this._fitAddonRef.value = fitAddon;
@@ -1360,6 +1740,7 @@ export class TerminalSession {
                 if (isPrintableTerminalInput(data) || data === '\r' || data === '\n') {
                     this._isAutoFollowEnabled = true;
                 }
+                this._emitInputRoute(this._activeRunId ? 'run' : 'interactive', data);
                 void this._tauri
                     .writeTerminalInput({ sessionId: this.id, data })
                     .catch((error: unknown) => {
@@ -1367,7 +1748,7 @@ export class TerminalSession {
                     });
             });
             terminal.onScroll(() => {
-                if (this._isProgrammaticScrollSync) return;
+                if (this._isProgrammaticScrollSync || this._keepViewportAtBottomDuringLayout) return;
                 const t = this._terminalRef.value;
                 if (!t) return;
                 this._isAutoFollowEnabled = this._isViewportNearBottom(t);
@@ -1380,6 +1761,7 @@ export class TerminalSession {
             terminal.onResize(({ cols, rows }) => {
                 if (!this._didTerminalSizeChange(cols, rows)) return;
                 this._scheduleViewportSync({ scrollToBottom: true });
+                this._markInteractiveResizeRepaintSuppression();
                 this._syncPtySize(cols, rows);
             });
             terminal.onSelectionChange(() => {
@@ -1389,7 +1771,7 @@ export class TerminalSession {
         this._attachTerminalToHost();
     }
 
-    /** 临时回退设置（仅在 initWithHost 之前被意外调用时防止崩溃） */
+    /** 临时回退设置：仅在 initWithHost 之前被意外调用时防止崩溃。 */
     private _fallbackSettings(): ITerminalSettings {
         return {
             bellMode: 'off',

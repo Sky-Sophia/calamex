@@ -90,6 +90,17 @@ const lightTerminalTheme = buildTerminalTheme(light);
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('buildComponentTokens / dark', () => {
+    it('Woodsmoke 层级：深色主题使用 DESIGN.md 指定的核心表面色', () => {
+        expect(dark.surface.app).toBe('#08090a');
+        expect(dark.surface.sidebar).toBe('#1c1c1f');
+        expect(dark.surface.panelDepth).toBe('#222326');
+        expect(dark.surface.overlayDepth).toBe('#2b2c30');
+        expect(dark.surface.overlay).toBe('#35363a');
+        expect(dark.surface.editor).toBe('#1a1b1e');
+        expect(dark.surface.activity).toBe('#1c1c1f');
+        expect(dark.surface.editorGutter).toBe('#1a1b1e');
+    });
+
     it('布局令牌：app 背景等于 dark.surface.app', () => {
         expect(darkTokens.layout.app.background).toBe(dark.surface.app);
     });

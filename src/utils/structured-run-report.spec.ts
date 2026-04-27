@@ -136,4 +136,66 @@ describe('structured-run-report', () => {
     expect(report.timeline.some((item) => item.description === 'run 2')).toBe(true);
     expect(report.summary.tone).toBe('running');
   });
+  it('lastRunResult 为成功时以退出码为准，不被同一 runId 的迟到失败日志覆盖', () => {
+    const report = buildStructuredRunReport({
+      terminalOutput: 'Hello SH Editor\n',
+      runLogs: [
+        {
+          id: 'run-start',
+          level: 'info',
+          title: TERMINAL_RUN_LOG_TITLES.start,
+          detail: 'run start',
+          createdAt: '2026-04-26T14:16:02.000Z',
+          scope: 'run',
+          runId: 'run-ok',
+          code: TERMINAL_RUN_LOG_CODES.start,
+        },
+        {
+          id: 'run-completed',
+          level: 'success',
+          title: TERMINAL_RUN_LOG_TITLES.completed,
+          detail: 'exit 0',
+          createdAt: '2026-04-26T14:16:02.546Z',
+          scope: 'run',
+          runId: 'run-ok',
+          code: TERMINAL_RUN_LOG_CODES.completed,
+        },
+        {
+          id: 'run-failed-late',
+          level: 'error',
+          title: TERMINAL_RUN_LOG_TITLES.failed,
+          detail: 'exit -1',
+          createdAt: '2026-04-26T14:16:02.548Z',
+          scope: 'run',
+          runId: 'run-ok',
+          code: TERMINAL_RUN_LOG_CODES.failed,
+        },
+      ],
+      lastRunResult: {
+        runId: 'run-ok',
+        success: true,
+        stdout: 'Hello SH Editor\n',
+        stderr: '',
+        combinedOutput: 'Hello SH Editor\n',
+        exitCode: 0,
+        executor: 'wsl',
+        executorLabel: 'WSL2',
+        durationMs: 500,
+        startedAt: '2026-04-26T14:16:02.000Z',
+        finishedAt: '2026-04-26T14:16:02.546Z',
+        commandLine: 'bash /tmp/script.sh',
+        logPath: null,
+        usedTempFile: true,
+      },
+      isRunning: false,
+      executor: 'wsl',
+      documentName: 'hello.sh',
+      documentPath: '/workspace/hello.sh',
+      workspaceRootPath: '/workspace',
+    });
+
+    expect(report.summary.tone).toBe('success');
+    expect(report.timeline.some((item) => item.description === 'exit -1')).toBe(false);
+    expect(report.timeline.some((item) => item.description === 'exit 0')).toBe(true);
+  });
 });

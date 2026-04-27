@@ -1,9 +1,10 @@
 /**
  * T-2.2 特征化测试：终端状态机快照
  * 目的：拆分前锁定 useIntegratedTerminal 状态转移行为，作为 T-2.3 的安全网。
- * 约束：MUST NOT 依赖真实 Tauri / 真实 xterm / 真实 PTY。
  */
 import type { TThemeMode } from '@/types/app';
+import { useEditorStore } from '@/store/editor';
+import { stripInjectedRunSeparatorForTerminalData } from '@/terminal/session';
 import type { ITerminalSettings } from '@/types/settings';
 import type { ITerminalStatusChangePayload } from '@/types/terminal';
 import { flushPromises, mount } from '@vue/test-utils';
@@ -18,13 +19,17 @@ import {
 
 // ─────────────────────────────────────────────
 // Mock 变量（vi.hoisted 保证提升前可访问）
-// ─────────────────────────────────────────────
 const {
     capturedListeners,
+    mockFitAddonInstance,
     mockTerminalInstance,
     mockTauriService,
 } = vi.hoisted(() => {
     const capturedListeners = new Map<string, (event: { payload: unknown }) => void>();
+    const mockFitAddonInstance = {
+        fit: vi.fn(),
+        dispose: vi.fn(),
+    };
 
     const mockTerminalInstance = {
         open: vi.fn(),
@@ -49,7 +54,14 @@ const {
         refresh: vi.fn(),
         clearTextureAtlas: vi.fn(),
         buffer: {
-            active: { baseY: 0, viewportY: 0, length: 0, getLine: vi.fn(() => null) },
+            active: {
+                baseY: 0,
+                cursorX: 0,
+                cursorY: 0,
+                viewportY: 0,
+                length: 0,
+                getLine: vi.fn(() => null),
+            },
         },
         rows: 28,
         cols: 120,
@@ -62,14 +74,14 @@ const {
         writeTerminalInput: vi.fn(),
         resizeTerminalSession: vi.fn(),
         closeTerminalSession: vi.fn(),
+        cancelTerminalRun: vi.fn(),
     };
 
-    return { capturedListeners, mockTerminalInstance, mockTauriService };
+    return { capturedListeners, mockFitAddonInstance, mockTerminalInstance, mockTauriService };
 });
 
 // ─────────────────────────────────────────────
 // Mock：@tauri-apps/api/event（捕获监听器）
-// ─────────────────────────────────────────────
 vi.mock('@tauri-apps/api/event', () => ({
     listen: vi.fn(async (eventName: string, handler: unknown) => {
         capturedListeners.set(
@@ -90,7 +102,7 @@ vi.mock('@xterm/xterm', () => ({
 }));
 
 vi.mock('@xterm/addon-fit', () => ({
-    FitAddon: vi.fn(() => ({ fit: vi.fn(), dispose: vi.fn() })),
+    FitAddon: vi.fn(() => mockFitAddonInstance),
 }));
 
 vi.mock('@xterm/addon-webgl', () => ({
@@ -103,7 +115,6 @@ vi.mock('@xterm/addon-webgl', () => ({
 
 // ─────────────────────────────────────────────
 // Mock：Tauri 服务层
-// ─────────────────────────────────────────────
 vi.mock('@/services/tauri', () => ({
     tauriService: mockTauriService,
 }));
@@ -118,7 +129,6 @@ vi.mock('@/utils/desktop-runtime', () => ({
 
 // ─────────────────────────────────────────────
 // Mock：clipboard（避免 jsdom 剪切板 API 错误）
-// ─────────────────────────────────────────────
 vi.mock('@/utils/clipboard', () => ({
     writeClipboardText: vi.fn(() => Promise.resolve()),
 }));
@@ -173,11 +183,13 @@ const createTestComponent = (
 // ─────────────────────────────────────────────
 // 测试套件
 // ─────────────────────────────────────────────
-describe('useIntegratedTerminal 状态机特征化', () => {
+describe('suite 1', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
         capturedListeners.clear();
         vi.clearAllMocks();
+        mockFitAddonInstance.fit.mockReset();
+        mockFitAddonInstance.dispose.mockClear();
 
         // 默认：ensureTerminalSession 成功
         mockTauriService.ensureTerminalSession.mockResolvedValue({
@@ -190,19 +202,28 @@ describe('useIntegratedTerminal 状态机特征化', () => {
         mockTauriService.writeTerminalInput.mockResolvedValue(undefined);
         mockTauriService.resizeTerminalSession.mockResolvedValue(undefined);
         mockTauriService.closeTerminalSession.mockResolvedValue(undefined);
+        mockTauriService.cancelTerminalRun.mockResolvedValue(undefined);
+        mockTerminalInstance.buffer.active.baseY = 0;
+        mockTerminalInstance.buffer.active.cursorX = 0;
+        mockTerminalInstance.buffer.active.cursorY = 0;
+        mockTerminalInstance.buffer.active.viewportY = 0;
+        mockTerminalInstance.buffer.active.length = 0;
+        mockTerminalInstance.buffer.active.getLine.mockReturnValue(null);
+        mockTerminalInstance.rows = 28;
+        mockTerminalInstance.cols = 120;
     });
 
-    // ── 1. 导出钩子的结构 ──
-    describe('useIntegratedTerminalStatus()', () => {
-        it('返回含 status 和 statusMessage 的对象', () => {
+    // ── 1. 导出钩子的结果 ──
+    describe('suite 2', () => {
+        it('case 1', () => {
             const result = useIntegratedTerminalStatus();
             expect(result).toHaveProperty('status');
             expect(result).toHaveProperty('statusMessage');
         });
     });
 
-    describe('useIntegratedTerminalControls()', () => {
-        it('返回完整的控制接口', () => {
+    describe('suite 3', () => {
+        it('case 2', () => {
             const controls = useIntegratedTerminalControls();
             expect(controls).toHaveProperty('status');
             expect(controls).toHaveProperty('statusMessage');
@@ -212,11 +233,57 @@ describe('useIntegratedTerminal 状态机特征化', () => {
             expect(controls).toHaveProperty('interrupt');
             expect(controls).toHaveProperty('sendCommand');
         });
+
+        it('case 3', async () => {
+            const editorStore = useEditorStore();
+            editorStore.isRunning = true;
+            editorStore.setPendingTerminalRunId('run-1');
+
+            const controls = useIntegratedTerminalControls();
+            await controls.interrupt();
+
+            expect(mockTauriService.cancelTerminalRun).toHaveBeenCalledWith({
+                runId: 'run-1',
+                mode: 'graceful',
+            });
+            expect(mockTauriService.writeTerminalInput).not.toHaveBeenCalled();
+        });
+
+        it('case 4', async () => {
+            mockTauriService.cancelTerminalRun.mockRejectedValueOnce(
+                new Error('当前运行路径不支持带外取消；请等待脚本自行结束。'),
+            );
+
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const wrapper = mount(createTestComponent(statusChanges), {
+                global: { plugins: [createPinia()] },
+                attachTo: document.body,
+            });
+            await flushPromises();
+
+            const editorStore = useEditorStore();
+            editorStore.isRunning = true;
+            editorStore.setPendingTerminalRunId('run-1');
+
+            const controls = useIntegratedTerminalControls();
+            await controls.interrupt();
+
+            expect(mockTauriService.cancelTerminalRun).toHaveBeenCalledWith({
+                runId: 'run-1',
+                mode: 'graceful',
+            });
+            expect(mockTauriService.writeTerminalInput).toHaveBeenCalledWith({
+                sessionId: 'main-terminal',
+                data: '\u0003',
+            });
+
+            wrapper.unmount();
+        });
     });
 
     // ── 2. 状态转移：connecting → ready ──
-    describe('状态转移：connecting → ready', () => {
-        it('ensureSession 成功后 sharedStatus 变为 ready', async () => {
+    describe('suite 4', () => {
+        it('case 5', async () => {
             const statusChanges: ITerminalStatusChangePayload[] = [];
             const wrapper = mount(createTestComponent(statusChanges), {
                 global: { plugins: [createPinia()] },
@@ -225,13 +292,14 @@ describe('useIntegratedTerminal 状态机特征化', () => {
 
             await flushPromises();
 
+            // 确认就绪
             const { status } = useIntegratedTerminalStatus();
             expect(status.value).toBe('ready');
 
             wrapper.unmount();
         });
 
-        it('状态变化回调包含 connecting → ready 顺序', async () => {
+        it('case 6', async () => {
             const statusChanges: ITerminalStatusChangePayload[] = [];
             const wrapper = mount(createTestComponent(statusChanges), {
                 global: { plugins: [createPinia()] },
@@ -248,7 +316,7 @@ describe('useIntegratedTerminal 状态机特征化', () => {
             wrapper.unmount();
         });
 
-        it('ensureTerminalSession 以正确 sessionId 调用', async () => {
+        it('case 7', async () => {
             const statusChanges: ITerminalStatusChangePayload[] = [];
             const wrapper = mount(createTestComponent(statusChanges), {
                 global: { plugins: [createPinia()] },
@@ -265,7 +333,7 @@ describe('useIntegratedTerminal 状态机特征化', () => {
             wrapper.unmount();
         });
 
-        it('前端会话对象丢失但 Rust 后端仍有旧 PTY 时先关闭旧会话再新建，避免回放旧 scrollback', async () => {
+        it('case 8', async () => {
             mockTauriService.ensureTerminalSession
                 .mockResolvedValueOnce({
                     sessionId: 'main-terminal',
@@ -304,7 +372,7 @@ describe('useIntegratedTerminal 状态机特征化', () => {
             wrapper.unmount();
         });
 
-        it('同一个前端 TerminalSession 重新挂载时不重复 ensure，也不重复回放 initialOutput', async () => {
+        it('case 9', async () => {
             const pinia = createPinia();
             const statusChanges: ITerminalStatusChangePayload[] = [];
             const firstWrapper = mount(createTestComponent(statusChanges), {
@@ -330,8 +398,8 @@ describe('useIntegratedTerminal 状态机特征化', () => {
     });
 
     // ── 3. 状态转移：connecting → error ──
-    describe('状态转移：connecting → error', () => {
-        it('ensureSession 失败后 sharedStatus 变为 error', async () => {
+    describe('suite 5', () => {
+        it('case 10', async () => {
             mockTauriService.ensureTerminalSession.mockRejectedValue(
                 new Error('connection refused'),
             );
@@ -344,6 +412,7 @@ describe('useIntegratedTerminal 状态机特征化', () => {
 
             await flushPromises();
 
+            // 确认状态
             const { status } = useIntegratedTerminalStatus();
             expect(status.value).toBe('error');
 
@@ -351,9 +420,9 @@ describe('useIntegratedTerminal 状态机特征化', () => {
         });
     });
 
-    // ── 4. 状态转移：ready → closed（terminal:exit 事件） ──
-    describe('状态转移：ready → closed（exit 事件）', () => {
-        it('匹配 sessionId 的 exit 事件将状态变为 closed', async () => {
+    // ── 4. 状态转移：ready → closed（terminal:interactive-exited 事件）──
+    describe('suite 6', () => {
+        it('case 11', async () => {
             const statusChanges: ITerminalStatusChangePayload[] = [];
             const wrapper = mount(createTestComponent(statusChanges), {
                 global: { plugins: [createPinia()] },
@@ -362,12 +431,12 @@ describe('useIntegratedTerminal 状态机特征化', () => {
 
             await flushPromises();
 
-            // 确认已就绪
+            // 确认就绪
             const { status } = useIntegratedTerminalStatus();
             expect(status.value).toBe('ready');
 
-            // 触发终端退出事件
-            const exitHandler = capturedListeners.get('terminal:exit');
+            // 触发退出事件
+            const exitHandler = capturedListeners.get('terminal:interactive-exited');
             expect(exitHandler).toBeDefined();
             exitHandler?.({ payload: { sessionId: 'main-terminal', exitCode: 0 } });
 
@@ -376,7 +445,7 @@ describe('useIntegratedTerminal 状态机特征化', () => {
             wrapper.unmount();
         });
 
-        it('sessionId 不匹配的 exit 事件被过滤忽略', async () => {
+        it('case 12', async () => {
             const statusChanges: ITerminalStatusChangePayload[] = [];
             const wrapper = mount(createTestComponent(statusChanges), {
                 global: { plugins: [createPinia()] },
@@ -385,9 +454,11 @@ describe('useIntegratedTerminal 状态机特征化', () => {
 
             await flushPromises();
 
-            const exitHandler = capturedListeners.get('terminal:exit');
+            // 触发其他会话的退出事件
+            const exitHandler = capturedListeners.get('terminal:interactive-exited');
             exitHandler?.({ payload: { sessionId: 'OTHER-SESSION', exitCode: 0 } });
 
+            // 确认状态未变
             const { status } = useIntegratedTerminalStatus();
             expect(status.value).toBe('ready'); // 保持不变
 
@@ -396,8 +467,8 @@ describe('useIntegratedTerminal 状态机特征化', () => {
     });
 
     // ── 5. 事件监听注册 ──
-    describe('事件监听注册', () => {
-        it('注册 4 个必需的 Tauri 事件监听器', async () => {
+    describe('suite 7', () => {
+        it('case 13', async () => {
             const statusChanges: ITerminalStatusChangePayload[] = [];
             const wrapper = mount(createTestComponent(statusChanges), {
                 global: { plugins: [createPinia()] },
@@ -412,15 +483,15 @@ describe('useIntegratedTerminal 状态机特征化', () => {
                 expect.any(Function),
             );
             expect(vi.mocked(listen)).toHaveBeenCalledWith(
-                'terminal:run-output',
+                'terminal:run-chunk',
                 expect.any(Function),
             );
             expect(vi.mocked(listen)).toHaveBeenCalledWith(
-                'terminal:run-complete',
+                'terminal:run-completed',
                 expect.any(Function),
             );
             expect(vi.mocked(listen)).toHaveBeenCalledWith(
-                'terminal:exit',
+                'terminal:interactive-exited',
                 expect.any(Function),
             );
 
@@ -428,9 +499,161 @@ describe('useIntegratedTerminal 状态机特征化', () => {
         });
     });
 
+    describe('suite 8', () => {
+        it('case 14', async () => {
+            const clientWidthSpy = vi
+                .spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+                .mockReturnValue(800);
+            const clientHeightSpy = vi
+                .spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+                .mockReturnValue(360);
+
+            mockTerminalInstance.buffer.active.baseY = 20;
+            mockTerminalInstance.buffer.active.viewportY = 20;
+            mockTerminalInstance.buffer.active.length = 28;
+            mockTerminalInstance.cols = 120;
+            mockTerminalInstance.rows = 20;
+            mockFitAddonInstance.fit.mockImplementation(() => {
+                mockTerminalInstance.buffer.active.viewportY = 0;
+                mockTerminalInstance.cols = 100;
+                mockTerminalInstance.rows = 10;
+
+                const scrollHandler = mockTerminalInstance.onScroll.mock.calls[0]?.[0] as
+                    | (() => void)
+                    | undefined;
+                scrollHandler?.();
+
+                const resizeHandler = mockTerminalInstance.onResize.mock.calls[0]?.[0] as
+                    | ((size: { cols: number; rows: number }) => void)
+                    | undefined;
+                resizeHandler?.({ cols: 100, rows: 10 });
+            });
+
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const wrapper = mount(createTestComponent(statusChanges), {
+                global: { plugins: [createPinia()] },
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+            await new Promise((resolve) => window.setTimeout(resolve, 80));
+
+            expect(mockFitAddonInstance.fit).toHaveBeenCalled();
+            expect(mockTerminalInstance.scrollToBottom).toHaveBeenCalled();
+
+            wrapper.unmount();
+            clientWidthSpy.mockRestore();
+            clientHeightSpy.mockRestore();
+        });
+
+        it('case 15', async () => {
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const wrapper = mount(createTestComponent(statusChanges), {
+                global: { plugins: [createPinia()] },
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+            mockTerminalInstance.write.mockClear();
+
+            const resizeHandler = mockTerminalInstance.onResize.mock.calls[0]?.[0] as
+                | ((size: { cols: number; rows: number }) => void)
+                | undefined;
+            resizeHandler?.({ cols: 100, rows: 10 });
+
+            const dataHandler = capturedListeners.get('terminal:data');
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    source: 'interactive',
+                    seq: 41,
+                    data: '\x1b[?25l\x1b[m\x1b[HTo run a command as administrator (user "root"), use "sudo <command>".\x1b[K\r\nSee "man sudo_root" for details.\x1b[K\r\n\x1b[K\x1b[37m\r[test@Predator]$\x1b[K\x1b[1C',
+                },
+            });
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    source: 'interactive',
+                    seq: 42,
+                    data: 'normal output after resize\r\n',
+                },
+            });
+
+            await flushPromises();
+            await new Promise((resolve) => window.setTimeout(resolve, 32));
+
+            const written = mockTerminalInstance.write.mock.calls
+                .map((call) => call[0])
+                .join('');
+            expect(written).not.toContain('To run a command as administrator');
+            expect(written).not.toContain('[test@Predator]$');
+            expect(written).toContain('normal output after resize');
+
+            wrapper.unmount();
+        });
+
+        it('case 16', async () => {
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const wrapper = mount(createTestComponent(statusChanges), {
+                global: { plugins: [createPinia()] },
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+            const dataHandler = capturedListeners.get('terminal:data');
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    source: 'interactive',
+                    seq: 51,
+                    data: '\x1b[?1049h',
+                },
+            });
+            await flushPromises();
+            mockTerminalInstance.write.mockClear();
+
+            const resizeHandler = mockTerminalInstance.onResize.mock.calls[0]?.[0] as
+                | ((size: { cols: number; rows: number }) => void)
+                | undefined;
+            resizeHandler?.({ cols: 101, rows: 11 });
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    source: 'interactive',
+                    seq: 52,
+                    data: '\x1b[?25l\x1b[Hvim repaint\x1b[K',
+                },
+            });
+
+            await flushPromises();
+            await new Promise((resolve) => window.setTimeout(resolve, 32));
+
+            const written = mockTerminalInstance.write.mock.calls
+                .map((call) => call[0])
+                .join('');
+            expect(written).toContain('vim repaint');
+
+            wrapper.unmount();
+        });
+    });
+
     // ── 6. 终端数据事件 ──
-    describe('terminal:data 事件', () => {
-        it('data 事件处理器注册并对匹配 sessionId 无异常响应', async () => {
+    describe('suite 9', () => {
+        it('case 17', () => {
+            expect(
+                stripInjectedRunSeparatorForTerminalData(
+                    '──── run #7 · exit 0 · 1.2s ────\r\n[test@Predator ~]$ ',
+                ),
+            ).toBe('[test@Predator ~]$ ');
+
+            expect(
+                stripInjectedRunSeparatorForTerminalData(
+                    '\r\n──── run #8 · exit 42 · 0.2s ────\r\n[test@Predator ~]$ ',
+                ),
+            ).toBe('\r\n[test@Predator ~]$ ');
+        });
+
+        it('case 18', async () => {
             const statusChanges: ITerminalStatusChangePayload[] = [];
             const wrapper = mount(createTestComponent(statusChanges), {
                 global: { plugins: [createPinia()] },
@@ -450,7 +673,285 @@ describe('useIntegratedTerminal 状态机特征化', () => {
             wrapper.unmount();
         });
 
-        it('sessionId 不匹配的数据事件不写入 terminal', async () => {
+        it('case 19', async () => {
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const wrapper = mount(createTestComponent(statusChanges), {
+                global: { plugins: [createPinia()] },
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+            await new Promise((resolve) => window.setTimeout(resolve, 380));
+
+            expect(mockTauriService.writeTerminalInput).not.toHaveBeenCalledWith({
+                sessionId: 'main-terminal',
+                data: '\n',
+            });
+
+            wrapper.unmount();
+        });
+
+        it('case 20', async () => {
+            mockTerminalInstance.write.mockClear();
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const wrapper = mount(createTestComponent(statusChanges), {
+                global: { plugins: [createPinia()] },
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+
+            const dataHandler = capturedListeners.get('terminal:data');
+            const runChunkHandler = capturedListeners.get('terminal:run-chunk');
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: 'Hello SH Editor\r\n',
+                    source: 'run',
+                },
+            });
+            runChunkHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    runId: 'run-visual-order',
+                    data: 'Hello SH Editor\r\n',
+                    seq: 1,
+                },
+            });
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '──── run #1 · exit 0 · 0.3s ────\r\n[test@Predator ~]$ ',
+                    source: 'injected_separator',
+                },
+            });
+
+            await flushPromises();
+            await new Promise((resolve) => window.setTimeout(resolve, 32));
+
+            const written = mockTerminalInstance.write.mock.calls
+                .map((call) => call[0])
+                .join('');
+            expect(written.indexOf('Hello SH Editor')).toBeGreaterThanOrEqual(0);
+            expect(written.indexOf('──── run #1')).toBeGreaterThan(written.indexOf('Hello SH Editor'));
+            expect(written.match(/Hello SH Editor/g)).toHaveLength(1);
+
+            wrapper.unmount();
+        });
+
+        it('case 21', async () => {
+            mockTerminalInstance.write.mockClear();
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const wrapper = mount(createTestComponent(statusChanges), {
+                global: { plugins: [createPinia()] },
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+
+            const editorStore = useEditorStore();
+            editorStore.setPendingTerminalRunId('run-suppress-interactive');
+            await flushPromises();
+            mockTerminalInstance.write.mockClear();
+
+            const dataHandler = capturedListeners.get('terminal:data');
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '\x1b[?25l\x1b[m\x1b[HTo run a command as administrator\r\n[test@Predator]$',
+                    source: 'interactive',
+                    seq: 301,
+                },
+            });
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '\r\nHello SH Editor\n',
+                    source: 'run',
+                    seq: 302,
+                    runId: 'run-suppress-interactive',
+                    runSeq: 1,
+                },
+            });
+
+            await flushPromises();
+            await new Promise((resolve) => window.setTimeout(resolve, 32));
+
+            const written = mockTerminalInstance.write.mock.calls
+                .map((call) => call[0])
+                .join('');
+            expect(written).not.toContain('To run a command as administrator');
+            expect(written).toContain('Hello SH Editor');
+
+            wrapper.unmount();
+        });
+
+        it('case 22', async () => {
+            mockTerminalInstance.write.mockClear();
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const wrapper = mount(createTestComponent(statusChanges), {
+                global: { plugins: [createPinia()] },
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+
+            const dataHandler = capturedListeners.get('terminal:data');
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '──── run #1 · exit 0 · 0.3s ────\r\n[test@Predator ~]$ ',
+                    source: 'injected_separator',
+                    seq: 203,
+                    runId: 'run-visual-order',
+                    runSeq: 3,
+                },
+            });
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '\r\nHello SH Editor\r\n',
+                    source: 'run',
+                    seq: 202,
+                    runId: 'run-visual-order',
+                    runSeq: 1,
+                },
+            });
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '\x1b[m',
+                    source: 'injected_reset',
+                    seq: 204,
+                    runId: 'run-visual-order',
+                    runSeq: 2,
+                },
+            });
+
+            await flushPromises();
+            await new Promise((resolve) => window.setTimeout(resolve, 32));
+
+            const written = mockTerminalInstance.write.mock.calls
+                .map((call) => call[0])
+                .join('');
+            expect(written.indexOf('Hello SH Editor')).toBeGreaterThanOrEqual(0);
+            expect(written.indexOf('──── run #1')).toBeGreaterThan(written.indexOf('Hello SH Editor'));
+
+            wrapper.unmount();
+        });
+
+        it('case 23', async () => {
+            mockTerminalInstance.write.mockClear();
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const wrapper = mount(createTestComponent(statusChanges), {
+                global: { plugins: [createPinia()] },
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+
+            const dataHandler = capturedListeners.get('terminal:data');
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '──── run #old · exit 0 · 0.1s ────\r\n[test@Predator ~]$ ',
+                    source: 'injected_separator',
+                    seq: 900,
+                    runId: 'old-run-before-listener',
+                    runSeq: 3,
+                },
+            });
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '──── run #new · exit 0 · 0.3s ────\r\n[test@Predator ~]$ ',
+                    source: 'injected_separator',
+                    seq: 903,
+                    runId: 'new-run',
+                    runSeq: 3,
+                },
+            });
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '\r\nHello SH Editor\r\n',
+                    source: 'run',
+                    seq: 901,
+                    runId: 'new-run',
+                    runSeq: 1,
+                },
+            });
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '\x1b[m',
+                    source: 'injected_reset',
+                    seq: 902,
+                    runId: 'new-run',
+                    runSeq: 2,
+                },
+            });
+
+            await flushPromises();
+            await new Promise((resolve) => window.setTimeout(resolve, 32));
+
+            const written = mockTerminalInstance.write.mock.calls
+                .map((call) => call[0])
+                .join('');
+            expect(written).toContain('Hello SH Editor');
+            expect(written).toContain('──── run #new');
+            expect(written.indexOf('──── run #new')).toBeGreaterThan(
+                written.indexOf('Hello SH Editor'),
+            );
+
+            wrapper.unmount();
+        });
+
+        it('case 24', async () => {
+            mockTerminalInstance.write.mockClear();
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const wrapper = mount(createTestComponent(statusChanges), {
+                global: { plugins: [createPinia()] },
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+
+            const dataHandler = capturedListeners.get('terminal:data');
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '\x1b[m',
+                    source: 'injected_reset',
+                    seq: 1001,
+                    runId: 'silent-run',
+                    runSeq: 1,
+                },
+            });
+            dataHandler?.({
+                payload: {
+                    sessionId: 'main-terminal',
+                    data: '──── run #2 · exit 0 · 0.1s ────\r\n[test@Predator ~]$ ',
+                    source: 'injected_separator',
+                    seq: 1002,
+                    runId: 'silent-run',
+                    runSeq: 2,
+                },
+            });
+
+            await flushPromises();
+            await new Promise((resolve) => window.setTimeout(resolve, 32));
+
+            const written = mockTerminalInstance.write.mock.calls
+                .map((call) => call[0])
+                .join('');
+            expect(written).toContain('──── run #2');
+            expect(written).toContain('[test@Predator ~]$ ');
+
+            wrapper.unmount();
+        });
+
+        it('case 25', async () => {
             mockTerminalInstance.write.mockClear();
 
             const statusChanges: ITerminalStatusChangePayload[] = [];
@@ -475,8 +976,8 @@ describe('useIntegratedTerminal 状态机特征化', () => {
     });
 
     // ── 7. 卸载清理 ──
-    describe('卸载时清理资源', () => {
-        it('卸载后 terminal:exit 监听器被移除', async () => {
+    describe('suite 10', () => {
+        it('case 26', async () => {
             const statusChanges: ITerminalStatusChangePayload[] = [];
             const wrapper = mount(createTestComponent(statusChanges), {
                 global: { plugins: [createPinia()] },
@@ -485,15 +986,15 @@ describe('useIntegratedTerminal 状态机特征化', () => {
 
             await flushPromises();
 
-            expect(capturedListeners.has('terminal:exit')).toBe(true);
+            expect(capturedListeners.has('terminal:interactive-exited')).toBe(true);
 
             wrapper.unmount();
             await flushPromises();
 
-            expect(capturedListeners.has('terminal:exit')).toBe(false);
+            expect(capturedListeners.has('terminal:interactive-exited')).toBe(false);
         });
 
-        it('卸载后 terminal:data 监听器被移除', async () => {
+        it('case 27', async () => {
             const statusChanges: ITerminalStatusChangePayload[] = [];
             const wrapper = mount(createTestComponent(statusChanges), {
                 global: { plugins: [createPinia()] },

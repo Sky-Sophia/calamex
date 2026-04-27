@@ -211,14 +211,14 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: #08090a;
+  background: var(--bg-0);
 }
 
 .app-runtime-error__panel {
   width: min(780px, 100%);
   border: 1px solid rgba(255, 107, 122, 0.28);
   border-radius: 12px;
-  background: #15171a;
+  background: var(--bg-1);
   padding: 20px 24px;
   box-shadow: 0 24px 72px rgba(0, 0, 0, 0.36);
 }

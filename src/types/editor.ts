@@ -100,11 +100,38 @@ export interface IWorkspaceDirectoryPayload {
   entries: IWorkspaceEntry[];
 }
 
-export interface IStartupWorkspacePayload {
+export interface IWorkspacePathCreateRequest {
+  parentPath: string;
   rootPath: string;
-  rootName: string;
-  defaultFilePath: string | null;
-  protectedRootPaths: string[];
+  name: string;
+  kind: 'directory' | 'file';
+}
+
+export interface IWorkspacePathCreatePayload {
+  path: string;
+  name: string;
+  kind: 'directory' | 'file';
+}
+
+export interface IWorkspacePathRenameRequest {
+  path: string;
+  rootPath: string;
+  newName: string;
+}
+
+export interface IWorkspacePathRenamePayload {
+  oldPath: string;
+  newPath: string;
+  name: string;
+}
+
+export interface IWorkspacePathDeleteRequest {
+  path: string;
+  rootPath: string;
+}
+
+export interface IWorkspacePathDeletePayload {
+  path: string;
 }
 
 export interface IRunResult {

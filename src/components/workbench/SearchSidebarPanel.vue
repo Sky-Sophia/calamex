@@ -209,13 +209,11 @@
     </div>
 
     <div class="search-panel-results" role="listbox">
-      <div class="search-panel-summary">
-        <template v-if="hasSearchQuery && !searchError && !activeScopeIsPending">
-          <b>{{ activeResults.length }}</b> 条结果 · 来自 <b>{{ matchedFileCount }}</b> 个文件
-        </template>
-        <template v-else>
-          已索引 <b>{{ indexedFileCount }}</b> 个文件
-        </template>
+      <div
+        v-if="hasSearchQuery && !searchError && !activeScopeIsPending"
+        class="search-panel-summary"
+      >
+        <b>{{ activeResults.length }}</b> 条结果 · 来自 <b>{{ matchedFileCount }}</b> 个文件
       </div>
 
       <div v-if="!props.isDesktopRuntime" class="search-panel-empty-state">
@@ -243,26 +241,22 @@
         <p class="search-panel-empty-text">{{ matcherError }}</p>
       </div>
 
-      <div v-else-if="!hasSearchQuery" class="search-panel-empty-state">
-        <p class="search-panel-empty-title">输入关键字开始搜索</p>
-        <p class="search-panel-empty-text">
-          当前支持文件名与路径匹配，可配合大小写、全字匹配、正则和包含/排除路径过滤。
-        </p>
-      </div>
-
       <div v-else-if="activeScopeIsPending" class="search-panel-empty-state">
         <p class="search-panel-empty-title">该类别待接入</p>
         <p class="search-panel-empty-text">当前已接入文件名与路径搜索，符号与内容结果稍后补齐。</p>
       </div>
 
-      <div v-else-if="activeResults.length === 0" class="search-panel-empty-state">
+      <div
+        v-else-if="hasSearchQuery && activeResults.length === 0"
+        class="search-panel-empty-state"
+      >
         <p class="search-panel-empty-title">没有匹配结果</p>
         <p class="search-panel-empty-text">试试更短的关键字，或调整大小写、正则和路径过滤条件。</p>
       </div>
 
       <button
         v-for="result in activeResults"
-        :key="result.path"
+        :key="result.resultKey"
         type="button"
         class="search-panel-result"
         :class="{ 'is-selected': selectedResultPath === result.path }"
@@ -278,7 +272,7 @@
           <span class="search-panel-result-snippet">
             <template
               v-for="(segment, index) in result.snippetSegments"
-              :key="`${result.path}-snippet-${index}`"
+              :key="`${result.resultKey}-snippet-${index}`"
             >
               <mark v-if="segment.matched">{{ segment.text }}</mark>
               <span v-else>{{ segment.text }}</span>
@@ -288,7 +282,7 @@
           <span class="search-panel-result-loc">
             <template
               v-for="(segment, index) in result.locationSegments"
-              :key="`${result.path}-location-${index}`"
+              :key="`${result.resultKey}-location-${index}`"
             >
               <mark v-if="segment.matched">{{ segment.text }}</mark>
               <span v-else>{{ segment.text }}</span>
@@ -306,49 +300,37 @@
 import ExplorerEntryIcon from '@/components/workbench/ExplorerEntryIcon.vue';
 import { useMessage } from '@/composables/useMessage';
 import { tauriService } from '@/services/tauri';
-import type { IWorkspaceDirectoryPayload, IWorkspaceEntry } from '@/types/editor';
+import type { IWorkspaceDirectoryPayload } from '@/types/editor';
+import type {
+  IWorkspaceSearchResult,
+  TWorkspaceSearchResultKind,
+  TWorkspaceSearchScope,
+} from '@/types/search';
 import { toErrorMessage } from '@/utils/error';
-import { getRelativeFileSystemPath, normalizeFileSystemPath } from '@/utils/path';
-import {
-  collectWorkspaceFileEntries,
-  resolveWorkspaceRootPayload,
-  sortByRelativePath,
-} from '@/utils/workspace';
-import { computed, ref, watch } from 'vue';
+import { computed, onScopeDispose, ref, watch } from 'vue';
 
-type TSearchScope = 'all' | 'file-name' | 'symbol' | 'content';
-type TSearchReason = 'file-name' | 'path';
+type TSearchReason = TWorkspaceSearchResultKind;
 
 interface IHighlightedSegment {
   text: string;
   matched: boolean;
 }
 
-interface ISearchIndexEntry {
-  path: string;
-  name: string;
-  relativePath: string;
-}
-
 interface ISearchResultItem {
   path: string;
+  resultKey: string;
   reason: TSearchReason;
   reasonLabel: string;
   snippetSegments: IHighlightedSegment[];
   locationSegments: IHighlightedSegment[];
   score: number;
+  lineNumber: number | null;
 }
 
 interface ISearchMatcher {
   hasQuery: boolean;
   errorMessage: string;
-  test: (value: string) => boolean;
   highlight: (value: string) => IHighlightedSegment[];
-}
-
-interface IPathFilterMatchers {
-  include: RegExp[];
-  exclude: RegExp[];
 }
 
 const props = defineProps<{
@@ -362,59 +344,42 @@ const emit = defineEmits<{
   'open-file': [path: string];
 }>();
 
-const SEARCH_SCOPE_LABELS: Record<TSearchScope, string> = {
+const SEARCH_SCOPE_LABELS: Record<TWorkspaceSearchScope, string> = {
   all: '全部',
   'file-name': '文件名',
   symbol: '符号',
   content: '内容',
 };
 
+const SEARCH_DEBOUNCE_MS = 180;
+const SEARCH_RESULT_LIMIT = 200;
+
 const message = useMessage();
 const searchQuery = ref('');
 const includePattern = ref('');
 const excludePattern = ref('');
-const activeScope = ref<TSearchScope>('all');
+const activeScope = ref<TWorkspaceSearchScope>('all');
 const matchCase = ref(false);
 const wholeWord = ref(false);
 const useRegex = ref(false);
 const showPathFilters = ref(false);
-const searchIndexEntries = ref<ISearchIndexEntry[]>([]);
 const searchIndexing = ref(false);
 const searchError = ref('');
 const selectedResultPath = ref<string | null>(null);
+const scannedFileCount = ref(0);
+const backendResults = ref<IWorkspaceSearchResult[]>([]);
 let searchRequestId = 0;
-
-const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+let activeAbortController: AbortController | null = null;
 
 const isWordCharacter = (value: string | undefined): boolean =>
-  Boolean(value) && /[A-Za-z0-9_\-\u4E00-\u9FFF]/.test(value);
+  Boolean(value) && /[A-Za-z0-9_\-\u4E00-\u9FFF]/u.test(value);
 
 const splitPatternList = (value: string): string[] =>
   value
-    .split(/[\n,]+/)
+    .split(/[\n,]+/u)
     .map((item) => item.trim())
     .filter(Boolean);
-
-const buildRelativePath = (path: string, rootPath: string): string => {
-  return (
-    getRelativeFileSystemPath(path, rootPath) ??
-    normalizeFileSystemPath(path, {
-      collapseDuplicateSeparators: true,
-      trimTrailingSeparator: true,
-    })
-  );
-};
-
-const buildSearchIndexEntry = (entry: IWorkspaceEntry, rootPath: string): ISearchIndexEntry => ({
-  path: entry.path,
-  name: entry.name,
-  relativePath: buildRelativePath(entry.path, rootPath),
-});
-
-const buildPatternRegExp = (pattern: string, caseSensitive: boolean): RegExp => {
-  const wildcardPattern = pattern.split('*').map(escapeRegExp).join('.*');
-  return new RegExp(`^${wildcardPattern}$`, caseSensitive ? 'u' : 'iu');
-};
 
 const collectPlainMatchRanges = (
   value: string,
@@ -422,8 +387,8 @@ const collectPlainMatchRanges = (
   caseSensitive: boolean,
   fullWord: boolean,
 ): Array<[number, number]> => {
-  const source = caseSensitive ? value : value.toLowerCase();
-  const needle = caseSensitive ? query : query.toLowerCase();
+  const source = caseSensitive ? value : value.toLocaleLowerCase();
+  const needle = caseSensitive ? query : query.toLocaleLowerCase();
   const ranges: Array<[number, number]> = [];
 
   if (!needle) {
@@ -487,25 +452,15 @@ const buildHighlightedSegments = (
 
   for (const [startIndex, endIndex] of ranges) {
     if (startIndex > previousIndex) {
-      segments.push({
-        text: value.slice(previousIndex, startIndex),
-        matched: false,
-      });
+      segments.push({ text: value.slice(previousIndex, startIndex), matched: false });
     }
 
-    segments.push({
-      text: value.slice(startIndex, endIndex),
-      matched: true,
-    });
-
+    segments.push({ text: value.slice(startIndex, endIndex), matched: true });
     previousIndex = endIndex;
   }
 
   if (previousIndex < value.length) {
-    segments.push({
-      text: value.slice(previousIndex),
-      matched: false,
-    });
+    segments.push({ text: value.slice(previousIndex), matched: false });
   }
 
   return segments.filter((segment) => segment.text.length > 0);
@@ -517,24 +472,17 @@ const resolveMatcher = (): ISearchMatcher => {
     return {
       hasQuery: false,
       errorMessage: '',
-      test: () => false,
       highlight: (value) => [{ text: value, matched: false }],
     };
   }
 
   if (useRegex.value) {
     try {
-      const baseFlags = matchCase.value ? 'u' : 'iu';
-      const testPattern = new RegExp(query, baseFlags);
-      const highlightPattern = new RegExp(query, `${baseFlags}g`);
-
+      const baseFlags = matchCase.value ? 'gu' : 'giu';
+      const highlightPattern = new RegExp(query, baseFlags);
       return {
         hasQuery: true,
         errorMessage: '',
-        test: (value: string) => {
-          testPattern.lastIndex = 0;
-          return testPattern.test(value);
-        },
         highlight: (value: string) =>
           buildHighlightedSegments(value, collectRegExpMatchRanges(value, highlightPattern)),
       };
@@ -542,7 +490,6 @@ const resolveMatcher = (): ISearchMatcher => {
       return {
         hasQuery: true,
         errorMessage: toErrorMessage(error, '请输入有效的正则表达式。'),
-        test: () => false,
         highlight: (value) => [{ text: value, matched: false }],
       };
     }
@@ -551,8 +498,6 @@ const resolveMatcher = (): ISearchMatcher => {
   return {
     hasQuery: true,
     errorMessage: '',
-    test: (value: string) =>
-      collectPlainMatchRanges(value, query, matchCase.value, wholeWord.value).length > 0,
     highlight: (value: string) =>
       buildHighlightedSegments(
         value,
@@ -561,118 +506,83 @@ const resolveMatcher = (): ISearchMatcher => {
   };
 };
 
-const resolveEntryScore = (entry: ISearchIndexEntry, reason: TSearchReason): number => {
-  const query = matchCase.value ? searchQuery.value.trim() : searchQuery.value.trim().toLowerCase();
-  const target = reason === 'file-name' ? entry.name : entry.relativePath;
-  const comparableTarget = matchCase.value ? target : target.toLowerCase();
-  const matchIndex = comparableTarget.indexOf(query);
-  const pathDepth = entry.relativePath.split('/').length;
-  const exactMatchBonus = comparableTarget === query ? -120 : 0;
-  const startMatchBonus = matchIndex === 0 ? -40 : matchIndex;
-  return exactMatchBonus + startMatchBonus + pathDepth * 4 + target.length;
-};
-
-const createSearchResult = (
-  entry: ISearchIndexEntry,
-  reason: TSearchReason,
-  currentMatcher: ISearchMatcher,
-): ISearchResultItem => ({
-  path: entry.path,
-  reason,
-  reasonLabel: reason === 'file-name' ? '文件名匹配' : '路径匹配',
-  snippetSegments: currentMatcher.highlight(entry.name),
-  locationSegments: currentMatcher.highlight(entry.relativePath),
-  score: resolveEntryScore(entry, reason),
-});
-
-const hasSearchQuery = computed(() => searchQuery.value.trim().length > 0);
 const matcher = computed(resolveMatcher);
 const matcherError = computed(() => matcher.value.errorMessage);
-const indexedFileCount = computed(() => searchIndexEntries.value.length);
-const pathFilterMatchers = computed<IPathFilterMatchers>(() => ({
-  include: splitPatternList(includePattern.value).map((pattern) =>
-    buildPatternRegExp(pattern, matchCase.value),
-  ),
-  exclude: splitPatternList(excludePattern.value).map((pattern) =>
-    buildPatternRegExp(pattern, matchCase.value),
-  ),
-}));
+const hasSearchQuery = computed(() => searchQuery.value.trim().length > 0);
+const indexedFileCount = computed(() => scannedFileCount.value);
+const includePatterns = computed(() => splitPatternList(includePattern.value));
+const excludePatterns = computed(() => splitPatternList(excludePattern.value));
 
-const passesPathFilters = (entry: ISearchIndexEntry): boolean => {
-  if (!showPathFilters.value) {
-    return true;
-  }
-
-  const { include, exclude } = pathFilterMatchers.value;
-  const relativePath = entry.relativePath;
-
-  if (include.length > 0 && !include.some((pattern) => pattern.test(relativePath))) {
-    return false;
-  }
-
-  if (exclude.some((pattern) => pattern.test(relativePath))) {
-    return false;
-  }
-
-  return true;
-};
-
-const searchResultsByScope = computed<Record<TSearchScope, ISearchResultItem[]>>(() => {
-  const nextResults: Record<TSearchScope, ISearchResultItem[]> = {
-    all: [],
-    'file-name': [],
-    symbol: [],
-    content: [],
+const toResultItem = (result: IWorkspaceSearchResult): ISearchResultItem => {
+  const lineSuffix = result.lineNumber ? `:${result.lineNumber}` : '';
+  const locationText = `${result.relativePath}${lineSuffix}`;
+  const reasonLabels: Record<TSearchReason, string> = {
+    'file-name': '文件名匹配',
+    content: '内容匹配',
+    symbol: '符号匹配',
   };
 
-  if (!matcher.value.hasQuery || matcher.value.errorMessage) {
-    return nextResults;
-  }
+  return {
+    path: result.path,
+    resultKey: `${result.kind}:${result.path}:${result.lineNumber ?? 0}`,
+    reason: result.kind,
+    reasonLabel: reasonLabels[result.kind],
+    snippetSegments: matcher.value.highlight(result.lineText ?? result.name),
+    locationSegments: matcher.value.highlight(locationText),
+    score: result.score,
+    lineNumber: result.lineNumber,
+  };
+};
 
-  const candidateEntries = searchIndexEntries.value.filter(passesPathFilters);
-  const fileNameResults = candidateEntries
-    .filter((entry) => matcher.value.test(entry.name))
-    .map((entry) => createSearchResult(entry, 'file-name', matcher.value))
-    .sort((left, right) => left.score - right.score);
+const allResults = computed(() => backendResults.value.map(toResultItem));
+const searchResultsByScope = computed<Record<TWorkspaceSearchScope, ISearchResultItem[]>>(() => {
+  const nextResults: Record<TWorkspaceSearchScope, ISearchResultItem[]> = {
+    all: allResults.value,
+    'file-name': allResults.value.filter((result) => result.reason === 'file-name'),
+    symbol: allResults.value.filter((result) => result.reason === 'symbol'),
+    content: allResults.value.filter((result) => result.reason === 'content'),
+  };
 
-  const fileNamePaths = new Set(fileNameResults.map((item) => item.path));
-  const pathResults = candidateEntries
-    .filter((entry) => !fileNamePaths.has(entry.path) && matcher.value.test(entry.relativePath))
-    .map((entry) => createSearchResult(entry, 'path', matcher.value))
-    .sort((left, right) => left.score - right.score);
-
-  nextResults['file-name'] = fileNameResults;
-  nextResults.all = [...fileNameResults, ...pathResults];
   return nextResults;
 });
 
 const scopeChips = computed(() =>
-  (Object.keys(SEARCH_SCOPE_LABELS) as TSearchScope[]).map((scopeKey) => ({
+  (Object.keys(SEARCH_SCOPE_LABELS) as TWorkspaceSearchScope[]).map((scopeKey) => ({
     key: scopeKey,
     label: SEARCH_SCOPE_LABELS[scopeKey],
     count: searchResultsByScope.value[scopeKey].length,
   })),
 );
 
-const activeScopeIsPending = computed(
-  () => hasSearchQuery.value && (activeScope.value === 'symbol' || activeScope.value === 'content'),
-);
-
+const activeScopeIsPending = computed(() => false);
 const activeResults = computed(() => searchResultsByScope.value[activeScope.value]);
 const matchedFileCount = computed(
   () => new Set(activeResults.value.map((result) => result.path)).size,
 );
 
-const buildSearchIndex = async (): Promise<void> => {
-  if (!props.isDesktopRuntime) {
-    searchIndexEntries.value = [];
+const cancelPendingSearch = (): void => {
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
+
+  if (activeAbortController) {
+    activeAbortController.abort();
+    activeAbortController = null;
+  }
+};
+
+const runSearch = async (): Promise<void> => {
+  if (!props.isDesktopRuntime || !props.workspaceRootPath) {
+    scannedFileCount.value = 0;
+    backendResults.value = [];
     searchIndexing.value = false;
     searchError.value = '';
     return;
   }
 
-  if (!props.workspaceRootPath) {
-    searchIndexEntries.value = [];
+  if (matcherError.value) {
+    backendResults.value = [];
     searchIndexing.value = false;
     searchError.value = '';
     return;
@@ -680,49 +590,55 @@ const buildSearchIndex = async (): Promise<void> => {
 
   const requestId = searchRequestId + 1;
   searchRequestId = requestId;
+  activeAbortController?.abort();
+  const abortController = new AbortController();
+  activeAbortController = abortController;
   searchIndexing.value = true;
   searchError.value = '';
 
   try {
-    const rootPayload = await resolveWorkspaceRootPayload(
-      props.workspaceRootPath,
-      props.preloadedWorkspaceRoot,
-      tauriService.listWorkspaceEntries,
-    );
+    const payload = await tauriService.searchWorkspace({
+      workspaceRootPath: props.workspaceRootPath,
+      query: searchQuery.value.trim(),
+      scope: activeScope.value,
+      matchCase: matchCase.value,
+      wholeWord: wholeWord.value,
+      useRegex: useRegex.value,
+      includePatterns: showPathFilters.value ? includePatterns.value : [],
+      excludePatterns: showPathFilters.value ? excludePatterns.value : [],
+      limit: SEARCH_RESULT_LIMIT,
+    });
 
     if (requestId !== searchRequestId) {
       return;
     }
 
-    const fileEntries = await collectWorkspaceFileEntries(
-      rootPayload,
-      tauriService.listWorkspaceEntries,
-      {
-        shouldContinue: () => requestId === searchRequestId,
-      },
-    );
-
-    if (requestId !== searchRequestId) {
-      return;
-    }
-
-    const nextEntries = fileEntries.map((entry) =>
-      buildSearchIndexEntry(entry, rootPayload.rootPath),
-    );
-
-    searchIndexEntries.value = sortByRelativePath(nextEntries);
+    scannedFileCount.value = payload.scannedFileCount;
+    backendResults.value = payload.results;
   } catch (error) {
-    if (requestId !== searchRequestId) {
+    if (abortController.signal.aborted || requestId !== searchRequestId) {
       return;
     }
 
-    searchIndexEntries.value = [];
-    searchError.value = toErrorMessage(error, '建立搜索索引失败。');
+    backendResults.value = [];
+    searchError.value = toErrorMessage(error, '搜索失败。');
   } finally {
     if (requestId === searchRequestId) {
       searchIndexing.value = false;
+      activeAbortController = null;
     }
   }
+};
+
+const scheduleSearch = (): void => {
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+  }
+
+  searchTimer = setTimeout(() => {
+    searchTimer = null;
+    void runSearch();
+  }, SEARCH_DEBOUNCE_MS);
 };
 
 const handleReplaceAction = (): void => {
@@ -735,10 +651,20 @@ const handleResultClick = (path: string): void => {
 };
 
 watch(
-  [() => props.isDesktopRuntime, () => props.workspaceRootPath, () => props.preloadedWorkspaceRoot],
-  () => {
-    void buildSearchIndex();
-  },
+  [
+    () => props.isDesktopRuntime,
+    () => props.workspaceRootPath,
+    () => props.preloadedWorkspaceRoot,
+    searchQuery,
+    activeScope,
+    matchCase,
+    wholeWord,
+    useRegex,
+    showPathFilters,
+    includePattern,
+    excludePattern,
+  ],
+  scheduleSearch,
   { immediate: true },
 );
 
@@ -771,4 +697,6 @@ watch(
   },
   { immediate: true },
 );
+
+onScopeDispose(cancelPendingSearch);
 </script>

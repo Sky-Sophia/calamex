@@ -12,17 +12,28 @@ use std::{
         mpsc, Arc, Mutex,
     },
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::terminal::{state_machine::StateMachine, types::TerminalState};
 
 const WSL_TEMP_DIRECTORY: &str = "/tmp";
 const TERMINAL_READ_BUFFER_SIZE: usize = 64 * 1024;
 const TERMINAL_EVENT_FLUSH_INTERVAL: Duration = Duration::from_millis(16);
 const TERMINAL_EVENT_FLUSH_THRESHOLD: usize = 64 * 1024;
+const TERMINAL_RESIZE_REPAINT_SUPPRESSION: Duration = Duration::from_millis(240);
 const TERMINAL_SNAPSHOT_MAX_LENGTH: usize = 160 * 1024;
+const TERMINAL_ANSI_SAFE_RESET: &str =
+    "\x1b[?25h\x1b[?7h\x1b[m\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l";
+const TERMINAL_ANSI_EXIT_ALT_SCREEN: &str = "\x1b[?1049l";
+const TERMINAL_ANSI_RESET_SCROLL_REGION_PRESERVE_CURSOR: &str = "\x1b7\x1b[r\x1b8";
+const TERMINAL_PROMPT_MAX_LENGTH: usize = 240;
 
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+static TERMINAL_DATA_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+static TERMINAL_RUN_CHUNK_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+static TERMINAL_RUN_VISUAL_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static WSL_COMMAND_PATH_CACHE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +60,7 @@ pub struct TerminalSessionPayload {
 pub struct DispatchTerminalScriptRequest {
     session_id: String,
     path: Option<String>,
+    workspace_root_path: Option<String>,
     content: String,
     is_dirty: bool,
     run_id: String,
@@ -85,19 +97,42 @@ pub struct CloseTerminalSessionRequest {
     session_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelTerminalRunRequest {
+    run_id: String,
+    mode: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "snake_case")]
+enum TerminalDataSource {
+    Interactive,
+    Run,
+    InjectedReset,
+    InjectedSeparator,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct TerminalDataEvent {
     session_id: String,
     data: String,
+    source: TerminalDataSource,
+    seq: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_seq: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct TerminalRunOutputEvent {
+struct TerminalRunChunkEvent {
     session_id: String,
     run_id: String,
     data: String,
+    seq: u64,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -109,11 +144,28 @@ struct TerminalExitEvent {
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct TerminalRunCompleteEvent {
+struct TerminalRunCompletedEvent {
     session_id: String,
     run_id: String,
     exit_code: Option<i32>,
     finished_at: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct TerminalRunStartedEvent {
+    session_id: String,
+    run_id: String,
+    started_at_ms: i64,
+    pid: u32,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct TerminalStateChangedEvent {
+    from: TerminalState,
+    to: TerminalState,
+    at_ms: i64,
 }
 
 struct TerminalPreparedScript {
@@ -139,6 +191,40 @@ struct TerminalSession {
     working_directory: String,
 }
 
+struct TerminalActiveRun {
+    run_id: String,
+    pty: Option<Arc<crate::terminal::run_supervisor::LiveRunPty>>,
+}
+
+enum ActiveRunInputTarget {
+    None,
+    Pending,
+    Ready(Arc<crate::terminal::run_supervisor::LiveRunPty>),
+}
+
+struct TerminalActiveRunGuard {
+    state: TerminalSessionState,
+    run_id: String,
+}
+
+#[derive(Clone, Copy, Default)]
+struct TerminalInteractiveVisualState {
+    resize_repaint_suppress_until: Option<Instant>,
+    alt_screen_active: bool,
+}
+
+impl TerminalActiveRunGuard {
+    fn new(state: TerminalSessionState, run_id: String) -> Self {
+        Self { state, run_id }
+    }
+}
+
+impl Drop for TerminalActiveRunGuard {
+    fn drop(&mut self) {
+        clear_active_terminal_run(&self.state, &self.run_id);
+    }
+}
+
 #[derive(Default)]
 struct TerminalUtf8ChunkDecoder {
     pending: Vec<u8>,
@@ -153,6 +239,8 @@ enum TerminalEmitterMessage {
 pub struct TerminalSessionState {
     sessions: Arc<Mutex<HashMap<String, Arc<TerminalSession>>>>,
     snapshots: Arc<Mutex<HashMap<String, String>>>,
+    interactive_visual: Arc<Mutex<HashMap<String, TerminalInteractiveVisualState>>>,
+    active_run: Arc<Mutex<Option<TerminalActiveRun>>>,
     creation_guard: Arc<Mutex<()>>,
 }
 
@@ -163,6 +251,7 @@ pub fn ensure_terminal_session(
     payload: EnsureTerminalSessionRequest,
 ) -> Result<TerminalSessionPayload, String> {
     let terminal_state = state.inner().clone();
+    update_terminal_geometry(payload.cols, payload.rows);
     let (child, reader, terminal_cwd) = {
         let _creation_guard = terminal_state
             .creation_guard
@@ -178,7 +267,10 @@ pub fn ensure_terminal_session(
                 terminate_terminal_session(existing_session.as_ref())?;
             } else {
                 resize_session_master(existing_session.as_ref(), payload.cols, payload.rows)?;
+                resize_active_terminal_run_pty(&terminal_state, payload.cols, payload.rows)?;
+                mark_terminal_resize_repaint_suppression(&terminal_state, &payload.session_id);
                 let initial_output = get_terminal_snapshot(&terminal_state, &payload.session_id)?;
+                mark_terminal_interactive_ready(&app);
 
                 return Ok(TerminalSessionPayload {
                     session_id: payload.session_id,
@@ -241,6 +333,7 @@ pub fn ensure_terminal_session(
         }
 
         set_terminal_snapshot(&terminal_state, &payload.session_id, String::new())?;
+        remove_terminal_interactive_visual_state(&terminal_state, &payload.session_id)?;
 
         (child, reader, terminal_cwd)
     };
@@ -251,7 +344,13 @@ pub fn ensure_terminal_session(
         payload.session_id.clone(),
         reader,
     );
-    spawn_terminal_waiter(app, terminal_state, payload.session_id.clone(), child);
+    spawn_terminal_waiter(
+        app.clone(),
+        terminal_state,
+        payload.session_id.clone(),
+        child,
+    );
+    mark_terminal_interactive_ready(&app);
 
     Ok(TerminalSessionPayload {
         session_id: payload.session_id,
@@ -268,6 +367,16 @@ pub fn write_terminal_input(
     payload: TerminalInputRequest,
 ) -> Result<(), String> {
     let terminal_state = state.inner().clone();
+    match get_active_terminal_run_input_target(&terminal_state)? {
+        ActiveRunInputTarget::Ready(active_pty) => {
+            return active_pty.write_input(payload.data.as_bytes());
+        }
+        ActiveRunInputTarget::Pending => {
+            return Ok(());
+        }
+        ActiveRunInputTarget::None => {}
+    }
+
     let session = get_terminal_session(&terminal_state, &payload.session_id)?
         .ok_or_else(|| "目标终端会话不存在。".to_string())?;
     let mut writer = session
@@ -287,10 +396,14 @@ pub fn resize_terminal_session(
     payload: TerminalResizeRequest,
 ) -> Result<(), String> {
     let terminal_state = state.inner().clone();
+    update_terminal_geometry(payload.cols, payload.rows);
     let session = get_terminal_session(&terminal_state, &payload.session_id)?
         .ok_or_else(|| "目标终端会话不存在。".to_string())?;
 
-    resize_session_master(session.as_ref(), payload.cols, payload.rows)
+    resize_session_master(session.as_ref(), payload.cols, payload.rows)?;
+    resize_active_terminal_run_pty(&terminal_state, payload.cols, payload.rows)?;
+    mark_terminal_resize_repaint_suppression(&terminal_state, &payload.session_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -301,6 +414,7 @@ pub fn close_terminal_session(
     let terminal_state = state.inner().clone();
     let removed_session = remove_terminal_session(&terminal_state, &payload.session_id)?;
     remove_terminal_snapshot(&terminal_state, &payload.session_id)?;
+    remove_terminal_interactive_visual_state(&terminal_state, &payload.session_id)?;
 
     let Some(session) = removed_session else {
         return Ok(());
@@ -338,13 +452,21 @@ pub fn dispatch_script_to_terminal(
     let command = build_terminal_run_command(&payload, &session.working_directory)?;
     let command_line = command.display_command.clone();
     let used_temp_file = command.used_temp_file;
-
-    spawn_terminal_child_run(
+    let prompt_snapshot = get_terminal_snapshot(&terminal_state, &payload.session_id)?;
+    let prompt = extract_prompt_from_terminal_snapshot(&prompt_snapshot)
+        .or_else(|| build_terminal_prompt_fallback(&session.working_directory));
+    try_mark_active_terminal_run(&terminal_state, &payload.run_id)?;
+    if let Err(error) = transition_terminal_state(&app, TerminalState::SwitchingToRun) {
+        clear_active_terminal_run(&terminal_state, &payload.run_id);
+        return Err(error);
+    }
+    spawn_terminal_run(
         app,
         terminal_state,
         payload.session_id.clone(),
         payload.run_id.clone(),
         command,
+        prompt,
     );
 
     Ok(DispatchTerminalScriptPayload {
@@ -354,6 +476,19 @@ pub fn dispatch_script_to_terminal(
         used_temp_file,
         started_at: started_at.to_rfc3339(),
     })
+}
+
+#[tauri::command]
+pub fn cancel_terminal_run(
+    state: State<TerminalSessionState>,
+    payload: CancelTerminalRunRequest,
+) -> Result<(), String> {
+    let terminal_state = state.inner().clone();
+    let Some(active_pty) = get_active_terminal_run_pty(&terminal_state, &payload.run_id)? else {
+        return Err(format!("未找到正在运行的脚本：{}", payload.run_id));
+    };
+    let _mode = payload.mode.as_deref().unwrap_or("graceful");
+    active_pty.kill()
 }
 
 fn lock_terminal_sessions(
@@ -411,6 +546,135 @@ fn remove_terminal_snapshot(state: &TerminalSessionState, session_id: &str) -> R
     Ok(())
 }
 
+fn remove_terminal_interactive_visual_state(
+    state: &TerminalSessionState,
+    session_id: &str,
+) -> Result<(), String> {
+    let mut visual_states = state
+        .interactive_visual
+        .lock()
+        .map_err(|_| "终端交互视觉状态已损坏。".to_string())?;
+    visual_states.remove(session_id);
+    Ok(())
+}
+
+fn mark_terminal_resize_repaint_suppression(state: &TerminalSessionState, session_id: &str) {
+    let Ok(mut visual_states) = state.interactive_visual.lock() else {
+        return;
+    };
+    let visual_state = visual_states.entry(session_id.to_string()).or_default();
+    visual_state.resize_repaint_suppress_until =
+        Some(Instant::now() + TERMINAL_RESIZE_REPAINT_SUPPRESSION);
+}
+
+fn update_terminal_geometry(cols: u16, rows: u16) {
+    let Ok(mut geometry) = crate::terminal::registry::registry().geometry.write() else {
+        return;
+    };
+    geometry.cols = cols.max(2);
+    geometry.rows = rows.max(1);
+}
+
+fn try_mark_active_terminal_run(state: &TerminalSessionState, run_id: &str) -> Result<(), String> {
+    let mut active_run = state
+        .active_run
+        .lock()
+        .map_err(|_| "终端运行状态已损坏。".to_string())?;
+    if let Some(active_run) = active_run.as_ref() {
+        return Err(format!("已有脚本正在运行：{}", active_run.run_id));
+    }
+    *active_run = Some(TerminalActiveRun {
+        run_id: run_id.to_string(),
+        pty: None,
+    });
+    Ok(())
+}
+
+fn attach_active_terminal_run_pty(
+    state: &TerminalSessionState,
+    run_id: &str,
+    pty: Arc<crate::terminal::run_supervisor::LiveRunPty>,
+) -> Result<(), String> {
+    let mut active_run = state
+        .active_run
+        .lock()
+        .map_err(|_| "终端运行状态已损坏。".to_string())?;
+    let Some(active_run) = active_run.as_mut() else {
+        return Err("当前没有可绑定的运行任务。".to_string());
+    };
+    if active_run.run_id != run_id {
+        return Err(format!(
+            "运行任务不匹配：active={} incoming={run_id}",
+            active_run.run_id
+        ));
+    }
+    active_run.pty = Some(pty);
+    Ok(())
+}
+
+fn clear_active_terminal_run(state: &TerminalSessionState, run_id: &str) {
+    let Ok(mut active_run) = state.active_run.lock() else {
+        return;
+    };
+    if active_run.as_ref().map(|run| run.run_id.as_str()) == Some(run_id) {
+        *active_run = None;
+    }
+}
+
+fn get_active_terminal_run_pty(
+    state: &TerminalSessionState,
+    run_id: &str,
+) -> Result<Option<Arc<crate::terminal::run_supervisor::LiveRunPty>>, String> {
+    let active_run = state
+        .active_run
+        .lock()
+        .map_err(|_| "终端运行状态已损坏。".to_string())?;
+    Ok(active_run
+        .as_ref()
+        .filter(|run| run.run_id == run_id)
+        .and_then(|run| run.pty.as_ref().cloned()))
+}
+
+fn resize_active_terminal_run_pty(
+    state: &TerminalSessionState,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let active_pty = {
+        let active_run = state
+            .active_run
+            .lock()
+            .map_err(|_| "终端运行状态已损坏。".to_string())?;
+        active_run
+            .as_ref()
+            .and_then(|run| run.pty.as_ref().cloned())
+    };
+
+    if let Some(active_pty) = active_pty {
+        active_pty.resize(cols, rows)?;
+    }
+
+    Ok(())
+}
+
+fn get_active_terminal_run_input_target(
+    state: &TerminalSessionState,
+) -> Result<ActiveRunInputTarget, String> {
+    let active_run = state
+        .active_run
+        .lock()
+        .map_err(|_| "终端运行状态已损坏。".to_string())?;
+    let Some(active_run) = active_run.as_ref() else {
+        return Ok(ActiveRunInputTarget::None);
+    };
+    Ok(active_run
+        .pty
+        .as_ref()
+        .cloned()
+        .map(ActiveRunInputTarget::Ready)
+        .unwrap_or(ActiveRunInputTarget::Pending))
+}
+
 fn advance_char_boundary(value: &str, index: usize) -> usize {
     if index >= value.len() {
         return value.len();
@@ -451,6 +715,161 @@ fn append_terminal_snapshot(
     snapshot.push_str(chunk);
     trim_terminal_snapshot(snapshot);
     Ok(())
+}
+
+fn contains_csi_final(data: &str, final_bytes: &[u8]) -> bool {
+    let bytes = data.as_bytes();
+    let mut index = 0;
+
+    while index + 2 < bytes.len() {
+        if bytes[index] != 0x1b || bytes[index + 1] != b'[' {
+            index += 1;
+            continue;
+        }
+
+        let mut cursor = index + 2;
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if (0x40..=0x7e).contains(&byte) {
+                if final_bytes.contains(&byte) {
+                    return true;
+                }
+                index = cursor + 1;
+                break;
+            }
+            cursor += 1;
+        }
+
+        if cursor >= bytes.len() {
+            break;
+        }
+    }
+
+    false
+}
+
+fn contains_alt_screen_switch(data: &str) -> bool {
+    let bytes = data.as_bytes();
+    let mut index = 0;
+
+    while index + 5 < bytes.len() {
+        if bytes[index] != 0x1b || bytes[index + 1] != b'[' || bytes[index + 2] != b'?' {
+            index += 1;
+            continue;
+        }
+
+        let params_start = index + 3;
+        let mut cursor = params_start;
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if byte == b'h' || byte == b'l' {
+                if let Ok(params) = std::str::from_utf8(&bytes[params_start..cursor]) {
+                    if params
+                        .split(';')
+                        .filter_map(|value| value.parse::<u16>().ok())
+                        .any(|value| matches!(value, 47 | 1047 | 1049))
+                    {
+                        return true;
+                    }
+                }
+                index = cursor + 1;
+                break;
+            }
+            if (0x40..=0x7e).contains(&byte) {
+                index = cursor + 1;
+                break;
+            }
+            cursor += 1;
+        }
+
+        if cursor >= bytes.len() {
+            break;
+        }
+    }
+
+    false
+}
+
+fn resolve_alt_screen_state_after_data(current: bool, data: &str) -> bool {
+    let bytes = data.as_bytes();
+    let mut index = 0;
+    let mut next = current;
+
+    while index + 5 < bytes.len() {
+        if bytes[index] != 0x1b || bytes[index + 1] != b'[' || bytes[index + 2] != b'?' {
+            index += 1;
+            continue;
+        }
+
+        let params_start = index + 3;
+        let mut cursor = params_start;
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if byte == b'h' || byte == b'l' {
+                if let Ok(params) = std::str::from_utf8(&bytes[params_start..cursor]) {
+                    if params
+                        .split(';')
+                        .filter_map(|value| value.parse::<u16>().ok())
+                        .any(|value| matches!(value, 47 | 1047 | 1049))
+                    {
+                        next = byte == b'h';
+                    }
+                }
+                index = cursor + 1;
+                break;
+            }
+            if (0x40..=0x7e).contains(&byte) {
+                index = cursor + 1;
+                break;
+            }
+            cursor += 1;
+        }
+
+        if cursor >= bytes.len() {
+            break;
+        }
+    }
+
+    next
+}
+
+fn is_likely_interactive_resize_repaint_frame(data: &str) -> bool {
+    contains_csi_final(data, &[b'H'])
+        && contains_csi_final(data, &[b'J', b'K'])
+        && (data.contains("\x1b[?25l") || data.contains("\x1b[H"))
+}
+
+fn should_skip_snapshot_for_interactive_resize_repaint(
+    state: &TerminalSessionState,
+    session_id: &str,
+    chunk: &str,
+) -> bool {
+    if chunk.is_empty() {
+        return false;
+    }
+
+    let Ok(mut visual_states) = state.interactive_visual.lock() else {
+        return false;
+    };
+    let visual_state = visual_states.entry(session_id.to_string()).or_default();
+    let was_alt_screen_active = visual_state.alt_screen_active;
+    let has_alt_screen_control = contains_alt_screen_switch(chunk);
+    visual_state.alt_screen_active =
+        resolve_alt_screen_state_after_data(visual_state.alt_screen_active, chunk);
+
+    if was_alt_screen_active || visual_state.alt_screen_active || has_alt_screen_control {
+        return false;
+    }
+
+    let Some(suppress_until) = visual_state.resize_repaint_suppress_until else {
+        return false;
+    };
+    if Instant::now() > suppress_until {
+        visual_state.resize_repaint_suppress_until = None;
+        return false;
+    }
+
+    is_likely_interactive_resize_repaint_frame(chunk)
 }
 
 fn normalize_pty_size(cols: u16, rows: u16) -> PtySize {
@@ -530,6 +949,56 @@ fn resolve_wsl_home_directory(wsl_command_path: &Path) -> Option<String> {
     } else {
         Some(value)
     }
+}
+
+fn build_terminal_prompt_fallback(terminal_cwd: &str) -> Option<String> {
+    let wsl_command_path = resolve_wsl_command_path().ok()?;
+    let mut command = StdCommand::new(wsl_command_path);
+    configure_std_command_for_background(&mut command);
+    let output = command
+        .args([
+            "--cd",
+            terminal_cwd,
+            "--",
+            "/bin/bash",
+            "--noprofile",
+            "--norc",
+            "-lc",
+            terminal_prompt_fallback_script(),
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let prompt = String::from_utf8_lossy(&output.stdout).to_string();
+    if prompt.len() > TERMINAL_PROMPT_MAX_LENGTH
+        || !prompt
+            .chars()
+            .any(|character| matches!(character, '$' | '#'))
+    {
+        return None;
+    }
+
+    Some(prompt)
+}
+
+fn terminal_prompt_fallback_script() -> &'static str {
+    r#"user_name="\$(id -un)"
+host_name="\$(hostname)"
+display_pwd="\$(pwd)"
+home_dir="\$(printf '%s' ~)"
+if [ "\$display_pwd" = "\$home_dir" ]; then
+  display_pwd='~'
+fi
+prompt_char="\$(printf '\\044')"
+if [ "\$(id -u)" = "0" ]; then
+  prompt_char='#'
+fi
+printf '[%s@%s %s]%s ' "\$user_name" "\$host_name" "\$display_pwd" "\$prompt_char"
+"#
 }
 
 fn resolve_wsl_command_path() -> Result<PathBuf, String> {
@@ -620,44 +1089,443 @@ fn emit_terminal_data(app: &AppHandle, payload: TerminalDataEvent) {
     }
 }
 
-fn emit_terminal_run_output(app: &AppHandle, payload: TerminalRunOutputEvent) {
+fn emit_terminal_run_chunk(app: &AppHandle, payload: TerminalRunChunkEvent) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.emit("terminal:run-output", payload);
+        let _ = window.emit("terminal:run-chunk", payload);
     }
 }
 
 fn emit_terminal_exit(app: &AppHandle, payload: TerminalExitEvent) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.emit("terminal:exit", payload);
+        let _ = window.emit("terminal:interactive-exited", payload);
     }
 }
 
-fn emit_terminal_run_complete(app: &AppHandle, payload: TerminalRunCompleteEvent) {
+fn emit_terminal_run_completed(app: &AppHandle, payload: TerminalRunCompletedEvent) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.emit("terminal:run-complete", payload);
+        let _ = window.emit("terminal:run-completed", payload);
     }
 }
 
-fn emit_terminal_run_output_chunk(
+fn emit_terminal_run_started(app: &AppHandle, payload: TerminalRunStartedEvent) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("terminal:run-started", payload);
+    }
+}
+
+fn emit_terminal_state_changed(app: &AppHandle, payload: TerminalStateChangedEvent) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("terminal:state-changed", payload);
+    }
+}
+
+fn terminal_now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
+}
+
+fn transition_terminal_state(app: &AppHandle, to: TerminalState) -> Result<(), String> {
+    let registry = crate::terminal::registry::registry();
+    let mut state = registry
+        .state
+        .write()
+        .map_err(|_| "终端状态机已损坏。".to_string())?;
+    let from = *state;
+    if from == to {
+        return Ok(());
+    }
+    if !StateMachine::can_transition(from, to) {
+        return Err(format!("非法终端状态转移：{from:?} -> {to:?}"));
+    }
+    *state = to;
+    emit_terminal_state_changed(
+        app,
+        TerminalStateChangedEvent {
+            from,
+            to,
+            at_ms: terminal_now_ms(),
+        },
+    );
+    Ok(())
+}
+
+fn mark_terminal_interactive_ready(app: &AppHandle) {
+    let _ = transition_terminal_state(app, TerminalState::IdleInteractive);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("terminal:interactive-ready", ());
+    }
+}
+
+fn mark_terminal_interactive_exited(app: &AppHandle, payload: TerminalExitEvent) {
+    if crate::terminal::registry::registry().current_state() == TerminalState::IdleInteractive {
+        let _ = transition_terminal_state(app, TerminalState::Booting);
+    }
+    emit_terminal_exit(app, payload);
+}
+
+fn emit_terminal_run_started_state(
+    app: &AppHandle,
+    session_id: &str,
+    run_id: &str,
+    pid: u32,
+    started_at: Instant,
+) {
+    emit_terminal_run_started(
+        app,
+        TerminalRunStartedEvent {
+            session_id: session_id.to_string(),
+            run_id: run_id.to_string(),
+            started_at_ms: terminal_now_ms()
+                - i64::try_from(started_at.elapsed().as_millis()).unwrap_or(0),
+            pid,
+        },
+    );
+    let _ = transition_terminal_state(app, TerminalState::Running);
+}
+
+fn begin_terminal_run_completion(app: &AppHandle) {
+    let current = crate::terminal::registry::registry().current_state();
+    match current {
+        TerminalState::Running => {
+            let _ = transition_terminal_state(app, TerminalState::SwitchingToIdle);
+        }
+        TerminalState::SwitchingToRun => {
+            let _ = transition_terminal_state(app, TerminalState::IdleInteractive);
+        }
+        _ => {}
+    }
+}
+
+fn finish_terminal_run_completion(app: &AppHandle) {
+    let current = crate::terminal::registry::registry().current_state();
+    if current == TerminalState::SwitchingToIdle {
+        let _ = transition_terminal_state(app, TerminalState::IdleInteractive);
+    }
+}
+
+fn emit_terminal_run_completed_with_state(app: &AppHandle, payload: TerminalRunCompletedEvent) {
+    begin_terminal_run_completion(app);
+    emit_terminal_run_completed(app, payload);
+    finish_terminal_run_completion(app);
+}
+
+fn next_terminal_data_seq() -> u64 {
+    TERMINAL_DATA_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed)
+}
+
+fn emit_terminal_run_chunk_with_visual_prefix(
     app: &AppHandle,
     state: &TerminalSessionState,
     session_id: &str,
     run_id: &str,
     data: String,
+    visual: TerminalRunVisualObservation,
 ) {
     if data.is_empty() {
         return;
     }
 
+    if !visual.prefix.is_empty() {
+        let _ = append_terminal_snapshot(state, session_id, visual.prefix);
+    }
     let _ = append_terminal_snapshot(state, session_id, &data);
-    emit_terminal_run_output(
+    emit_terminal_data(
         app,
-        TerminalRunOutputEvent {
+        TerminalDataEvent {
+            session_id: session_id.to_string(),
+            data: format!("{}{}", visual.prefix, data),
+            source: TerminalDataSource::Run,
+            seq: next_terminal_data_seq(),
+            run_id: Some(run_id.to_string()),
+            run_seq: (visual.run_seq > 0).then_some(visual.run_seq),
+        },
+    );
+    emit_terminal_run_chunk(
+        app,
+        TerminalRunChunkEvent {
             session_id: session_id.to_string(),
             run_id: run_id.to_string(),
             data,
+            seq: next_terminal_run_chunk_seq(),
         },
     );
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TerminalRunVisualTracker {
+    has_output: bool,
+    ended_at_line_start: bool,
+    next_seq: u64,
+    alt_screen_active: bool,
+    scroll_region_changed: bool,
+}
+
+impl Default for TerminalRunVisualTracker {
+    fn default() -> Self {
+        Self {
+            has_output: false,
+            ended_at_line_start: false,
+            next_seq: 1,
+            alt_screen_active: false,
+            scroll_region_changed: false,
+        }
+    }
+}
+
+impl TerminalRunVisualTracker {
+    fn allocate_seq(&mut self) -> u64 {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        seq
+    }
+
+    fn observe(&mut self, data: &str) {
+        if data.is_empty() {
+            return;
+        }
+        self.observe_ansi_state(data);
+        self.has_output = true;
+        self.ended_at_line_start = data.ends_with('\n') || data.ends_with('\r');
+    }
+
+    fn observe_ansi_state(&mut self, data: &str) {
+        let bytes = data.as_bytes();
+        let mut index = 0;
+
+        while index + 2 < bytes.len() {
+            if bytes[index] != 0x1b || bytes[index + 1] != b'[' {
+                index += 1;
+                continue;
+            }
+
+            let params_start = index + 2;
+            let mut cursor = params_start;
+            while cursor < bytes.len() {
+                let byte = bytes[cursor];
+                if (0x40..=0x7e).contains(&byte) {
+                    if let Some(params) = data.get(params_start..cursor) {
+                        self.observe_csi(params, byte);
+                    }
+                    index = cursor + 1;
+                    break;
+                }
+                cursor += 1;
+            }
+
+            if cursor >= bytes.len() {
+                break;
+            }
+        }
+    }
+
+    fn observe_csi(&mut self, params: &str, final_byte: u8) {
+        match final_byte {
+            b'h' if csi_private_params_contain(params, &[47, 1047, 1049]) => {
+                self.alt_screen_active = true;
+            }
+            b'l' if csi_private_params_contain(params, &[47, 1047, 1049]) => {
+                self.alt_screen_active = false;
+            }
+            b'r' => {
+                self.scroll_region_changed = true;
+            }
+            _ => {}
+        }
+    }
+}
+
+fn csi_private_params_contain(params: &str, needles: &[u16]) -> bool {
+    let Some(private_params) = params.strip_prefix('?') else {
+        return false;
+    };
+
+    private_params.split(';').any(|part| {
+        let digits = part
+            .bytes()
+            .take_while(|byte| byte.is_ascii_digit())
+            .collect::<Vec<_>>();
+        if digits.is_empty() {
+            return false;
+        }
+
+        std::str::from_utf8(&digits)
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .is_some_and(|value| needles.contains(&value))
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TerminalRunVisualObservation {
+    prefix: &'static str,
+    run_seq: u64,
+}
+
+fn observe_visual_output_and_prefix(
+    tracker: &Arc<Mutex<TerminalRunVisualTracker>>,
+    data: &str,
+) -> TerminalRunVisualObservation {
+    if let Ok(mut tracker) = tracker.lock() {
+        let prefix = if !tracker.has_output && !data.starts_with(['\r', '\n']) {
+            "\r\n"
+        } else {
+            ""
+        };
+        let run_seq = tracker.allocate_seq();
+        tracker.observe(data);
+        TerminalRunVisualObservation { prefix, run_seq }
+    } else {
+        TerminalRunVisualObservation {
+            prefix: "",
+            run_seq: 0,
+        }
+    }
+}
+
+fn current_visual_tracker(
+    tracker: &Arc<Mutex<TerminalRunVisualTracker>>,
+) -> TerminalRunVisualTracker {
+    tracker.lock().map(|value| *value).unwrap_or_default()
+}
+
+fn next_terminal_run_visual_seq() -> u64 {
+    TERMINAL_RUN_VISUAL_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed)
+}
+
+fn next_visual_run_seq(tracker: &Arc<Mutex<TerminalRunVisualTracker>>) -> u64 {
+    tracker
+        .lock()
+        .map(|mut tracker| tracker.allocate_seq())
+        .unwrap_or(0)
+}
+
+fn emit_terminal_run_visual_completion(
+    app: &AppHandle,
+    state: &TerminalSessionState,
+    session_id: &str,
+    run_id: &str,
+    exit_code: Option<i32>,
+    started_at: Instant,
+    tracker: &Arc<Mutex<TerminalRunVisualTracker>>,
+    prompt: Option<String>,
+) {
+    let tracker_snapshot = current_visual_tracker(tracker);
+    let reset_run_seq = next_visual_run_seq(tracker);
+    let separator_run_seq = next_visual_run_seq(tracker);
+    let reset = build_terminal_ansi_reset(tracker_snapshot);
+    let separator = build_terminal_run_separator(
+        next_terminal_run_visual_seq(),
+        exit_code,
+        started_at.elapsed(),
+        tracker_snapshot,
+        prompt,
+    );
+    let _ = append_terminal_snapshot(state, session_id, &reset);
+    let _ = append_terminal_snapshot(state, session_id, &separator);
+
+    emit_terminal_data(
+        app,
+        TerminalDataEvent {
+            session_id: session_id.to_string(),
+            data: reset,
+            source: TerminalDataSource::InjectedReset,
+            seq: next_terminal_data_seq(),
+            run_id: Some(run_id.to_string()),
+            run_seq: Some(reset_run_seq),
+        },
+    );
+
+    emit_terminal_data(
+        app,
+        TerminalDataEvent {
+            session_id: session_id.to_string(),
+            data: separator,
+            source: TerminalDataSource::InjectedSeparator,
+            seq: next_terminal_data_seq(),
+            run_id: Some(run_id.to_string()),
+            run_seq: Some(separator_run_seq),
+        },
+    );
+}
+
+fn build_terminal_ansi_reset(tracker: TerminalRunVisualTracker) -> String {
+    let mut reset = String::new();
+    if tracker.alt_screen_active {
+        reset.push_str(TERMINAL_ANSI_EXIT_ALT_SCREEN);
+    }
+    reset.push_str(TERMINAL_ANSI_SAFE_RESET);
+    if tracker.scroll_region_changed {
+        reset.push_str(TERMINAL_ANSI_RESET_SCROLL_REGION_PRESERVE_CURSOR);
+    }
+    reset
+}
+
+fn build_terminal_run_separator(
+    visual_seq: u64,
+    exit_code: Option<i32>,
+    duration: Duration,
+    tracker: TerminalRunVisualTracker,
+    prompt: Option<String>,
+) -> String {
+    let prefix = if tracker.has_output && tracker.ended_at_line_start {
+        ""
+    } else {
+        "\r\n"
+    };
+    let exit_label = exit_code
+        .map(|code| format!("exit {code}"))
+        .unwrap_or_else(|| "exit ?".to_string());
+    let duration_secs = duration.as_secs_f64();
+    let mut text =
+        format!("{prefix}──── run #{visual_seq} · {exit_label} · {duration_secs:.1}s ────\r\n");
+    if let Some(prompt) = prompt {
+        text.push_str(&prompt);
+    }
+    text
+}
+
+fn extract_prompt_from_terminal_snapshot(snapshot: &str) -> Option<String> {
+    if snapshot.is_empty() {
+        return None;
+    }
+
+    let marker_index = snapshot
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| matches!(character, '$' | '#').then_some(index))?;
+    let prefix = &snapshot[..=marker_index];
+    let start = prefix
+        .rfind("\x1b[32m")
+        .or_else(|| prefix.rfind("\x1b[1m"))
+        .or_else(|| prefix.rfind('['))
+        .or_else(|| prefix.rfind('\n').map(|index| index + 1))
+        .or_else(|| prefix.rfind('\r').map(|index| index + 1))
+        .unwrap_or(0);
+    let mut prompt = snapshot[start..]
+        .split(['\r', '\n'])
+        .next()
+        .unwrap_or_default()
+        .to_string();
+
+    if prompt.len() > TERMINAL_PROMPT_MAX_LENGTH
+        || !prompt
+            .chars()
+            .any(|character| matches!(character, '$' | '#'))
+    {
+        return None;
+    }
+
+    if !prompt.ends_with(' ') {
+        prompt.push(' ');
+    }
+
+    Some(prompt)
+}
+
+fn next_terminal_run_chunk_seq() -> u64 {
+    TERMINAL_RUN_CHUNK_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed)
 }
 
 fn flush_terminal_data_buffer(
@@ -671,13 +1539,19 @@ fn flush_terminal_data_buffer(
     }
 
     let chunk = std::mem::take(buffer);
-    let _ = append_terminal_snapshot(state, session_id, &chunk);
+    if !should_skip_snapshot_for_interactive_resize_repaint(state, session_id, &chunk) {
+        let _ = append_terminal_snapshot(state, session_id, &chunk);
+    }
 
     emit_terminal_data(
         app,
         TerminalDataEvent {
             session_id: session_id.to_string(),
             data: chunk,
+            source: TerminalDataSource::Interactive,
+            seq: next_terminal_data_seq(),
+            run_id: None,
+            run_seq: None,
         },
     );
 }
@@ -745,7 +1619,8 @@ fn spawn_terminal_reader(
                         continue;
                     }
 
-                    let _ = sender.send(TerminalEmitterMessage::VisibleOutput(decoded_chunk.clone()));
+                    let _ =
+                        sender.send(TerminalEmitterMessage::VisibleOutput(decoded_chunk.clone()));
                 }
                 Err(_) => break,
             }
@@ -779,8 +1654,11 @@ fn spawn_terminal_waiter(
         if let Ok(mut snapshots) = state.snapshots.lock() {
             snapshots.remove(&session_id);
         }
+        if let Ok(mut visual_states) = state.interactive_visual.lock() {
+            visual_states.remove(&session_id);
+        }
 
-        emit_terminal_exit(
+        mark_terminal_interactive_exited(
             &app,
             TerminalExitEvent {
                 session_id,
@@ -788,51 +1666,6 @@ fn spawn_terminal_waiter(
             },
         );
     });
-}
-
-fn spawn_terminal_child_output_reader<R>(
-    app: AppHandle,
-    state: TerminalSessionState,
-    session_id: String,
-    run_id: String,
-    mut reader: R,
-) -> thread::JoinHandle<()>
-where
-    R: Read + Send + 'static,
-{
-    thread::spawn(move || {
-        let mut buffer = [0_u8; TERMINAL_READ_BUFFER_SIZE];
-        let mut decoded_chunk = String::new();
-        let mut decoder = TerminalUtf8ChunkDecoder::default();
-
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(size) => {
-                    decoded_chunk.clear();
-                    decoder.decode_into(&buffer[..size], &mut decoded_chunk, false);
-                    if decoded_chunk.is_empty() {
-                        continue;
-                    }
-
-                    emit_terminal_run_output_chunk(
-                        &app,
-                        &state,
-                        &session_id,
-                        &run_id,
-                        decoded_chunk.clone(),
-                    );
-                }
-                Err(_) => break,
-            }
-        }
-
-        decoded_chunk.clear();
-        decoder.decode_into(&[], &mut decoded_chunk, true);
-        if !decoded_chunk.is_empty() {
-            emit_terminal_run_output_chunk(&app, &state, &session_id, &run_id, decoded_chunk);
-        }
-    })
 }
 
 fn cleanup_terminal_child_run_files(paths: &[String]) {
@@ -861,27 +1694,44 @@ fn cleanup_terminal_child_run_files(paths: &[String]) {
         .status();
 }
 
-fn spawn_terminal_child_run(
+fn spawn_terminal_run(
     app: AppHandle,
     state: TerminalSessionState,
     session_id: String,
     run_id: String,
     command: TerminalDispatchCommand,
+    prompt: Option<String>,
 ) {
     thread::spawn(move || {
+        let started_at = Instant::now();
+        let visual_tracker = Arc::new(Mutex::new(TerminalRunVisualTracker::default()));
+        let _active_run_guard = TerminalActiveRunGuard::new(state.clone(), run_id.clone());
         let wsl_command_path = match resolve_wsl_command_path() {
             Ok(path) => path,
             Err(error) => {
-                emit_terminal_run_output_chunk(
+                let output = format!("启动 WSL2 失败：{error}\n");
+                let visual = observe_visual_output_and_prefix(&visual_tracker, &output);
+                emit_terminal_run_chunk_with_visual_prefix(
                     &app,
                     &state,
                     &session_id,
                     &run_id,
-                    format!("启动 WSL2 失败：{error}\n"),
+                    output,
+                    visual,
                 );
-                emit_terminal_run_complete(
+                emit_terminal_run_visual_completion(
                     &app,
-                    TerminalRunCompleteEvent {
+                    &state,
+                    &session_id,
+                    &run_id,
+                    Some(127),
+                    started_at,
+                    &visual_tracker,
+                    prompt,
+                );
+                emit_terminal_run_completed_with_state(
+                    &app,
+                    TerminalRunCompletedEvent {
                         session_id,
                         run_id,
                         exit_code: Some(127),
@@ -892,83 +1742,95 @@ fn spawn_terminal_child_run(
             }
         };
 
-        let mut child_command = StdCommand::new(wsl_command_path);
-        configure_std_command_for_background(&mut child_command);
-        child_command
-            .args([
-                "--cd",
-                &command.working_directory,
-                "--",
-                "/bin/bash",
-                &command.execution_path,
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        let mut child = match child_command.spawn() {
-            Ok(child) => child,
-            Err(error) => {
-                emit_terminal_run_output_chunk(
-                    &app,
-                    &state,
-                    &session_id,
-                    &run_id,
-                    format!("启动脚本进程失败：{error}\n"),
+        let output_app = app.clone();
+        let output_state = state.clone();
+        let output_session_id = session_id.clone();
+        let output_run_id = run_id.clone();
+        let output_visual_tracker = Arc::clone(&visual_tracker);
+        let geometry = crate::terminal::registry::registry()
+            .geometry
+            .read()
+            .map(|geometry| *geometry)
+            .unwrap_or_default();
+        let result = crate::terminal::run_supervisor::spawn_live_run_pty(
+            crate::terminal::run_supervisor::RunPtySpec {
+                wsl_command_path,
+                working_directory: command.working_directory.clone(),
+                execution_path: command.execution_path.clone(),
+                cols: geometry.cols,
+                rows: geometry.rows,
+                timeout: None,
+            },
+            move |chunk| {
+                let visual = observe_visual_output_and_prefix(&output_visual_tracker, &chunk);
+                emit_terminal_run_chunk_with_visual_prefix(
+                    &output_app,
+                    &output_state,
+                    &output_session_id,
+                    &output_run_id,
+                    chunk,
+                    visual,
                 );
-                cleanup_terminal_child_run_files(&command.cleanup_paths);
-                emit_terminal_run_complete(
-                    &app,
-                    TerminalRunCompleteEvent {
-                        session_id,
-                        run_id,
-                        exit_code: Some(127),
-                        finished_at: Utc::now().to_rfc3339(),
-                    },
-                );
-                return;
-            }
-        };
-        let child_pid = child.id();
-
-        let mut reader_threads = Vec::new();
-        if let Some(stdout) = child.stdout.take() {
-            reader_threads.push(spawn_terminal_child_output_reader(
-                app.clone(),
-                state.clone(),
-                session_id.clone(),
-                run_id.clone(),
-                stdout,
-            ));
-        }
-        if let Some(stderr) = child.stderr.take() {
-            reader_threads.push(spawn_terminal_child_output_reader(
-                app.clone(),
-                state.clone(),
-                session_id.clone(),
-                run_id.clone(),
-                stderr,
-            ));
-        }
-
-        let exit_code = child
-            .wait()
-            .ok()
-            .and_then(|status| status.code())
-            .or(Some(1));
-        eprintln!(
-            "script-child-exited pid={child_pid} session_id={session_id} run_id={run_id} exit_code={:?}",
-            exit_code
+            },
         );
-
-        for reader_thread in reader_threads {
-            let _ = reader_thread.join();
-        }
+        let exit_code = match result {
+            Ok(live_run) => {
+                let live_run = Arc::new(live_run);
+                if let Err(error) =
+                    attach_active_terminal_run_pty(&state, &run_id, Arc::clone(&live_run))
+                {
+                    let output = format!("{error}\n");
+                    let visual = observe_visual_output_and_prefix(&visual_tracker, &output);
+                    emit_terminal_run_chunk_with_visual_prefix(
+                        &app,
+                        &state,
+                        &session_id,
+                        &run_id,
+                        output,
+                        visual,
+                    );
+                    let _ = live_run.kill();
+                    Some(127)
+                } else {
+                    emit_terminal_run_started_state(
+                        &app,
+                        &session_id,
+                        &run_id,
+                        live_run.pid.unwrap_or(0),
+                        started_at,
+                    );
+                    live_run.wait_timeout(None).or(Some(1))
+                }
+            }
+            Err(error) => {
+                let output = format!("{error}\n");
+                let visual = observe_visual_output_and_prefix(&visual_tracker, &output);
+                emit_terminal_run_chunk_with_visual_prefix(
+                    &app,
+                    &state,
+                    &session_id,
+                    &run_id,
+                    output,
+                    visual,
+                );
+                Some(127)
+            }
+        };
 
         cleanup_terminal_child_run_files(&command.cleanup_paths);
-        emit_terminal_run_complete(
+        emit_terminal_run_visual_completion(
             &app,
-            TerminalRunCompleteEvent {
+            &state,
+            &session_id,
+            &run_id,
+            exit_code,
+            started_at,
+            &visual_tracker,
+            prompt,
+        );
+        emit_terminal_run_completed_with_state(
+            &app,
+            TerminalRunCompletedEvent {
                 session_id,
                 run_id,
                 exit_code,
@@ -1030,11 +1892,21 @@ fn prepare_terminal_dispatch_script(
     terminal_working_directory: &str,
 ) -> Result<TerminalPreparedScript, String> {
     let preferred_path = payload.path.as_ref().map(PathBuf::from);
-    let working_directory = preferred_path
+    let workspace_working_directory = payload
+        .workspace_root_path
+        .as_ref()
+        .map(|path| path.trim())
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .map(|path| to_wsl_path(&path))
+        .transpose()?;
+    let script_working_directory = preferred_path
         .as_ref()
         .and_then(|path| path.parent().map(Path::to_path_buf))
         .map(|path| to_wsl_path(&path))
-        .transpose()?
+        .transpose()?;
+    let working_directory = workspace_working_directory
+        .or(script_working_directory)
         .unwrap_or_else(|| terminal_working_directory.to_string());
 
     let has_existing_preferred_path = preferred_path
@@ -1142,4 +2014,322 @@ fn normalize_windows_path_for_wsl(value: &str) -> Result<String, String> {
 
 fn bash_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs,
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+
+    struct DispatchHarnessResult {
+        output: String,
+        exit_code: Option<i32>,
+        seqs: Vec<u64>,
+    }
+
+    #[test]
+    fn run_pty_active_run_is_serialized() {
+        let state = TerminalSessionState::default();
+
+        assert!(try_mark_active_terminal_run(&state, "run-1").is_ok());
+        assert!(try_mark_active_terminal_run(&state, "run-2").is_err());
+        assert!(matches!(
+            get_active_terminal_run_input_target(&state),
+            Ok(ActiveRunInputTarget::Pending)
+        ));
+
+        clear_active_terminal_run(&state, "run-1");
+        assert!(matches!(
+            get_active_terminal_run_input_target(&state),
+            Ok(ActiveRunInputTarget::None)
+        ));
+        assert!(try_mark_active_terminal_run(&state, "run-2").is_ok());
+    }
+
+    #[test]
+    fn terminal_run_chunk_seq_is_monotonic() {
+        let first = next_terminal_run_chunk_seq();
+        let second = next_terminal_run_chunk_seq();
+        let third = next_terminal_run_chunk_seq();
+
+        assert!(first < second);
+        assert!(second < third);
+    }
+
+    #[test]
+    fn terminal_data_seq_is_monotonic() {
+        let first = next_terminal_data_seq();
+        let second = next_terminal_data_seq();
+        let third = next_terminal_data_seq();
+
+        assert!(first < second);
+        assert!(second < third);
+    }
+
+    #[test]
+    fn run_pty_visual_separator_does_not_add_blank_line_after_newline_output() {
+        let separator = build_terminal_run_separator(
+            7,
+            Some(0),
+            Duration::from_millis(1200),
+            TerminalRunVisualTracker {
+                has_output: true,
+                ended_at_line_start: true,
+                ..TerminalRunVisualTracker::default()
+            },
+            Some("[test@Predator ~]$ ".to_string()),
+        );
+
+        assert!(separator.starts_with("──── run #7 · exit 0 · 1.2s ────\r\n"));
+        assert!(separator.ends_with("[test@Predator ~]$ "));
+        assert!(!separator.starts_with("\r\n\r\n"));
+    }
+
+    #[test]
+    fn run_pty_visual_separator_starts_newline_for_no_newline_output() {
+        let separator = build_terminal_run_separator(
+            8,
+            Some(42),
+            Duration::from_millis(250),
+            TerminalRunVisualTracker {
+                has_output: true,
+                ended_at_line_start: false,
+                ..TerminalRunVisualTracker::default()
+            },
+            None,
+        );
+
+        assert!(separator.starts_with("\r\n──── run #8 · exit 42 · 0.2s ────\r\n"));
+    }
+
+    #[test]
+    fn visual_reset_does_not_move_cursor_for_plain_output() {
+        let mut tracker = TerminalRunVisualTracker::default();
+        tracker.observe("Hello SH Editor\n");
+
+        let reset = build_terminal_ansi_reset(tracker);
+
+        assert!(!reset.contains("\x1b[?1049l"));
+        assert!(!reset.contains("\x1b[r"));
+        assert_eq!(reset, TERMINAL_ANSI_SAFE_RESET);
+    }
+
+    #[test]
+    fn visual_reset_exits_alt_screen_only_when_run_entered_it() {
+        let mut tracker = TerminalRunVisualTracker::default();
+        tracker.observe("\x1b[?1049hinside alt screen");
+
+        let reset = build_terminal_ansi_reset(tracker);
+
+        assert!(reset.starts_with(TERMINAL_ANSI_EXIT_ALT_SCREEN));
+    }
+
+    #[test]
+    fn visual_reset_preserves_cursor_when_resetting_scroll_region() {
+        let mut tracker = TerminalRunVisualTracker::default();
+        tracker.observe("\x1b[3;20rregion changed");
+
+        let reset = build_terminal_ansi_reset(tracker);
+
+        assert!(reset.contains(TERMINAL_ANSI_RESET_SCROLL_REGION_PRESERVE_CURSOR));
+        assert!(!reset.contains("\x1b[m\x1b[r"));
+    }
+
+    #[test]
+    fn interactive_resize_repaint_is_excluded_from_snapshot_window() {
+        let state = TerminalSessionState::default();
+        let session_id = "resize-repaint-session";
+        mark_terminal_resize_repaint_suppression(&state, session_id);
+
+        assert!(should_skip_snapshot_for_interactive_resize_repaint(
+            &state,
+            session_id,
+            "\x1b[?25l\x1b[m\x1b[HTo run a command as administrator\x1b[K\r\n[test@Predator]$\x1b[K"
+        ));
+        assert!(!should_skip_snapshot_for_interactive_resize_repaint(
+            &state,
+            session_id,
+            "normal output after resize\r\n"
+        ));
+    }
+
+    #[test]
+    fn interactive_resize_repaint_keeps_alt_screen_frames() {
+        let state = TerminalSessionState::default();
+        let session_id = "resize-alt-screen-session";
+
+        mark_terminal_resize_repaint_suppression(&state, session_id);
+        assert!(!should_skip_snapshot_for_interactive_resize_repaint(
+            &state,
+            session_id,
+            "\x1b[?1049h"
+        ));
+
+        mark_terminal_resize_repaint_suppression(&state, session_id);
+        assert!(!should_skip_snapshot_for_interactive_resize_repaint(
+            &state,
+            session_id,
+            "\x1b[?25l\x1b[Hvim repaint\x1b[K"
+        ));
+    }
+
+    #[test]
+    fn terminal_prompt_fallback_builds_visible_prompt() {
+        let _guard = crate::terminal::test_support::wsl_test_guard();
+        let wsl_command_path = resolve_wsl_command_path().expect("wsl should resolve");
+        let terminal_cwd =
+            resolve_wsl_home_directory(&wsl_command_path).unwrap_or_else(|| "~".to_string());
+
+        let prompt =
+            build_terminal_prompt_fallback(&terminal_cwd).expect("prompt fallback should build");
+
+        assert!(prompt.starts_with('['));
+        assert!(prompt.ends_with("$ ") || prompt.ends_with("# "));
+        assert!(prompt.contains('@'));
+    }
+
+    #[test]
+    fn run_pty_extracts_last_prompt_from_interactive_snapshot() {
+        let snapshot = "To run a command as administrator\n\x1b[4;1H\x1b[?25h\x1b[?2004h\x1b[32m\x1b[1m[test@Predator my_desktop_app]$\x1b[m ";
+        let prompt = extract_prompt_from_terminal_snapshot(snapshot);
+
+        assert_eq!(
+            prompt.as_deref(),
+            Some("\x1b[32m\x1b[1m[test@Predator my_desktop_app]$\x1b[m ")
+        );
+    }
+
+    #[test]
+    fn visual_completion_snapshot_keeps_prompt_after_run_chunk_with_dollar() {
+        let state = TerminalSessionState::default();
+        let session_id = "snapshot-prompt-session";
+        let prompt = "\x1b[32m\x1b[1m[test@Predator my_desktop_app]$\x1b[m ";
+        set_terminal_snapshot(&state, session_id, prompt.to_string()).expect("snapshot set");
+        append_terminal_snapshot(&state, session_id, "price is $5\n").expect("run output append");
+
+        let separator = build_terminal_run_separator(
+            9,
+            Some(0),
+            Duration::from_millis(900),
+            TerminalRunVisualTracker {
+                has_output: true,
+                ended_at_line_start: true,
+                ..TerminalRunVisualTracker::default()
+            },
+            Some(prompt.to_string()),
+        );
+        append_terminal_snapshot(&state, session_id, &separator).expect("separator append");
+
+        let snapshot = get_terminal_snapshot(&state, session_id).expect("snapshot get");
+        let extracted = extract_prompt_from_terminal_snapshot(&snapshot);
+
+        assert_eq!(extracted.as_deref(), Some(prompt));
+    }
+
+    #[test]
+    fn dispatch_command_prefers_workspace_root_over_script_directory() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "calamex-dispatch-workspace-{}",
+            build_temp_file_suffix().expect("suffix should build")
+        ));
+        let script_dir = temp_root.join("scripts");
+        fs::create_dir_all(&script_dir).expect("test workspace should be created");
+        let script_path = script_dir.join("hello.sh");
+        fs::write(&script_path, "pwd\n").expect("test script should be written");
+
+        let payload = DispatchTerminalScriptRequest {
+            session_id: "dispatch-cwd-session".to_string(),
+            path: Some(script_path.to_string_lossy().to_string()),
+            workspace_root_path: Some(temp_root.to_string_lossy().to_string()),
+            content: String::new(),
+            is_dirty: false,
+            run_id: "dispatch-cwd-run".to_string(),
+        };
+        let command =
+            build_terminal_run_command(&payload, "/tmp").expect("dispatch command should build");
+
+        assert_eq!(
+            command.working_directory,
+            to_wsl_path(&temp_root).expect("workspace root should convert to WSL path")
+        );
+
+        let _ = fs::remove_dir_all(&temp_root);
+    }
+
+    #[test]
+    fn run_pty_dispatch_harness_emits_output_and_complete() {
+        let result =
+            run_pty_dispatch_harness("echo __RUN_PTY_DISPATCH_OK__\nexit 0\n", "run-pty-ok");
+
+        assert_eq!(result.exit_code, Some(0), "{}", result.output);
+        assert!(result.output.contains("__RUN_PTY_DISPATCH_OK__"));
+        assert!(!result.seqs.is_empty());
+        assert!(result.seqs.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn run_pty_dispatch_harness_propagates_exit_code() {
+        let result = run_pty_dispatch_harness("echo __RUN_PTY_EXIT_42__\nexit 42\n", "run-pty-42");
+
+        assert_eq!(result.exit_code, Some(42), "{}", result.output);
+        assert!(result.output.contains("__RUN_PTY_EXIT_42__"));
+    }
+
+    #[test]
+    fn run_pty_dispatch_harness_is_default_path() {
+        let result =
+            run_pty_dispatch_harness("echo __RUN_PTY_DEFAULT_OK__\nexit 0\n", "run-default-ok");
+
+        assert_eq!(result.exit_code, Some(0), "{}", result.output);
+        assert!(result.output.contains("__RUN_PTY_DEFAULT_OK__"));
+    }
+
+    fn run_pty_dispatch_harness(content: &str, run_id: &str) -> DispatchHarnessResult {
+        let _guard = crate::terminal::test_support::wsl_test_guard();
+        let payload = DispatchTerminalScriptRequest {
+            session_id: "dispatch-harness-session".to_string(),
+            path: None,
+            workspace_root_path: None,
+            content: content.to_string(),
+            is_dirty: true,
+            run_id: run_id.to_string(),
+        };
+        let command =
+            build_terminal_run_command(&payload, "/tmp").expect("dispatch command should build");
+        let output = Arc::new(Mutex::new(String::new()));
+        let seqs = Arc::new(Mutex::new(Vec::<u64>::new()));
+        let output_ref = Arc::clone(&output);
+        let seqs_ref = Arc::clone(&seqs);
+        let exit = crate::terminal::run_supervisor::run_pty_script(
+            crate::terminal::run_supervisor::RunPtySpec {
+                wsl_command_path: resolve_wsl_command_path().expect("wsl should resolve"),
+                working_directory: command.working_directory.clone(),
+                execution_path: command.execution_path.clone(),
+                cols: 120,
+                rows: 40,
+                timeout: Some(Duration::from_secs(8)),
+            },
+            move |chunk| {
+                output_ref.lock().expect("output mutex").push_str(&chunk);
+                seqs_ref
+                    .lock()
+                    .expect("seq mutex")
+                    .push(next_terminal_run_chunk_seq());
+            },
+        )
+        .expect("run pty dispatch harness should run");
+        cleanup_terminal_child_run_files(&command.cleanup_paths);
+        let output = output.lock().expect("output mutex").clone();
+        let seqs = seqs.lock().expect("seq mutex").clone();
+
+        DispatchHarnessResult {
+            output,
+            exit_code: exit.exit_code,
+            seqs,
+        }
+    }
 }

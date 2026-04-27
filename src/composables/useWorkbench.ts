@@ -18,8 +18,8 @@ import type {
 } from '@/types/editor';
 import { desktopRuntimeReady, waitForDesktopRuntime } from '@/utils/desktop-runtime';
 import { toErrorMessage } from '@/utils/error';
+import { isShellScriptPath } from '@/utils/file-assets';
 import { COMMAND_TEMPLATES, COMMENT_TEMPLATES, DEFAULT_EXECUTOR } from '@/utils/templates';
-import { loadWorkspaceRootPayloadOrEmpty } from '@/utils/workspace';
 import { computed } from 'vue';
 
 const EMPTY_ENVIRONMENT: IExecutionEnvironment = {
@@ -29,6 +29,9 @@ const EMPTY_ENVIRONMENT: IExecutionEnvironment = {
 };
 
 const isTextDocument = (document: { kind: string }): boolean => document.kind === 'text';
+
+const isShellScriptDocument = (document: { kind: string; path: string | null; name: string }): boolean =>
+  isTextDocument(document) && isShellScriptPath(document.path ?? document.name);
 
 export const useWorkbench = () => {
   const appStore = useAppStore();
@@ -45,7 +48,7 @@ export const useWorkbench = () => {
   };
 
   const canRun = computed(() => {
-    if (!editorStore.hasActiveDocument || !isTextDocument(editorStore.document)) {
+    if (!editorStore.hasActiveDocument || !isShellScriptDocument(editorStore.document)) {
       return false;
     }
 
@@ -106,7 +109,7 @@ export const useWorkbench = () => {
     flushSession,
   });
 
-  const { runScript, appendTerminalOutput, handleIntegratedTerminalRunComplete } = useTerminalRun({
+  const { runScript, appendTerminalOutput, handleIntegratedTerminalRunCompleted } = useTerminalRun({
     canRun,
     editorStore,
   });
@@ -124,7 +127,7 @@ export const useWorkbench = () => {
   const initialize = async (): Promise<{
     startupWorkspaceDirectory: IWorkspaceDirectoryPayload | null;
   }> => {
-    let startupWorkspaceDirectory: IWorkspaceDirectoryPayload | null = null;
+    const startupWorkspaceDirectory: IWorkspaceDirectoryPayload | null = null;
 
     const runtimeReady = await waitForDesktopRuntime();
     if (!runtimeReady) {
@@ -156,32 +159,6 @@ export const useWorkbench = () => {
       reportError('执行环境检测失败', error, '执行环境检测失败');
     }
 
-    try {
-      const startupWorkspace = await tauriService.getStartupWorkspace();
-      editorStore.setProtectedWorkspaceRootPaths(startupWorkspace.protectedRootPaths);
-      startupWorkspaceDirectory = await loadWorkspaceRootPayloadOrEmpty(
-        startupWorkspace.rootPath,
-        startupWorkspace.rootName,
-        tauriService.listWorkspaceEntries,
-      );
-
-      const hasSessionWorkspace = Boolean(editorStore.sessionSnapshot.workspaceRoot);
-      if (!hasSessionWorkspace) {
-        editorStore.setWorkspaceRootPath(startupWorkspace.rootPath);
-      }
-
-      const hasSessionTabs = editorStore.sessionSnapshot.openTabs.length > 0;
-      if (!hasSessionTabs && !editorStore.hasActiveDocument && startupWorkspace.defaultFilePath) {
-        try {
-          const payload = await tauriService.loadScript(startupWorkspace.defaultFilePath);
-          editorStore.openDocumentTab(payload);
-        } catch (error) {
-          reportError('加载默认脚本失败', error, '加载默认脚本失败');
-        }
-      }
-    } catch (error) {
-      reportError('加载默认工作区失败', error, '加载默认工作区失败');
-    }
 
     return {
       startupWorkspaceDirectory,
@@ -238,7 +215,7 @@ export const useWorkbench = () => {
     requestCloseApplication,
     activateDocument,
     runScript,
-    handleIntegratedTerminalRunComplete,
+    handleIntegratedTerminalRunCompleted,
     updateContent,
     appendTerminalOutput,
     updateEncoding,

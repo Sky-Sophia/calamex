@@ -54,8 +54,8 @@ import { useIntegratedTerminal } from '@/composables/useIntegratedTerminal';
 import type { TThemeMode } from '@/types/app';
 import type { ITerminalSettings } from '@/types/settings';
 import type {
-    ITerminalRunCompletePayload,
-    ITerminalRunOutputEvent,
+    ITerminalRunCompletedPayload,
+    ITerminalRunChunkPayload,
     ITerminalStatusChangePayload,
 } from '@/types/terminal';
 import '@xterm/xterm/css/xterm.css';
@@ -69,8 +69,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'status-change': [payload: ITerminalStatusChangePayload];
-  output: [payload: ITerminalRunOutputEvent];
-  'run-complete': [payload: ITerminalRunCompletePayload];
+  'run-chunk': [payload: ITerminalRunChunkPayload];
+  'run-completed': [payload: ITerminalRunCompletedPayload];
 }>();
 
 const visible = computed(() => props.visible);
@@ -83,8 +83,8 @@ const { hostRef, status, statusMessage, retry, focusTerminal } = useIntegratedTe
   theme,
   settings: terminalSettings,
   onStatusChange: (payload) => emit('status-change', payload),
-  onOutput: (value) => emit('output', value),
-  onRunComplete: (payload) => emit('run-complete', payload),
+  onOutput: (payload) => emit('run-chunk', payload),
+  onRunCompleted: (payload) => emit('run-completed', payload),
 });
 
 const showOverlay = computed(() => status.value !== 'ready');

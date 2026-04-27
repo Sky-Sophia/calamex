@@ -3,7 +3,7 @@
 ref="innerEditorRef" :document-path="documentPath" :model-value="modelValue" :theme="theme"
     :analysis="analysisState" :editor-settings="editorSettings" :git-baseline="gitBaseline"
     @update:model-value="handleModelValueChange" @cursor-position-change="handleCursorPositionChange"
-    @format-request="emit('format-request')" />
+    @format-request="emit('format-request')" @command-palette-request="emit('command-palette-request')" />
 </template>
 
 <script setup lang="ts">
@@ -26,6 +26,7 @@ interface IEditorExpose {
   insertSnippet: (snippet: string) => void;
   revealPosition: (line: number, column: number) => void;
   rerunDiagnostics: () => void;
+  layoutEditor: () => void;
 }
 
 const props = withDefaults(
@@ -50,6 +51,7 @@ const emit = defineEmits<{
   'cursor-position-change': [line: number, column: number];
   'diagnostics-change': [documentId: string, payload: IAnalyzeScriptPayload];
   'format-request': [];
+  'command-palette-request': [];
 }>();
 
 const innerEditorRef = ref<IEditorExpose | null>(null);
@@ -282,6 +284,10 @@ const revealPosition = (line: number, column: number): void => {
   innerEditorRef.value?.revealPosition(line, column);
 };
 
+const layoutEditor = (): void => {
+  innerEditorRef.value?.layoutEditor();
+};
+
 const handleModelValueChange = (value: string): void => {
   emit('update:modelValue', value);
 };
@@ -295,5 +301,6 @@ defineExpose<IEditorExpose>({
   insertSnippet,
   revealPosition,
   rerunDiagnostics,
+  layoutEditor,
 });
 </script>

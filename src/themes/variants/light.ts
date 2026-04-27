@@ -15,6 +15,7 @@ export const light: IRoles = {
         activity: P.n160,   // #edf1f8  活动轨
         sidebar: P.n070,   // #f7f9fc  侧边栏
         editor: P.n050,   // #ffffff  编辑器
+        editorGutter: P.n060,   // #f8fafc  编辑器装订线
         editorWidget: P.n090,   // #f5f7fb  悬浮 Widget / 补全框
         panel: P.n090,   // #f5f7fb  底部面板
         panelDepth: P.n150,   // #eef2f8  面板次级

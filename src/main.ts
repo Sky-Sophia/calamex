@@ -58,7 +58,7 @@ const renderFatalBootstrapError = (error: unknown): void => {
     'align-items:center',
     'justify-content:center',
     'padding:24px',
-    'background:#0b0c0e',
+    'background:#08090a',
     'color:#e5e7eb',
     'font-family:Consolas, "JetBrains Mono", monospace',
   ].join(';');
@@ -68,7 +68,7 @@ const renderFatalBootstrapError = (error: unknown): void => {
     'width:min(780px,100%)',
     'border:1px solid rgba(255,107,122,.28)',
     'border-radius:12px',
-    'background:#15171a',
+    'background:#1c1c1f',
     'padding:20px 24px',
     'box-shadow:0 24px 72px rgba(0,0,0,.36)',
   ].join(';');

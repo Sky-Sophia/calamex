@@ -22,13 +22,14 @@ const {
   mockSessionStore,
   mockWindowService,
   capturedTerminalEventListeners,
+  capturedTerminalEventListenerSets,
   mockListen,
 } =
   vi.hoisted(() => ({
     capturedTerminalEventListeners: new Map<string, (event: { payload: unknown }) => void>(),
+    capturedTerminalEventListenerSets: new Map<string, Set<(event: { payload: unknown }) => void>>(),
     mockTauriService: {
       detectEnvironment: vi.fn(),
-      getStartupWorkspace: vi.fn(),
       getGitRepositoryStatus: vi.fn(),
       listWorkspaceEntries: vi.fn(),
       loadScript: vi.fn(),
@@ -40,6 +41,7 @@ const {
       ensureTerminalSession: vi.fn(),
       writeTerminalInput: vi.fn(),
       resizeTerminalSession: vi.fn(),
+      cancelTerminalRun: vi.fn(),
     },
     mockDialogConfirm: vi.fn<[], Promise<'confirm' | 'cancel' | 'dismiss'>>(),
     mockMessages: {
@@ -58,9 +60,20 @@ const {
     },
     mockListen: vi.fn(async (eventName: string, handler: unknown) => {
       const typedHandler = handler as (event: { payload: unknown }) => void;
-      capturedTerminalEventListeners.set(eventName, typedHandler);
+      const handlers = capturedTerminalEventListenerSets.get(eventName) ?? new Set();
+      handlers.add(typedHandler);
+      capturedTerminalEventListenerSets.set(eventName, handlers);
+      capturedTerminalEventListeners.set(eventName, (event) => {
+        for (const item of handlers) {
+          item(event);
+        }
+      });
       return () => {
-        capturedTerminalEventListeners.delete(eventName);
+        handlers.delete(typedHandler);
+        if (handlers.size === 0) {
+          capturedTerminalEventListenerSets.delete(eventName);
+          capturedTerminalEventListeners.delete(eventName);
+        }
       };
     }),
   }));
@@ -157,6 +170,7 @@ describe('useWorkbench 特征化快照', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     capturedTerminalEventListeners.clear();
+    capturedTerminalEventListenerSets.clear();
 
     scope = effectScope();
     scope.run(() => {
@@ -206,6 +220,15 @@ describe('useWorkbench 特征化快照', () => {
       editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
       editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
       expect(workbench.canRun.value).toBe(true);
+    });
+
+    it('当前文件不是 .sh / .bash 脚本时 canRun 为 false', () => {
+      editorStore.createDocumentTab({
+        name: 'notes.txt',
+        content: '#!/bin/bash\necho hi',
+      });
+      editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
+      expect(workbench.canRun.value).toBe(false);
     });
   });
 
@@ -312,34 +335,61 @@ describe('useWorkbench 特征化快照', () => {
       expect(editorStore.document.path).toBe('/tmp/logo.png');
       expect(mockTauriService.loadScript).not.toHaveBeenCalled();
     });
+
+    it('??????????????????????', async () => {
+      editorStore.sessionSnapshot = {
+        ...editorStore.sessionSnapshot,
+        workspaceRoot: '/workspace',
+        openTabs: [
+          { path: '/workspace/a.sh', pinned: false, order: 0 },
+          { path: '/workspace/b.sh', pinned: false, order: 1 },
+        ],
+        activeTabPath: '/workspace/b.sh',
+      };
+
+      mockTauriService.listWorkspaceEntries.mockResolvedValueOnce({
+        rootPath: '/workspace',
+        rootName: 'workspace',
+        entries: [],
+      });
+      mockTauriService.loadScript.mockImplementation((path: string) => Promise.resolve({
+        path,
+        name: path.endsWith('a.sh') ? 'a.sh' : 'b.sh',
+        content: '#!/bin/bash\necho ok',
+        encoding: 'utf-8',
+        lineCount: 2,
+        charCount: 20,
+      }));
+
+      await workbench.restoreSession();
+
+      expect(editorStore.workspaceRootPath).toBe('/workspace');
+      expect(editorStore.documents.map((document) => document.path)).toEqual([
+        '/workspace/a.sh',
+        '/workspace/b.sh',
+      ]);
+      expect(editorStore.document.path).toBe('/workspace/b.sh');
+    });
   });
 
   describe('initialize()', () => {
-    it('启动工作区预加载失败时回退为空目录骨架', async () => {
+    it('???????????????/????', async () => {
       mockTauriService.detectEnvironment.mockResolvedValueOnce({
         hasAny: true,
         executors: [],
         recommended: 'wsl',
       });
-      mockTauriService.getStartupWorkspace.mockResolvedValueOnce({
-        rootPath: '/workspace',
-        rootName: 'workspace',
-        defaultFilePath: null,
-        protectedRootPaths: ['/workspace'],
-      });
-      mockTauriService.listWorkspaceEntries.mockRejectedValueOnce(new Error('load failed'));
 
       const result = await workbench.initialize();
 
-      expect(result.startupWorkspaceDirectory).toEqual({
-        rootPath: '/workspace',
-        rootName: 'workspace',
-        entries: [],
-      });
-      expect(editorStore.workspaceRootPath).toBe('/workspace');
+      expect(result.startupWorkspaceDirectory).toBeNull();
+      expect(editorStore.workspaceRootPath).toBeNull();
+      expect(editorStore.documents).toHaveLength(0);
+      expect(mockTauriService.listWorkspaceEntries).not.toHaveBeenCalled();
+      expect(mockTauriService.loadScript).not.toHaveBeenCalled();
     });
   });
-  // ── 3. requestCloseDocument ──
+
   describe('requestCloseDocument()', () => {
     it('关闭干净文档时不显示对话框', async () => {
       workbench.createNewDocument();
@@ -458,6 +508,23 @@ describe('useWorkbench 特征化快照', () => {
       expect(editorStore.isRunning).toBe(false);
     });
 
+    it('当前文件不是脚本文件时不会派发运行', async () => {
+      editorStore.createDocumentTab({
+        name: 'notes.txt',
+        content: '#!/bin/bash\necho hi',
+      });
+      editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
+
+      await workbench.runScript();
+
+      expect(workbench.canRun.value).toBe(false);
+      expect(mockMessages.warning).toHaveBeenCalledWith(
+        '当前文件不是脚本文件，仅支持运行 .sh / .bash 脚本。',
+      );
+      expect(mockTauriService.dispatchScriptToTerminal).not.toHaveBeenCalled();
+      expect(editorStore.isRunning).toBe(false);
+    });
+
     it('canRun=true 时 dispatch 后 isRunning 为 true', async () => {
       editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
       editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
@@ -474,6 +541,34 @@ describe('useWorkbench 特征化快照', () => {
 
       expect(editorStore.isRunning).toBe(true);
       expect(mockTauriService.dispatchScriptToTerminal).toHaveBeenCalledOnce();
+    });
+
+    it('派发脚本时携带工作区根目录，确保 run cwd 不继承 iPTY 当前目录', async () => {
+      editorStore.workspaceRootPath = '/workspace';
+      editorStore.openDocumentTab({
+        path: '/workspace/scripts/hello.sh',
+        name: 'hello.sh',
+        content: '#!/bin/bash\necho hi',
+        encoding: 'utf-8',
+      });
+      editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
+
+      mockTauriService.dispatchScriptToTerminal.mockResolvedValueOnce({
+        sessionId: 'main-terminal',
+        cwd: '/workspace',
+        commandLine: 'bash /workspace/scripts/hello.sh',
+        usedTempFile: false,
+        startedAt: new Date().toISOString(),
+      });
+
+      await workbench.runScript();
+
+      expect(mockTauriService.dispatchScriptToTerminal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: '/workspace/scripts/hello.sh',
+          workspaceRootPath: '/workspace',
+        }),
+      );
     });
 
     it('派发前先确保终端事件监听已注册，避免遗漏完成事件', async () => {
@@ -500,7 +595,7 @@ describe('useWorkbench 特征化快照', () => {
       expect(mockTauriService.dispatchScriptToTerminal).toHaveBeenCalledOnce();
     });
 
-    it('直接收到 terminal:run-complete 事件时也能收口运行态，不依赖 UI 转发链', async () => {
+    it('直接收到 terminal:run-completed 事件时也能收口运行态，不依赖 UI 转发链', async () => {
       editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
       editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
 
@@ -518,10 +613,10 @@ describe('useWorkbench 特征化快照', () => {
 
       await workbench.runScript();
 
-      const runCompleteHandler = capturedTerminalEventListeners.get('terminal:run-complete');
-      expect(runCompleteHandler).toBeDefined();
+      const runCompletedHandler = capturedTerminalEventListeners.get('terminal:run-completed');
+      expect(runCompletedHandler).toBeDefined();
 
-      runCompleteHandler?.({
+      runCompletedHandler?.({
         payload: {
           sessionId: 'main-terminal',
           runId: capturedRunId,
@@ -536,7 +631,7 @@ describe('useWorkbench 特征化快照', () => {
       expect(editorStore.lastRunResult?.exitCode).toBe(0);
     });
 
-    it('Windows ConPTY 未透传 OSC marker 时使用 terminal:data 捕获本次输出', async () => {
+    it('run-completed 成功后忽略迟到失败收口，避免运行日志误判失败', async () => {
       editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
       editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
 
@@ -546,7 +641,7 @@ describe('useWorkbench 特征化快照', () => {
         return Promise.resolve({
           sessionId: 'main-terminal',
           cwd: '/home',
-          commandLine: "/bin/bash '/tmp/sh-editor-dispatch-123.sh'",
+          commandLine: 'bash /tmp/script.sh',
           usedTempFile: true,
           startedAt: new Date().toISOString(),
         });
@@ -554,18 +649,69 @@ describe('useWorkbench 特征化快照', () => {
 
       await workbench.runScript();
 
-      const dataHandler = capturedTerminalEventListeners.get('terminal:data');
-      const runCompleteHandler = capturedTerminalEventListeners.get('terminal:run-complete');
-      expect(dataHandler).toBeDefined();
-      expect(runCompleteHandler).toBeDefined();
+      const runCompletedHandler = capturedTerminalEventListeners.get('terminal:run-completed');
+      const exitHandler = capturedTerminalEventListeners.get('terminal:interactive-exited');
+      expect(runCompletedHandler).toBeDefined();
+      expect(exitHandler).toBeDefined();
 
-      dataHandler?.({
+      runCompletedHandler?.({
         payload: {
           sessionId: 'main-terminal',
-          data: "[test@host]$ /bin/bash '/tmp/sh-editor-dispatch-123.sh'\r\nhi\r\n",
+          runId: capturedRunId,
+          exitCode: 0,
+          finishedAt: new Date().toISOString(),
         },
       });
-      runCompleteHandler?.({
+      exitHandler?.({
+        payload: {
+          sessionId: 'main-terminal',
+          exitCode: -1,
+        },
+      });
+
+      const finalLogs = editorStore.runLogs.filter(
+        (item) =>
+          item.runId === capturedRunId &&
+          (item.code === 'terminal-run/completed' || item.code === 'terminal-run/failed'),
+      );
+
+      expect(editorStore.lastRunResult?.success).toBe(true);
+      expect(editorStore.lastRunResult?.exitCode).toBe(0);
+      expect(editorStore.runHistory.length).toBe(1);
+      expect(finalLogs.map((item) => item.code)).toEqual(['terminal-run/completed']);
+    });
+
+    it('child wait 事件流通过 terminal:run-chunk / terminal:run-completed 收口运行态', async () => {
+      editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
+      editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
+
+      let capturedRunId = '';
+      mockTauriService.dispatchScriptToTerminal.mockImplementation((req: { runId: string }) => {
+        capturedRunId = req.runId;
+        return Promise.resolve({
+          sessionId: 'main-terminal',
+          cwd: '/home',
+          commandLine: "/bin/bash '/tmp/script-123.tmp.sh'",
+          usedTempFile: true,
+          startedAt: new Date().toISOString(),
+        });
+      });
+
+      await workbench.runScript();
+
+      const runChunkHandler = capturedTerminalEventListeners.get('terminal:run-chunk');
+      const runCompletedHandler = capturedTerminalEventListeners.get('terminal:run-completed');
+      expect(runChunkHandler).toBeDefined();
+      expect(runCompletedHandler).toBeDefined();
+
+      runChunkHandler?.({
+        payload: {
+          sessionId: 'main-terminal',
+          runId: capturedRunId,
+          data: 'hi\r\n',
+        },
+      });
+      runCompletedHandler?.({
         payload: {
           sessionId: 'main-terminal',
           runId: capturedRunId,
@@ -576,10 +722,10 @@ describe('useWorkbench 特征化快照', () => {
 
       expect(editorStore.isRunning).toBe(false);
       expect(editorStore.lastRunResult?.stdout).toContain('hi');
-      expect(editorStore.lastRunResult?.stdout).not.toContain('sh-editor-dispatch-123.sh');
+      expect(editorStore.lastRunResult?.stdout).not.toContain('script-123.tmp.sh');
     });
 
-    it('收到 terminal:exit 事件时会兜底收口，并允许下一次重新创建终端会话', async () => {
+    it('收到 terminal:interactive-exited 事件时会兜底收口，并允许下一次重新创建终端会话', async () => {
       editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
       editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
 
@@ -597,7 +743,7 @@ describe('useWorkbench 特征化快照', () => {
 
       await workbench.runScript();
 
-      const exitHandler = capturedTerminalEventListeners.get('terminal:exit');
+      const exitHandler = capturedTerminalEventListeners.get('terminal:interactive-exited');
       expect(exitHandler).toBeDefined();
 
       exitHandler?.({
@@ -664,8 +810,8 @@ describe('useWorkbench 特征化快照', () => {
     });
   });
 
-  // ── 6. handleIntegratedTerminalRunComplete ──
-  describe('handleIntegratedTerminalRunComplete()', () => {
+  // ── 6. handleIntegratedTerminalRunCompleted ──
+  describe('handleIntegratedTerminalRunCompleted()', () => {
     it('runId 匹配时清除 isRunning 并写入运行历史', async () => {
       editorStore.createDocumentTab({ content: '#!/bin/bash\necho hi' });
       editorStore.setEnvironment({ hasAny: true, executors: [], recommended: 'wsl' });
@@ -685,7 +831,7 @@ describe('useWorkbench 特征化快照', () => {
       await workbench.runScript();
 
       const finishedAt = new Date().toISOString();
-      workbench.handleIntegratedTerminalRunComplete({
+      workbench.handleIntegratedTerminalRunCompleted({
         sessionId: 'main-terminal',
         runId: capturedRunId,
         exitCode: 0,
@@ -714,7 +860,7 @@ describe('useWorkbench 特征化快照', () => {
       expect(editorStore.isRunning).toBe(true);
       expect(editorStore.pendingTerminalRunId).not.toBeNull();
 
-      workbench.handleIntegratedTerminalRunComplete({
+      workbench.handleIntegratedTerminalRunCompleted({
         sessionId: 'main-terminal',
         runId: '',
         exitCode: 0,
@@ -741,7 +887,7 @@ describe('useWorkbench 特征化快照', () => {
 
       await workbench.runScript();
 
-      workbench.handleIntegratedTerminalRunComplete({
+      workbench.handleIntegratedTerminalRunCompleted({
         sessionId: 'main-terminal',
         runId: 'another-run-id',
         exitCode: 0,
@@ -778,8 +924,8 @@ describe('useWorkbench 特征化快照', () => {
         finishedAt: new Date().toISOString(),
       };
 
-      workbench.handleIntegratedTerminalRunComplete(payload);
-      workbench.handleIntegratedTerminalRunComplete(payload);
+      workbench.handleIntegratedTerminalRunCompleted(payload);
+      workbench.handleIntegratedTerminalRunCompleted(payload);
 
       expect(editorStore.isRunning).toBe(false);
       expect(editorStore.runHistory.length).toBe(1);

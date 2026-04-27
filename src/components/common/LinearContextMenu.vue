@@ -1,7 +1,6 @@
 <template>
   <Teleport to="body">
     <div
-      v-if="props.open"
       class="linear-context-menu-root"
       :class="{
         'is-light': props.theme === 'light',
@@ -9,7 +8,12 @@
       }"
       @contextmenu.prevent
     >
-      <div class="cmx linear-context-menu" :style="rootStyle">
+      <MotionDropdown
+        class="cmx linear-context-menu"
+        :open="props.open"
+        :origin="motionOrigin"
+        :style="rootStyle"
+      >
         <template v-for="(group, groupIndex) in props.groups" :key="group.key">
           <div class="cmx-hd">{{ group.title }}</div>
 
@@ -24,7 +28,7 @@
                 class="cmx-i"
                 :class="{ disabled: item.disabled, active: activeSubmenuKey === item.key }"
                 :disabled="item.disabled"
-                @click.stop="handleItemSelect(item)"
+                @pointerdown.prevent.stop="handleItemSelect(item)"
               >
                 <span class="ic">
                   <LinearContextMenuIcon :icon="item.icon" />
@@ -46,7 +50,7 @@
                     class="cmx-i"
                     :class="{ disabled: child.disabled }"
                     :disabled="child.disabled"
-                    @click.stop="handleItemSelect(child)"
+                    @pointerdown.prevent.stop="handleItemSelect(child)"
                   >
                     <span class="ic">
                       <LinearContextMenuIcon :icon="child.icon" />
@@ -67,7 +71,7 @@
               :class="{ disabled: item.disabled }"
               :disabled="item.disabled"
               @mouseenter="handleItemMouseEnter(item)"
-              @click.stop="handleItemSelect(item)"
+              @pointerdown.prevent.stop="handleItemSelect(item)"
             >
               <span class="ic">
                 <LinearContextMenuIcon :icon="item.icon" />
@@ -81,7 +85,7 @@
 
           <div v-if="groupIndex < props.groups.length - 1" class="cmx-sep" />
         </template>
-      </div>
+      </MotionDropdown>
     </div>
   </Teleport>
 </template>
@@ -92,7 +96,9 @@ import type {
   ILinearContextMenuItem,
 } from '@/components/common/linear-context-menu.types';
 import LinearContextMenuIcon from '@/components/common/LinearContextMenuIcon.vue';
+import MotionDropdown from '@/components/business/MotionDropdown.vue';
 import type { TThemeMode } from '@/types/app';
+import type { TDropdownMotionOrigin } from '@/types/motion';
 import { computed, ref, watch } from 'vue';
 
 const props = defineProps<{
@@ -114,6 +120,16 @@ const rootStyle = computed(() => ({
   left: `${props.x}px`,
   top: `${props.y}px`,
 }));
+
+const motionOrigin = computed<TDropdownMotionOrigin>(() => {
+  if (typeof window === 'undefined') {
+    return 'top left';
+  }
+
+  const vertical = props.y > window.innerHeight * 0.56 ? 'bottom' : 'top';
+  const horizontal = props.x > window.innerWidth * 0.68 ? 'right' : 'left';
+  return `${vertical} ${horizontal}`;
+});
 
 const handleItemMouseEnter = (item: ILinearContextMenuItem): void => {
   activeSubmenuKey.value = item.children?.length && !item.disabled ? item.key : null;
@@ -144,20 +160,20 @@ watch(
 
 <style scoped>
 .linear-context-menu-root {
-  --bg: #08090a;
-  --bg-1: #0f1011;
-  --bg-2: #1a1b1e;
-  --bg-3: #232428;
-  --bg-h: rgba(255, 255, 255, 0.045);
-  --bg-sel: rgba(94, 106, 210, 0.16);
-  --fg: #f7f8f8;
-  --fg-1: #d0d6e0;
-  --fg-2: #8a8f98;
-  --fg-3: #62666d;
-  --fg-4: #3e4248;
-  --bd: rgba(255, 255, 255, 0.06);
-  --bd-st: rgba(255, 255, 255, 0.1);
-  --ac: #5e6ad2;
+  --cm-bg: var(--bg-0);
+  --cm-bg-1: var(--bg-1);
+  --cm-bg-2: var(--overlay-bg, var(--bg-4));
+  --cm-bg-3: var(--overlay-bg-depth, var(--bg-3));
+  --cm-bg-h: var(--bg-h);
+  --cm-bg-sel: var(--accent-muted);
+  --cm-fg: var(--text-primary);
+  --cm-fg-1: var(--text-secondary);
+  --cm-fg-2: var(--text-tertiary);
+  --cm-fg-3: var(--text-quaternary);
+  --cm-fg-4: var(--editor-context-menu-disabled);
+  --cm-bd: var(--border-subtle);
+  --cm-bd-st: var(--border-strong);
+  --cm-ac: var(--settings-accent);
   --ac-fg: #eef0ff;
   --ff:
     -apple-system, 'Inter Variable', 'Inter', 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
@@ -178,18 +194,18 @@ watch(
 }
 
 .linear-context-menu-root.is-light {
-  --bg-2: #ffffff;
-  --bg-3: #eef2f8;
-  --bg-h: rgba(15, 23, 42, 0.045);
-  --bg-sel: rgba(76, 111, 255, 0.14);
-  --fg: #111827;
-  --fg-1: #334155;
-  --fg-2: #64748b;
-  --fg-3: #94a3b8;
-  --fg-4: #cbd5e1;
-  --bd: rgba(15, 23, 42, 0.08);
-  --bd-st: rgba(15, 23, 42, 0.12);
-  --ac: #4c6fff;
+  --cm-bg-2: var(--overlay-bg, var(--bg-4));
+  --cm-bg-3: var(--overlay-bg-depth, var(--bg-3));
+  --cm-bg-h: var(--bg-h);
+  --cm-bg-sel: var(--accent-muted);
+  --cm-fg: var(--text-primary);
+  --cm-fg-1: var(--text-secondary);
+  --cm-fg-2: var(--text-tertiary);
+  --cm-fg-3: var(--text-quaternary);
+  --cm-fg-4: var(--editor-context-menu-disabled);
+  --cm-bd: var(--border-subtle);
+  --cm-bd-st: var(--border-strong);
+  --cm-ac: var(--settings-accent);
   --ac-fg: #0f172a;
   --sh:
     0 14px 40px -16px rgba(15, 23, 42, 0.18),
@@ -199,13 +215,13 @@ watch(
 
 .cmx {
   min-width: 224px;
-  border: 1px solid var(--bd-st);
+  border: 1px solid var(--cm-bd-st);
   border-radius: var(--r);
-  background: var(--bg-2);
+  background: var(--cm-bg-2);
   padding: 4px;
   box-shadow: var(--sh);
   user-select: none;
-  color: var(--fg-1);
+  color: var(--cm-fg-1);
   position: relative;
   pointer-events: auto;
 }
@@ -216,7 +232,7 @@ watch(
 
 .cmx-hd {
   padding: 8px 10px 4px;
-  color: var(--fg-3);
+  color: var(--cm-fg-3);
   font: 500 10.5px/1.3 var(--ff);
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -232,7 +248,7 @@ watch(
   border-radius: var(--rs);
   background: transparent;
   padding: 6px 10px;
-  color: var(--fg-1);
+  color: var(--cm-fg-1);
   text-align: left;
   cursor: default;
   transition:
@@ -243,13 +259,13 @@ watch(
 .cmx-i:hover,
 .cmx-i:focus-visible,
 .cmx-i.active {
-  background: var(--bg-h);
-  color: var(--fg);
+  background: var(--cm-bg-h);
+  color: var(--cm-fg);
   outline: none;
 }
 
 .cmx-i.disabled {
-  color: var(--fg-4);
+  color: var(--cm-fg-4);
   pointer-events: none;
 }
 
@@ -260,7 +276,7 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--fg-2);
+  color: var(--cm-fg-2);
 }
 
 .cmx-i:hover .ic,
@@ -293,9 +309,9 @@ watch(
   min-width: 17px;
   border: none;
   border-radius: 3.5px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--editor-context-menu-kbd-bg);
   padding: 2.5px 5px;
-  color: var(--fg-2);
+  color: var(--cm-fg-2);
   font: 500 10.5px/1 var(--fm);
   letter-spacing: 0;
   text-align: center;
@@ -303,18 +319,18 @@ watch(
 }
 
 .linear-context-menu-root.is-light .kh kbd {
-  background: rgba(15, 23, 42, 0.05);
+  background: var(--editor-context-menu-kbd-bg);
 }
 
 .cmx-i:hover .kh kbd,
 .cmx-i:focus-visible .kh kbd {
-  background: rgba(255, 255, 255, 0.09);
-  color: var(--fg-1);
+  background: var(--editor-context-menu-kbd-hover-bg);
+  color: var(--cm-fg-1);
 }
 
 .linear-context-menu-root.is-light .cmx-i:hover .kh kbd,
 .linear-context-menu-root.is-light .cmx-i:focus-visible .kh kbd {
-  background: rgba(15, 23, 42, 0.08);
+  background: var(--editor-context-menu-kbd-hover-bg);
 }
 
 .arr {
@@ -322,7 +338,7 @@ watch(
   width: 12px;
   height: 12px;
   display: inline-flex;
-  color: var(--fg-3);
+  color: var(--cm-fg-3);
 }
 
 .arr svg {
@@ -343,7 +359,7 @@ watch(
 .cmx-sep {
   height: 1px;
   margin: 4px -4px;
-  background: var(--bd);
+  background: var(--cm-bd);
 }
 
 .cmx-sub {

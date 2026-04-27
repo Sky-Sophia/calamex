@@ -244,8 +244,8 @@ const EMPTY_REPORT: IStructuredRunReport = {
   hasContent: false,
   source: 'structured',
   session: {
-    pathPrefix: 'builtin-workspace',
-    fileLabel: 'startup.sh',
+    pathPrefix: '??????',
+    fileLabel: '?????',
     meta: 'WSL · bash',
   },
   summary: {
@@ -286,7 +286,7 @@ const ANSI_ESCAPE_PATTERN =
   // eslint-disable-next-line no-control-regex
   /\u001b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][\s\S]*?(?:\u0007|\u001b\\))/g;
 const EMERGENCY_PROMPT_ONLY_PATTERN = /^[\w.-]+@[\w.-]+:.*[$#]\s*$/;
-const EMERGENCY_DISPATCH_RUNNER_PATTERN = /\/tmp\/sh-editor-dispatch-[\w.-]+\.sh/i;
+const EMERGENCY_TEMP_SCRIPT_PATTERN = /\/tmp\/[\w.-]+\.tmp\.sh/i;
 
 const resolveLatestRunMarker = (runLogs: IRunLogEntry[]): IRunLogEntry | undefined =>
   [...runLogs]
@@ -310,7 +310,7 @@ const buildEmergencyDetailLines = (
       return true;
     }
 
-    if (EMERGENCY_DISPATCH_RUNNER_PATTERN.test(line)) {
+    if (EMERGENCY_TEMP_SCRIPT_PATTERN.test(line)) {
       return false;
     }
 
@@ -448,8 +448,8 @@ const buildEmergencyReport = (reason?: string): IStructuredRunReport => {
     source: 'fallback',
     fallbackReason: reason ?? FALLBACK_EMPTY_WITH_SIGNALS_REASON,
     session: {
-      pathPrefix: props.workspaceRootPath ?? 'builtin-workspace',
-      fileLabel: props.documentName || 'startup.sh',
+      pathPrefix: props.workspaceRootPath ?? '??????',
+      fileLabel: props.documentName || '?????',
       meta: `${props.lastRunResult?.executorLabel ?? props.executor.toUpperCase()} · bash`,
     },
     summary: {
@@ -1451,7 +1451,7 @@ onBeforeUnmount(() => {
   overflow: auto;
   border: 1px solid color-mix(in srgb, var(--shell-divider) 72%, transparent);
   border-radius: 6px;
-  background: #0a0b0d;
+  background: var(--bg-code);
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   font-size: 11.5px;

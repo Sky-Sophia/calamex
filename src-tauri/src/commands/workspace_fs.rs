@@ -1,6 +1,8 @@
 use super::{
-    line_count, ImageAssetPayload, SaveScriptRequest, ScriptFilePayload, StartupWorkspacePayload,
-    WorkspaceDirectoryPayload, WorkspaceEntry,
+    line_count, ImageAssetPayload, SaveScriptRequest, ScriptFilePayload, WorkspaceDirectoryPayload,
+    WorkspaceEntry, WorkspacePathCreatePayload, WorkspacePathCreateRequest,
+    WorkspacePathDeletePayload, WorkspacePathDeleteRequest, WorkspacePathRenamePayload,
+    WorkspacePathRenameRequest,
 };
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use encoding_rs::{GB18030, UTF_16BE, UTF_16LE, UTF_8};
@@ -9,23 +11,6 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
 };
-use tauri::{AppHandle, Manager};
-
-const DEFAULT_WORKSPACE_DIRECTORY_NAME: &str = "builtin-workspace";
-const DEFAULT_WORKSPACE_SCRIPT_NAME: &str = "startup.sh";
-const DEFAULT_WORKSPACE_SCRIPT_CONTENT: &str = "#!/bin/bash\n\nset -euo pipefail\n\nmain() {\n  echo \"Welcome to SH Editor\"\n}\n\nmain \"$@\"\n";
-
-#[tauri::command]
-pub fn get_startup_workspace(app: AppHandle) -> Result<StartupWorkspacePayload, String> {
-    let (workspace_root, default_file_path) = ensure_startup_workspace(&app)?;
-
-    Ok(StartupWorkspacePayload {
-        root_path: workspace_root.to_string_lossy().to_string(),
-        root_name: workspace_name(&workspace_root),
-        default_file_path: default_file_path.map(|value| value.to_string_lossy().to_string()),
-        protected_root_paths: vec![workspace_root.to_string_lossy().to_string()],
-    })
-}
 
 #[tauri::command]
 pub fn load_script(path: String) -> Result<ScriptFilePayload, String> {
@@ -92,6 +77,94 @@ pub fn list_workspace_entries(
     })
 }
 
+#[tauri::command]
+pub fn create_workspace_path(
+    payload: WorkspacePathCreateRequest,
+) -> Result<WorkspacePathCreatePayload, String> {
+    let workspace_root = resolve_workspace_root(Some(payload.root_path))?;
+    let parent_path = resolve_workspace_child_path(&workspace_root, &payload.parent_path)?;
+    if !parent_path.is_dir() {
+        return Err("目标父目录不是有效目录。".into());
+    }
+
+    let name = validate_workspace_entry_name(&payload.name)?;
+    let target_path = parent_path.join(&name);
+    if target_path.exists() {
+        return Err("同名文件或文件夹已存在。".into());
+    }
+
+    match payload.kind.as_str() {
+        "file" => {
+            fs::File::create(&target_path).map_err(|error| format!("创建文件失败：{error}"))?;
+        }
+        "directory" => {
+            fs::create_dir(&target_path).map_err(|error| format!("创建文件夹失败：{error}"))?;
+        }
+        _ => return Err("不支持的资源类型。".into()),
+    }
+
+    Ok(WorkspacePathCreatePayload {
+        path: target_path.to_string_lossy().to_string(),
+        name,
+        kind: payload.kind,
+    })
+}
+
+#[tauri::command]
+pub fn rename_workspace_path(
+    payload: WorkspacePathRenameRequest,
+) -> Result<WorkspacePathRenamePayload, String> {
+    let workspace_root = resolve_workspace_root(Some(payload.root_path))?;
+    let source_path = resolve_workspace_child_path(&workspace_root, &payload.path)?;
+    if !source_path.exists() {
+        return Err("目标文件或文件夹不存在。".into());
+    }
+    if source_path == workspace_root {
+        return Err("不能重命名工作区根目录。".into());
+    }
+
+    let name = validate_workspace_entry_name(&payload.new_name)?;
+    let parent = source_path
+        .parent()
+        .ok_or_else(|| "无法解析目标父目录。".to_string())?;
+    let target_path = parent.join(&name);
+    if target_path.exists() {
+        return Err("同名文件或文件夹已存在。".into());
+    }
+
+    fs::rename(&source_path, &target_path).map_err(|error| format!("重命名失败：{error}"))?;
+
+    Ok(WorkspacePathRenamePayload {
+        old_path: source_path.to_string_lossy().to_string(),
+        new_path: target_path.to_string_lossy().to_string(),
+        name,
+    })
+}
+
+#[tauri::command]
+pub fn delete_workspace_path(
+    payload: WorkspacePathDeleteRequest,
+) -> Result<WorkspacePathDeletePayload, String> {
+    let workspace_root = resolve_workspace_root(Some(payload.root_path))?;
+    let target_path = resolve_workspace_child_path(&workspace_root, &payload.path)?;
+    if target_path == workspace_root {
+        return Err("不能删除工作区根目录。".into());
+    }
+    if !target_path.exists() {
+        return Err("目标文件或文件夹不存在。".into());
+    }
+
+    if target_path.is_dir() {
+        fs::remove_dir_all(&target_path).map_err(|error| format!("删除文件夹失败：{error}"))?;
+    } else {
+        fs::remove_file(&target_path).map_err(|error| format!("删除文件失败：{error}"))?;
+    }
+
+    Ok(WorkspacePathDeletePayload {
+        path: target_path.to_string_lossy().to_string(),
+    })
+}
+
 pub(crate) fn resolve_workspace_root(selected_root: Option<String>) -> Result<PathBuf, String> {
     if let Some(root) = selected_root {
         let root_path = PathBuf::from(root)
@@ -145,6 +218,44 @@ pub(crate) fn workspace_name(root_path: &Path) -> String {
         .and_then(|value| value.to_str())
         .unwrap_or("workspace")
         .to_string()
+}
+
+fn resolve_workspace_child_path(workspace_root: &Path, raw_path: &str) -> Result<PathBuf, String> {
+    let target_path = PathBuf::from(raw_path)
+        .canonicalize()
+        .map_err(|error| format!("解析资源路径失败：{error}"))?;
+
+    if !target_path.starts_with(workspace_root) {
+        return Err("仅允许操作当前资源根目录内的路径。".into());
+    }
+
+    Ok(target_path)
+}
+
+fn validate_workspace_entry_name(raw_name: &str) -> Result<String, String> {
+    let name = raw_name.trim();
+    if name.is_empty() {
+        return Err("名称不能为空。".into());
+    }
+
+    if name == "." || name == ".." {
+        return Err("名称不能为 . 或 ..。".into());
+    }
+
+    let candidate = Path::new(name);
+    if candidate.file_name().and_then(|value| value.to_str()) != Some(name) {
+        return Err("名称不能包含路径分隔符。".into());
+    }
+
+    const INVALID_CHARS: [char; 9] = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
+    if name
+        .chars()
+        .any(|character| INVALID_CHARS.contains(&character) || character.is_control())
+    {
+        return Err("名称包含非法字符。".into());
+    }
+
+    Ok(name.to_string())
 }
 
 pub(crate) fn decode_script_bytes(bytes: &[u8]) -> Result<(String, String), String> {
@@ -247,58 +358,6 @@ fn resolve_image_mime_type(path: &Path) -> Result<&'static str, String> {
         "ico" => Ok("image/x-icon"),
         _ => Err(format!("暂不支持预览该图片格式：{extension}")),
     }
-}
-
-fn resolve_development_startup_workspace() -> Option<(PathBuf, Option<PathBuf>)> {
-    if !cfg!(debug_assertions) {
-        return None;
-    }
-
-    let workspace_root = resolve_workspace_root(None).ok()?;
-    if git2::Repository::discover(&workspace_root).is_err() {
-        return None;
-    }
-
-    Some((workspace_root, None))
-}
-
-fn ensure_startup_workspace(app: &AppHandle) -> Result<(PathBuf, Option<PathBuf>), String> {
-    if let Some(workspace) = resolve_development_startup_workspace() {
-        return Ok(workspace);
-    }
-
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("读取应用数据目录失败：{error}"))?;
-
-    fs::create_dir_all(&app_data_dir).map_err(|error| format!("创建应用数据目录失败：{error}"))?;
-
-    let workspace_root = app_data_dir.join(DEFAULT_WORKSPACE_DIRECTORY_NAME);
-    fs::create_dir_all(&workspace_root).map_err(|error| format!("创建默认工作区失败：{error}"))?;
-
-    let default_script_path = workspace_root.join(DEFAULT_WORKSPACE_SCRIPT_NAME);
-    let should_seed_default_script = match fs::metadata(&default_script_path) {
-        Ok(metadata) => metadata.len() == 0,
-        Err(_) => true,
-    };
-
-    if should_seed_default_script {
-        fs::write(
-            &default_script_path,
-            DEFAULT_WORKSPACE_SCRIPT_CONTENT.as_bytes(),
-        )
-        .map_err(|error| format!("写入默认脚本失败：{error}"))?;
-    }
-
-    let canonical_workspace_root = workspace_root
-        .canonicalize()
-        .map_err(|error| format!("读取默认工作区失败：{error}"))?;
-    let canonical_default_script = default_script_path
-        .canonicalize()
-        .map_err(|error| format!("读取默认脚本失败：{error}"))?;
-
-    Ok((canonical_workspace_root, Some(canonical_default_script)))
 }
 
 fn read_workspace_entries(directory: &Path) -> Result<Vec<WorkspaceEntry>, String> {

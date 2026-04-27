@@ -1,8 +1,14 @@
 use super::{decode_script_bytes, resolve_workspace_root, workspace_name};
 use chrono::{TimeZone, Utc};
-use git2::{BranchType, ErrorCode, ObjectType, Repository, Status, StatusEntry, StatusOptions};
+use git2::{
+    build::CheckoutBuilder, BranchType, ErrorCode, ObjectType, Repository, Status, StatusEntry,
+    StatusOptions,
+};
 use serde::{Deserialize, Serialize};
-use std::path::{Component, Path, PathBuf};
+use std::{
+    fs,
+    path::{Component, Path, PathBuf},
+};
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -88,7 +94,7 @@ pub struct GitCommitRequest {
 pub fn get_git_repository_status(
     workspace_root_path: Option<String>,
 ) -> Result<GitRepositoryStatusPayload, String> {
-    let workspace_root = resolve_workspace_root(workspace_root_path)?;
+    let workspace_root = resolve_git_workspace_root(workspace_root_path)?;
 
     match Repository::discover(&workspace_root) {
         Ok(repository) => build_git_repository_status_payload(&repository),
@@ -103,9 +109,9 @@ pub fn get_git_repository_status(
 pub fn init_git_repository(
     workspace_root_path: Option<String>,
 ) -> Result<GitRepositoryStatusPayload, String> {
-    let workspace_root = resolve_workspace_root(workspace_root_path)?;
+    let workspace_root = resolve_git_workspace_root(workspace_root_path)?;
 
-    match Repository::discover(&workspace_root) {
+    match Repository::open(&workspace_root) {
         Ok(repository) => build_git_repository_status_payload(&repository),
         Err(error) if error.code() == ErrorCode::NotFound => {
             Repository::init(&workspace_root)
@@ -122,7 +128,7 @@ pub fn init_git_repository(
 
 #[tauri::command]
 pub fn get_git_file_baseline(path: String) -> Result<GitFileBaselinePayload, String> {
-    let file_path = PathBuf::from(&path);
+    let file_path = normalize_path_for_git(Path::new(&path));
     let discovery_root = file_path.parent().unwrap_or(file_path.as_path());
 
     match Repository::discover(discovery_root) {
@@ -221,6 +227,56 @@ pub fn unstage_git_paths(
 }
 
 #[tauri::command]
+pub fn discard_git_paths(
+    payload: GitPathOperationRequest,
+) -> Result<GitRepositoryStatusPayload, String> {
+    let repository = open_repository_from_root(&payload.repository_root_path)?;
+    let repository_root = resolve_repository_root(&repository)?;
+    let pathspecs = resolve_pathspecs(&repository_root, &payload.paths)?;
+
+    if pathspecs.is_empty() {
+        return build_git_repository_status_payload(&repository);
+    }
+
+    let mut checkout_builder = CheckoutBuilder::new();
+    checkout_builder.force();
+    let mut has_tracked_worktree_paths = false;
+
+    for pathspec in &pathspecs {
+        let relative_path = Path::new(pathspec);
+        let file_status = repository
+            .status_file(relative_path)
+            .map_err(|error| format!("读取 Git 文件状态失败：{error}"))?;
+
+        if file_status.contains(Status::CONFLICTED) {
+            return Err("冲突文件需要先手动解决，不能直接放弃更改。".into());
+        }
+
+        let is_only_untracked =
+            file_status.contains(Status::WT_NEW) && !file_status.contains(Status::INDEX_NEW);
+        if is_only_untracked {
+            remove_untracked_worktree_path(&repository_root, relative_path)?;
+            continue;
+        }
+
+        if file_status.intersects(
+            Status::WT_MODIFIED | Status::WT_DELETED | Status::WT_RENAMED | Status::WT_TYPECHANGE,
+        ) {
+            checkout_builder.path(pathspec);
+            has_tracked_worktree_paths = true;
+        }
+    }
+
+    if has_tracked_worktree_paths {
+        repository
+            .checkout_index(None, Some(&mut checkout_builder))
+            .map_err(|error| format!("放弃 Git 工作区更改失败：{error}"))?;
+    }
+
+    build_git_repository_status_payload(&repository)
+}
+
+#[tauri::command]
 pub fn commit_git_index(payload: GitCommitRequest) -> Result<GitCommitResultPayload, String> {
     let repository = open_repository_from_root(&payload.repository_root_path)?;
     let message = payload.message.trim();
@@ -280,9 +336,47 @@ pub fn commit_git_index(payload: GitCommitRequest) -> Result<GitCommitResultPayl
     })
 }
 
+fn remove_untracked_worktree_path(
+    repository_root: &Path,
+    relative_path: &Path,
+) -> Result<(), String> {
+    let target_path = repository_root.join(relative_path);
+    if !target_path.exists() {
+        return Ok(());
+    }
+
+    let canonical_root = normalize_path_for_git(
+        &repository_root
+            .canonicalize()
+            .map_err(|error| format!("读取 Git 工作区根目录失败：{error}"))?,
+    );
+    let canonical_target = normalize_path_for_git(
+        &target_path
+            .canonicalize()
+            .map_err(|error| format!("读取未跟踪文件路径失败：{error}"))?,
+    );
+
+    if !canonical_target.starts_with(&canonical_root) {
+        return Err("拒绝删除 Git 工作区之外的未跟踪路径。".into());
+    }
+
+    let metadata = fs::symlink_metadata(&target_path)
+        .map_err(|error| format!("读取未跟踪路径元数据失败：{error}"))?;
+    if metadata.is_dir() {
+        fs::remove_dir_all(&target_path).map_err(|error| format!("删除未跟踪目录失败：{error}"))?;
+        return Ok(());
+    }
+
+    fs::remove_file(&target_path).map_err(|error| format!("删除未跟踪文件失败：{error}"))
+}
+
 fn open_repository_from_root(repository_root_path: &str) -> Result<Repository, String> {
-    Repository::discover(repository_root_path)
-        .map_err(|error| format!("读取 Git 仓库失败：{error}"))
+    let repository_root = normalize_path_for_git(Path::new(repository_root_path));
+    Repository::discover(repository_root).map_err(|error| format!("读取 Git 仓库失败：{error}"))
+}
+
+fn resolve_git_workspace_root(workspace_root_path: Option<String>) -> Result<PathBuf, String> {
+    resolve_workspace_root(workspace_root_path).map(|path| normalize_path_for_git(&path))
 }
 
 fn build_unavailable_git_status(message: &str) -> GitRepositoryStatusPayload {
@@ -312,10 +406,12 @@ fn build_git_repository_status_payload(
     repository: &Repository,
 ) -> Result<GitRepositoryStatusPayload, String> {
     let repository_root = resolve_repository_root(repository)?;
-    let git_dir_path = repository
-        .path()
-        .canonicalize()
-        .unwrap_or_else(|_| repository.path().to_path_buf());
+    let git_dir_path = normalize_path_for_git(
+        &repository
+            .path()
+            .canonicalize()
+            .unwrap_or_else(|_| repository.path().to_path_buf()),
+    );
     let head_commit = resolve_head_commit(repository)?;
     let head_branch_name = resolve_head_branch_name(repository)?;
     let is_detached = resolve_head_detached(repository)?;
@@ -523,6 +619,7 @@ fn resolve_repository_root(repository: &Repository) -> Result<PathBuf, String> {
             path.canonicalize()
                 .map_err(|error| format!("读取 Git 工作区根目录失败：{error}"))
         })
+        .map(|path| normalize_path_for_git(&path))
 }
 
 fn resolve_head_commit(repository: &Repository) -> Result<Option<git2::Commit<'_>>, String> {
@@ -719,6 +816,7 @@ fn resolve_relative_path(repository_root: &Path, path: &Path) -> Result<PathBuf,
     } else {
         repository_root.join(path)
     };
+    let path_candidate = normalize_path_for_git(&path_candidate);
 
     path_candidate
         .strip_prefix(repository_root)
@@ -754,4 +852,236 @@ fn resolve_pathspecs(repository_root: &Path, paths: &[String]) -> Result<Vec<Str
 
 fn path_to_forward_slashes(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+#[cfg(windows)]
+fn normalize_path_for_git(path: &Path) -> PathBuf {
+    let value = path.to_string_lossy();
+
+    if let Some(stripped) = value.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{stripped}"));
+    }
+
+    if let Some(stripped) = value.strip_prefix(r"\\?\") {
+        return PathBuf::from(stripped.to_string());
+    }
+
+    if let Some(stripped) = value.strip_prefix("//?/UNC/") {
+        return PathBuf::from(format!("//{stripped}").replace('/', r"\"));
+    }
+
+    if let Some(stripped) = value.strip_prefix("//?/") {
+        return PathBuf::from(stripped.replace('/', r"\"));
+    }
+
+    path.to_path_buf()
+}
+
+#[cfg(not(windows))]
+fn normalize_path_for_git(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use git2::Signature;
+    use std::{
+        env,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    struct TempGitDir {
+        path: PathBuf,
+    }
+
+    impl TempGitDir {
+        fn new(label: &str) -> Result<Self, String> {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|error| error.to_string())?
+                .as_nanos();
+            let path = env::temp_dir().join(format!(
+                "calamex-git-{label}-{}-{nanos}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).map_err(|error| error.to_string())?;
+            Ok(Self { path })
+        }
+    }
+
+    impl Drop for TempGitDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn write_worktree_file(root: &Path, relative_path: &str, content: &str) -> Result<(), String> {
+        let file_path = root.join(relative_path);
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+
+        fs::write(file_path, content).map_err(|error| error.to_string())
+    }
+
+    fn create_initial_commit(
+        repository: &Repository,
+        root: &Path,
+        relative_path: &str,
+        content: &str,
+    ) -> Result<(), String> {
+        write_worktree_file(root, relative_path, content)?;
+
+        let mut index = repository.index().map_err(|error| error.to_string())?;
+        index
+            .add_path(Path::new(relative_path))
+            .map_err(|error| error.to_string())?;
+        index.write().map_err(|error| error.to_string())?;
+        let tree_id = index.write_tree().map_err(|error| error.to_string())?;
+        let tree = repository
+            .find_tree(tree_id)
+            .map_err(|error| error.to_string())?;
+        let signature = Signature::now("Calamex Test", "test@example.com")
+            .map_err(|error| error.to_string())?;
+
+        repository
+            .commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "feat: initial",
+                &tree,
+                &[],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalize_path_for_git_strips_windows_verbatim_prefix() {
+        assert_eq!(
+            normalize_path_for_git(Path::new(r"\\?\D:\workspace\repo")),
+            PathBuf::from(r"D:\workspace\repo")
+        );
+        assert_eq!(
+            normalize_path_for_git(Path::new("//?/D:/workspace/repo")),
+            PathBuf::from(r"D:\workspace\repo")
+        );
+    }
+
+    #[test]
+    fn init_git_repository_creates_repository_at_workspace_root() -> Result<(), String> {
+        let temp = TempGitDir::new("init-root")?;
+
+        let status = init_git_repository(Some(temp.path.to_string_lossy().to_string()))?;
+        let expected_root = normalize_path_for_git(
+            &temp
+                .path
+                .canonicalize()
+                .map_err(|error| error.to_string())?,
+        );
+        let expected_root_text = expected_root.to_string_lossy().to_string();
+
+        assert!(temp.path.join(".git").exists());
+        assert!(status.available);
+        assert_eq!(
+            status.repository_root_path.as_deref(),
+            Some(expected_root_text.as_str())
+        );
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn init_git_repository_accepts_windows_verbatim_workspace_root() -> Result<(), String> {
+        let temp = TempGitDir::new("init-verbatim")?;
+        let verbatim_workspace_root = format!(r"\\?\{}", temp.path.display());
+
+        let status = init_git_repository(Some(verbatim_workspace_root))?;
+        let expected_root = normalize_path_for_git(
+            &temp
+                .path
+                .canonicalize()
+                .map_err(|error| error.to_string())?,
+        );
+        let expected_root_text = expected_root.to_string_lossy().to_string();
+
+        assert!(temp.path.join(".git").exists());
+        assert!(status.available);
+        assert_eq!(
+            status.repository_root_path.as_deref(),
+            Some(expected_root_text.as_str())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn init_git_repository_does_not_reuse_parent_repository() -> Result<(), String> {
+        let temp = TempGitDir::new("init-nested")?;
+        let parent_repository = Repository::init(&temp.path).map_err(|error| error.to_string())?;
+        let parent_root = resolve_repository_root(&parent_repository)?;
+        let child_root = temp.path.join("child-workspace");
+        fs::create_dir_all(&child_root).map_err(|error| error.to_string())?;
+
+        let status = init_git_repository(Some(child_root.to_string_lossy().to_string()))?;
+        let expected_child_root = normalize_path_for_git(
+            &child_root
+                .canonicalize()
+                .map_err(|error| error.to_string())?,
+        );
+        let expected_child_root_text = expected_child_root.to_string_lossy().to_string();
+
+        assert!(child_root.join(".git").exists());
+        assert_ne!(parent_root, expected_child_root);
+        assert_eq!(
+            status.repository_root_path.as_deref(),
+            Some(expected_child_root_text.as_str())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn discard_git_paths_removes_untracked_file() -> Result<(), String> {
+        let temp = TempGitDir::new("discard-untracked")?;
+        let repository = Repository::init(&temp.path).map_err(|error| error.to_string())?;
+        let repository_root = resolve_repository_root(&repository)?;
+        write_worktree_file(&temp.path, "scratch/new.sh", "echo scratch\n")?;
+
+        let status = discard_git_paths(GitPathOperationRequest {
+            repository_root_path: repository_root.to_string_lossy().to_string(),
+            paths: vec![repository_root
+                .join("scratch/new.sh")
+                .to_string_lossy()
+                .to_string()],
+        })?;
+
+        assert!(!temp.path.join("scratch/new.sh").exists());
+        assert_eq!(status.untracked_count, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn discard_git_paths_restores_tracked_worktree_file() -> Result<(), String> {
+        let temp = TempGitDir::new("discard-tracked")?;
+        let repository = Repository::init(&temp.path).map_err(|error| error.to_string())?;
+        let repository_root = resolve_repository_root(&repository)?;
+        create_initial_commit(&repository, &temp.path, "src/app.sh", "echo original\n")?;
+        write_worktree_file(&temp.path, "src/app.sh", "echo changed\n")?;
+
+        let status = discard_git_paths(GitPathOperationRequest {
+            repository_root_path: repository_root.to_string_lossy().to_string(),
+            paths: vec![repository_root
+                .join("src/app.sh")
+                .to_string_lossy()
+                .to_string()],
+        })?;
+
+        let content =
+            fs::read_to_string(temp.path.join("src/app.sh")).map_err(|error| error.to_string())?;
+        assert_eq!(content.replace("\r\n", "\n"), "echo original\n");
+        assert!(status.is_clean);
+        Ok(())
+    }
 }

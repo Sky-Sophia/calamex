@@ -32,6 +32,38 @@ const workspaceEntrySchema = z.object({
   hasChildren: z.boolean(),
 });
 
+const workspacePathKindSchema = z.enum(['directory', 'file']);
+
+const workspaceSearchScopeSchema = z.enum(['all', 'file-name', 'symbol', 'content']);
+
+const workspaceSearchResultSchema = z.object({
+  path: z.string(),
+  relativePath: z.string(),
+  name: z.string(),
+  kind: z.enum(['file-name', 'content', 'symbol']),
+  lineNumber: z.number().int().positive().nullable(),
+  lineText: z.string().nullable(),
+  score: z.number(),
+});
+
+const sshConfigHostPayloadSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  username: z.string(),
+  host: z.string(),
+  port: z.number().int().min(1).max(65535),
+  identityPath: z.string().nullable(),
+  lastUsedLabel: z.string(),
+});
+
+const sshConnectionInputSchema = z.object({
+  host: z.string().min(1),
+  port: z.number().int().min(1).max(65535),
+  username: z.string().min(1),
+  authMode: z.enum(['key', 'password']),
+  identityPath: z.string().nullable(),
+});
+
 const executionOptionSchema = z.object({
   type: executorKindSchema,
   label: z.string(),
@@ -175,15 +207,6 @@ const executionEnvironmentPayloadSnakeSchema = z.object({
 }));
 
 export const tauriContracts = {
-  getStartupWorkspace: {
-    inSchema: z.void(),
-    outSchema: z.object({
-      rootPath: z.string(),
-      rootName: z.string(),
-      defaultFilePath: z.string().nullable(),
-      protectedRootPaths: z.array(z.string()),
-    }),
-  },
   analyzeScript: {
     inSchema: z.object({
       path: z.string().nullable(),
@@ -240,15 +263,67 @@ export const tauriContracts = {
     inSchema: z.void(),
     outSchema: z.union([executionEnvironmentPayloadSchema, executionEnvironmentPayloadSnakeSchema]),
   },
-  listWorkspaceEntries: {
-    inSchema: z.object({
-      path: z.string().optional(),
-      rootPath: z.string().optional(),
-    }),
+    listWorkspaceEntries: {
+      inSchema: z.object({
+        path: z.string().optional(),
+        rootPath: z.string().optional(),
+      }),
     outSchema: z.object({
       rootPath: z.string(),
       rootName: z.string(),
-      entries: z.array(workspaceEntrySchema),
+        entries: z.array(workspaceEntrySchema),
+      }),
+    },
+    createWorkspacePath: {
+      inSchema: z.object({
+        parentPath: z.string().min(1),
+        rootPath: z.string().min(1),
+        name: z.string().min(1),
+        kind: workspacePathKindSchema,
+      }),
+      outSchema: z.object({
+        path: z.string(),
+        name: z.string(),
+        kind: workspacePathKindSchema,
+      }),
+    },
+    renameWorkspacePath: {
+      inSchema: z.object({
+        path: z.string().min(1),
+        rootPath: z.string().min(1),
+        newName: z.string().min(1),
+      }),
+      outSchema: z.object({
+        oldPath: z.string(),
+        newPath: z.string(),
+        name: z.string(),
+      }),
+    },
+    deleteWorkspacePath: {
+      inSchema: z.object({
+        path: z.string().min(1),
+        rootPath: z.string().min(1),
+      }),
+      outSchema: z.object({
+        path: z.string(),
+      }),
+    },
+    searchWorkspace: {
+    inSchema: z.object({
+      workspaceRootPath: z.string().min(1),
+      query: z.string(),
+      scope: workspaceSearchScopeSchema,
+      matchCase: z.boolean(),
+      wholeWord: z.boolean(),
+      useRegex: z.boolean(),
+      includePatterns: z.array(z.string()),
+      excludePatterns: z.array(z.string()),
+      limit: z.number().int().positive().max(500).optional(),
+    }),
+    outSchema: z.object({
+      rootPath: z.string(),
+      scannedFileCount: z.number().int().nonnegative(),
+      results: z.array(workspaceSearchResultSchema),
     }),
   },
   getGitRepositoryStatus: {
@@ -291,6 +366,13 @@ export const tauriContracts = {
     }),
     outSchema: gitRepositoryStatusPayloadSchema,
   },
+  discardGitPaths: {
+    inSchema: z.object({
+      repositoryRootPath: z.string(),
+      paths: z.array(z.string()),
+    }),
+    outSchema: gitRepositoryStatusPayloadSchema,
+  },
   commitGitIndex: {
     inSchema: z.object({
       repositoryRootPath: z.string(),
@@ -299,6 +381,72 @@ export const tauriContracts = {
     outSchema: z.object({
       status: gitRepositoryStatusPayloadSchema,
       commit: gitCommitSummaryPayloadSchema,
+    }),
+  },
+  testSshConnection: {
+    inSchema: sshConnectionInputSchema,
+    outSchema: z.object({
+      ok: z.boolean(),
+      code: z.string(),
+      message: z.string(),
+    }),
+  },
+  listSshConfigHosts: {
+    inSchema: z.void(),
+    outSchema: z.array(sshConfigHostPayloadSchema),
+  },
+  listSshDirectory: {
+    inSchema: sshConnectionInputSchema.extend({
+      path: z.string(),
+    }),
+    outSchema: z.object({
+      path: z.string(),
+      entries: z.array(z.object({
+        name: z.string(),
+        path: z.string(),
+        kind: z.enum(['directory', 'file']),
+        size: z.number().int().nonnegative(),
+      })),
+    }),
+  },
+  downloadSshFile: {
+    inSchema: sshConnectionInputSchema.extend({
+      remotePath: z.string().min(1),
+      localPath: z.string().min(1),
+    }),
+    outSchema: z.object({
+      remotePath: z.string(),
+      localPath: z.string(),
+      byteSize: z.number().int().nonnegative(),
+    }),
+  },
+  uploadSshFile: {
+    inSchema: sshConnectionInputSchema.extend({
+      localPath: z.string().min(1),
+      remoteDirectory: z.string(),
+    }),
+    outSchema: z.object({
+      localPath: z.string(),
+      remotePath: z.string(),
+      byteSize: z.number().int().nonnegative(),
+    }),
+  },
+  deleteSshPath: {
+    inSchema: sshConnectionInputSchema.extend({
+      remotePath: z.string().min(1),
+    }),
+    outSchema: z.object({
+      remotePath: z.string(),
+    }),
+  },
+  renameSshPath: {
+    inSchema: sshConnectionInputSchema.extend({
+      remotePath: z.string().min(1),
+      newName: z.string().min(1),
+    }),
+    outSchema: z.object({
+      oldPath: z.string(),
+      newPath: z.string(),
     }),
   },
   ensureTerminalSession: {
@@ -314,6 +462,7 @@ export const tauriContracts = {
     inSchema: z.object({
       sessionId: z.string(),
       path: z.string().nullable(),
+      workspaceRootPath: z.string().nullable().optional(),
       content: z.string(),
       isDirty: z.boolean(),
       runId: z.string(),
@@ -338,6 +487,13 @@ export const tauriContracts = {
   closeTerminalSession: {
     inSchema: z.object({
       sessionId: z.string(),
+    }),
+    outSchema: zTauriVoid,
+  },
+  cancelTerminalRun: {
+    inSchema: z.object({
+      runId: z.string(),
+      mode: z.enum(['graceful', 'kill']).optional(),
     }),
     outSchema: zTauriVoid,
   },

@@ -6,10 +6,22 @@ import type {
 
 export type TEditorContextMenuIcon = Extract<
   TLinearContextMenuIcon,
-  'format' | 'search' | 'command' | 'comment' | 'cut' | 'copy' | 'paste' | 'select-all' | 'goto'
+  | 'format'
+  | 'search'
+  | 'command'
+  | 'comment'
+  | 'cut'
+  | 'copy'
+  | 'paste'
+  | 'select-all'
+  | 'goto'
+  | 'undo'
+  | 'redo'
 >;
 
 export type TEditorContextMenuAction =
+  | 'undo'
+  | 'redo'
   | 'format-with-shfmt'
   | 'toggle-comment-line'
   | 'find'

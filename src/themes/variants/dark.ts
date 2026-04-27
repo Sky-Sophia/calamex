@@ -10,23 +10,24 @@ import type { IRoles } from '../types';
 export const dark: IRoles = {
 
     surface: {
-        app: P.n950,   // #0d0f12  应用根背景
-        chrome: P.n870,   // #181a1f  标题栏/状态栏基调
-        activity: P.n910,   // #111318  活动轨背景
-        sidebar: P.n890,   // #15181d  侧边栏
-        editor: P.n940,   // #0f0f12  编辑器
-        editorWidget: P.n880,   // #15191e  悬浮 Widget / 补全框
-        panel: P.n880,   // #15191e  底部面板
-        panelDepth: P.n900,   // #111419  面板次级
-        tabbar: P.n960,   // #0c0c0f  Tab 栏
-        tabActive: P.n940,   // #0f0f12  活动 Tab
-        tabHover: P.n960,   // #0c0c0f  悬浮 Tab
-        overlay: P.n880,   // #15191e  菜单/下拉
-        overlayDepth: P.n900,   // #111419  菜单内分组头
-        hover: P.wa06,   // rgba(255,255,255,.06)
+        app: P.n980,   // #08090a  Woodsmoke bg-0 / 画布
+        chrome: P.n850,   // #1c1c1f  Woodsmoke bg-1 / Chrome
+        activity: P.n850,   // #1c1c1f  左侧图标栏 / 活动轨
+        sidebar: P.n850,   // #1c1c1f  侧边栏/主面板
+        editor: P.n860,   // #1a1b1e  代码编辑区
+        editorGutter: P.n860,   // #1a1b1e  编辑器装订线
+        editorWidget: P.n840,   // #222326  悬浮 Widget / 补全框
+        panel: P.n850,   // #1c1c1f  底部面板
+        panelDepth: P.n840,   // #222326  面板次级
+        tabbar: P.n850,   // #1c1c1f  Tab 栏
+        tabActive: P.n860,   // #1a1b1e  活动 Tab 对齐编辑区
+        tabHover: P.wa05,   // 5% white  悬浮 Tab
+        overlay: P.n755,   // #35363a  高对比浮层
+        overlayDepth: P.n795,   // #2b2c30  菜单内分组头/控件面
+        hover: P.wa05,   // 5% white
         soft: P.wa04,   // rgba(255,255,255,.04)
-        softStrong: P.wa07,   // rgba(255,255,255,.07)
-        selection: P.n780,   // #20242c
+        softStrong: P.wa12,   // 12% white
+        selection: P.wa075,   // 7.5% white
     },
 
     text: {
@@ -87,10 +88,10 @@ export const dark: IRoles = {
     },
 
     terminal: {
-        background: P.n880,                          // #15191e
+        background: P.n860,                          // #1a1b1e
         foreground: P.n410,                          // #d7dce5
         cursor: P.a900,                          // #335cff
-        cursorAccent: P.n880,
+        cursorAccent: P.n860,
         selectionBackground: P.aa26,                          // rgba(94,106,210,.26)
         scrollbarBackground: P.wa10,
         scrollbarHoverBackground: P.wa18,

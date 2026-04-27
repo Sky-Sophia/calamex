@@ -30,6 +30,8 @@ export interface IRoles {
         sidebar: string;
         /** 代码编辑器背景 */
         editor: string;
+        /** 代码编辑器装订线 / 行号区背景 */
+        editorGutter: string;
         /** 编辑器内嵌 Widget（悬浮提示、补全框等） */
         editorWidget: string;
         /** 底部面板（终端区）背景 */

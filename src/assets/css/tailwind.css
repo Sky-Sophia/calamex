@@ -33,7 +33,7 @@
   html,
   body,
   #app {
-    background-color: #08090a;
+    background-color: var(--bg-0, #08090a);
   }
 
   /* stylelint-enable declaration-no-important */

@@ -4,7 +4,7 @@ import type {
 } from '@/components/common/linear-context-menu.types';
 import { useIntegratedTerminalControls } from '@/composables/useIntegratedTerminal';
 import { openExternalUrl } from '@/utils/browser';
-import { tryReadClipboardText, writeClipboardText } from '@/utils/clipboard';
+import { tryReadClipboardText, tryWriteClipboardText, writeClipboardText } from '@/utils/clipboard';
 import { onBeforeUnmount, reactive, ref } from 'vue';
 
 const MENU_WIDTH = 224;
@@ -44,6 +44,8 @@ interface IResolvedContextTarget {
   isReadOnly: boolean;
   linkHref: string | null;
   selectedText: string;
+  inputSelection: { start: number; end: number } | null;
+  documentSelectionRange: Range | null;
   isTerminalSurface: boolean;
 }
 
@@ -125,26 +127,43 @@ const resolveLinkHref = (element: HTMLElement | null): string | null => {
   }
 };
 
-const resolveInputSelection = (element: HTMLInputElement | HTMLTextAreaElement): string => {
+const resolveInputSelection = (
+  element: HTMLInputElement | HTMLTextAreaElement,
+): { text: string; start: number; end: number } => {
   const start = element.selectionStart ?? 0;
   const end = element.selectionEnd ?? start;
-  return start === end ? '' : element.value.slice(start, end);
+  return {
+    text: start === end ? '' : element.value.slice(start, end),
+    start,
+    end,
+  };
 };
 
-const resolveDocumentSelection = (element: HTMLElement | null): string => {
+const resolveDocumentSelection = (
+  element: HTMLElement | null,
+): { text: string; range: Range | null } => {
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-    return '';
+    return { text: '', range: null };
   }
 
   if (!element) {
-    return selection.toString().trim();
+    return {
+      text: selection.toString(),
+      range: selection.getRangeAt(0).cloneRange(),
+    };
   }
 
   try {
-    return selection.getRangeAt(0).intersectsNode(element) ? selection.toString().trim() : '';
+    const range = selection.getRangeAt(0);
+    return range.intersectsNode(element)
+      ? { text: selection.toString(), range: range.cloneRange() }
+      : { text: '', range: null };
   } catch {
-    return selection.toString().trim();
+    return {
+      text: selection.toString(),
+      range: selection.getRangeAt(0).cloneRange(),
+    };
   }
 };
 
@@ -164,10 +183,12 @@ const resolveContextTarget = (target: EventTarget | null): IResolvedContextTarge
         ? editableElement.getAttribute('contenteditable') === 'false'
         : false;
 
-  const selectedText =
+  const inputSelection =
     editableElement instanceof HTMLInputElement || editableElement instanceof HTMLTextAreaElement
       ? resolveInputSelection(editableElement)
-      : resolveDocumentSelection(element);
+      : null;
+  const documentSelection = inputSelection ? { text: '', range: null } : resolveDocumentSelection(element);
+  const selectedText = inputSelection?.text ?? documentSelection.text;
 
   return {
     element,
@@ -176,6 +197,8 @@ const resolveContextTarget = (target: EventTarget | null): IResolvedContextTarge
     isReadOnly,
     linkHref: resolveLinkHref(element),
     selectedText,
+    inputSelection: inputSelection ? { start: inputSelection.start, end: inputSelection.end } : null,
+    documentSelectionRange: documentSelection.range,
     isTerminalSurface: element?.closest('.embedded-terminal-host, .embedded-terminal-shell') !== null,
   };
 };
@@ -200,6 +223,33 @@ const focusEditableElement = (element: IResolvedContextTarget['editableElement']
   if (element instanceof HTMLElement) {
     element.focus({ preventScroll: true });
   }
+};
+
+const restoreInputSelection = (
+  element: HTMLInputElement | HTMLTextAreaElement,
+  selection: IResolvedContextTarget['inputSelection'],
+): void => {
+  focusEditableElement(element);
+  if (!selection) {
+    return;
+  }
+
+  element.setSelectionRange(selection.start, selection.end);
+};
+
+const restoreDocumentSelection = (range: Range | null): boolean => {
+  if (!range) {
+    return false;
+  }
+
+  const selection = window.getSelection();
+  if (!selection) {
+    return false;
+  }
+
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return true;
 };
 
 const execDocumentCommand = (command: string, value?: string): boolean => {
@@ -228,16 +278,42 @@ const dispatchEditableInput = (
 
 const cutTextFromInput = async (
   element: HTMLInputElement | HTMLTextAreaElement,
+  selection: IResolvedContextTarget['inputSelection'],
 ): Promise<boolean> => {
-  const selectedText = resolveInputSelection(element);
+  if (!selection || selection.start === selection.end) {
+    return false;
+  }
+
+  const selectedText = element.value.slice(selection.start, selection.end);
   if (!selectedText) {
     return false;
   }
 
-  await writeClipboardText(selectedText);
-  const start = element.selectionStart ?? 0;
-  const end = element.selectionEnd ?? start;
-  element.setRangeText('', start, end, 'start');
+  if (!(await tryWriteClipboardText(selectedText))) {
+    return false;
+  }
+  element.setRangeText('', selection.start, selection.end, 'start');
+  dispatchEditableInput(element);
+  return true;
+};
+
+const cutTextFromContentEditable = async (
+  element: HTMLElement,
+  target: IResolvedContextTarget,
+): Promise<boolean> => {
+  if (!target.selectedText || !restoreDocumentSelection(target.documentSelectionRange)) {
+    return false;
+  }
+
+  if (!(await tryWriteClipboardText(target.selectedText))) {
+    return false;
+  }
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return false;
+  }
+
+  selection.deleteFromDocument();
   dispatchEditableInput(element);
   return true;
 };
@@ -297,6 +373,23 @@ const selectDocumentContents = (element: HTMLElement | null): boolean => {
   return true;
 };
 
+const restoreEditableSelection = (target: IResolvedContextTarget): void => {
+  if (
+    target.editableElement instanceof HTMLInputElement ||
+    target.editableElement instanceof HTMLTextAreaElement
+  ) {
+    restoreInputSelection(target.editableElement, target.inputSelection);
+    return;
+  }
+
+  if (target.documentSelectionRange) {
+    restoreDocumentSelection(target.documentSelectionRange);
+    return;
+  }
+
+  focusEditableElement(target.editableElement);
+};
+
 export const useBrowserContextMenu = () => {
   const terminalControls = useIntegratedTerminalControls();
   const state = reactive<IBrowserContextMenuState>({
@@ -307,8 +400,6 @@ export const useBrowserContextMenu = () => {
   const groups = ref<TBrowserContextMenuGroup[]>([]);
   const contextTarget = ref<IResolvedContextTarget | null>(null);
 
-  const resolveTerminalSession = () => terminalControls.session.value;
-
   const closeMenu = (): void => {
     state.open = false;
     groups.value = [];
@@ -316,9 +407,9 @@ export const useBrowserContextMenu = () => {
   };
 
   const buildMenuGroups = (target: IResolvedContextTarget): TBrowserContextMenuGroup[] => {
-    const terminalSession = resolveTerminalSession();
-    const hasTerminalSelection =
-      target.isTerminalSurface && terminalSession ? terminalSession.getSelectionText().length > 0 : false;
+    const hasTerminalSelection = target.isTerminalSurface
+      ? terminalControls.getSelectionText().length > 0
+      : false;
     const hasSelection = target.selectedText.length > 0 || hasTerminalSelection;
     const canEdit = target.isEditableText && !target.isReadOnly;
     const nextGroups: TBrowserContextMenuGroup[] = [];
@@ -460,22 +551,14 @@ export const useBrowserContextMenu = () => {
   };
 
   const handleCopy = async (target: IResolvedContextTarget): Promise<void> => {
-    const terminalSession = resolveTerminalSession();
-
-    if (target.isTerminalSurface && terminalSession) {
-      await terminalSession.copySelection();
+    if (target.isTerminalSurface) {
+      await terminalControls.copySelection();
       return;
     }
 
-    if (target.isEditableText) {
-      focusEditableElement(target.editableElement);
-      if (execDocumentCommand('copy')) {
-        return;
-      }
-    }
-
-    if (target.selectedText) {
-      await writeClipboardText(target.selectedText);
+    if (target.selectedText && !(await tryWriteClipboardText(target.selectedText))) {
+      restoreEditableSelection(target);
+      execDocumentCommand('copy');
     }
   };
 
@@ -484,24 +567,28 @@ export const useBrowserContextMenu = () => {
       return;
     }
 
-    focusEditableElement(target.editableElement);
-    if (execDocumentCommand('cut')) {
-      return;
-    }
-
     if (
       target.editableElement instanceof HTMLInputElement ||
       target.editableElement instanceof HTMLTextAreaElement
     ) {
-      await cutTextFromInput(target.editableElement);
+      restoreInputSelection(target.editableElement, target.inputSelection);
+      await cutTextFromInput(target.editableElement, target.inputSelection);
+      return;
     }
+
+    if (target.editableElement instanceof HTMLElement && target.editableElement.isContentEditable) {
+      if (await cutTextFromContentEditable(target.editableElement, target)) {
+        return;
+      }
+    }
+
+    restoreEditableSelection(target);
+    execDocumentCommand('cut');
   };
 
   const handlePaste = async (target: IResolvedContextTarget): Promise<void> => {
-    const terminalSession = resolveTerminalSession();
-
-    if (target.isTerminalSurface && terminalSession) {
-      await terminalSession.pasteFromClipboard();
+    if (target.isTerminalSurface) {
+      await terminalControls.pasteFromClipboard();
       return;
     }
 
@@ -509,24 +596,20 @@ export const useBrowserContextMenu = () => {
       return;
     }
 
-    focusEditableElement(target.editableElement);
-    if (execDocumentCommand('paste')) {
-      return;
-    }
-
     const clipboardText = await tryReadClipboardText();
     if (clipboardText === null) {
+      restoreEditableSelection(target);
+      execDocumentCommand('paste');
       return;
     }
 
+    restoreEditableSelection(target);
     await insertTextIntoEditable(target.editableElement, clipboardText);
   };
 
   const handleSelectAll = (target: IResolvedContextTarget): void => {
-    const terminalSession = resolveTerminalSession();
-
-    if (target.isTerminalSurface && terminalSession) {
-      terminalSession.selectAll();
+    if (target.isTerminalSurface) {
+      terminalControls.selectAll();
       return;
     }
 
@@ -563,11 +646,11 @@ export const useBrowserContextMenu = () => {
 
     switch (actionItem.action) {
       case 'undo':
-        focusEditableElement(target.editableElement);
+        restoreEditableSelection(target);
         execDocumentCommand('undo');
         return;
       case 'redo':
-        focusEditableElement(target.editableElement);
+        restoreEditableSelection(target);
         execDocumentCommand('redo');
         return;
       case 'cut':
@@ -611,6 +694,8 @@ export const useBrowserContextMenu = () => {
       return;
     }
 
+    const target = resolveContextTarget(event.target);
+
     if (event.defaultPrevented) {
       if (state.open) {
         closeMenu();
@@ -619,7 +704,7 @@ export const useBrowserContextMenu = () => {
     }
 
     event.preventDefault();
-    openMenu(event, resolveContextTarget(event.target));
+    openMenu(event, target);
   };
 
   const handleWindowKeydown = (event: KeyboardEvent): void => {

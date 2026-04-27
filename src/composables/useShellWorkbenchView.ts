@@ -6,7 +6,7 @@ import type {
   ICommandTemplate,
   IWorkspaceDirectoryPayload,
 } from '@/types/editor';
-import type { ITerminalRunCompletePayload } from '@/types/terminal';
+import type { ITerminalRunCompletedPayload } from '@/types/terminal';
 import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
 import { consumeProgrammaticWindowCloseAllowance } from '@/utils/window-close';
 import {
@@ -21,6 +21,7 @@ export type TEditorExpose = {
   insertSnippet: (snippet: string) => void;
   revealPosition: (line: number, column: number) => void;
   rerunDiagnostics: () => void;
+  layoutEditor: () => void;
 };
 
 export type TSettingsOverlayExpose = {
@@ -104,6 +105,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   let isUnmounted = false;
   let isShellWindowResizing = false;
   let statusbarMessageTimerId: number | null = null;
+  let editorLayoutAfterSidebarFrameId: number | null = null;
   let focusBeforeSettingsOpen: HTMLElement | null = null;
   let globalKeydownCleanup: (() => void) | null = null;
 
@@ -360,6 +362,22 @@ export const useShellWorkbenchView = (onReady: () => void) => {
 
   const toggleSidebar = (): void => {
     isSidebarVisible.value = !isSidebarVisible.value;
+    scheduleEditorLayoutAfterSidebarChange();
+  };
+
+  const scheduleEditorLayoutAfterSidebarChange = (): void => {
+    void nextTick(() => {
+      editorRef.value?.layoutEditor();
+
+      if (editorLayoutAfterSidebarFrameId !== null) {
+        window.cancelAnimationFrame(editorLayoutAfterSidebarFrameId);
+      }
+
+      editorLayoutAfterSidebarFrameId = window.requestAnimationFrame(() => {
+        editorLayoutAfterSidebarFrameId = null;
+        editorRef.value?.layoutEditor();
+      });
+    });
   };
 
   const clearStatusbarMessageTimer = (): void => {
@@ -456,6 +474,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   const showSidebarView = (view: TWorkbenchSidebarView): void => {
     activeSidebarView.value = view;
     isSidebarVisible.value = true;
+    scheduleEditorLayoutAfterSidebarChange();
   };
 
   const handleSelectSidebarView = async (view: TWorkbenchSidebarView): Promise<void> => {
@@ -467,6 +486,11 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     }
 
     if (activeSidebarView.value === view) {
+      if (view === 'source-control') {
+        isSidebarVisible.value = true;
+        return;
+      }
+
       toggleSidebar();
       return;
     }
@@ -549,8 +573,8 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     });
   };
 
-  const handleIntegratedTerminalRunComplete = (payload: ITerminalRunCompletePayload): void => {
-    workbench.handleIntegratedTerminalRunComplete(payload);
+  const handleIntegratedTerminalRunCompleted = (payload: ITerminalRunCompletedPayload): void => {
+    workbench.handleIntegratedTerminalRunCompleted(payload);
   };
 
   watch(
@@ -611,6 +635,11 @@ export const useShellWorkbenchView = (onReady: () => void) => {
       editorViewportResizeFrameId = null;
     }
 
+    if (editorLayoutAfterSidebarFrameId !== null) {
+      window.cancelAnimationFrame(editorLayoutAfterSidebarFrameId);
+      editorLayoutAfterSidebarFrameId = null;
+    }
+
     if (diagnosticsResizeSettleTimerId !== null) {
       window.clearTimeout(diagnosticsResizeSettleTimerId);
       diagnosticsResizeSettleTimerId = null;
@@ -660,6 +689,6 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     openTerminal,
     clearTerminalLogs,
     handleRunScript,
-    handleIntegratedTerminalRunComplete,
+    handleIntegratedTerminalRunCompleted,
   };
 };

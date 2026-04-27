@@ -3,7 +3,7 @@
     :terminal-visible="isTerminalVisible" :terminal-height="terminalHeight" :sidebar-width="sidebarWidth"
     :content-overlay-visible="isSettingsView" @update:terminal-height="handleTerminalHeightChange">
     <template #titlebar>
-      <WindowTitleBar :document-name="editorStore.document.name" :is-dirty="editorStore.document.isDirty"
+      <WindowTitleBar ref="titlebarRef" :document-name="editorStore.document.name" :is-dirty="editorStore.document.isDirty"
         :has-active-document="editorStore.hasActiveDocument" :document-kind="editorStore.document.kind"
         :theme="appStore.theme" :is-running="editorStore.isRunning" :can-run="canRun" :can-save="canSave"
         :is-desktop-runtime="isDesktopRuntime" :is-terminal-visible="isTerminalVisible"
@@ -53,7 +53,7 @@
           :document-name="editorStore.document.name" :model-value="editorStore.document.content" :theme="appStore.theme"
           :editor-settings="appStore.settings.editor" @update:model-value="updateContent"
           @cursor-position-change="handleCursorPositionChange" @diagnostics-change="handleDiagnosticsChange"
-          @format-request="handleFormatDocument" />
+          @format-request="handleFormatDocument" @command-palette-request="handleOpenCommandPalette" />
 
         <ImageAssetPreview v-else-if="editorStore.document.path" :path="editorStore.document.path"
           :name="editorStore.document.name" />
@@ -85,7 +85,7 @@
         :theme="appStore.theme" :terminal-settings="appStore.settings.terminal"
         :visible="isTerminalVisible && isWorkbenchContentVisible" :is-maximized="isTerminalMaximized"
         @hide="hideTerminal" @toggle-maximize="toggleTerminalMaximize" @clear-logs="clearTerminalLogs"
-        @terminal-run-complete="handleIntegratedTerminalRunComplete" />
+        @terminal-run-completed="handleIntegratedTerminalRunCompleted" />
     </template>
 
     <template #statusbar>
@@ -120,6 +120,17 @@ import WorkbenchSettingsOverlay from '@/components/workbench/WorkbenchSettingsOv
 import WorkbenchStatusBar from '@/components/workbench/WorkbenchStatusBar.vue';
 import { useShellWorkbenchView } from '@/composables/useShellWorkbenchView';
 import AppShellLayout from '@/layouts/AppShellLayout.vue';
+import { ref } from 'vue';
+
+interface ITitlebarExpose {
+  openCommandPalette: () => void;
+}
+
+const titlebarRef = ref<ITitlebarExpose | null>(null);
+
+const handleOpenCommandPalette = (): void => {
+  titlebarRef.value?.openCommandPalette();
+};
 
 const emit = defineEmits<{
   ready: [];
@@ -186,6 +197,6 @@ const {
   openTerminal,
   clearTerminalLogs,
   handleRunScript,
-  handleIntegratedTerminalRunComplete,
+  handleIntegratedTerminalRunCompleted,
 } = useShellWorkbenchView(() => emit('ready'));
 </script>

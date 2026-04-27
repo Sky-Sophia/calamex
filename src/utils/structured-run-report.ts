@@ -3,10 +3,13 @@ import { formatTime } from '@/utils/date';
 import { getPathBaseName, getRelativeFileSystemPath } from '@/utils/path';
 import {
   TERMINAL_RUN_LOG_TITLES,
+  isTerminalRunCompletedLog,
   isTerminalRunDispatchedLog,
+  isTerminalRunFailedLog,
   isTerminalRunFinalLog,
   isTerminalRunFlowLog,
   isTerminalRunStartLog,
+  isTerminalRunTimeoutLog,
   resolveTerminalRunLogKind,
 } from '@/utils/terminal-run';
 
@@ -89,8 +92,7 @@ const PROMPT_ONLY_PATTERN = /^[\w.-]+@[\w.-]+:.*[$#]\s*$/;
 const CONTINUATION_PROMPT_PATTERN = /^[\w.-]*>\s*/;
 const HEREDOC_START_PATTERN = /cat\s+<<'SH_EDITOR_EOF_\d+'/i;
 const HEREDOC_END_PATTERN = /^__SH_EDITOR_EOF_\d+__$/;
-const TEMP_SCRIPT_PATTERN = /\.sh-editor-[\w.-]+\.tmp\.sh/i;
-const DISPATCH_RUNNER_PATTERN = /\/tmp\/sh-editor-dispatch-[\w.-]+\.sh/i;
+const TEMP_SCRIPT_PATTERN = /\/tmp\/[\w.-]+\.tmp\.sh/i;
 const INTERNAL_SCRIPT_PATTERN = /__sh_editor_status|unset\s+__sh_editor_status/i;
 const WARNING_PATTERN = /warning|warn|deprecated|注意|提醒/i;
 const ERROR_PATTERN =
@@ -226,8 +228,8 @@ const resolveSession = (
   runLogs: IRunLogEntry[],
   executor: TExecutorKind,
 ): IStructuredRunSession => {
-  const workspaceLabel = getPathLeaf(workspaceRootPath) || 'builtin-workspace';
-  const fallbackFileLabel = documentName.trim() || getPathLeaf(documentPath) || 'startup.sh';
+  const workspaceLabel = getPathLeaf(workspaceRootPath) || '未打开工作区';
+  const fallbackFileLabel = documentName.trim() || getPathLeaf(documentPath) || '未选择文件';
   const relativePath = getRelativePath(documentPath, workspaceRootPath);
   const relativeSegments = relativePath
     ? relativePath.split('/').filter(Boolean)
@@ -371,7 +373,7 @@ const shouldSkipLine = (
     return { skip: true, nextInHeredoc: false };
   }
 
-  if (TEMP_SCRIPT_PATTERN.test(line) || DISPATCH_RUNNER_PATTERN.test(line) || INTERNAL_SCRIPT_PATTERN.test(line)) {
+  if (TEMP_SCRIPT_PATTERN.test(line) || INTERNAL_SCRIPT_PATTERN.test(line)) {
     return { skip: true, nextInHeredoc: false };
   }
 
@@ -678,8 +680,19 @@ const buildTimeline = (
 ): IStructuredRunTimelineItem[] => {
   const primaryLogItems: TInternalTimelineItem[] = [];
   const finalLogItems: TInternalTimelineItem[] = [];
+  const scopedRunLogs = lastRunResult
+    ? runLogs.filter((item) => {
+      if (!isTerminalRunFinalLog(item)) {
+        return true;
+      }
 
-  for (const item of runLogs) {
+      return lastRunResult.success
+        ? isTerminalRunCompletedLog(item)
+        : isTerminalRunFailedLog(item) || isTerminalRunTimeoutLog(item);
+    })
+    : runLogs;
+
+  for (const item of scopedRunLogs) {
     const timelineItem = buildLogTimelineItem(item, outputLines);
     if (isTerminalRunFinalLog(item)) {
       finalLogItems.push(timelineItem);
@@ -742,7 +755,15 @@ const resolveSummaryTone = (
     return 'running';
   }
 
-  if ((lastRunResult && !lastRunResult.success) || (exitCodeFromOutput !== null && exitCodeFromOutput !== 0) || counts.error > 0) {
+  if (lastRunResult) {
+    return lastRunResult.success ? 'success' : 'error';
+  }
+
+  if (exitCodeFromOutput !== null) {
+    return exitCodeFromOutput === 0 ? 'success' : 'error';
+  }
+
+  if (counts.error > 0) {
     return 'error';
   }
 

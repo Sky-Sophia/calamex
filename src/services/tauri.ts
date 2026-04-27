@@ -523,12 +523,6 @@ const definePayloadIpc = <TInSchema extends z.ZodTypeAny, TOutSchema extends z.Z
     mapArgs: (payload) => ({ payload }),
   });
 
-const getStartupWorkspaceIpc = defineContractIpc(
-  'get_startup_workspace',
-  '加载默认工作区',
-  tauriContracts.getStartupWorkspace,
-  { idempotent: true },
-);
 
 const analyzeScriptIpc = definePayloadIpc(
   'analyze_script',
@@ -570,6 +564,34 @@ const listWorkspaceEntriesIpc = defineContractIpc(
   { idempotent: true },
 );
 
+const createWorkspacePathIpc = definePayloadIpc(
+  'create_workspace_path',
+  '创建工作区资源',
+  tauriContracts.createWorkspacePath,
+  { audit: 'sensitive' },
+);
+
+const renameWorkspacePathIpc = definePayloadIpc(
+  'rename_workspace_path',
+  '重命名工作区资源',
+  tauriContracts.renameWorkspacePath,
+  { audit: 'sensitive' },
+);
+
+const deleteWorkspacePathIpc = definePayloadIpc(
+  'delete_workspace_path',
+  '删除工作区资源',
+  tauriContracts.deleteWorkspacePath,
+  { audit: 'sensitive' },
+);
+
+const searchWorkspaceIpc = definePayloadIpc(
+  'search_workspace',
+  '搜索工作区',
+  tauriContracts.searchWorkspace,
+  { idempotent: true, timeoutMs: 30_000 },
+);
+
 const getGitRepositoryStatusIpc = defineContractIpc(
   'get_git_repository_status',
   '读取 Git 仓库状态',
@@ -602,11 +624,67 @@ const unstageGitPathsIpc = definePayloadIpc(
   tauriContracts.unstageGitPaths,
 );
 
+const discardGitPathsIpc = definePayloadIpc(
+  'discard_git_paths',
+  '放弃 Git 工作区更改',
+  tauriContracts.discardGitPaths,
+  { audit: 'sensitive' },
+);
+
 const commitGitIndexIpc = definePayloadIpc(
   'commit_git_index',
   '创建 Git 提交',
   tauriContracts.commitGitIndex,
   { audit: 'sensitive' },
+);
+
+const testSshConnectionIpc = definePayloadIpc(
+  'test_ssh_connection',
+  '测试 SSH 连接',
+  tauriContracts.testSshConnection,
+  { idempotent: true, timeoutMs: 15_000, audit: 'sensitive' },
+);
+
+const listSshConfigHostsIpc = defineContractIpc(
+  'list_ssh_config_hosts',
+  '读取 SSH 配置主机',
+  tauriContracts.listSshConfigHosts,
+  { idempotent: true, audit: 'sensitive' },
+);
+
+const listSshDirectoryIpc = definePayloadIpc(
+  'list_ssh_directory',
+  '读取 SSH 远端目录',
+  tauriContracts.listSshDirectory,
+  { idempotent: true, timeoutMs: 15_000, audit: 'sensitive' },
+);
+
+const downloadSshFileIpc = definePayloadIpc(
+  'download_ssh_file',
+  '下载 SSH 远端文件',
+  tauriContracts.downloadSshFile,
+  { audit: 'sensitive', timeoutMs: 60_000 },
+);
+
+const uploadSshFileIpc = definePayloadIpc(
+  'upload_ssh_file',
+  '上传 SSH 远端文件',
+  tauriContracts.uploadSshFile,
+  { audit: 'sensitive', timeoutMs: 60_000 },
+);
+
+const deleteSshPathIpc = definePayloadIpc(
+  'delete_ssh_path',
+  '删除 SSH 远端路径',
+  tauriContracts.deleteSshPath,
+  { audit: 'sensitive', timeoutMs: 30_000 },
+);
+
+const renameSshPathIpc = definePayloadIpc(
+  'rename_ssh_path',
+  '重命名 SSH 远端路径',
+  tauriContracts.renameSshPath,
+  { audit: 'sensitive', timeoutMs: 30_000 },
 );
 
 const ensureTerminalSessionIpc = definePayloadIpc(
@@ -643,12 +721,19 @@ const closeTerminalSessionIpc = definePayloadIpc(
   { audit: 'sensitive' },
 );
 
+const cancelTerminalRunIpc = definePayloadIpc(
+  'cancel_terminal_run',
+  '取消终端脚本运行',
+  tauriContracts.cancelTerminalRun,
+  { audit: 'sensitive' },
+);
+
 export const tauriService: ITauriService & {
   pickOpenPath(): Promise<string | null>;
+  pickAnyOpenPath(): Promise<string | null>;
   pickOpenFolderPath(): Promise<string | null>;
   pickSavePath(defaultPath: string): Promise<string | null>;
 } = {
-  getStartupWorkspace: () => getStartupWorkspaceIpc(undefined),
 
   analyzeScript: analyzeScriptIpc,
 
@@ -660,6 +745,15 @@ export const tauriService: ITauriService & {
         multiple: false,
         directory: false,
         filters: openFileFilters,
+      }),
+    );
+  },
+
+  pickAnyOpenPath() {
+    return pickDialogPath('选择要上传的本地文件', ({ open }) =>
+      open({
+        multiple: false,
+        directory: false,
       }),
     );
   },
@@ -698,6 +792,14 @@ export const tauriService: ITauriService & {
     return listWorkspaceEntriesIpc({ path, rootPath });
   },
 
+  createWorkspacePath: createWorkspacePathIpc,
+
+  renameWorkspacePath: renameWorkspacePathIpc,
+
+  deleteWorkspacePath: deleteWorkspacePathIpc,
+
+  searchWorkspace: searchWorkspaceIpc,
+
   getGitRepositoryStatus(workspaceRootPath) {
     return getGitRepositoryStatusIpc({ workspaceRootPath });
   },
@@ -714,6 +816,8 @@ export const tauriService: ITauriService & {
 
   unstageGitPaths: unstageGitPathsIpc,
 
+  discardGitPaths: discardGitPathsIpc,
+
   commitGitIndex: commitGitIndexIpc,
 
   ensureTerminalSession: ensureTerminalSessionIpc,
@@ -725,4 +829,20 @@ export const tauriService: ITauriService & {
   resizeTerminalSession: resizeTerminalSessionIpc,
 
   closeTerminalSession: closeTerminalSessionIpc,
+
+  cancelTerminalRun: cancelTerminalRunIpc,
+
+  testSshConnection: testSshConnectionIpc,
+
+  listSshConfigHosts: () => listSshConfigHostsIpc(undefined),
+
+  listSshDirectory: listSshDirectoryIpc,
+
+  downloadSshFile: downloadSshFileIpc,
+
+  uploadSshFile: uploadSshFileIpc,
+
+  deleteSshPath: deleteSshPathIpc,
+
+  renameSshPath: renameSshPathIpc,
 };

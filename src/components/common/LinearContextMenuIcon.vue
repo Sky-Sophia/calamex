@@ -1,6 +1,51 @@
 <template>
   <svg
-    v-if="props.icon === 'format'"
+    v-if="props.icon === 'branch'"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <circle cx="6" cy="5" r="2" />
+    <circle cx="18" cy="7" r="2" />
+    <circle cx="18" cy="19" r="2" />
+    <path d="M6 7v4a4 4 0 0 0 4 4h4" />
+    <path d="M16 7h-5a5 5 0 0 0-5 5v5" />
+  </svg>
+
+  <svg
+    v-else-if="props.icon === 'check'"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path d="m5 12 4 4L19 6" />
+  </svg>
+
+  <svg
+    v-else-if="props.icon === 'commit'"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M4 12h6" />
+    <path d="M14 12h6" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+
+  <svg
+    v-else-if="props.icon === 'format'"
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -12,6 +57,22 @@
     <path d="M4 6h12" />
     <path d="M4 12h16" />
     <path d="M4 18h8" />
+  </svg>
+
+  <svg
+    v-else-if="props.icon === 'refresh'"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M20 7v5h-5" />
+    <path d="M4 17v-5h5" />
+    <path d="M6.8 9a6 6 0 0 1 9.9-2.2L20 10" />
+    <path d="M17.2 15a6 6 0 0 1-9.9 2.2L4 14" />
   </svg>
 
   <svg
@@ -102,6 +163,50 @@
     <rect x="8" y="2" width="8" height="4" rx="1" />
     <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
     <path d="M9 13h6M9 17h4" />
+  </svg>
+
+  <svg
+    v-else-if="props.icon === 'plus'"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M12 5v14" />
+    <path d="M5 12h14" />
+  </svg>
+
+  <svg
+    v-else-if="props.icon === 'minus'"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M5 12h14" />
+  </svg>
+
+  <svg
+    v-else-if="props.icon === 'trash'"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M3 6h18" />
+    <path d="M8 6V4h8v2" />
+    <path d="m6 6 1 15h10l1-15" />
+    <path d="M10 11v5" />
+    <path d="M14 11v5" />
   </svg>
 
   <svg

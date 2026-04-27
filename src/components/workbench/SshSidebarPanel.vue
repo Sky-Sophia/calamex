@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { useIntegratedTerminalControls } from '@/composables/useIntegratedTerminal'
 import { useMessage } from '@/composables/useMessage'
+import { tauriService } from '@/services/tauri'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 type TSshContentTab = 'explorer' | 'transfer'
@@ -7,12 +9,13 @@ type TSshPanelTab = TSshContentTab | 'connect'
 type TSshAuthMode = 'key' | 'password'
 type TSshFileKind = 'folder' | 'rust' | 'toml' | 'markdown' | 'lock' | 'file'
 type TSshTransferDirection = 'upload' | 'download'
-type TSshTransferStatus = 'uploading' | 'downloading' | 'done'
+type TSshTransferStatus = 'uploading' | 'downloading' | 'done' | 'failed'
 type TSshContextActionTone = 'default' | 'danger'
 
 interface ISshPathSegment {
   id: string
   label: string
+  path: string
 }
 
 interface ISshFileItem {
@@ -20,6 +23,8 @@ interface ISshFileItem {
   name: string
   kind: TSshFileKind
   metaLabel: string
+  path: string
+  isDirectory: boolean
 }
 
 interface ISshTransferItem {
@@ -45,71 +50,37 @@ interface ISshRecentConnection {
   username: string
   host: string
   port: string
+  authMode: TSshAuthMode
+  identityPath: string
   lastUsedLabel: string
+}
+
+interface ISshAuthOption {
+  value: TSshAuthMode
+  label: string
 }
 
 const CONTEXT_MENU_WIDTH = 172
 const CONTEXT_MENU_HEIGHT = 214
-const CURRENT_PATH_SEGMENT_ID = 'workspace'
 const DEFAULT_SELECTED_FILE_ID = 'ssh-client'
 const MANUAL_CONNECTION_ID = 'manual'
-
-const SSH_PATH_SEGMENTS: ISshPathSegment[] = [
-  { id: 'home', label: '~' },
-  { id: 'projects', label: 'projects' },
-  { id: CURRENT_PATH_SEGMENT_ID, label: 'sh-editor' },
-]
+const DEFAULT_SSH_PORT = '22'
+const TERMINAL_OPEN_DELAY_MS = 120
+const HOST_PATTERN = /^[a-zA-Z0-9._:-]+$/
+const USER_PATTERN = /^[a-zA-Z0-9._-]+$/
+const SAFE_PATH_PATTERN = /^[^\r\n]+$/
 
 const SSH_FILE_ITEMS: ISshFileItem[] = [
-  { id: 'src', name: 'src', kind: 'folder', metaLabel: '12 项' },
-  { id: 'assets', name: 'assets', kind: 'folder', metaLabel: '5 项' },
-  { id: 'target', name: 'target', kind: 'folder', metaLabel: '3 项' },
-  { id: 'main-rs', name: 'main.rs', kind: 'rust', metaLabel: '4.2 KB' },
-  { id: DEFAULT_SELECTED_FILE_ID, name: 'ssh_client.rs', kind: 'rust', metaLabel: '8.7 KB' },
-  { id: 'sidebar-rs', name: 'sidebar.rs', kind: 'rust', metaLabel: '3.1 KB' },
-  { id: 'cargo-toml', name: 'Cargo.toml', kind: 'toml', metaLabel: '1.4 KB' },
-  { id: 'cargo-lock', name: 'Cargo.lock', kind: 'lock', metaLabel: '42 KB' },
-  { id: 'readme-md', name: 'README.md', kind: 'markdown', metaLabel: '2.0 KB' },
-  { id: 'gitignore', name: '.gitignore', kind: 'file', metaLabel: '48 B' },
-]
-
-const SSH_TRANSFER_ITEMS: ISshTransferItem[] = [
-  {
-    id: 'upload-sidebar',
-    name: 'sidebar.rs',
-    direction: 'upload',
-    sizeLabel: '3.1 KB',
-    progressLabel: '2.2 KB / 3.1 KB',
-    progress: 72,
-    status: 'uploading',
-  },
-  {
-    id: 'download-config',
-    name: 'config.json',
-    direction: 'download',
-    sizeLabel: '12.8 KB',
-    progressLabel: '5.8 KB / 12.8 KB',
-    progress: 45,
-    status: 'downloading',
-  },
-  {
-    id: 'upload-main',
-    name: 'main.rs',
-    direction: 'upload',
-    sizeLabel: '4.2 KB',
-    progressLabel: '已完成',
-    progress: 100,
-    status: 'done',
-  },
-  {
-    id: 'download-db',
-    name: 'database.db',
-    direction: 'download',
-    sizeLabel: '256 KB',
-    progressLabel: '已完成',
-    progress: 100,
-    status: 'done',
-  },
+  { id: 'src', name: 'src', kind: 'folder', metaLabel: '12 项', path: 'src', isDirectory: true },
+  { id: 'assets', name: 'assets', kind: 'folder', metaLabel: '5 项', path: 'assets', isDirectory: true },
+  { id: 'target', name: 'target', kind: 'folder', metaLabel: '3 项', path: 'target', isDirectory: true },
+  { id: 'main-rs', name: 'main.rs', kind: 'rust', metaLabel: '4.2 KB', path: 'main.rs', isDirectory: false },
+  { id: DEFAULT_SELECTED_FILE_ID, name: 'ssh_client.rs', kind: 'rust', metaLabel: '8.7 KB', path: 'ssh_client.rs', isDirectory: false },
+  { id: 'sidebar-rs', name: 'sidebar.rs', kind: 'rust', metaLabel: '3.1 KB', path: 'sidebar.rs', isDirectory: false },
+  { id: 'cargo-toml', name: 'Cargo.toml', kind: 'toml', metaLabel: '1.4 KB', path: 'Cargo.toml', isDirectory: false },
+  { id: 'cargo-lock', name: 'Cargo.lock', kind: 'lock', metaLabel: '42 KB', path: 'Cargo.lock', isDirectory: false },
+  { id: 'readme-md', name: 'README.md', kind: 'markdown', metaLabel: '2.0 KB', path: 'README.md', isDirectory: false },
+  { id: 'gitignore', name: '.gitignore', kind: 'file', metaLabel: '48 B', path: '.gitignore', isDirectory: false },
 ]
 
 const SSH_CONTEXT_ACTIONS: ISshContextAction[] = [
@@ -120,6 +91,17 @@ const SSH_CONTEXT_ACTIONS: ISshContextAction[] = [
   { key: 'delete', label: '删除', tone: 'danger', separatorBefore: true },
 ]
 
+const SSH_AUTH_OPTIONS: ISshAuthOption[] = [
+  {
+    value: 'key',
+    label: '密钥认证',
+  },
+  {
+    value: 'password',
+    label: '密码认证',
+  },
+]
+
 const SSH_RECENT_CONNECTIONS: ISshRecentConnection[] = [
   {
     id: 'dev-server',
@@ -127,6 +109,8 @@ const SSH_RECENT_CONNECTIONS: ISshRecentConnection[] = [
     username: 'root',
     host: '192.168.1.100',
     port: '22',
+    authMode: 'key',
+    identityPath: '~/.ssh/id_rsa',
     lastUsedLabel: '昨天',
   },
   {
@@ -135,6 +119,8 @@ const SSH_RECENT_CONNECTIONS: ISshRecentConnection[] = [
     username: 'deploy',
     host: '10.0.12.31',
     port: '22',
+    authMode: 'key',
+    identityPath: '~/.ssh/id_rsa',
     lastUsedLabel: '3 天前',
   },
   {
@@ -143,6 +129,8 @@ const SSH_RECENT_CONNECTIONS: ISshRecentConnection[] = [
     username: 'ubuntu',
     host: 'vps.example.com',
     port: '22',
+    authMode: 'key',
+    identityPath: '~/.ssh/id_rsa',
     lastUsedLabel: '上周',
   },
 ]
@@ -154,13 +142,32 @@ const FALLBACK_SELECTED_FILE: ISshFileItem = {
   metaLabel: '8.7 KB',
 }
 
+const emit = defineEmits<{
+  'open-terminal': []
+}>()
+
 const message = useMessage()
+const terminalControls = useIntegratedTerminalControls()
 const activeContentTab = ref<TSshContentTab>('explorer')
 const isConnectFormVisible = ref(false)
 const isConnected = ref(false)
 const currentConnectionId = ref<string | null>(null)
 const selectedFileId = ref(DEFAULT_SELECTED_FILE_ID)
 const contextMenuRef = ref<HTMLElement | null>(null)
+const authSelectRef = ref<HTMLElement | null>(null)
+const isConnecting = ref(false)
+const isAuthSelectOpen = ref(false)
+const recentConnections = ref<ISshRecentConnection[]>(SSH_RECENT_CONNECTIONS)
+const sshFileItems = ref<ISshFileItem[]>(SSH_FILE_ITEMS)
+const transferItems = ref<ISshTransferItem[]>([])
+const currentRemotePath = ref('.')
+const isRemoteDirectoryLoading = ref(false)
+const isUploading = ref(false)
+const isDownloading = ref(false)
+const isPathMutating = ref(false)
+const pendingRenameItem = ref<ISshFileItem | null>(null)
+const pendingDeleteItem = ref<ISshFileItem | null>(null)
+const renameInputValue = ref('')
 const contextMenu = reactive({
   open: false,
   x: 0,
@@ -178,7 +185,7 @@ const isExplorerActive = computed(() => activeContentTab.value === 'explorer')
 const isTransferActive = computed(() => activeContentTab.value === 'transfer')
 const isDisconnected = computed(() => !isConnected.value)
 const currentConnection = computed<ISshRecentConnection>(() => {
-  const matchedConnection = SSH_RECENT_CONNECTIONS.find(
+  const matchedConnection = recentConnections.value.find(
     (item) => item.id === currentConnectionId.value,
   )
 
@@ -192,6 +199,8 @@ const currentConnection = computed<ISshRecentConnection>(() => {
     username: connectionForm.username,
     host: connectionForm.host,
     port: connectionForm.port,
+    authMode: connectionForm.authMode,
+    identityPath: connectionForm.identityPath,
     lastUsedLabel: '刚刚',
   }
 })
@@ -201,8 +210,22 @@ const connectionStatusLabel = computed(() =>
     : '未连接 · 等待建立会话',
 )
 const selectedFile = computed<ISshFileItem>(
-  () => SSH_FILE_ITEMS.find((item) => item.id === selectedFileId.value) ?? FALLBACK_SELECTED_FILE,
+  () => sshFileItems.value.find((item) => item.id === selectedFileId.value) ?? FALLBACK_SELECTED_FILE,
 )
+const sshCommandPreview = computed(() => buildSshCommand())
+const sshPathSegments = computed<ISshPathSegment[]>(() => buildRemotePathSegments(currentRemotePath.value))
+const selectedAuthOption = computed(
+  () =>
+    SSH_AUTH_OPTIONS.find((option) => option.value === connectionForm.authMode) ??
+    SSH_AUTH_OPTIONS[0],
+)
+const isTransferBusy = computed(() => isUploading.value || isDownloading.value)
+const normalizedRenameInput = computed(() => renameInputValue.value.trim())
+const canConfirmRename = computed(() => {
+  const item = pendingRenameItem.value
+  const nextName = normalizedRenameInput.value
+  return Boolean(item && nextName && nextName !== item.name && !nextName.includes('/') && !nextName.includes('\\'))
+})
 
 const isTabActive = (tab: TSshPanelTab): boolean => {
   if (tab === 'connect') {
@@ -216,6 +239,20 @@ const closeContextMenu = (): void => {
   contextMenu.open = false
 }
 
+const closeAuthSelect = (): void => {
+  isAuthSelectOpen.value = false
+}
+
+const toggleAuthSelect = (): void => {
+  isAuthSelectOpen.value = !isAuthSelectOpen.value
+  closeContextMenu()
+}
+
+const selectAuthMode = (authMode: TSshAuthMode): void => {
+  connectionForm.authMode = authMode
+  closeAuthSelect()
+}
+
 const setContentTab = (tab: TSshContentTab): void => {
   if (!isConnected.value) {
     return
@@ -224,11 +261,13 @@ const setContentTab = (tab: TSshContentTab): void => {
   activeContentTab.value = tab
   isConnectFormVisible.value = false
   closeContextMenu()
+  closeAuthSelect()
 }
 
 const openConnectForm = (): void => {
   isConnectFormVisible.value = true
   closeContextMenu()
+  closeAuthSelect()
 }
 
 const toggleConnectForm = (): void => {
@@ -239,17 +278,19 @@ const toggleConnectForm = (): void => {
   }
 
   closeContextMenu()
+  closeAuthSelect()
 }
 
 const handleCancelConnect = (): void => {
   isConnectFormVisible.value = false
+  closeAuthSelect()
 
   if (isConnected.value) {
     activeContentTab.value = 'explorer'
   }
 }
 
-const applyMockConnection = (connectionId: string | null): void => {
+const applyConnectionState = (connectionId: string | null): void => {
   currentConnectionId.value = connectionId
   isConnected.value = true
   isConnectFormVisible.value = false
@@ -257,36 +298,485 @@ const applyMockConnection = (connectionId: string | null): void => {
   closeContextMenu()
 }
 
-const handleConnect = (): void => {
-  applyMockConnection(MANUAL_CONNECTION_ID)
-  message.info(`SSH 连接预览：${connectionForm.username}@${connectionForm.host}:${connectionForm.port}`)
+const quoteShellArg = (value: string): string => {
+  const normalizedValue = value.trim()
+  if (/^[a-zA-Z0-9_@%+=:,./~-]+$/.test(normalizedValue)) {
+    return normalizedValue
+  }
+
+  return "'" + normalizedValue.replace(/'/g, "'\\''") + "'"
 }
 
-const handleImportConfig = (): void => {
-  message.info('SSH 配置导入待接入')
+const formatRemoteFileSize = (size: number): string => {
+  if (size < 1024) {
+    return `${size} B`
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`
+  }
+
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
-const handleSelectRecentConnection = (connection: ISshRecentConnection): void => {
-  connectionForm.host = connection.host
-  connectionForm.port = connection.port
-  connectionForm.username = connection.username
-  connectionForm.authMode = 'key'
-  connectionForm.identityPath = '~/.ssh/id_rsa'
-  applyMockConnection(connection.id)
-  message.info(`SSH 连接预览：${connection.username}@${connection.host}:${connection.port}`)
+const resolveFileKind = (name: string, isDirectory: boolean): TSshFileKind => {
+  if (isDirectory) {
+    return 'folder'
+  }
+
+  if (name.endsWith('.rs')) {
+    return 'rust'
+  }
+
+  if (name.endsWith('.toml')) {
+    return 'toml'
+  }
+
+  if (name.endsWith('.md')) {
+    return 'markdown'
+  }
+
+  if (name.toLowerCase().endsWith('lock')) {
+    return 'lock'
+  }
+
+  return 'file'
 }
 
-const handlePathSegmentClick = (segment: ISshPathSegment): void => {
-  if (segment.id === CURRENT_PATH_SEGMENT_ID) {
+const buildRemotePathSegments = (path: string): ISshPathSegment[] => {
+  const normalizedPath = path.trim() || '.'
+  if (normalizedPath === '.') {
+    return [{ id: '.', label: '.', path: '.' }]
+  }
+
+  const segments: ISshPathSegment[] = []
+  const isAbsolutePath = normalizedPath.startsWith('/')
+  const parts = normalizedPath.split('/').filter(Boolean)
+  let cursor = isAbsolutePath ? '' : ''
+
+  if (isAbsolutePath) {
+    segments.push({ id: '/', label: '/', path: '/' })
+  }
+
+  for (const part of parts) {
+    cursor = cursor ? `${cursor}/${part}` : isAbsolutePath ? `/${part}` : part
+    segments.push({ id: cursor, label: part, path: cursor })
+  }
+
+  return segments.length > 0 ? segments : [{ id: '.', label: '.', path: '.' }]
+}
+
+const createSshDirectoryRequest = (path: string) => ({
+  host: connectionForm.host.trim(),
+  port: Number.parseInt(connectionForm.port.trim(), 10),
+  username: connectionForm.username.trim(),
+  authMode: connectionForm.authMode,
+  identityPath: connectionForm.authMode === 'key' ? connectionForm.identityPath.trim() || null : null,
+  path,
+})
+
+const createSshFileTransferRequest = (remotePath: string, localPath: string) => ({
+  host: connectionForm.host.trim(),
+  port: Number.parseInt(connectionForm.port.trim(), 10),
+  username: connectionForm.username.trim(),
+  authMode: connectionForm.authMode,
+  identityPath: connectionForm.authMode === 'key' ? connectionForm.identityPath.trim() || null : null,
+  remotePath,
+  localPath,
+})
+
+const createSshFileUploadRequest = (localPath: string, remoteDirectory: string) => ({
+  host: connectionForm.host.trim(),
+  port: Number.parseInt(connectionForm.port.trim(), 10),
+  username: connectionForm.username.trim(),
+  authMode: connectionForm.authMode,
+  identityPath: connectionForm.authMode === 'key' ? connectionForm.identityPath.trim() || null : null,
+  localPath,
+  remoteDirectory,
+})
+
+const createSshPathDeleteRequest = (remotePath: string) => ({
+  host: connectionForm.host.trim(),
+  port: Number.parseInt(connectionForm.port.trim(), 10),
+  username: connectionForm.username.trim(),
+  authMode: connectionForm.authMode,
+  identityPath: connectionForm.authMode === 'key' ? connectionForm.identityPath.trim() || null : null,
+  remotePath,
+})
+
+const createSshPathRenameRequest = (remotePath: string, newName: string) => ({
+  host: connectionForm.host.trim(),
+  port: Number.parseInt(connectionForm.port.trim(), 10),
+  username: connectionForm.username.trim(),
+  authMode: connectionForm.authMode,
+  identityPath: connectionForm.authMode === 'key' ? connectionForm.identityPath.trim() || null : null,
+  remotePath,
+  newName,
+})
+
+const createTransferItem = (
+  direction: TSshTransferDirection,
+  name: string,
+  progressLabel: string,
+): ISshTransferItem => ({
+  id: `${direction}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  name,
+  direction,
+  sizeLabel: '—',
+  progressLabel,
+  progress: 0,
+  status: direction === 'upload' ? 'uploading' : 'downloading',
+})
+
+const updateTransferItem = (
+  transferId: string,
+  patch: Partial<Omit<ISshTransferItem, 'id'>>,
+): void => {
+  const target = transferItems.value.find((item) => item.id === transferId)
+  if (!target) {
     return
   }
 
-  message.info(`路径跳转待接入：${segment.label}`)
+  Object.assign(target, patch)
+}
+
+const loadRemoteDirectory = async (path: string): Promise<void> => {
+  isRemoteDirectoryLoading.value = true
+
+  try {
+    const result = await tauriService.listSshDirectory(createSshDirectoryRequest(path))
+    currentRemotePath.value = result.path
+    sshFileItems.value = result.entries.map((entry) => {
+      const isDirectory = entry.kind === 'directory'
+      return {
+        id: entry.path,
+        name: entry.name,
+        kind: resolveFileKind(entry.name, isDirectory),
+        metaLabel: isDirectory ? '目录' : formatRemoteFileSize(entry.size),
+        path: entry.path,
+        isDirectory,
+      }
+    })
+    selectedFileId.value = sshFileItems.value[0]?.id ?? ''
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '读取远端目录失败。'
+    message.error(errorMessage)
+  } finally {
+    isRemoteDirectoryLoading.value = false
+  }
+}
+
+const downloadSelectedFile = async (): Promise<void> => {
+  if (!isConnected.value || isDownloading.value) {
+    return
+  }
+
+  const fileItem = selectedFile.value
+  if (fileItem.isDirectory) {
+    message.info('暂不支持下载目录，请选择一个文件。')
+    return
+  }
+
+  const savePath = await tauriService.pickSavePath(fileItem.name)
+  if (!savePath) {
+    return
+  }
+
+  const transferItem = createTransferItem('download', fileItem.name, '下载中…')
+  transferItems.value.unshift(transferItem)
+  isDownloading.value = true
+
+  try {
+    const result = await tauriService.downloadSshFile(
+      createSshFileTransferRequest(fileItem.path, savePath),
+    )
+    updateTransferItem(transferItem.id, {
+      sizeLabel: formatRemoteFileSize(result.byteSize),
+      progressLabel: '已完成',
+      progress: 100,
+      status: 'done',
+    })
+    message.success(`已下载 ${fileItem.name}，共 ${formatRemoteFileSize(result.byteSize)}。`)
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '下载远端文件失败。'
+    updateTransferItem(transferItem.id, {
+      progressLabel: errorMessage,
+      progress: 100,
+      status: 'failed',
+    })
+    message.error(errorMessage)
+  } finally {
+    isDownloading.value = false
+  }
+}
+
+const uploadFileToCurrentDirectory = async (): Promise<void> => {
+  if (!isConnected.value || isUploading.value) {
+    return
+  }
+
+  const localPath = await tauriService.pickAnyOpenPath()
+  if (!localPath) {
+    return
+  }
+
+  const selectedItem = sshFileItems.value.find((item) => item.id === selectedFileId.value)
+  const remoteDirectory = selectedItem?.isDirectory ? selectedItem.path : currentRemotePath.value
+  const transferItem = createTransferItem('upload', localPath.split(/[\\/]/).pop() ?? localPath, '上传中…')
+  transferItems.value.unshift(transferItem)
+  isUploading.value = true
+
+  try {
+    const result = await tauriService.uploadSshFile(
+      createSshFileUploadRequest(localPath, remoteDirectory),
+    )
+    await loadRemoteDirectory(currentRemotePath.value)
+    updateTransferItem(transferItem.id, {
+      sizeLabel: formatRemoteFileSize(result.byteSize),
+      progressLabel: '已完成',
+      progress: 100,
+      status: 'done',
+    })
+    message.success(`已上传到 ${result.remotePath}，共 ${formatRemoteFileSize(result.byteSize)}。`)
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '上传本地文件失败。'
+    updateTransferItem(transferItem.id, {
+      progressLabel: errorMessage,
+      progress: 100,
+      status: 'failed',
+    })
+    message.error(errorMessage)
+  } finally {
+    isUploading.value = false
+  }
+}
+
+const copySelectedPath = async (): Promise<void> => {
+  const fileItem = selectedFile.value
+  try {
+    await navigator.clipboard.writeText(fileItem.path)
+    message.success('已复制远端路径。')
+  } catch {
+    message.error('复制远端路径失败。')
+  }
+}
+
+const closeRenameDialog = (): void => {
+  pendingRenameItem.value = null
+  renameInputValue.value = ''
+}
+
+const closeDeleteDialog = (): void => {
+  pendingDeleteItem.value = null
+}
+
+const renameSelectedPath = (): void => {
+  const fileItem = selectedFile.value
+  pendingRenameItem.value = fileItem
+  renameInputValue.value = fileItem.name
+}
+
+const confirmRenamePath = async (): Promise<void> => {
+  const fileItem = pendingRenameItem.value
+  const newName = normalizedRenameInput.value
+  if (!fileItem || !newName || newName === fileItem.name) {
+    closeRenameDialog()
+    return
+  }
+
+  if (!canConfirmRename.value) {
+    message.error('新名称不能包含路径分隔符。')
+    return
+  }
+
+  isPathMutating.value = true
+  try {
+    await tauriService.renameSshPath(createSshPathRenameRequest(fileItem.path, newName))
+    closeRenameDialog()
+    await loadRemoteDirectory(currentRemotePath.value)
+    message.success('远端路径已重命名。')
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '重命名远端路径失败。'
+    message.error(errorMessage)
+  } finally {
+    isPathMutating.value = false
+  }
+}
+
+const deleteSelectedPath = (): void => {
+  pendingDeleteItem.value = selectedFile.value
+}
+
+const confirmDeletePath = async (): Promise<void> => {
+  const fileItem = pendingDeleteItem.value
+  if (!fileItem) {
+    return
+  }
+
+  isPathMutating.value = true
+  try {
+    await tauriService.deleteSshPath(createSshPathDeleteRequest(fileItem.path))
+    closeDeleteDialog()
+    await loadRemoteDirectory(currentRemotePath.value)
+    message.success('远端路径已删除。')
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : '删除远端路径失败。'
+    message.error(errorMessage)
+  } finally {
+    isPathMutating.value = false
+  }
+}
+
+const validateConnectionForm = (): string | null => {
+  const host = connectionForm.host.trim()
+  const username = connectionForm.username.trim()
+  const port = Number.parseInt(connectionForm.port.trim(), 10)
+  const identityPath = connectionForm.identityPath.trim()
+
+  if (!host) {
+    return '请填写主机地址。'
+  }
+
+  if (!HOST_PATTERN.test(host)) {
+    return '主机地址只能包含字母、数字、点、短横线、下划线或冒号。'
+  }
+
+  if (!username) {
+    return '请填写用户名。'
+  }
+
+  if (!USER_PATTERN.test(username)) {
+    return '用户名只能包含字母、数字、点、短横线或下划线。'
+  }
+
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return '端口必须是 1 到 65535 之间的整数。'
+  }
+
+  if (identityPath && !SAFE_PATH_PATTERN.test(identityPath)) {
+    return '私钥路径不能包含换行符。'
+  }
+
+  return null
+}
+
+const buildSshCommand = (): string => {
+  const host = connectionForm.host.trim()
+  const username = connectionForm.username.trim()
+  const port = connectionForm.port.trim() || DEFAULT_SSH_PORT
+  const parts = ['ssh', '-p', quoteShellArg(port)]
+
+  if (connectionForm.authMode === 'key' && connectionForm.identityPath.trim()) {
+    parts.push('-i', quoteShellArg(connectionForm.identityPath))
+  }
+
+  if (username && host) {
+    parts.push(username + '@' + host)
+  }
+
+  return parts.join(' ')
+}
+
+const handleConnect = async (connectionId = MANUAL_CONNECTION_ID): Promise<void> => {
+  const validationError = validateConnectionForm()
+  if (validationError) {
+    message.error(validationError)
+    return
+  }
+
+  isConnecting.value = true
+
+  try {
+    const testResult = await tauriService.testSshConnection({
+      host: connectionForm.host.trim(),
+      port: Number.parseInt(connectionForm.port.trim(), 10),
+      username: connectionForm.username.trim(),
+      authMode: connectionForm.authMode,
+      identityPath:
+        connectionForm.authMode === 'key' ? connectionForm.identityPath.trim() || null : null,
+    })
+
+    if (!testResult.ok) {
+      if (connectionForm.authMode === 'password' && testResult.code === 'ssh/auth-failed') {
+        emit('open-terminal')
+        await new Promise((resolve) => window.setTimeout(resolve, TERMINAL_OPEN_DELAY_MS))
+        await terminalControls.sendCommand(sshCommandPreview.value)
+        isConnected.value = false
+        isConnectFormVisible.value = false
+        message.warning('已打开真实 SSH 终端，请在终端内输入密码完成认证。')
+        return
+      }
+
+      isConnected.value = false
+      message.error(testResult.message)
+      return
+    }
+
+    emit('open-terminal')
+    await new Promise((resolve) => window.setTimeout(resolve, TERMINAL_OPEN_DELAY_MS))
+    await terminalControls.sendCommand(sshCommandPreview.value)
+    applyConnectionState(connectionId)
+    await loadRemoteDirectory('.')
+    message.success('SSH 连接验证成功，已打开远端会话。')
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'SSH 连接失败。'
+    isConnected.value = false
+    message.error(errorMessage)
+  } finally {
+    isConnecting.value = false
+  }
+}
+
+const handleImportConfig = async (): Promise<void> => {
+  try {
+    const hosts = await tauriService.listSshConfigHosts()
+    if (hosts.length === 0) {
+      message.info('未在本机 SSH 配置中发现可导入主机。')
+      return
+    }
+
+    recentConnections.value = hosts.map((host) => ({
+      id: host.id,
+      name: host.name,
+      username: host.username,
+      host: host.host,
+      port: String(host.port),
+      authMode: 'key',
+      identityPath: host.identityPath ?? '',
+      lastUsedLabel: host.lastUsedLabel,
+    }))
+    message.success(`已导入 ${hosts.length} 个 SSH 配置主机。`)
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'SSH 配置导入失败。'
+    message.error(errorMessage)
+  }
+}
+
+const handleSelectRecentConnection = async (connection: ISshRecentConnection): Promise<void> => {
+  connectionForm.host = connection.host
+  connectionForm.port = connection.port
+  connectionForm.username = connection.username
+  connectionForm.authMode = connection.authMode
+  connectionForm.identityPath = connection.identityPath
+  await handleConnect(connection.id)
+}
+
+const handlePathSegmentClick = (segment: ISshPathSegment): void => {
+  if (segment.path === currentRemotePath.value || isRemoteDirectoryLoading.value) {
+    return
+  }
+
+  void loadRemoteDirectory(segment.path)
 }
 
 const handleSelectFile = (fileId: string): void => {
   selectedFileId.value = fileId
   closeContextMenu()
+
+  const fileItem = sshFileItems.value.find((item) => item.id === fileId)
+  if (fileItem?.isDirectory && !isRemoteDirectoryLoading.value) {
+    void loadRemoteDirectory(fileItem.path)
+  }
 }
 
 const handleFileContextMenu = (event: MouseEvent, fileId: string): void => {
@@ -302,6 +792,32 @@ const handleFileContextMenu = (event: MouseEvent, fileId: string): void => {
 
 const handleContextAction = (action: ISshContextAction): void => {
   const targetLabel = selectedFile.value.name
+  if (action.key === 'download') {
+    closeContextMenu()
+    void downloadSelectedFile()
+    return
+  }
+  if (action.key === 'upload') {
+    closeContextMenu()
+    void uploadFileToCurrentDirectory()
+    return
+  }
+  if (action.key === 'copy-path') {
+    closeContextMenu()
+    void copySelectedPath()
+    return
+  }
+  if (action.key === 'rename') {
+    closeContextMenu()
+    void renameSelectedPath()
+    return
+  }
+  if (action.key === 'delete') {
+    closeContextMenu()
+    void deleteSelectedPath()
+    return
+  }
+
   message.info(`${action.label}待接入：${targetLabel}`)
   closeContextMenu()
 }
@@ -311,20 +827,30 @@ const handleFooterAction = (action: TSshTransferDirection): void => {
     return
   }
 
-  message.info(action === 'upload' ? '上传待接入' : '下载待接入')
+  if (action === 'download') {
+    void downloadSelectedFile()
+    return
+  }
+
+  void uploadFileToCurrentDirectory()
 }
 
 const handleWindowClick = (event: MouseEvent): void => {
-  if (!contextMenu.open) {
-    return
-  }
-
   const target = event.target
-  if (target instanceof Node && contextMenuRef.value?.contains(target)) {
+
+  if (contextMenu.open) {
+    if (target instanceof Node && contextMenuRef.value?.contains(target)) {
+      return
+    }
+
+    closeContextMenu()
+  }
+
+  if (target instanceof Node && authSelectRef.value?.contains(target)) {
     return
   }
 
-  closeContextMenu()
+  closeAuthSelect()
 }
 
 const handleWindowContextMenu = (event: MouseEvent): void => {
@@ -342,6 +868,7 @@ const handleWindowContextMenu = (event: MouseEvent): void => {
 const handleWindowKeydown = (event: KeyboardEvent): void => {
   if (event.key === 'Escape') {
     closeContextMenu()
+    closeAuthSelect()
   }
 }
 
@@ -429,13 +956,63 @@ v-if="isConnectFormVisible" class="ssh-connect-form"
           <input v-model="connectionForm.username" type="text" placeholder="root" autocomplete="off" />
         </label>
 
-        <label class="ssh-form-group">
+        <div ref="authSelectRef" class="ssh-form-group ssh-auth-field">
           <span>认证方式</span>
-          <select v-model="connectionForm.authMode">
-            <option value="key">密钥认证</option>
-            <option value="password">密码认证</option>
-          </select>
-        </label>
+          <button
+            type="button"
+            class="ssh-auth-select-trigger"
+            :class="{ 'is-open': isAuthSelectOpen }"
+            :aria-expanded="isAuthSelectOpen"
+            aria-haspopup="listbox"
+            @click.stop="toggleAuthSelect"
+          >
+            <span class="ssh-auth-select-leading" aria-hidden="true">
+              <svg v-if="connectionForm.authMode === 'key'" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <circle cx="7.5" cy="15.5" r="3.5" />
+                <path d="M10 13l8-8" />
+                <path d="M16 7l2 2" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <rect x="4" y="10" width="16" height="10" rx="2" />
+                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+              </svg>
+            </span>
+            <span class="ssh-auth-select-copy">
+              <span class="ssh-auth-select-label">{{ selectedAuthOption.label }}</span>
+            </span>
+            <svg class="ssh-auth-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+
+          <div v-if="isAuthSelectOpen" class="ssh-auth-select-menu" role="listbox">
+            <div class="ssh-auth-select-group">认证方式</div>
+            <button
+              v-for="option in SSH_AUTH_OPTIONS"
+              :key="option.value"
+              type="button"
+              class="ssh-auth-option"
+              :class="{ 'is-selected': connectionForm.authMode === option.value }"
+              role="option"
+              :aria-selected="connectionForm.authMode === option.value"
+              @click.stop="selectAuthMode(option.value)"
+            >
+              <span class="ssh-auth-option-copy">
+                <span class="ssh-auth-option-label">{{ option.label }}</span>
+              </span>
+              <svg
+                v-if="connectionForm.authMode === option.value"
+                class="ssh-auth-option-check"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
 
         <label class="ssh-form-group">
           <span>私钥路径</span>
@@ -498,7 +1075,7 @@ viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-li
           <div class="ssh-recent-title ssh-recent-title--disconnected">最近使用</div>
 
           <button
-v-for="connection in SSH_RECENT_CONNECTIONS" :key="connection.id" type="button"
+            v-for="connection in recentConnections" :key="connection.id" type="button"
             class="ssh-recent-item ssh-recent-item--disconnected" @click="handleSelectRecentConnection(connection)">
             <span class="ssh-recent-icon ssh-recent-icon--disconnected" aria-hidden="true">
               <svg
@@ -522,20 +1099,20 @@ width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 
       <template v-else>
         <div v-if="isExplorerActive" class="ssh-path-bar" aria-label="远端路径">
-          <template v-for="(segment, index) in SSH_PATH_SEGMENTS" :key="segment.id">
+          <template v-for="(segment, index) in sshPathSegments" :key="segment.id">
             <button
 type="button" class="ssh-path-segment"
-              :class="{ 'is-current': segment.id === CURRENT_PATH_SEGMENT_ID }"
+              :class="{ 'is-current': segment.path === currentRemotePath }"
               @click="handlePathSegmentClick(segment)">
               {{ segment.label }}
             </button>
-            <span v-if="index < SSH_PATH_SEGMENTS.length - 1" class="ssh-path-separator">/</span>
+            <span v-if="index < sshPathSegments.length - 1" class="ssh-path-separator">/</span>
           </template>
         </div>
 
         <div v-if="isExplorerActive" class="ssh-file-list" role="list" aria-label="远端文件列表">
           <button
-v-for="item in SSH_FILE_ITEMS" :key="item.id" type="button" class="ssh-file-item" :class="{
+ v-for="item in sshFileItems" :key="item.id" type="button" class="ssh-file-item" :class="{
             'is-folder': item.kind === 'folder',
             'is-selected': selectedFileId === item.id,
           }" :aria-label="`${item.name}，${item.metaLabel}`" @click="handleSelectFile(item.id)"
@@ -565,7 +1142,10 @@ v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentCol
         </div>
 
         <div v-else-if="isTransferActive" class="ssh-transfer-panel" aria-label="传输任务列表">
-          <article v-for="item in SSH_TRANSFER_ITEMS" :key="item.id" class="ssh-transfer-item">
+          <div v-if="transferItems.length === 0" class="ssh-transfer-empty">
+            暂无传输任务
+          </div>
+          <article v-for="item in transferItems" :key="item.id" class="ssh-transfer-item">
             <div class="ssh-transfer-header">
               <div class="ssh-transfer-name">
                 <span class="ssh-transfer-direction" :class="`is-${item.direction}`">
@@ -582,8 +1162,8 @@ v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentCol
 
             <div class="ssh-transfer-footer">
               <span class="ssh-transfer-meta">{{ item.progressLabel }}</span>
-              <span class="ssh-transfer-meta" :class="{ 'is-success': item.status === 'done' }">
-                {{ item.status === 'done' ? '✓' : `${item.progress}%` }}
+              <span class="ssh-transfer-meta" :class="{ 'is-success': item.status === 'done', 'is-failed': item.status === 'failed' }">
+                {{ item.status === 'done' ? '✓' : item.status === 'failed' ? '失败' : '进行中' }}
               </span>
             </div>
           </article>
@@ -595,8 +1175,8 @@ v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentCol
       <button
 type="button" class="ssh-footer-button" :class="{
         'ssh-footer-button--disconnected': isDisconnected,
-        'is-disabled': isDisconnected,
-      }" :disabled="isDisconnected" title="连接后可用" @click="handleFooterAction('upload')">
+        'is-disabled': isDisconnected || isTransferBusy,
+      }" :disabled="isDisconnected || isTransferBusy" title="连接后可用" @click="handleFooterAction('upload')">
         <svg
 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
           stroke-linejoin="round" aria-hidden="true">
@@ -610,8 +1190,8 @@ viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-li
       <button
 type="button" class="ssh-footer-button" :class="{
         'ssh-footer-button--disconnected': isDisconnected,
-        'is-disabled': isDisconnected,
-      }" :disabled="isDisconnected" title="连接后可用" @click="handleFooterAction('download')">
+        'is-disabled': isDisconnected || isTransferBusy,
+      }" :disabled="isDisconnected || isTransferBusy" title="连接后可用" @click="handleFooterAction('download')">
         <svg
 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
           stroke-linejoin="round" aria-hidden="true">
@@ -666,6 +1246,48 @@ v-else-if="action.key === 'upload'" viewBox="0 0 24 24" fill="none" stroke="curr
           {{ action.label }}
         </button>
       </template>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div v-if="pendingRenameItem" class="ssh-modal-backdrop" @click.self="closeRenameDialog">
+      <form class="ssh-modal" @submit.prevent="confirmRenamePath">
+        <div class="ssh-modal-copy">
+          <h3>重命名远端项目</h3>
+          <p>为“{{ pendingRenameItem.name }}”输入新的名称。不会覆盖远端已有项目。</p>
+        </div>
+        <label class="ssh-modal-field">
+          <span>新名称</span>
+          <input v-model="renameInputValue" :disabled="isPathMutating" autocomplete="off" />
+        </label>
+        <div class="ssh-modal-actions">
+          <button type="button" class="ssh-modal-button" :disabled="isPathMutating" @click="closeRenameDialog">
+            取消
+          </button>
+          <button type="submit" class="ssh-modal-button is-primary" :disabled="!canConfirmRename || isPathMutating">
+            {{ isPathMutating ? '处理中…' : '重命名' }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div v-if="pendingDeleteItem" class="ssh-modal-backdrop" @click.self="closeDeleteDialog">
+      <section class="ssh-modal is-danger" role="alertdialog" aria-modal="true">
+        <div class="ssh-modal-copy">
+          <h3>删除远端项目？</h3>
+          <p>将删除“{{ pendingDeleteItem.name }}”。此操作不可撤销，请确认这是你想要的操作。</p>
+        </div>
+        <div class="ssh-modal-actions">
+          <button type="button" class="ssh-modal-button" :disabled="isPathMutating" @click="closeDeleteDialog">
+            取消
+          </button>
+          <button type="button" class="ssh-modal-button is-danger" :disabled="isPathMutating" @click="confirmDeletePath">
+            {{ isPathMutating ? '删除中…' : '删除' }}
+          </button>
+        </div>
+      </section>
     </div>
   </Teleport>
 </template>
@@ -1119,7 +1741,163 @@ v-else-if="action.key === 'upload'" viewBox="0 0 24 24" fill="none" stroke="curr
   flex: 0 0 70px;
 }
 
-.ssh-form-group span {
+.ssh-auth-field {
+  position: relative;
+}
+
+.ssh-auth-select-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--shell-divider) 88%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-soft) 100%, transparent);
+  padding: 0 8px;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color 120ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 120ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 120ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 120ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ssh-auth-select-trigger:hover {
+  border-color: color-mix(in srgb, var(--shell-divider) 70%, var(--text-quaternary));
+  background: color-mix(in srgb, var(--surface-soft-strong) 100%, transparent);
+}
+
+.ssh-auth-select-trigger:active {
+  transform: scale(0.99);
+}
+
+.ssh-auth-select-trigger:focus-visible,
+.ssh-auth-select-trigger.is-open {
+  border-color: color-mix(in srgb, var(--accent-strong) 72%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-strong) 30%, transparent);
+}
+
+.ssh-auth-select-leading {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+
+.ssh-auth-select-leading svg {
+  width: 14px;
+  height: 14px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.75;
+}
+
+.ssh-auth-select-copy,
+.ssh-auth-option-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.ssh-auth-select-label,
+.ssh-auth-option-label {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ssh-auth-select-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  stroke-width: 2;
+  transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1), color 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.ssh-auth-select-trigger.is-open .ssh-auth-select-chevron {
+  color: var(--text-secondary);
+  transform: rotate(180deg);
+}
+
+.ssh-auth-select-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid color-mix(in srgb, var(--shell-divider) 76%, var(--text-quaternary));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-bg) 94%, var(--sidebar-bg));
+  padding: 5px;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.36),
+    0 0 0 0.5px color-mix(in srgb, var(--text-primary) 6%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 4%, transparent);
+  transform-origin: top center;
+}
+
+.ssh-auth-select-group {
+  padding: 5px 8px 6px;
+  color: var(--text-quaternary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.ssh-auth-option {
+  display: flex;
+  width: 100%;
+  min-height: 28px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 5px 8px;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transition:
+    background-color 80ms cubic-bezier(0, 0, 0.2, 1),
+    color 80ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.ssh-auth-option:hover,
+.ssh-auth-option:focus-visible {
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  color: var(--text-primary);
+}
+
+.ssh-auth-option.is-selected {
+  background: color-mix(in srgb, var(--accent-strong) 10%, transparent);
+  color: var(--text-primary);
+}
+
+.ssh-auth-option-check {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--accent-strong);
+  stroke-width: 2.2;
+}
+
+.ssh-form-group > span {
   font-size: 11px;
   font-weight: 500;
   color: var(--text-tertiary);
@@ -1147,6 +1925,29 @@ v-else-if="action.key === 'upload'" viewBox="0 0 24 24" fill="none" stroke="curr
 .ssh-form-group select:focus {
   border-color: color-mix(in srgb, var(--accent-strong) 72%, transparent);
   background: color-mix(in srgb, var(--surface-soft-strong) 100%, transparent);
+}
+
+.ssh-command-preview {
+  display: grid;
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--shell-divider) 88%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-soft) 100%, transparent);
+  padding: 6px 8px;
+}
+
+.ssh-command-preview span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.ssh-command-preview code {
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .ssh-form-actions {
@@ -1335,6 +2136,13 @@ v-else-if="action.key === 'upload'" viewBox="0 0 24 24" fill="none" stroke="curr
   padding: 8px 12px;
 }
 
+.ssh-transfer-empty {
+  padding: 18px 10px;
+  color: var(--text-quaternary);
+  font-size: 11.5px;
+  text-align: center;
+}
+
 .ssh-transfer-item {
   margin-bottom: 6px;
   border: 1px solid color-mix(in srgb, var(--shell-divider) 92%, transparent);
@@ -1392,6 +2200,10 @@ v-else-if="action.key === 'upload'" viewBox="0 0 24 24" fill="none" stroke="curr
   color: var(--success);
 }
 
+.ssh-transfer-meta.is-failed {
+  color: var(--danger);
+}
+
 .ssh-progress-bar {
   height: 3px;
   overflow: hidden;
@@ -1406,15 +2218,34 @@ v-else-if="action.key === 'upload'" viewBox="0 0 24 24" fill="none" stroke="curr
 }
 
 .ssh-progress-fill.is-uploading {
+  width: 42% !important;
   background: linear-gradient(90deg, var(--accent-strong), color-mix(in srgb, var(--accent-strong) 72%, white));
+  animation: ssh-transfer-indeterminate 1.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }
 
 .ssh-progress-fill.is-downloading {
+  width: 42% !important;
   background: linear-gradient(90deg, #059669, var(--success));
+  animation: ssh-transfer-indeterminate 1.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }
 
 .ssh-progress-fill.is-done {
   background: var(--success);
+}
+
+.ssh-progress-fill.is-failed {
+  background: var(--danger);
+}
+
+@keyframes ssh-transfer-indeterminate {
+
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(260%);
+  }
 }
 
 .ssh-sidebar-footer {
@@ -1523,5 +2354,116 @@ v-else-if="action.key === 'upload'" viewBox="0 0 24 24" fill="none" stroke="curr
   height: 1px;
   margin: 4px 0;
   background: color-mix(in srgb, var(--shell-divider) 92%, transparent);
+}
+
+.ssh-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.ssh-modal {
+  display: grid;
+  width: min(360px, calc(100vw - 32px));
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--shell-divider) 100%, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-bg) 96%, var(--sidebar-bg));
+  box-shadow:
+    0 14px 36px rgba(0, 0, 0, 0.46),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 5%, transparent);
+  padding: 16px;
+}
+
+.ssh-modal.is-danger {
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--shell-divider));
+}
+
+.ssh-modal-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.ssh-modal-copy h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.ssh-modal-copy p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.ssh-modal-field {
+  display: grid;
+  gap: 6px;
+}
+
+.ssh-modal-field span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.ssh-modal-field input {
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--shell-divider) 88%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-soft) 100%, transparent);
+  padding: 0 9px;
+  color: var(--text-primary);
+  font: inherit;
+  outline: none;
+}
+
+.ssh-modal-field input:focus {
+  border-color: color-mix(in srgb, var(--accent-strong) 72%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-strong) 24%, transparent);
+}
+
+.ssh-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.ssh-modal-button {
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 0 11px;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ssh-modal-button:hover:not(:disabled) {
+  background: var(--surface-soft);
+  color: var(--text-primary);
+}
+
+.ssh-modal-button.is-primary {
+  background: var(--accent-strong);
+  color: #fff;
+}
+
+.ssh-modal-button.is-danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.ssh-modal-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 </style>

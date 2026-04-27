@@ -29,6 +29,7 @@
 | [ADR-20260423-B](./ADR-20260423-visual-hosting-nchittest-and-nobackground.md) | Visual Hosting resize 链路修复：边框命中与 DComp 背景层          | `accepted`   | 2026-04-23 | Window resize |
 | [ADR-20260423-C](./ADR-20260423-standard-window-resize-redirection-bitmap.md) | 回到标准 windowed hosting：redirection bitmap + 前端 resize 减载 | `accepted`   | 2026-04-23 | Window resize |
 | [ADR-20260423-W](./ADR-20260423-welcome-smil-svg.md)                          | 欢迎页改为 SMIL SVG + 受限 welcome 路由                          | `accepted`   | 2026-04-23 | Welcome       |
+| [ADR-20260425](./ADR-20260425-terminal-dual-pty.md)                           | 终端双 PTY 模型                                                  | `accepted`   | 2026-04-25 | Terminal      |
 
 ---
 

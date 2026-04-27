@@ -6,6 +6,7 @@
       :class="{ 'is-active': isActive }"
       :style="rowStyle"
       @click="handleClick"
+      @contextmenu.prevent.stop="handleContextMenu"
     >
       <span class="explorer-chevron" :class="{ 'is-placeholder': !showChevron }">
         <svg
@@ -59,6 +60,7 @@
         :search-query="searchQuery"
         @toggle-directory="$emit('toggle-directory', $event)"
         @open-file="$emit('open-file', $event)"
+        @context-menu="$emit('context-menu', $event)"
       />
     </div>
   </div>
@@ -90,6 +92,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'toggle-directory': [path: string];
   'open-file': [path: string];
+  'context-menu': [payload: { event: MouseEvent; entry: IWorkspaceEntry }];
 }>();
 
 const isDirectory = computed(() => props.entry.kind === 'directory');
@@ -133,5 +136,9 @@ const handleClick = (): void => {
   }
 
   emit('open-file', props.entry.path);
+};
+
+const handleContextMenu = (event: MouseEvent): void => {
+  emit('context-menu', { event, entry: props.entry });
 };
 </script>

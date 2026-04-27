@@ -24,6 +24,18 @@ export function emitCssVars(roles: IRoles, tokens: IComponentTokens): void {
         root.style.setProperty(name, value);
     };
 
+    // ── Linear / Woodsmoke 基础层级 ─────────────────────────────────────────
+    set('--bg-0', roles.surface.app);
+    set('--bg-1', roles.surface.sidebar);
+    set('--bg-2', roles.surface.panelDepth);
+    set('--bg-3', roles.surface.overlayDepth);
+    set('--bg-4', roles.surface.overlay);
+    set('--bg-h', roles.surface.hover);
+    set('--bg-s', roles.surface.selection);
+    set('--bg-a', roles.surface.softStrong);
+    set('--bg-code', roles.surface.editor);
+    set('--bg-gutter', roles.surface.editorGutter);
+
     // ── 布局区域 ──────────────────────────────────────────────────────────────
     set('--app-bg', tokens.layout.app.background);
     set('--titlebar-bg', tokens.layout.titlebar.background);
@@ -35,6 +47,7 @@ export function emitCssVars(roles: IRoles, tokens: IComponentTokens): void {
 
     // ── 编辑器 ────────────────────────────────────────────────────────────────
     set('--editor-bg', tokens.editor.background);
+    set('--editor-gutter-bg', tokens.editor.gutter);
     set('--editor-surface', tokens.editor.surface);
 
     // ── Tab ────────────────────────────────────────────────────────────────────
@@ -65,6 +78,7 @@ export function emitCssVars(roles: IRoles, tokens: IComponentTokens): void {
     // 注意：--accent 同时供 Tailwind bg-accent 使用；
     // 此处写入品牌值，用户偏好由 store/app.ts 在之后覆盖
     set('--accent', tokens.accent.default);
+    set('--accent-foreground', tokens.text.onAccent);
     set('--accent-strong', tokens.accent.strong);
     set('--accent-muted', tokens.accent.muted);
     set('--settings-accent', tokens.accent.default);
@@ -102,13 +116,25 @@ export function emitCssVars(roles: IRoles, tokens: IComponentTokens): void {
     //  此处同步与 L3 重叠的部分，避免 Shadcn 组件颜色漂移)
     set('--background', tokens.layout.app.background);
     set('--foreground', tokens.text.primary);
+    set('--card', tokens.layout.sidebar.background);
+    set('--card-foreground', tokens.text.primary);
+    set('--popover', tokens.overlay.background);
+    set('--popover-foreground', tokens.text.primary);
+    set('--primary', tokens.accent.default);
+    set('--primary-foreground', tokens.text.onAccent);
+    set('--secondary', tokens.editor.surface);
+    set('--secondary-foreground', tokens.text.primary);
+    set('--muted', tokens.panel.backgroundDepth);
     set('--muted-foreground', tokens.text.tertiary);
+    set('--input', tokens.border.divider);
     set('--border', tokens.border.subtle);
+    set('--ring', tokens.accent.default);
 
     // ── 调试用角色变量（可选，供自定义面板消费，生产代码不应依赖）──────────
     // 前缀 --r- 标识"仅调试/自定义"
     set('--r-surface-app', roles.surface.app);
     set('--r-surface-editor', roles.surface.editor);
+    set('--r-surface-editor-gutter', roles.surface.editorGutter);
     set('--r-surface-overlay', roles.surface.overlay);
     set('--r-accent-default', roles.accent.default);
     set('--r-text-primary', roles.text.primary);

@@ -64,8 +64,6 @@
           </svg>
         </button>
 
-        <span class="run-panel-action-divider" aria-hidden="true" />
-
         <button
           type="button"
           class="icon-button app-tooltip-target run-panel-action-button"
@@ -106,8 +104,8 @@
           :theme="props.theme"
           :terminal-settings="props.terminalSettings"
           @status-change="handleTerminalStatusChange"
-          @output="$emit('terminal-output', $event)"
-          @run-complete="$emit('terminal-run-complete', $event)"
+          @run-chunk="$emit('terminal-run-chunk', $event)"
+          @run-completed="$emit('terminal-run-completed', $event)"
         />
       </div>
 
@@ -129,6 +127,15 @@
           @submit-command="void handleSubmitCommand($event)"
         />
       </div>
+
+      <div v-if="activeTab === 'flow'" class="run-panel-view is-flow">
+        <TerminalFlowPanel
+          :terminal-status="terminalStatus"
+          :is-running="props.isRunning"
+          :terminal-output-length="props.terminalOutputLength"
+          :terminal-output-version="props.terminalOutputVersion"
+        />
+      </div>
     </div>
   </section>
 </template>
@@ -136,14 +143,15 @@
 <script setup lang="ts">
 import EmbeddedTerminal from '@/components/workbench/EmbeddedTerminal.vue';
 import StructuredRunInsights from '@/components/workbench/StructuredRunInsights.vue';
+import TerminalFlowPanel from '@/components/workbench/TerminalFlowPanel.vue';
 import { useIntegratedTerminalControls } from '@/composables/useIntegratedTerminal';
 import { useMessage } from '@/composables/useMessage';
 import type { TThemeMode } from '@/types/app';
 import type { IRunLogEntry, IRunResult, TExecutorKind } from '@/types/editor';
 import type { ITerminalSettings } from '@/types/settings';
 import type {
-    ITerminalRunCompletePayload,
-    ITerminalRunOutputEvent,
+    ITerminalRunCompletedPayload,
+    ITerminalRunChunkPayload,
     ITerminalStatusChangePayload,
 } from '@/types/terminal';
 import { toErrorMessage } from '@/utils/error';
@@ -168,17 +176,18 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   hide: [];
-  'terminal-output': [payload: ITerminalRunOutputEvent];
-  'terminal-run-complete': [payload: ITerminalRunCompletePayload];
+  'terminal-run-chunk': [payload: ITerminalRunChunkPayload];
+  'terminal-run-completed': [payload: ITerminalRunCompletedPayload];
   'toggle-maximize': [];
   'clear-logs': [];
 }>();
 
 const message = useMessage();
-const activeTab = ref<'terminal' | 'logs'>('terminal');
+const activeTab = ref<'terminal' | 'logs' | 'flow'>('terminal');
 const tabs = [
   { label: '终端', value: 'terminal' },
   { label: '运行日志', value: 'logs' },
+  { label: '事件流', value: 'flow' },
 ] as const;
 
 const terminalStatus = ref<ITerminalStatusChangePayload>({

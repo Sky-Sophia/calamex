@@ -3,7 +3,8 @@
     <div
 ref="shellRef"
       class="app-window-shell relative flex h-full flex-col overflow-hidden border border-(--shell-divider)"
-      :data-layout-resizing="layoutTransitionsEnabled ? 'false' : 'true'">
+      :data-layout-resizing="layoutTransitionsEnabled ? 'false' : 'true'"
+      :data-workbench-motion-state="motionState">
       <template v-if="isDesktopRuntime">
         <div
 v-for="handle in resizeHandles" :key="handle.direction" class="window-resize-handle"
@@ -13,15 +14,16 @@ v-for="handle in resizeHandles" :key="handle.direction" class="window-resize-han
       <slot name="titlebar" />
 
       <div
-class="relative grid min-h-0 flex-1 overflow-hidden"
-        :class="layoutTransitionsEnabled ? layoutGridTransitionClass : 'transition-none'" :style="shellGridStyle">
+        class="relative grid min-h-0 flex-1 overflow-hidden bg-(--editor-bg)"
+        :style="shellGridStyle"
+      >
         <div class="border-r border-(--shell-divider) bg-(--activity-bg)">
           <slot name="activity" />
         </div>
 
         <div
-class="app-shell-pane min-w-0 overflow-hidden bg-(--sidebar-bg)" :class="[
-          layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none',
+ref="sidebarRef" class="app-shell-pane workbench-sidebar-pane min-w-0 overflow-hidden bg-(--sidebar-bg)" :class="[
+          layoutTransitionsEnabled ? sidebarSurfaceTransitionClass : 'transition-none',
           props.sidebarVisible
             ? 'translate-x-0 border-r border-(--shell-divider) opacity-100'
             : '-translate-x-3 opacity-0 pointer-events-none',
@@ -49,7 +51,7 @@ type="button" class="terminal-resize-handle" :class="[
             </button>
 
             <section
-class="app-shell-pane min-h-0 overflow-hidden bg-(--panel-bg)" :class="[
+ref="terminalPaneRef" class="app-shell-pane min-h-0 overflow-hidden bg-(--panel-bg)" :class="[
               layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none',
               props.terminalVisible
                 ? 'translate-y-0 opacity-100'
@@ -75,6 +77,7 @@ v-if="props.contentOverlayVisible" class="pointer-events-none absolute inset-y-0
 </template>
 
 <script setup lang="ts">
+import { useWorkbenchMotion } from '@/composables/useWorkbenchMotion';
 import {
   SHELL_WINDOW_RESIZE_END_EVENT,
   SHELL_WINDOW_RESIZE_START_EVENT,
@@ -123,6 +126,8 @@ const emit = defineEmits<{
 const WINDOW_RESIZE_SETTLE_MS = 140;
 const mainRef = ref<HTMLElement | null>(null);
 const shellRef = ref<HTMLElement | null>(null);
+const sidebarRef = ref<HTMLElement | null>(null);
+const terminalPaneRef = ref<HTMLElement | null>(null);
 const layoutTransitionsEnabled = ref(true);
 let resizeObserver: ResizeObserver | null = null;
 let shellResizeObserver: ResizeObserver | null = null;
@@ -184,12 +189,22 @@ const contentOverlayStyle = computed(() => ({
   left: `${ACTIVITY_RAIL_WIDTH}px`,
 }));
 
-const layoutGridTransitionClass =
-  'transition-[grid-template-columns] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]';
 const layoutRowsTransitionClass =
   'transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]';
 const surfaceTransitionClass =
   'transition-[opacity,transform,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]';
+const sidebarSurfaceTransitionClass = surfaceTransitionClass;
+
+const setLayoutTransitionsEnabled = (enabled: boolean): void => {
+  layoutTransitionsEnabled.value = enabled;
+};
+
+const { motionState, transitionSidebar, transitionTerminal } = useWorkbenchMotion({
+  shellRef,
+  sidebarRef,
+  terminalRef: terminalPaneRef,
+  setLayoutTransitionsEnabled,
+});
 
 const scheduleLayoutTransitionRestore = (): void => {
   if (isShellWindowResizing) {
@@ -316,6 +331,7 @@ const startTerminalResize = (event: MouseEvent): void => {
   const startY = event.clientY;
   const startHeight = clampTerminalHeight(props.terminalHeight);
   layoutTransitionsEnabled.value = false;
+  window.dispatchEvent(new Event(SHELL_WINDOW_RESIZE_START_EVENT));
 
   const handleMouseMove = (moveEvent: MouseEvent): void => {
     const nextHeight = clampTerminalHeight(startHeight + (startY - moveEvent.clientY));
@@ -332,6 +348,7 @@ const startTerminalResize = (event: MouseEvent): void => {
     }
     scheduleLayoutTransitionRestore();
     terminalResizeCleanup = null;
+    window.dispatchEvent(new Event(SHELL_WINDOW_RESIZE_END_EVENT));
   };
 
   terminalResizeCleanup = stopResize;
@@ -405,6 +422,30 @@ watch(
   () => {
     scheduleTerminalViewportSync();
   },
+);
+
+watch(
+  () => props.sidebarVisible,
+  (nextVisible, previousVisible) => {
+    if (nextVisible === previousVisible) {
+      return;
+    }
+
+    void transitionSidebar(nextVisible);
+  },
+  { flush: 'pre' },
+);
+
+watch(
+  () => props.terminalVisible,
+  (nextVisible, previousVisible) => {
+    if (nextVisible === previousVisible) {
+      return;
+    }
+
+    void transitionTerminal(nextVisible);
+  },
+  { flush: 'pre' },
 );
 
 onMounted(() => {

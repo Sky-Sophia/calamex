@@ -6,7 +6,7 @@
 
     <DropdownMenuPortal>
       <DropdownMenuContent
-        class="dropdown-menu-panel z-1250 overflow-hidden outline-none"
+        class="dropdown-menu-panel motion-dropdown-surface z-1250 overflow-hidden outline-none"
         :class="{ 'is-menubar': props.variant === 'menubar' }"
         :align="contentAlign"
         :side-offset="8" :collision-padding="8" :style="{ minWidth: `${props.minWidth}px` }">
@@ -53,7 +53,7 @@
 
             <DropdownMenuPortal>
               <DropdownMenuSubContent
-                class="dropdown-menu-panel dropdown-menu-sub-panel z-1250 overflow-hidden outline-none"
+                class="dropdown-menu-panel dropdown-menu-sub-panel motion-dropdown-surface z-1250 overflow-hidden outline-none"
                 :class="{ 'is-menubar': props.variant === 'menubar' }"
                 :side-offset="6"
                 :collision-padding="8"

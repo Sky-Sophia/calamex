@@ -3,8 +3,7 @@
     <div class="grid h-10 grid-cols-[minmax(0,1fr)_minmax(240px,420px)_minmax(0,1fr)] items-center gap-3 px-3">
       <div class="flex min-w-0 items-center gap-3">
         <div class="flex h-6 w-6 items-center justify-center rounded-md bg-(--accent-muted) text-(--accent-strong)">
-          <svg
-viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8"
+          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
             <path d="M14 3v5h5" />
@@ -12,13 +11,11 @@ viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-wid
         </div>
 
         <nav class="flex min-w-0 items-center gap-1 text-[12px] text-(--text-tertiary)">
-          <AppDropdownMenu
-v-for="menu in menubarMenus" :key="menu.key" :items="menu.items" align="left"
+          <AppDropdownMenu v-for="menu in menubarMenus" :key="menu.key" :items="menu.items" align="left"
             variant="menubar" :min-width="menu.minWidth" :open="openMenuKey === menu.key"
             @update:open="handleMenuOpenChange(menu.key, $event)" @select="handleMenuSelect(menu.key, $event)">
             <template #trigger="{ open }">
-              <button
-type="button" class="menubar-menu-item" :class="{ 'is-open': open }" data-no-window-drag
+              <button type="button" class="menubar-menu-item" :class="{ 'is-open': open }" data-no-window-drag
                 @mouseenter="handleMenuTriggerMouseEnter(menu.key)">
                 {{ menu.label }}
               </button>
@@ -27,26 +24,64 @@ type="button" class="menubar-menu-item" :class="{ 'is-open': open }" data-no-win
         </nav>
       </div>
 
-      <div class="flex justify-center" @dblclick="handleToggleMaximize">
-        <div class="window-command-bar w-full justify-center text-[12px]">
-          <svg
-viewBox="0 0 24 24" class="h-4 w-4 text-(--text-quaternary)" fill="none" stroke="currentColor"
+      <div ref="commandPaletteRef" class="relative flex justify-center" data-no-window-drag @dblclick.stop>
+        <button v-if="!isCommandPaletteOpen" type="button" class="window-command-bar w-full justify-center text-[12px]"
+          aria-label="打开命令面板" aria-haspopup="dialog" :aria-expanded="isCommandPaletteOpen" data-no-window-drag
+          @click="openCommandPalette">
+          <svg viewBox="0 0 24 24" class="h-4 w-4 text-(--text-quaternary)" fill="none" stroke="currentColor"
             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="6.5" />
             <path d="M20 20l-3.5-3.5" />
           </svg>
-          <span class="truncate">Calamex</span>
+          <span class="window-command-bar-placeholder truncate"></span>
+        </button>
+
+        <div v-else class="titlebar-command-palette" role="dialog" aria-label="命令面板" data-no-window-drag>
+          <label class="titlebar-command-palette-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="6.5" />
+              <path d="M20 20l-3.5-3.5" />
+            </svg>
+            <input ref="commandPaletteInputRef" v-model="commandPaletteQuery" type="text" placeholder="输入命令或搜索…"
+              autocomplete="off" @keydown.down.prevent="moveCommandPaletteActive(1)"
+              @keydown.up.prevent="moveCommandPaletteActive(-1)"
+              @keydown.enter.prevent="executeActiveCommandPaletteAction" @keydown.esc.prevent="closeCommandPalette" />
+          </label>
+
+          <div class="titlebar-command-palette-body" role="listbox" aria-label="可用命令">
+            <template v-if="filteredCommandPaletteActions.length > 0">
+              <button v-for="(action, index) in filteredCommandPaletteActions" :key="action.id" type="button"
+                class="titlebar-command-palette-item"
+                :class="{ 'is-active': index === commandPaletteActiveIndex, 'is-disabled': action.disabled }"
+                role="option" :aria-selected="index === commandPaletteActiveIndex" :disabled="action.disabled"
+                @mouseenter="commandPaletteActiveIndex = index" @click="executeCommandPaletteAction(action)">
+                <span class="titlebar-command-palette-icon" aria-hidden="true">
+                  <LinearContextMenuIcon :icon="action.icon" />
+                </span>
+                <span class="titlebar-command-palette-main">
+                  <span class="titlebar-command-palette-label">{{ action.label }}</span>
+                </span>
+                <span class="titlebar-command-palette-shortcut">{{ action.shortcutLabel }}</span>
+              </button>
+            </template>
+            <div v-else class="titlebar-command-palette-empty">未找到匹配命令</div>
+          </div>
+
+          <div class="titlebar-command-palette-footer" aria-hidden="true">
+            <span><kbd>↑</kbd><kbd>↓</kbd> 导航</span>
+            <span><kbd>↵</kbd> 执行</span>
+            <span class="ml-auto"><kbd>Esc</kbd> 关闭</span>
+          </div>
         </div>
       </div>
 
       <div class="flex min-w-0 items-center justify-end gap-2">
-        <button
-type="button" class="icon-button relative app-tooltip-target border border-transparent"
+        <button type="button" class="icon-button relative app-tooltip-target border border-transparent"
           :class="terminalToggleButtonClass" :disabled="!isDesktopRuntime"
           :data-tooltip="isTerminalToggleDisabled ? undefined : terminalToggleTooltip" data-tooltip-placement="bottom"
           :aria-label="terminalToggleTooltip" @click="toggleTerminalVisibility">
-          <svg
-viewBox="0 0 16 16" aria-hidden="true" class="h-4 w-4" fill="none" stroke="currentColor"
+          <svg viewBox="0 0 16 16" aria-hidden="true" class="h-4 w-4" fill="none" stroke="currentColor"
             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M2.5 3.5h11a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z" />
             <path d="m5.2 7 1.6 1.4-1.6 1.4" />
@@ -54,17 +89,13 @@ viewBox="0 0 16 16" aria-hidden="true" class="h-4 w-4" fill="none" stroke="curre
           </svg>
         </button>
 
-        <span
-class="app-tooltip-target inline-flex" :data-tooltip="isRunButtonDisabled ? undefined : runButtonTooltip"
+        <span class="app-tooltip-target inline-flex" :data-tooltip="isRunButtonDisabled ? undefined : runButtonTooltip"
           data-tooltip-placement="bottom">
-          <button
-type="button" class="titlebar-run-button" :disabled="isRunButtonDisabled" aria-label="运行脚本"
+          <button type="button" class="titlebar-run-button" :disabled="isRunButtonDisabled" aria-label="运行脚本"
             @click="$emit('run')">
-            <svg
-xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 16 16"
+            <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 16 16"
               class="titlebar-run-icon h-5 w-5" aria-hidden="true">
-              <path
-fill="currentColor"
+              <path fill="currentColor"
                 d="M4.506 3.503L12.501 8l-8 4.5zm-.004-1.505C3.718 1.998 3 2.626 3 3.5v9c0 .874.718 1.502 1.502 1.502c.245 0 .496-.061.733-.195l8-4.5c1.019-.573 1.019-2.041 0-2.615l-8-4.499a1.5 1.5 0 0 0-.733-.195" />
             </svg>
           </button>
@@ -75,32 +106,27 @@ fill="currentColor"
         </span>
 
         <div v-if="isDesktopRuntime" class="ml-1 flex items-center gap-0.5">
-          <button
-class="window-control-button app-tooltip-target" type="button" aria-label="最小化" data-tooltip="最小化"
+          <button class="window-control-button app-tooltip-target" type="button" aria-label="最小化" data-tooltip="最小化"
             data-tooltip-placement="bottom" @click="handleMinimize">
             <svg viewBox="0 0 10 10" aria-hidden="true" class="h-3.5 w-3.5">
               <path d="M1 5h8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.2" />
             </svg>
           </button>
 
-          <button
-class="window-control-button app-tooltip-target" type="button"
+          <button class="window-control-button app-tooltip-target" type="button"
             :aria-label="isMaximized ? '向下还原' : '最大化'" :data-tooltip="isMaximized ? '向下还原' : '最大化'"
             data-tooltip-placement="bottom" @click="handleToggleMaximize">
             <svg v-if="!isMaximized" viewBox="0 0 10 10" aria-hidden="true" class="h-3.5 w-3.5">
-              <rect
-x="1.5" y="1.5" width="7" height="7" fill="none" rx="0.5" stroke="currentColor"
+              <rect x="1.5" y="1.5" width="7" height="7" fill="none" rx="0.5" stroke="currentColor"
                 stroke-width="1.1" />
             </svg>
             <svg v-else viewBox="0 0 10 10" aria-hidden="true" class="h-3.5 w-3.5">
-              <path
-d="M3 1.5h5.5V7M7 3H1.5v5.5H7z" fill="none" stroke="currentColor" stroke-linejoin="round"
+              <path d="M3 1.5h5.5V7M7 3H1.5v5.5H7z" fill="none" stroke="currentColor" stroke-linejoin="round"
                 stroke-width="1.1" />
             </svg>
           </button>
 
-          <button
-class="window-control-button app-tooltip-target" type="button" aria-label="关闭" data-tooltip="关闭"
+          <button class="window-control-button app-tooltip-target" type="button" aria-label="关闭" data-tooltip="关闭"
             data-tooltip-placement="bottom" @click="$emit('close-request')">
             <svg viewBox="0 0 10 10" aria-hidden="true" class="h-3.5 w-3.5">
               <path d="M2 2l6 6M8 2L2 8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.2" />
@@ -114,12 +140,14 @@ class="window-control-button app-tooltip-target" type="button" aria-label="关�
 
 <script setup lang="ts">
 import AppDropdownMenu from '@/components/common/AppDropdownMenu.vue';
+import LinearContextMenuIcon from '@/components/common/LinearContextMenuIcon.vue';
+import type { TLinearContextMenuIcon } from '@/components/common/linear-context-menu.types';
 import { useMessage } from '@/composables/useMessage';
 import type { TThemeMode, TWorkbenchSidebarView } from '@/types/app';
 import type { ICommandTemplate } from '@/types/editor';
 import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
 import type { UnlistenFn } from '@tauri-apps/api/event';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 type TTitlebarMenuKey = 'file' | 'edit' | 'view' | 'select' | 'goto' | 'terminal' | 'help';
 const RESIZE_EDGE_PX = 4;
@@ -142,6 +170,19 @@ interface ITitlebarMenuDefinition {
   label: string;
   minWidth: number;
   items: ITitlebarMenuItem[];
+}
+
+interface ICommandPaletteAction {
+  id: string;
+  menuKey: TTitlebarMenuKey;
+  itemKey: string;
+  label: string;
+  groupLabel: string;
+  shortcut?: string;
+  disabled: boolean;
+  searchText: string;
+  icon: TLinearContextMenuIcon;
+  shortcutLabel: string;
 }
 
 const props = defineProps<{
@@ -183,6 +224,11 @@ const emit = defineEmits<{
 const message = useMessage();
 const isMaximized = ref(false);
 const openMenuKey = ref<TTitlebarMenuKey | null>(null);
+const isCommandPaletteOpen = ref(false);
+const commandPaletteQuery = ref('');
+const commandPaletteActiveIndex = ref(0);
+const commandPaletteRef = ref<HTMLElement | null>(null);
+const commandPaletteInputRef = ref<HTMLInputElement | null>(null);
 
 const currentDocumentLabel = computed(() => {
   if (!props.hasActiveDocument) {
@@ -482,6 +528,149 @@ const menubarMenus = computed<ITitlebarMenuDefinition[]>(() => [
   { key: 'help', label: '帮助', minWidth: 220, items: helpMenuItems.value },
 ]);
 
+
+const DEFAULT_COMMAND_PALETTE_SHORTCUT = 'Enter';
+
+const resolveCommandPaletteIcon = (menuKey: TTitlebarMenuKey, itemKey: string): TLinearContextMenuIcon => {
+  if (itemKey.includes('undo')) return 'undo';
+  if (itemKey.includes('redo')) return 'redo';
+  if (itemKey.includes('format')) return 'format';
+  if (itemKey.includes('find') || itemKey.includes('search')) return 'search';
+  if (itemKey.includes('goto') || itemKey.includes('navigate') || itemKey.includes('problem')) return 'goto';
+  if (itemKey.includes('terminal')) return 'command';
+  if (itemKey.includes('run') || itemKey.includes('task')) return 'command';
+  if (itemKey.includes('theme')) return 'check';
+  if (itemKey.includes('save')) return 'check';
+  if (itemKey.includes('open')) return 'open-external';
+  if (itemKey.includes('new')) return 'plus';
+  if (itemKey.includes('close')) return 'minus';
+  if (itemKey.includes('cut')) return 'cut';
+  if (itemKey.includes('copy')) return 'copy';
+  if (itemKey.includes('paste')) return 'paste';
+  if (itemKey.includes('select')) return 'select-all';
+  if (itemKey.includes('template') || itemKey.includes('comment')) return 'comment';
+  if (menuKey === 'help') return 'link';
+  return 'command';
+};
+
+const resolveCommandPaletteShortcut = (shortcut: string | undefined): string =>
+  shortcut && shortcut.trim().length > 0 ? shortcut : DEFAULT_COMMAND_PALETTE_SHORTCUT;
+
+const commandPaletteActions = computed<ICommandPaletteAction[]>(() =>
+  menubarMenus.value.flatMap((menu) =>
+    menu.items.flatMap((item) => {
+      if (item.children?.length) {
+        return item.children.map((child) => ({
+          id: `${menu.key}:${child.key}`,
+          menuKey: menu.key,
+          itemKey: child.key,
+          label: child.label,
+          groupLabel: `${menu.label} / ${item.label}`,
+          shortcut: child.shortcut,
+          disabled: Boolean(item.disabled || child.disabled),
+          icon: resolveCommandPaletteIcon(menu.key, child.key),
+          shortcutLabel: resolveCommandPaletteShortcut(child.shortcut),
+          searchText: `${child.label} ${item.label} ${menu.label} ${child.shortcut ?? ''}`.toLowerCase(),
+        }));
+      }
+
+      return [{
+        id: `${menu.key}:${item.key}`,
+        menuKey: menu.key,
+        itemKey: item.key,
+        label: item.label,
+        groupLabel: menu.label,
+        shortcut: item.shortcut,
+        disabled: Boolean(item.disabled),
+        icon: resolveCommandPaletteIcon(menu.key, item.key),
+        shortcutLabel: resolveCommandPaletteShortcut(item.shortcut),
+        searchText: `${item.label} ${menu.label} ${item.shortcut ?? ''}`.toLowerCase(),
+      }];
+    }),
+  ),
+);
+
+const normalizedCommandPaletteQuery = computed(() => commandPaletteQuery.value.trim().toLowerCase());
+
+const filteredCommandPaletteActions = computed(() => {
+  const query = normalizedCommandPaletteQuery.value;
+  if (!query) {
+    return commandPaletteActions.value;
+  }
+
+  return commandPaletteActions.value.filter((action) => action.searchText.includes(query));
+});
+const openCommandPalette = (): void => {
+  closeMenubarMenus();
+  isCommandPaletteOpen.value = true;
+};
+
+const closeCommandPalette = (): void => {
+  isCommandPaletteOpen.value = false;
+  commandPaletteQuery.value = '';
+  commandPaletteActiveIndex.value = 0;
+};
+
+const moveCommandPaletteActive = (delta: number): void => {
+  const enabledActions = filteredCommandPaletteActions.value.filter((action) => !action.disabled);
+  if (enabledActions.length === 0) {
+    commandPaletteActiveIndex.value = 0;
+    return;
+  }
+
+  const currentAction = filteredCommandPaletteActions.value[commandPaletteActiveIndex.value];
+  const currentEnabledIndex = currentAction
+    ? enabledActions.findIndex((action) => action.id === currentAction.id)
+    : -1;
+  const nextEnabledIndex = (currentEnabledIndex + delta + enabledActions.length) % enabledActions.length;
+  const nextAction = enabledActions[nextEnabledIndex];
+  const nextIndex = nextAction
+    ? filteredCommandPaletteActions.value.findIndex((action) => action.id === nextAction.id)
+    : 0;
+  commandPaletteActiveIndex.value = Math.max(nextIndex, 0);
+};
+
+const executeCommandPaletteAction = (action: ICommandPaletteAction): void => {
+  if (action.disabled) {
+    return;
+  }
+
+  closeCommandPalette();
+  handleMenuSelect(action.menuKey, action.itemKey);
+};
+
+const executeActiveCommandPaletteAction = (): void => {
+  const action = filteredCommandPaletteActions.value[commandPaletteActiveIndex.value];
+  if (!action) {
+    return;
+  }
+
+  executeCommandPaletteAction(action);
+};
+
+const handleDocumentPointerDown = (event: PointerEvent): void => {
+  if (!isCommandPaletteOpen.value) {
+    return;
+  }
+
+  const target = event.target;
+  if (target instanceof Node && commandPaletteRef.value?.contains(target)) {
+    return;
+  }
+
+  closeCommandPalette();
+};
+
+const handleDocumentKeyDown = (event: KeyboardEvent): void => {
+  const isCommandPaletteShortcut = (event.metaKey || event.ctrlKey) && (event.key === 'k' || event.key === 'p');
+  if (!isCommandPaletteShortcut) {
+    return;
+  }
+
+  event.preventDefault();
+  openCommandPalette();
+};
+
 const resolveMenuItemLabel = (menuKey: TTitlebarMenuKey, itemKey: string): string =>
   menubarMenus.value.find((menu) => menu.key === menuKey)?.items.find((item) => item.key === itemKey)?.label ?? itemKey;
 
@@ -624,6 +813,9 @@ const handleViewAction = (key: string): void => {
   }
 
   switch (key) {
+    case 'command-palette':
+      openCommandPalette();
+      return;
     case 'toggle-terminal':
       toggleTerminalVisibility();
       return;
@@ -814,8 +1006,35 @@ const handleStartWindowDrag = async (event: MouseEvent): Promise<void> => {
   }
 };
 
+watch(isCommandPaletteOpen, (open) => {
+  if (!open) {
+    return;
+  }
+
+  void nextTick(() => {
+    commandPaletteInputRef.value?.focus();
+  });
+});
+
+watch(filteredCommandPaletteActions, (actions) => {
+  if (actions.length === 0) {
+    commandPaletteActiveIndex.value = 0;
+    return;
+  }
+
+  if (commandPaletteActiveIndex.value >= actions.length) {
+    commandPaletteActiveIndex.value = actions.findIndex((action) => !action.disabled);
+  }
+
+  if (commandPaletteActiveIndex.value < 0) {
+    commandPaletteActiveIndex.value = 0;
+  }
+});
+
 onMounted(async () => {
   isTitlebarUnmounted = false;
+  document.addEventListener('pointerdown', handleDocumentPointerDown);
+  document.addEventListener('keydown', handleDocumentKeyDown);
 
   if (!props.isDesktopRuntime) {
     return;
@@ -843,8 +1062,16 @@ onMounted(async () => {
   unlistenResize = nextUnlistenResize;
 });
 
+defineExpose<{
+  openCommandPalette: () => void;
+}>({
+  openCommandPalette,
+});
+
 onBeforeUnmount(() => {
   isTitlebarUnmounted = true;
+  document.removeEventListener('pointerdown', handleDocumentPointerDown);
+  document.removeEventListener('keydown', handleDocumentKeyDown);
 
   if (unlistenResize) {
     unlistenResize();

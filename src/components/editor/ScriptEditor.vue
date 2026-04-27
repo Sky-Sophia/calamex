@@ -35,6 +35,7 @@ interface IEditorExpose {
   focusEditor: () => void;
   insertSnippet: (snippet: string) => void;
   revealPosition: (line: number, column: number) => void;
+  layoutEditor: () => void;
 }
 
 const VIEW_STATE_SAVE_DEBOUNCE_MS = 500;
@@ -68,6 +69,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: string];
   'cursor-position-change': [line: number, column: number];
   'format-request': [];
+  'command-palette-request': [];
 }>();
 
 let editorInstance: monaco.editor.IStandaloneCodeEditor | null = null;
@@ -86,6 +88,9 @@ const {
   getEditor: () => editorInstance,
   onFormatRequest: () => {
     emit('format-request');
+  },
+  onCommandPaletteRequest: () => {
+    emit('command-palette-request');
   },
 });
 
@@ -170,7 +175,7 @@ let editorLayoutFrameId: number | null = null;
 let shellCompletionRegistrationTimerId: number | null = null;
 let shellCompletionRegistrationPromise: Promise<void> | null = null;
 let previousContainerSize = { width: 0, height: 0 };
-let gitDecorationIds: string[] = [];
+let gitDecorationsCollection: monaco.editor.IEditorDecorationsCollection | null = null;
 let viewStateSaveTimerId: number | null = null;
 let isShellWindowResizing = false;
 let pendingEditorLayoutAfterWindowResize = false;
@@ -291,13 +296,25 @@ const buildGitDecorations = (): monaco.editor.IModelDeltaDecoration[] => {
   });
 };
 
-const syncGitDecorations = (): void => {
+const getGitDecorationsCollection = (): monaco.editor.IEditorDecorationsCollection | null => {
   if (!editorInstance) {
-    gitDecorationIds = [];
+    return null;
+  }
+
+  if (!gitDecorationsCollection) {
+    gitDecorationsCollection = editorInstance.createDecorationsCollection();
+  }
+
+  return gitDecorationsCollection;
+};
+
+const syncGitDecorations = (): void => {
+  const collection = getGitDecorationsCollection();
+  if (!collection) {
     return;
   }
 
-  gitDecorationIds = editorInstance.deltaDecorations(gitDecorationIds, buildGitDecorations());
+  collection.set(buildGitDecorations());
 };
 
 const layoutEditor = (): void => {
@@ -629,9 +646,8 @@ onBeforeUnmount(() => {
     monaco.editor.setModelMarkers(model, 'shellcheck', []);
   }
 
-  if (editorInstance) {
-    gitDecorationIds = editorInstance.deltaDecorations(gitDecorationIds, []);
-  }
+  gitDecorationsCollection?.clear();
+  gitDecorationsCollection = null;
 
   resizeObserver?.disconnect();
   resizeObserver = null;
@@ -694,5 +710,6 @@ defineExpose<IEditorExpose>({
   focusEditor,
   insertSnippet,
   revealPosition,
+  layoutEditor,
 });
 </script>

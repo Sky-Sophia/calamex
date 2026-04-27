@@ -1,7 +1,7 @@
 {
     "$schema": "../gen/schemas/desktop-schema.json",
     "identifier": "git",
-    "description": "Git 域能力：仓库状态查询、文件基线读取、暂存/取消暂存、提交。对应命令：get_git_repository_status / get_git_file_baseline / stage_git_paths / unstage_git_paths / commit_git_index / init_git_repository。参见 ADR-0005。注意：commit_git_index 为写操作，前端调用前 MUST 经用户确认。",
+    "description": "Git 域能力：仓库状态查询、文件基线读取、暂存/取消暂存、提交。对应命令：get_git_repository_status / get_git_file_baseline / stage_git_paths / unstage_git_paths / discard_git_paths / commit_git_index / init_git_repository。参见 ADR-0005。注意：commit_git_index 为写操作，前端调用前 MUST 经用户确认。",
     "windows": [
         "main"
     ],

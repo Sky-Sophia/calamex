@@ -1,16 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <!--
-    Calamex — small-size icon (16/20/24/32 px)
-    Design intent: preserve the "three-stroke descending rhythm" identity at pixel scale.
-    Dropped (intentionally, for small-size legibility):
-      - 22° rotation  → all edges pixel-aligned
-      - mainGradient  → flat midpoint color (gradient invisible at 4px bar width)
-      - highlight + shadow → invisible at small size, only add fuzz
-    Keep: three parallel bars, descending length, centered vertically, brand blue-purple.
-  -->
-  <g fill="#7380EB">
-    <rect x="4"  y="4"  width="4" height="16" rx="1"/>
-    <rect x="10" y="6"  width="4" height="12" rx="1"/>
-    <rect x="16" y="8"  width="4" height="8"  rx="1"/>
+  <g fill="#5E6AD2">
+    <rect x="4"  y="4" width="4" height="16" rx="1"/>
+    <rect x="10" y="6" width="4" height="12" rx="1"/>
+    <rect x="16" y="8" width="4" height="8"  rx="1"/>
   </g>
 </svg>

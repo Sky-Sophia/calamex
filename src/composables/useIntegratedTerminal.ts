@@ -1,21 +1,27 @@
 /**
  * src/composables/useIntegratedTerminal.ts
- * UI 适配器层（<=200 行）— 负责 Vue 生命周期绑定 / DOM 挂载 / 响应式 watcher。
- * 所有终端会话逻辑由 TerminalSession（src/terminal/session.ts）封装。
- *
+ * UI 层薄封装：负责 Vue 生命周期 / DOM 挂载 / watcher。
+ * 终端状态与事件编排收口在 TerminalSession（src/terminal/session.ts）。
  * R-18.4.1 / R-20.2.1 / R-20.2.3
  */
 import { tauriService } from '@/services/tauri';
+import { useTerminalFacade } from '@/services/terminal/facade';
 import { useEditorStore } from '@/store/editor';
+import { useTerminalRuntimeStore } from '@/store/terminal';
 import { useTerminalRegistryStore } from '@/terminal/registry';
+import type { ITerminalSessionCallbacks } from '@/terminal/session';
 import type { TThemeMode } from '@/types/app';
 import type { ITerminalSettings } from '@/types/settings';
 import type {
-  ITerminalRunCompletePayload,
-  ITerminalRunOutputEvent,
+  ITerminalDataEvent,
+  ITerminalBufferDiagnostic,
+  ITerminalRunCompletedPayload,
+  ITerminalRunChunkPayload,
   ITerminalStatusChangePayload,
+  ITerminalVisualWritePayload,
 } from '@/types/terminal';
 import { DEFAULT_TERMINAL_SESSION_ID } from '@/types/terminal';
+import { storeToRefs } from 'pinia';
 import {
   nextTick,
   onBeforeUnmount,
@@ -25,8 +31,9 @@ import {
   watch,
   type Ref,
 } from 'vue';
+import { toErrorMessage } from '@/utils/error';
 
-// --- 选项类型 ---
+// --- 类型定义 ---
 
 type TUseIntegratedTerminalOptions = {
   settings: Ref<ITerminalSettings>;
@@ -34,15 +41,18 @@ type TUseIntegratedTerminalOptions = {
   theme: Ref<TThemeMode>;
   sessionId?: string;
   onStatusChange?: (payload: ITerminalStatusChangePayload) => void;
-  onOutput?: (payload: ITerminalRunOutputEvent) => void;
-  onRunComplete?: (payload: ITerminalRunCompletePayload) => void;
+  onOutput?: (payload: ITerminalRunChunkPayload) => void;
+  onRunCompleted?: (payload: ITerminalRunCompletedPayload) => void;
+  onTerminalData?: (payload: ITerminalDataEvent) => void;
+  onVisualWrite?: (payload: ITerminalVisualWritePayload) => void;
+  onBufferDiagnostic?: (payload: ITerminalBufferDiagnostic) => void;
 };
 
-// --- 对外只读状态钩子 ---
+// --- 共享状态钩子 ---
 
 /**
- * 读取当前活跃终端会话的连接状态。
- * registry 持有该 ref，无论 session 是否已创建均返回相同的响应式对象（Fix-3）。
+ * 返回集成终端连接状态。
+ * registry 持有共享 ref，保证 session 创建前后读取同一份状态。
  */
 export const useIntegratedTerminalStatus = () => {
   const registry = useTerminalRegistryStore();
@@ -54,16 +64,23 @@ export const useIntegratedTerminalStatus = () => {
 };
 
 /**
- * 读取当前活跃终端会话的完整控制接口。
- * status/statusMessage 永远与 session 同源（经 registry refs）；action 在调用时惰性查找 session。
+ * 返回集成终端控制器。
+ * status/statusMessage 始终来自 registry refs，actions 转发到当前 session。
  */
 export const useIntegratedTerminalControls = () => {
   const registry = useTerminalRegistryStore();
+  const editorStore = useEditorStore();
+  const terminalFacade = useTerminalFacade();
   const { status, statusMessage } = registry.getStatusRefs(DEFAULT_TERMINAL_SESSION_ID);
+  const resolveActiveRunId = (): string | null =>
+    editorStore.pendingTerminalRunId ?? editorStore.activeRunSummary?.runId ?? null;
+  const shouldFallbackToInteractiveInterrupt = (error: unknown): boolean =>
+    toErrorMessage(error, '').includes('\u4e0d\u652f\u6301\u5e26\u5916\u53d6\u6d88');
+
   return {
     status: readonly(status),
     statusMessage: readonly(statusMessage),
-    // session payload 在 connect 前为 null，这是正常语义
+    // session payload 在 connect 前为 null，这是正常状态。
     get session() {
       const s = registry.get(DEFAULT_TERMINAL_SESSION_ID);
       return s ? readonly(s.session) : readonly(ref(null));
@@ -75,6 +92,17 @@ export const useIntegratedTerminalControls = () => {
       await registry.get(DEFAULT_TERMINAL_SESSION_ID)?.clearScreen();
     },
     interrupt: async (): Promise<void> => {
+      const runId = resolveActiveRunId();
+      if (editorStore.isRunning && runId) {
+        try {
+          await terminalFacade.cancelRun(runId, 'graceful');
+          return;
+        } catch (error) {
+          if (!shouldFallbackToInteractiveInterrupt(error)) {
+            throw error;
+          }
+        }
+      }
       await registry.get(DEFAULT_TERMINAL_SESSION_ID)?.interrupt();
     },
     sendCommand: async (command: string): Promise<void> => {
@@ -83,6 +111,8 @@ export const useIntegratedTerminalControls = () => {
     copySelection: async (): Promise<void> => {
       await registry.get(DEFAULT_TERMINAL_SESSION_ID)?.copySelection();
     },
+    getSelectionText: (): string =>
+      registry.get(DEFAULT_TERMINAL_SESSION_ID)?.getSelectionText() ?? '',
     pasteFromClipboard: async (): Promise<void> => {
       await registry.get(DEFAULT_TERMINAL_SESSION_ID)?.pasteFromClipboard();
     },
@@ -101,23 +131,51 @@ export const useIntegratedTerminal = ({
   sessionId = DEFAULT_TERMINAL_SESSION_ID,
   onStatusChange,
   onOutput,
-  onRunComplete,
+  onRunCompleted,
+  onTerminalData,
+  onVisualWrite,
+  onBufferDiagnostic,
 }: TUseIntegratedTerminalOptions) => {
   const editorStore = useEditorStore();
+  const runtimeStore = useTerminalRuntimeStore();
+  const { showRunSeparator, deepDiagnosticsEnabled } = storeToRefs(runtimeStore);
   const registry = useTerminalRegistryStore();
   const hostRef = ref<HTMLElement | null>(null);
+  const buildSessionCallbacks = (): ITerminalSessionCallbacks => ({
+    onStatusChange,
+    onOutput,
+    onRunCompleted,
+    onInputRoute: (payload) => {
+      runtimeStore.recordInputRoute(payload.route, payload.data);
+    },
+    onTerminalData: (payload) => {
+      runtimeStore.recordTerminalData(payload);
+      onTerminalData?.(payload);
+    },
+    onVisualWrite: (payload) => {
+      runtimeStore.recordVisualWrite(payload);
+      onVisualWrite?.(payload);
+    },
+    onBufferDiagnostic: deepDiagnosticsEnabled.value
+      ? (payload) => {
+          runtimeStore.recordBufferDiagnostic(payload);
+          onBufferDiagnostic?.(payload);
+        }
+      : undefined,
+  });
 
-  // 同步创建/获取会话（setup 阶段即可被 useIntegratedTerminalStatus 读取）
+  // 同步创建/获取会话，使 setup 阶段即可被 useIntegratedTerminalStatus 读取。
   const session = registry.getOrCreate({
     sessionId,
     tauriService,
     resetOrphanedBackendSession: !editorStore.isRunning,
-    onStatusChange,
-    onOutput,
-    onRunComplete,
+    ...buildSessionCallbacks(),
   });
-  // 每次 composable 被调用时更新回调（组件重挂载场景）
-  session.updateCallbacks({ onStatusChange, onOutput, onRunComplete });
+  // 每次 composable 被调用时更新回调，覆盖组件重挂载场景。
+  session.updateCallbacks({
+    ...buildSessionCallbacks(),
+  });
+  session.setRunSeparatorVisible(showRunSeparator.value);
 
   // --- 生命周期 ---
 
@@ -163,7 +221,23 @@ export const useIntegratedTerminal = ({
     { flush: 'sync', immediate: true },
   );
 
-  // --- 返回值 ---
+  watch(
+    showRunSeparator,
+    (visibleSeparator) => {
+      session.setRunSeparatorVisible(visibleSeparator);
+    },
+    { flush: 'sync' },
+  );
+
+  watch(
+    deepDiagnosticsEnabled,
+    () => {
+      session.updateCallbacks(buildSessionCallbacks());
+    },
+    { flush: 'sync' },
+  );
+
+  // --- 对外 API ---
 
   return {
     hostRef,

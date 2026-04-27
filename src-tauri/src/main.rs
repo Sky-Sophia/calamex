@@ -2,14 +2,18 @@
 
 mod commands;
 mod error;
+mod terminal;
 
 use commands::{
-    analyze_script, apply_window_stage, begin_startup_transition, close_terminal_session,
-    commit_git_index, detect_execution_environment, dispatch_script_to_terminal,
-    ensure_terminal_session, finalize_startup_transition, format_script, get_git_file_baseline,
-    get_git_repository_status, get_startup_workspace, init_git_repository, list_workspace_entries,
-    load_image_asset, load_script, resize_terminal_session, save_script, set_window_background,
-    shutdown_all_terminal_sessions, stage_git_paths, unstage_git_paths, write_terminal_input,
+    analyze_script, apply_window_stage, begin_startup_transition, cancel_terminal_run,
+    close_terminal_session, commit_git_index, create_workspace_path, delete_ssh_path,
+    delete_workspace_path, detect_execution_environment, discard_git_paths,
+    dispatch_script_to_terminal, download_ssh_file, ensure_terminal_session,
+    finalize_startup_transition, format_script, get_git_file_baseline, get_git_repository_status,
+    init_git_repository, list_ssh_config_hosts, list_ssh_directory, list_workspace_entries,
+    load_image_asset, load_script, rename_ssh_path, rename_workspace_path, resize_terminal_session,
+    save_script, search_workspace, set_window_background, shutdown_all_terminal_sessions,
+    stage_git_paths, test_ssh_connection, unstage_git_paths, upload_ssh_file, write_terminal_input,
     TerminalSessionState,
 };
 use std::time::Duration;
@@ -67,6 +71,10 @@ fn main() {
             }
         })
         .setup(|app| {
+            terminal::registry::registry()
+                .event_bus
+                .attach_app(app.handle().clone());
+
             for webview_window in app.webview_windows().into_values() {
                 disable_webview_default_context_menu(&webview_window);
             }
@@ -104,7 +112,6 @@ fn main() {
             set_window_background,
             begin_startup_transition,
             finalize_startup_transition,
-            get_startup_workspace,
             load_script,
             load_image_asset,
             save_script,
@@ -113,16 +120,29 @@ fn main() {
             detect_execution_environment,
             dispatch_script_to_terminal,
             list_workspace_entries,
+            create_workspace_path,
+            rename_workspace_path,
+            delete_workspace_path,
+            search_workspace,
             get_git_repository_status,
             init_git_repository,
             get_git_file_baseline,
             stage_git_paths,
             unstage_git_paths,
+            discard_git_paths,
             commit_git_index,
             ensure_terminal_session,
+            cancel_terminal_run,
             write_terminal_input,
             resize_terminal_session,
-            close_terminal_session
+            close_terminal_session,
+            test_ssh_connection,
+            list_ssh_config_hosts,
+            list_ssh_directory,
+            download_ssh_file,
+            upload_ssh_file,
+            delete_ssh_path,
+            rename_ssh_path
         ]);
 
     if let Err(error) = app.run(tauri::generate_context!()) {
