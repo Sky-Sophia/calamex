@@ -6,6 +6,9 @@ pub mod validator;
 
 use crate::ai::audit::{self, AiAuditEventKind};
 use crate::ai::errors;
+use crate::ai_edit::auto_apply::{self, AiAutoApplyOperationKind, AiAutoApplyOperationPlan};
+use crate::ai_edit::AiEditState;
+use crate::ai_edit::protected_paths;
 use crate::commands::contracts::{
     AiApplyPatchFilePayload, AiApplyPatchPayload, AiApplyPatchRequest, AiPatchFilePayload,
     AiPatchHunkPayload, AiPatchSetPayload, AiProposePatchPayload, AiProposePatchRequest,
@@ -48,19 +51,30 @@ pub fn propose_patch(payload: AiProposePatchRequest) -> Result<AiProposePatchPay
     Ok(AiProposePatchPayload { patch })
 }
 
-pub fn apply_patch(payload: AiApplyPatchRequest) -> Result<AiApplyPatchPayload, String> {
-    validate_patch(&payload.patch)?;
-    let mut backups: Vec<(PathBuf, String)> = Vec::new();
-    let mut applied_files = Vec::new();
+struct PendingPatchFile {
+    payload_path: String,
+    original_hash: String,
+    original: String,
+    updated: String,
+}
 
-    for file in &payload.patch.files {
+pub fn apply_patch(
+    payload: AiApplyPatchRequest,
+    state: &AiEditState,
+    snapshot_root: &Path,
+) -> Result<AiApplyPatchPayload, String> {
+    validate_patch(&payload.patch)?;
+    let metadata = payload.metadata;
+    let patch = payload.patch;
+    let mut pending_files = Vec::with_capacity(patch.files.len());
+
+    for file in &patch.files {
         let path = PathBuf::from(&file.path);
         validate_writable_path(&path)?;
         let original = fs::read_to_string(&path).map_err(|error| {
             errors::error("AI_PATCH_CONFLICT", format!("读取待应用文件失败：{error}"))
         })?;
         if hash_text(&original) != file.original_hash {
-            rollback(&backups);
             audit::emit(AiAuditEventKind::PatchFailed);
             return Err(errors::error(
                 "AI_PATCH_CONFLICT",
@@ -68,19 +82,51 @@ pub fn apply_patch(payload: AiApplyPatchRequest) -> Result<AiApplyPatchPayload, 
             ));
         }
         let updated = apply_file_patch(file)?;
-        backups.push((path.clone(), original));
-        if let Err(error) = fs::write(&path, updated.as_bytes()) {
-            rollback(&backups);
-            audit::emit(AiAuditEventKind::PatchFailed);
-            return Err(errors::error(
-                "AI_PATCH_APPLY_FAILED",
-                format!("写入 Patch 失败，已尝试回滚：{error}"),
-            ));
-        }
-        applied_files.push(AiApplyPatchFilePayload {
-            path: file.path.clone(),
-            byte_size: updated.len() as u64,
+        pending_files.push(PendingPatchFile {
+            payload_path: file.path.clone(),
+            original_hash: file.original_hash.clone(),
+            original,
+            updated,
         });
+    }
+
+    let operation_plans = pending_files
+        .iter()
+        .map(|file| AiAutoApplyOperationPlan {
+            kind: AiAutoApplyOperationKind::Modify,
+            path: file.payload_path.clone(),
+            new_path: None,
+            original_hash: Some(file.original_hash.clone()),
+            original_content: Some(file.original.clone()),
+            updated_content: Some(file.updated.clone()),
+        })
+        .collect::<Vec<_>>();
+
+    let applied_files = match auto_apply::apply_operation_plans(
+        &operation_plans,
+        metadata.as_ref(),
+        &patch.summary,
+        state,
+        snapshot_root,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            audit::emit(AiAuditEventKind::PatchFailed);
+            return Err(error);
+        }
+    };
+
+    let applied_files = applied_files
+        .into_iter()
+        .map(|file| AiApplyPatchFilePayload {
+            path: file.path,
+            byte_size: file.byte_size,
+        })
+        .collect::<Vec<_>>();
+
+    if applied_files.is_empty() {
+        audit::emit(AiAuditEventKind::PatchFailed);
+        return Err(errors::error("AI_PATCH_APPLY_FAILED", "Patch 未产生任何写入结果。"));
     }
 
     audit::emit(AiAuditEventKind::PatchApplied);
@@ -124,11 +170,11 @@ fn validate_writable_path(path: &Path) -> Result<(), String> {
     if !path.is_file() {
         return Err(errors::error("AI_PATCH_CONFLICT", "Patch 目标文件不存在。"));
     }
-    let value = path.to_string_lossy().to_lowercase();
-    if value.contains(".git") || value.contains("node_modules") || value.contains("target") {
+    let value = path.to_string_lossy().replace('\\', "/");
+    if protected_paths::is_builtin_protected_path(&value) {
         return Err(errors::error(
-            "AI_PATCH_INVALID",
-            "Patch 目标路径不允许写入。",
+            "AI_EDIT_PATH_PROTECTED",
+            "AED 受保护路径需要显式二次确认，当前 Patch 已被拒绝。",
         ));
     }
     Ok(())
@@ -173,16 +219,17 @@ fn count_lines(value: &str) -> u32 {
     value.lines().count().max(1) as u32
 }
 
-fn rollback(backups: &[(PathBuf, String)]) {
-    for (path, content) in backups.iter().rev() {
-        let _ = fs::write(path, content);
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{hash_text, propose_patch};
-    use crate::commands::contracts::AiProposePatchRequest;
+    use super::{apply_patch, hash_text, propose_patch, validate_writable_path};
+    use crate::ai_edit::{self, edit_journal, AiEditState};
+    use crate::commands::contracts::{
+        AiApplyPatchMetadataRequest, AiApplyPatchRequest, AiEditListTimelineRequest,
+        AiEditSetAuthLevelRequest, AiEditTimelineEntryPayload, AiPatchFilePayload,
+        AiPatchHunkPayload, AiPatchSetPayload, AiProposePatchRequest,
+    };
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn propose_patch_uses_original_hash() {
@@ -194,5 +241,261 @@ mod tests {
         })
         .expect("patch should be generated");
         assert_eq!(payload.patch.files[0].original_hash, hash_text("echo old"));
+    }
+
+    #[test]
+    fn validate_writable_path_rejects_protected_targets() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "aed-ai-patch-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ));
+        let protected_dir = temp_dir.join("repo");
+        let protected_path = protected_dir.join("Cargo.lock");
+
+        fs::create_dir_all(&protected_dir).expect("temp directory should be created");
+        fs::write(&protected_path, "lock").expect("temp file should be written");
+
+        let error = validate_writable_path(&PathBuf::from(&protected_path))
+            .expect_err("protected path should be rejected");
+        assert!(error.contains("AI_EDIT_PATH_PROTECTED"));
+
+        let _ = fs::remove_file(&protected_path);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn apply_patch_records_operation_into_ai_edit_timeline() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "aed-ai-patch-record-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ));
+        let file_path = temp_dir.join("script.sh");
+        fs::create_dir_all(&temp_dir).expect("temp directory should be created");
+        fs::write(&file_path, "echo old").expect("temp file should be written");
+
+        let state = AiEditState::default();
+        ai_edit::set_auth_level(
+            AiEditSetAuthLevelRequest {
+                level: "session".to_string(),
+                task_id: None,
+            },
+            &state,
+        )
+        .expect("session auth should be set");
+        let snapshot_root = temp_dir.join("snapshot-store");
+        let result = apply_patch(
+            AiApplyPatchRequest {
+                patch: AiPatchSetPayload {
+                    summary: "应用 AI 代码块".to_string(),
+                    files: vec![AiPatchFilePayload {
+                        path: file_path.to_string_lossy().to_string(),
+                        original_hash: hash_text("echo old"),
+                        hunks: vec![AiPatchHunkPayload {
+                            old_start: 1,
+                            old_lines: 1,
+                            new_start: 1,
+                            new_lines: 1,
+                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
+                        }],
+                    }],
+                },
+                metadata: None,
+            },
+            &state,
+            &snapshot_root,
+        )
+        .expect("patch should apply");
+
+        let timeline = ai_edit::list_timeline_with_state(
+            AiEditListTimelineRequest {
+                task_id: None,
+                limit: None,
+            },
+            &state,
+            Vec::new(),
+            edit_journal::list_operations(&snapshot_root).expect("operations should be listed"),
+        )
+        .expect("timeline should be listed");
+
+        assert_eq!(result.applied_files.len(), 1);
+        assert_eq!(timeline.entries.len(), 3);
+        assert!(matches!(timeline.entries[0], AiEditTimelineEntryPayload::Operation(_)));
+        assert!(matches!(timeline.entries[1], AiEditTimelineEntryPayload::Snapshot(_)));
+        assert!(matches!(timeline.entries[2], AiEditTimelineEntryPayload::Snapshot(_)));
+        if let AiEditTimelineEntryPayload::Operation(operation) = &timeline.entries[0] {
+            assert!(operation.source_snapshot_id.is_some());
+        }
+
+        let _ = fs::remove_file(&file_path);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn apply_patch_rejects_manual_auth_mode() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "aed-ai-patch-manual-auth-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ));
+        let file_path = temp_dir.join("script.sh");
+        fs::create_dir_all(&temp_dir).expect("temp directory should be created");
+        fs::write(&file_path, "echo old").expect("temp file should be written");
+
+        let state = AiEditState::default();
+        let snapshot_root = temp_dir.join("snapshot-store");
+        let error = apply_patch(
+            AiApplyPatchRequest {
+                patch: AiPatchSetPayload {
+                    summary: "应用 AI 代码块".to_string(),
+                    files: vec![AiPatchFilePayload {
+                        path: file_path.to_string_lossy().to_string(),
+                        original_hash: hash_text("echo old"),
+                        hunks: vec![AiPatchHunkPayload {
+                            old_start: 1,
+                            old_lines: 1,
+                            new_start: 1,
+                            new_lines: 1,
+                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
+                        }],
+                    }],
+                },
+                metadata: Some(AiApplyPatchMetadataRequest {
+                    task_id: Some("task-1".to_string()),
+                    turn_id: Some("turn-1".to_string()),
+                    reason: None,
+                    tool_call_id: None,
+                    confirmed_by_user: None,
+                }),
+            },
+            &state,
+            &snapshot_root,
+        )
+        .expect_err("manual mode should block patch apply");
+
+        assert!(error.contains("AI_EDIT_AUTH_BLOCKED"));
+        assert_eq!(fs::read_to_string(&file_path).expect("file should still exist"), "echo old");
+
+        let _ = fs::remove_file(&file_path);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn apply_patch_allows_session_auth_mode() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "aed-ai-patch-session-auth-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ));
+        let file_path = temp_dir.join("script.sh");
+        fs::create_dir_all(&temp_dir).expect("temp directory should be created");
+        fs::write(&file_path, "echo old").expect("temp file should be written");
+
+        let state = AiEditState::default();
+        ai_edit::set_auth_level(
+            AiEditSetAuthLevelRequest {
+                level: "session".to_string(),
+                task_id: None,
+            },
+            &state,
+        )
+        .expect("session auth should be set");
+        let snapshot_root = temp_dir.join("snapshot-store");
+
+        let result = apply_patch(
+            AiApplyPatchRequest {
+                patch: AiPatchSetPayload {
+                    summary: "应用 AI 代码块".to_string(),
+                    files: vec![AiPatchFilePayload {
+                        path: file_path.to_string_lossy().to_string(),
+                        original_hash: hash_text("echo old"),
+                        hunks: vec![AiPatchHunkPayload {
+                            old_start: 1,
+                            old_lines: 1,
+                            new_start: 1,
+                            new_lines: 1,
+                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
+                        }],
+                    }],
+                },
+                metadata: Some(AiApplyPatchMetadataRequest {
+                    task_id: Some("task-1".to_string()),
+                    turn_id: Some("turn-1".to_string()),
+                    reason: None,
+                    tool_call_id: None,
+                    confirmed_by_user: None,
+                }),
+            },
+            &state,
+            &snapshot_root,
+        )
+        .expect("session mode should allow patch apply");
+
+        assert_eq!(result.applied_files.len(), 1);
+        assert_eq!(fs::read_to_string(&file_path).expect("patched file should exist"), "echo new");
+
+        let _ = fs::remove_file(&file_path);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn apply_patch_allows_user_confirmed_manual_mode() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "aed-ai-patch-manual-confirm-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ));
+        let file_path = temp_dir.join("script.sh");
+        fs::create_dir_all(&temp_dir).expect("temp directory should be created");
+        fs::write(&file_path, "echo old").expect("temp file should be written");
+
+        let state = AiEditState::default();
+        let snapshot_root = temp_dir.join("snapshot-store");
+
+        let result = apply_patch(
+            AiApplyPatchRequest {
+                patch: AiPatchSetPayload {
+                    summary: "应用 AI 代码块".to_string(),
+                    files: vec![AiPatchFilePayload {
+                        path: file_path.to_string_lossy().to_string(),
+                        original_hash: hash_text("echo old"),
+                        hunks: vec![AiPatchHunkPayload {
+                            old_start: 1,
+                            old_lines: 1,
+                            new_start: 1,
+                            new_lines: 1,
+                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
+                        }],
+                    }],
+                },
+                metadata: Some(AiApplyPatchMetadataRequest {
+                    task_id: Some("task-1".to_string()),
+                    turn_id: Some("turn-1".to_string()),
+                    reason: None,
+                    tool_call_id: None,
+                    confirmed_by_user: Some(true),
+                }),
+            },
+            &state,
+            &snapshot_root,
+        )
+        .expect("manual mode should allow user confirmed patch apply");
+
+        assert_eq!(result.applied_files.len(), 1);
+        assert_eq!(fs::read_to_string(&file_path).expect("patched file should exist"), "echo new");
+
+        let _ = fs::remove_file(&file_path);
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

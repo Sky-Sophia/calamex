@@ -1,7 +1,19 @@
-import { z } from 'zod';
+import {
+  aiEditAuthStateSchema,
+  aiEditListTimelinePayloadSchema,
+  aiEditListTimelineRequestSchema,
+  aiEditRestoreSnapshotPayloadSchema,
+  aiEditRestoreSnapshotRequestSchema,
+  aiEditRevertTaskPayloadSchema,
+  aiEditRevertTaskRequestSchema,
+  aiEditSetAuthLevelRequestSchema,
+  aiEditUndoOperationPayloadSchema,
+  aiEditUndoOperationRequestSchema,
+} from '@/types/ai-edit.schema';
 import {
   aiAgentPlanPayloadSchema,
   aiAgentPlanRequestSchema,
+  aiApplyPatchMetadataSchema,
   aiChatPayloadSchema,
   aiChatRequestSchema,
   aiChatStreamPayloadSchema,
@@ -9,9 +21,13 @@ import {
   aiCodeActionRequestSchema,
   aiConfigPayloadSchema,
   aiPatchSetSchema,
+  aiProviderConnectionPayloadSchema,
+  aiProviderConnectionRequestSchema,
+  aiProviderTestPayloadSchema,
   aiProviderTypeSchema,
   aiToolDefinitionPayloadSchema,
 } from '@/types/ai.schema';
+import { z } from 'zod';
 
 export const zTauriVoid = z
   .union([z.null(), z.undefined(), z.void()])
@@ -276,52 +292,52 @@ export const tauriContracts = {
     inSchema: z.void(),
     outSchema: z.union([executionEnvironmentPayloadSchema, executionEnvironmentPayloadSnakeSchema]),
   },
-    listWorkspaceEntries: {
-      inSchema: z.object({
-        path: z.string().optional(),
-        rootPath: z.string().optional(),
-      }),
+  listWorkspaceEntries: {
+    inSchema: z.object({
+      path: z.string().optional(),
+      rootPath: z.string().optional(),
+    }),
     outSchema: z.object({
       rootPath: z.string(),
       rootName: z.string(),
-        entries: z.array(workspaceEntrySchema),
-      }),
-    },
-    createWorkspacePath: {
-      inSchema: z.object({
-        parentPath: z.string().min(1),
-        rootPath: z.string().min(1),
-        name: z.string().min(1),
-        kind: workspacePathKindSchema,
-      }),
-      outSchema: z.object({
-        path: z.string(),
-        name: z.string(),
-        kind: workspacePathKindSchema,
-      }),
-    },
-    renameWorkspacePath: {
-      inSchema: z.object({
-        path: z.string().min(1),
-        rootPath: z.string().min(1),
-        newName: z.string().min(1),
-      }),
-      outSchema: z.object({
-        oldPath: z.string(),
-        newPath: z.string(),
-        name: z.string(),
-      }),
-    },
-    deleteWorkspacePath: {
-      inSchema: z.object({
-        path: z.string().min(1),
-        rootPath: z.string().min(1),
-      }),
-      outSchema: z.object({
-        path: z.string(),
-      }),
-    },
-    searchWorkspace: {
+      entries: z.array(workspaceEntrySchema),
+    }),
+  },
+  createWorkspacePath: {
+    inSchema: z.object({
+      parentPath: z.string().min(1),
+      rootPath: z.string().min(1),
+      name: z.string().min(1),
+      kind: workspacePathKindSchema,
+    }),
+    outSchema: z.object({
+      path: z.string(),
+      name: z.string(),
+      kind: workspacePathKindSchema,
+    }),
+  },
+  renameWorkspacePath: {
+    inSchema: z.object({
+      path: z.string().min(1),
+      rootPath: z.string().min(1),
+      newName: z.string().min(1),
+    }),
+    outSchema: z.object({
+      oldPath: z.string(),
+      newPath: z.string(),
+      name: z.string(),
+    }),
+  },
+  deleteWorkspacePath: {
+    inSchema: z.object({
+      path: z.string().min(1),
+      rootPath: z.string().min(1),
+    }),
+    outSchema: z.object({
+      path: z.string(),
+    }),
+  },
+  searchWorkspace: {
     inSchema: z.object({
       workspaceRootPath: z.string().min(1),
       query: z.string(),
@@ -493,17 +509,21 @@ export const tauriContracts = {
     }),
     outSchema: aiConfigPayloadSchema,
   },
+  aiTestProviderConfig: {
+    inSchema: aiProviderConnectionRequestSchema,
+    outSchema: aiProviderTestPayloadSchema,
+  },
+  aiConnectProvider: {
+    inSchema: aiProviderConnectionRequestSchema,
+    outSchema: aiProviderConnectionPayloadSchema,
+  },
   aiClearCredentials: {
     inSchema: z.void(),
     outSchema: zTauriVoid,
   },
   aiTestProvider: {
     inSchema: z.void(),
-    outSchema: z.object({
-      ok: z.boolean(),
-      code: z.string(),
-      message: z.string(),
-    }),
+    outSchema: aiProviderTestPayloadSchema,
   },
   aiChat: {
     inSchema: aiChatRequestSchema,
@@ -585,6 +605,7 @@ export const tauriContracts = {
   aiApplyPatch: {
     inSchema: z.object({
       patch: aiPatchSetSchema,
+      metadata: aiApplyPatchMetadataSchema.optional(),
     }),
     outSchema: z.object({
       appliedFiles: z.array(z.object({
@@ -592,6 +613,30 @@ export const tauriContracts = {
         byteSize: z.number().int().nonnegative(),
       })),
     }),
+  },
+  aiEditGetAuthLevel: {
+    inSchema: z.void(),
+    outSchema: aiEditAuthStateSchema,
+  },
+  aiEditSetAuthLevel: {
+    inSchema: aiEditSetAuthLevelRequestSchema,
+    outSchema: aiEditAuthStateSchema,
+  },
+  aiEditListTimeline: {
+    inSchema: aiEditListTimelineRequestSchema,
+    outSchema: aiEditListTimelinePayloadSchema,
+  },
+  aiEditRestoreSnapshot: {
+    inSchema: aiEditRestoreSnapshotRequestSchema,
+    outSchema: aiEditRestoreSnapshotPayloadSchema,
+  },
+  aiEditUndoOperation: {
+    inSchema: aiEditUndoOperationRequestSchema,
+    outSchema: aiEditUndoOperationPayloadSchema,
+  },
+  aiEditRevertTask: {
+    inSchema: aiEditRevertTaskRequestSchema,
+    outSchema: aiEditRevertTaskPayloadSchema,
   },
   aiListTools: {
     inSchema: z.void(),

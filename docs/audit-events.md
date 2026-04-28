@@ -29,6 +29,9 @@
 |---|---|---|---|
 | `settings.workspace_changed` | 工作区根路径变更 | `traceId`, `new_path_hash` | HIGH |
 | `settings.theme_changed` | 主题切换 | `traceId`, `from_mode`, `to_mode` | LOW |
+| `ai.edit.auth_changed` | AED 授权等级升级或降级 | `traceId`, `from_level`, `to_level`, `task_id` | HIGH |
+| `ai.edit.operation_reverted` | 用户撤销单条 AED 编辑 | `traceId`, `operation_id`, `source_snapshot_id`, `pre_revert_snapshot_id`, `restored_snapshot_id`, `task_id`, `restored_file_count` | HIGH |
+| `ai.edit.snapshot_restored` | 用户恢复 AED 快照 | `traceId`, `snapshot_id`, `pre_revert_snapshot_id`, `restored_snapshot_id`, `task_id`, `restored_file_count` | HIGH |
 
 ---
 

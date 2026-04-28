@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const mode = process.argv[2];
 const extraArgs = process.argv.slice(3);
+const DEV_SERVER_PORT = 1420;
 const WINDOWS_VS_CUSTOM_ROOTS = [
     'D:\\Apps\\VisualStudio',
     'D:\\Dev\\VisualStudio',
@@ -98,6 +99,194 @@ const listDirectories = (targetPath) => {
 };
 
 const joinEnvValues = (values) => values.filter(Boolean).join(path.delimiter);
+
+const escapePowerShellString = (value) => value.replace(/'/g, "''");
+
+const runPowerShell = (script) => spawnSync(
+    'powershell.exe',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
+    {
+        cwd: rootDir,
+        encoding: 'utf8',
+        shell: false,
+        timeout: 10_000,
+    },
+);
+
+const parseJsonOutput = (stdout) => {
+    if (!stdout) {
+        return [];
+    }
+
+    const trimmed = stdout.trim();
+    if (!trimmed) {
+        return [];
+    }
+
+    try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+            return parsed;
+        }
+
+        return parsed === null || typeof parsed === 'undefined' ? [] : [parsed];
+    } catch {
+        return [];
+    }
+};
+
+const parseListeningProcessIdsFromNetstat = (stdout, port) => {
+    const processIds = new Set();
+    const pattern = new RegExp(`^\\s*TCP\\s+\\S+:${port}\\s+\\S+\\s+LISTENING\\s+(\\d+)\\s*$`, 'i');
+
+    for (const line of stdout.split(/\r?\n/)) {
+        const match = line.match(pattern);
+        if (!match) {
+            continue;
+        }
+
+        const processId = Number.parseInt(match[1], 10);
+        if (Number.isInteger(processId) && processId > 0) {
+            processIds.add(processId);
+        }
+    }
+
+    return [...processIds];
+};
+
+const collectWindowsListeningProcessIds = (port) => {
+    const result = spawnSync('netstat.exe', ['-ano', '-p', 'tcp'], {
+        cwd: rootDir,
+        encoding: 'utf8',
+        shell: false,
+        timeout: 10_000,
+    });
+
+    if (result.status !== 0 || !result.stdout) {
+        return [];
+    }
+
+    return parseListeningProcessIdsFromNetstat(result.stdout, port);
+};
+
+const getWindowsProcessSummary = (processId) => {
+    const script = `
+$process = Get-Process -Id ${processId} -ErrorAction SilentlyContinue
+if (-not $process) {
+    exit 0
+}
+
+[PSCustomObject]@{
+    Id = [int]$process.Id
+    Name = [string]$process.ProcessName
+    Path = [string]$process.Path
+} | ConvertTo-Json -Compress
+`;
+
+    const result = runPowerShell(script);
+    if (result.status !== 0) {
+        return null;
+    }
+
+    const [summary] = parseJsonOutput(result.stdout);
+    if (!summary) {
+        return null;
+    }
+
+    return {
+        id: Number.parseInt(String(summary.Id ?? processId), 10),
+        name: String(summary.Name ?? ''),
+        path: String(summary.Path ?? ''),
+    };
+};
+
+const collectWindowsCalamexProcessIds = () => {
+    const escapedTargetDir = escapePowerShellString(path.join(rootDir, 'target').toLowerCase());
+    const script = `
+$targetDir = '${escapedTargetDir}'
+
+Get-Process -Name calamex -ErrorAction SilentlyContinue |
+    ForEach-Object {
+        $processPath = ([string]$_.Path).ToLowerInvariant()
+        if ($processPath.StartsWith($targetDir)) {
+            [PSCustomObject]@{ Id = [int]$_.Id }
+        }
+    } | ConvertTo-Json -Compress
+`;
+
+    const result = runPowerShell(script);
+    if (result.status !== 0) {
+        return [];
+    }
+
+    return parseJsonOutput(result.stdout)
+        .map((value) => Number.parseInt(String(value?.Id ?? value), 10))
+        .filter((value) => Number.isInteger(value) && value > 0);
+};
+
+const collectWindowsStaleDevProcessIds = () => {
+    const processIds = new Set();
+
+    for (const processId of collectWindowsListeningProcessIds(DEV_SERVER_PORT)) {
+        const summary = getWindowsProcessSummary(processId);
+        if (summary?.name.toLowerCase() === 'node') {
+            processIds.add(processId);
+        }
+    }
+
+    for (const processId of collectWindowsCalamexProcessIds()) {
+        processIds.add(processId);
+    }
+
+    return [...processIds];
+};
+
+const terminateWindowsProcesses = (processIds) => {
+    if (processIds.length === 0) {
+        return;
+    }
+
+    const ids = processIds.filter((processId) => Number.isInteger(processId) && processId > 0);
+    if (ids.length === 0) {
+        return;
+    }
+
+    const joinedIds = ids.join(',');
+    const script = `
+$ids = @(${joinedIds})
+foreach ($id in $ids) {
+    Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+}
+`;
+
+    const result = runPowerShell(script);
+    if (result.status === 0) {
+        return;
+    }
+
+    for (const processId of ids) {
+        try {
+            process.kill(processId);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(`[run-tauri] 结束残留进程 ${processId} 失败。${message}`);
+        }
+    }
+};
+
+const cleanupWindowsStaleDevProcesses = () => {
+    if (process.platform !== 'win32' || mode !== 'dev') {
+        return;
+    }
+
+    const staleProcessIds = collectWindowsStaleDevProcessIds();
+    if (staleProcessIds.length === 0) {
+        return;
+    }
+
+    console.warn(`[run-tauri] 检测到 ${staleProcessIds.length} 个本仓库残留开发进程，正在清理...`);
+    terminateWindowsProcesses(staleProcessIds);
+};
 
 const findCommandPath = (fileName, extraCandidates = []) => {
     const pathValue = process.env.PATH ?? '';
@@ -354,6 +543,7 @@ const buildWindowsToolchainEnv = () => {
 
 const runTauri = (env) => {
     warnIfVisualHostingRequested();
+    cleanupWindowsStaleDevProcesses();
 
     const cliScriptPath = path.join(
         rootDir,

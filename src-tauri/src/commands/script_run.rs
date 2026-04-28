@@ -1,14 +1,11 @@
-use super::{configure_tokio_command_for_background, ExecutionEnvironment, ExecutionOption};
+use super::{ExecutionEnvironment, ExecutionOption};
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    process::Stdio,
     sync::Mutex,
     time::{Duration, Instant},
 };
-use tokio::{process::Command, time::timeout};
 
-const PROBE_TIMEOUT: Duration = Duration::from_secs(4);
 const EXECUTOR_CACHE_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
@@ -159,26 +156,12 @@ fn build_execution_environment(executors: &[ExecutorCandidate]) -> ExecutionEnvi
 }
 
 async fn probe_executor(candidate: &ExecutorCandidate) -> bool {
-    let Some(path) = candidate.path.as_ref() else {
-        return false;
-    };
-
     if candidate.kind != "wsl" {
         return false;
     }
 
-    let mut command = Command::new(path);
-    configure_tokio_command_for_background(&mut command);
-    command.args(["--list", "--quiet"]);
-    command.stdout(Stdio::piped()).stderr(Stdio::null());
-
-    matches!(
-        timeout(PROBE_TIMEOUT, command.output()).await,
-        Ok(Ok(output))
-            if output.status.success()
-                && output
-                    .stdout
-                    .iter()
-                    .any(|byte| !matches!(*byte, 0 | b' ' | b'\n' | b'\r' | b'\t'))
-    )
+    // 避免在启动阶段执行 wsl.exe 健康探测。
+    // 某些 Windows 环境下 `wsl.exe --list --quiet` 会长时间挂起，导致前端初始化无法继续。
+    // 启动只做命令存在性判断，实际运行时再由脚本执行链路兜底错误。
+    candidate.path.is_some()
 }

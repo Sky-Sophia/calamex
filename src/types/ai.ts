@@ -22,6 +22,7 @@ export type TAiContextKind =
   | 'git-diff'
   | 'terminal-log'
   | 'search-result'
+  | 'image-attachment'
   | 'symbol-definition'
   | 'symbol-references'
   | 'project-tree';
@@ -92,6 +93,15 @@ export interface IAiSaveCredentialsRequest {
   apiKey: string;
 }
 
+export interface IAiProviderConnectionRequest extends IAiSaveConfigRequest {
+  apiKey: string | null;
+}
+
+export interface IAiProviderSettingsActionFeedback {
+  onSuccess(message?: string): void;
+  onError(message: string): void;
+}
+
 export interface IAiChatRequest {
   threadId: string | null;
   messages: IAiChatMessage[];
@@ -128,6 +138,11 @@ export interface IAiProviderTestPayload {
   ok: boolean;
   code: string;
   message: string;
+}
+
+export interface IAiProviderConnectionPayload {
+  config: IAiConfigPayload;
+  test: IAiProviderTestPayload;
 }
 
 export interface IAiInlineCompletionRequest {
@@ -176,15 +191,15 @@ export interface IAiCodeActionResult {
 
 export interface IAiCodeActionRequest {
   kind:
-    | 'explain_selection'
-    | 'rewrite_selection'
-    | 'generate_tests'
-    | 'fix_diagnostic'
-    | 'extract_function'
-    | 'add_error_handling'
-    | 'add_docs'
-    | 'simplify_code'
-    | 'convert_style';
+  | 'explain_selection'
+  | 'rewrite_selection'
+  | 'generate_tests'
+  | 'fix_diagnostic'
+  | 'extract_function'
+  | 'add_error_handling'
+  | 'add_docs'
+  | 'simplify_code'
+  | 'convert_style';
   filePath: string | null;
   language: string;
   selection: string;
@@ -245,8 +260,17 @@ export interface IAiProposePatchPayload {
   patch: IAiPatchSet;
 }
 
+export interface IAiApplyPatchMetadata {
+  taskId?: string | null;
+  turnId?: string | null;
+  reason?: string | null;
+  toolCallId?: string | null;
+  confirmedByUser?: boolean | null;
+}
+
 export interface IAiApplyPatchRequest {
   patch: IAiPatchSet;
+  metadata?: IAiApplyPatchMetadata;
 }
 
 export interface IAiApplyPatchPayload {

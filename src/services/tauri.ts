@@ -1,9 +1,14 @@
-import type { ITauriService } from '@/types/tauri';
+import { aiChatStreamEventPayloadSchema } from '@/types/ai.schema';
 import { AppError, isAppError } from '@/types/app-error';
+import type { ITauriService } from '@/types/tauri';
 import { assertDesktopRuntime } from '@/utils/desktop-runtime';
 import { toErrorMessage } from '@/utils/error';
+import {
+  createRedactedTextSummary,
+  redactForLog,
+  redactSensitiveText,
+} from '@/utils/sensitive-redaction';
 import { z } from 'zod';
-import { aiChatStreamEventPayloadSchema } from '@/types/ai.schema';
 import { tauriContracts } from './tauri.contracts';
 
 type TauriCoreModule = typeof import('@tauri-apps/api/core');
@@ -132,9 +137,9 @@ const serializeForLog = (value: unknown): string => {
   }
 
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(redactForLog(value));
   } catch {
-    return String(value);
+    return String(redactForLog(value));
   }
 };
 
@@ -155,8 +160,6 @@ const buildPayloadMetricsFromSerialized = (serialized: string): IPayloadMetrics 
 const buildPayloadMetrics = (value: unknown): IPayloadMetrics =>
   buildPayloadMetricsFromSerialized(serializeForLog(value));
 
-const estimateTextBytes = (value: string): number => value.length;
-
 const buildPayloadMetricsOmittingTextFields = <T extends Record<string, unknown>>(
   value: T,
   omittedFields: readonly string[],
@@ -167,13 +170,10 @@ const buildPayloadMetricsOmittingTextFields = <T extends Record<string, unknown>
 
   for (const [field, fieldValue] of Object.entries(value)) {
     if (omittedFieldSet.has(field) && typeof fieldValue === 'string') {
-      const bytes = estimateTextBytes(fieldValue);
+      const summary = createRedactedTextSummary(fieldValue);
+      const bytes = summary.estimatedBytes;
       omittedBytes += bytes;
-      summaryValue[field] = {
-        omitted: true,
-        chars: fieldValue.length,
-        estimatedBytes: bytes,
-      };
+      summaryValue[field] = summary;
       continue;
     }
 
@@ -333,7 +333,7 @@ const normalizeIpcError = (
     return error;
   }
 
-  const baseMessage = toErrorMessage(error, 'IPC 调用失败');
+  const baseMessage = redactSensitiveText(toErrorMessage(error, 'IPC 调用失败'));
 
   if (baseMessage.includes('浏览器预览模式')) {
     return new AppError({
@@ -477,15 +477,15 @@ export const defineIpc = <TInSchema extends z.ZodTypeAny, TOutSchema extends z.Z
       const normalizedError =
         error instanceof z.ZodError
           ? new AppError({
-              code: 'ipc.input-validation',
-              message: `IPC 请求参数无效，已记录 traceId=${traceId}。`,
-              scope: 'validation',
-              traceId,
-              cause: {
-                issues: error.issues,
-                payloadSummary: shouldAudit ? ensureInputMetrics().summary : undefined,
-              },
-            })
+            code: 'ipc.input-validation',
+            message: `IPC 请求参数无效，已记录 traceId=${traceId}。`,
+            scope: 'validation',
+            traceId,
+            cause: {
+              issues: error.issues,
+              payloadSummary: shouldAudit ? ensureInputMetrics().summary : undefined,
+            },
+          })
           : normalizeIpcError(error, { traceId, errorMap });
 
       if (shouldAudit) {
@@ -736,6 +736,27 @@ const aiSaveCredentialsIpc = definePayloadIpc(
   },
 );
 
+const aiTestProviderConfigIpc = definePayloadIpc(
+  'ai_test_provider_config',
+  '使用草稿配置测试 AI Provider',
+  tauriContracts.aiTestProviderConfig,
+  {
+    idempotent: true,
+    audit: 'sensitive',
+    measureInput: (value) => buildPayloadMetricsOmittingTextFields(value, ['apiKey']),
+  },
+);
+
+const aiConnectProviderIpc = definePayloadIpc(
+  'ai_connect_provider',
+  '连接并保存 AI Provider',
+  tauriContracts.aiConnectProvider,
+  {
+    audit: 'sensitive',
+    measureInput: (value) => buildPayloadMetricsOmittingTextFields(value, ['apiKey']),
+  },
+);
+
 const aiClearCredentialsIpc = defineContractIpc(
   'ai_clear_credentials',
   '清除 AI 凭证',
@@ -755,6 +776,20 @@ const aiChatIpc = definePayloadIpc(
   '发送 AI 对话请求',
   tauriContracts.aiChat,
   { audit: 'sensitive', timeoutMs: 60_000, measureInput: measureAiChatInput },
+);
+
+const aiChatStreamIpc = definePayloadIpc(
+  'ai_chat_stream',
+  '发送 AI 流式对话请求',
+  tauriContracts.aiChatStream,
+  { audit: 'sensitive', timeoutMs: 60_000, measureInput: measureAiChatInput },
+);
+
+const aiCancelIpc = definePayloadIpc(
+  'ai_cancel',
+  '取消 AI 流式请求',
+  tauriContracts.aiCancel,
+  { audit: 'sensitive', timeoutMs: 15_000, measureInput: buildPayloadMetrics },
 );
 
 const aiInlineCompleteIpc = definePayloadIpc(
@@ -809,6 +844,41 @@ const aiApplyPatchIpc = definePayloadIpc(
   '应用 AI Patch',
   tauriContracts.aiApplyPatch,
   { audit: 'sensitive', timeoutMs: 30_000, measureInput: measureAiChatInput },
+);
+
+const aiEditGetAuthLevelIpc = defineContractIpc(
+  'ai_edit_get_auth_level',
+  '读取 AED 授权等级',
+  tauriContracts.aiEditGetAuthLevel,
+  { audit: 'sensitive', idempotent: true },
+);
+
+const aiEditSetAuthLevelIpc = definePayloadIpc(
+  'ai_edit_set_auth_level',
+  '设置 AED 授权等级',
+  tauriContracts.aiEditSetAuthLevel,
+  { audit: 'sensitive', timeoutMs: 15_000 },
+);
+
+const aiEditListTimelineIpc = definePayloadIpc(
+  'ai_edit_list_timeline',
+  '读取 AED 时间线',
+  tauriContracts.aiEditListTimeline,
+  { audit: 'sensitive', timeoutMs: 15_000 },
+);
+
+const aiEditRestoreSnapshotIpc = definePayloadIpc(
+  'ai_edit_restore_snapshot',
+  '恢复 AED 快照',
+  tauriContracts.aiEditRestoreSnapshot,
+  { audit: 'sensitive', timeoutMs: 30_000 },
+);
+
+const aiEditUndoOperationIpc = definePayloadIpc(
+  'ai_edit_undo_operation',
+  '撤销 AED 编辑',
+  tauriContracts.aiEditUndoOperation,
+  { audit: 'sensitive', timeoutMs: 30_000 },
 );
 
 const aiListToolsIpc = defineContractIpc(
@@ -989,6 +1059,10 @@ export const tauriService: ITauriService & {
 
   aiTestProvider: () => aiTestProviderIpc(undefined),
 
+  aiTestProviderConfig: aiTestProviderConfigIpc,
+
+  aiConnectProvider: aiConnectProviderIpc,
+
   aiChat: aiChatIpc,
 
   aiChatStream: aiChatStreamIpc,
@@ -996,7 +1070,7 @@ export const tauriService: ITauriService & {
   aiCancel: aiCancelIpc,
 
   async onAiChatStream(handler) {
-    await assertDesktopRuntime('?? AI ????');
+    await assertDesktopRuntime('监听 AI 流式响应');
     const { listen } = await loadTauriEvent();
     return listen('ai:chat-stream', (event) => {
       const parsed = aiChatStreamEventPayloadSchema.safeParse(event.payload);
@@ -1020,6 +1094,16 @@ export const tauriService: ITauriService & {
   aiProposePatch: aiProposePatchIpc,
 
   aiApplyPatch: aiApplyPatchIpc,
+
+  aiEditGetAuthLevel: () => aiEditGetAuthLevelIpc(undefined),
+
+  aiEditSetAuthLevel: aiEditSetAuthLevelIpc,
+
+  aiEditListTimeline: aiEditListTimelineIpc,
+
+  aiEditRestoreSnapshot: aiEditRestoreSnapshotIpc,
+
+  aiEditUndoOperation: aiEditUndoOperationIpc,
 
   aiListTools: () => aiListToolsIpc(undefined),
 };

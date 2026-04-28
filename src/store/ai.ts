@@ -1,6 +1,8 @@
 ﻿import { aiService } from '@/services/modules/ai';
 import type {
   IAiConfigPayload,
+  IAiProviderConnectionPayload,
+  IAiProviderConnectionRequest,
   IAiProviderTestPayload,
   IAiSaveConfigRequest,
   IAiSaveCredentialsRequest,
@@ -10,9 +12,16 @@ import type {
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
+// ---------------------------------------------------------------------------
+// Defaults
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PROVIDER_TYPE: TAiProviderType = 'mock';
+const DEFAULT_MOCK_MODEL_ID = 'mock-ide-assistant';
+
 const createDefaultConfig = (): IAiConfigPayload => ({
-  providerType: 'mock',
-  selectedModel: 'mock-ide-assistant',
+  providerType: DEFAULT_PROVIDER_TYPE,
+  selectedModel: DEFAULT_MOCK_MODEL_ID,
   baseUrl: null,
   isBaseUrlConfigured: false,
   hasCredentials: false,
@@ -21,6 +30,10 @@ const createDefaultConfig = (): IAiConfigPayload => ({
   chatEnabled: true,
   agentEnabled: false,
 });
+
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
 
 export const useAiStore = defineStore('ai', () => {
   const config = ref<IAiConfigPayload>(createDefaultConfig());
@@ -31,24 +44,40 @@ export const useAiStore = defineStore('ai', () => {
   const selectedModel = computed(() => config.value.selectedModel);
   const isConfigured = computed(() => config.value.isConfigured);
 
-  const loadConfig = async (): Promise<IAiConfigPayload> => {
-    config.value = await aiService.getConfig();
-    return config.value;
-  };
-
-  const saveConfig = async (payload: IAiSaveConfigRequest): Promise<IAiConfigPayload> => {
-    config.value = await aiService.saveConfig(payload);
-    return config.value;
-  };
-
-  const saveCredentials = async (
-    payload: IAiSaveCredentialsRequest,
+  /**
+   * 把任意返回 IAiConfigPayload 的远端调用结果落盘到 config,并把同一份回传给调用方。
+   * 远端 reject 时不写入,异常按原样向上抛(由调用方决定是否走 setStatus('error', ...))。
+   */
+  const applyConfigUpdate = async (
+    request: Promise<IAiConfigPayload>,
   ): Promise<IAiConfigPayload> => {
-    config.value = await aiService.saveCredentials(payload);
+    config.value = await request;
     return config.value;
   };
 
-  const testProvider = async (): Promise<IAiProviderTestPayload> => aiService.testProvider();
+  const loadConfig = (): Promise<IAiConfigPayload> =>
+    applyConfigUpdate(aiService.getConfig());
+
+  const saveConfig = (payload: IAiSaveConfigRequest): Promise<IAiConfigPayload> =>
+    applyConfigUpdate(aiService.saveConfig(payload));
+
+  const saveCredentials = (
+    payload: IAiSaveCredentialsRequest,
+  ): Promise<IAiConfigPayload> => applyConfigUpdate(aiService.saveCredentials(payload));
+
+  const testProvider = (): Promise<IAiProviderTestPayload> => aiService.testProvider();
+
+  const testProviderConfig = (
+    payload: IAiProviderConnectionRequest,
+  ): Promise<IAiProviderTestPayload> => aiService.testProviderConfig(payload);
+
+  const connectProvider = async (
+    payload: IAiProviderConnectionRequest,
+  ): Promise<IAiProviderConnectionPayload> => {
+    const result = await aiService.connectProvider(payload);
+    config.value = result.config;
+    return result;
+  };
 
   const setStatus = (nextStatus: TAiStatus, message: string | null = null): void => {
     status.value = nextStatus;
@@ -66,6 +95,8 @@ export const useAiStore = defineStore('ai', () => {
     saveConfig,
     saveCredentials,
     testProvider,
+    testProviderConfig,
+    connectProvider,
     setStatus,
   };
 });

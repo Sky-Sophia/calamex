@@ -1,4 +1,5 @@
 import '@/assets/fonts/inter/inter.css';
+import { listShellCommandLabels } from './services/shell-command-catalog';
 import { pinia } from './store';
 import { hydrateSessionStorage } from './store/plugins/tauriSessionStorage';
 import { initAppTooltipSystem } from './utils/app-tooltip';
@@ -8,7 +9,10 @@ import {
   type TAppWindowLabel,
 } from './utils/app-window';
 import { registerRuntimeDiagnostics, setRuntimeError } from './utils/runtime-diagnostics';
-import { listShellCommandLabels } from './services/shell-command-catalog';
+
+interface ITauriInternals {
+  invoke?: (cmd: string, args?: Record<string, unknown>, options?: unknown) => Promise<unknown>;
+}
 
 registerRuntimeDiagnostics();
 
@@ -41,6 +45,33 @@ const resolveErrorDetail = (error: unknown): string => {
     return JSON.stringify(error, null, 2);
   } catch {
     return String(error);
+  }
+};
+
+const forceRevealMainWindowOnBootstrapFailure = async (
+  currentWindowLabel: TAppWindowLabel,
+): Promise<void> => {
+  if (isWelcomeWindow(currentWindowLabel) || typeof window === 'undefined') {
+    return;
+  }
+
+  const invokeFn = (window as Window & { __TAURI_INTERNALS__?: ITauriInternals })
+    .__TAURI_INTERNALS__?.invoke;
+
+  if (typeof invokeFn !== 'function') {
+    return;
+  }
+
+  try {
+    await invokeFn('begin_startup_transition');
+  } catch {
+    // ignore native transition failures during fatal bootstrap fallback
+  }
+
+  try {
+    await invokeFn('finalize_startup_transition');
+  } catch {
+    // ignore native transition failures during fatal bootstrap fallback
   }
 };
 
@@ -94,10 +125,11 @@ const renderFatalBootstrapError = (error: unknown): void => {
 };
 
 const bootstrap = async (): Promise<void> => {
+  const currentWindowLabel = resolveWindowLabelFromLocation();
+
   try {
     await import('./styles.css');
 
-    const currentWindowLabel = resolveWindowLabelFromLocation();
     window.__SH_WINDOW_LABEL__ = currentWindowLabel;
 
     const [{ createApp }, { getThemeManager }, { default: App }, { default: router }] =
@@ -133,6 +165,7 @@ const bootstrap = async (): Promise<void> => {
   } catch (error) {
     console.error(MESSAGES.bootstrapErrorLabel, error);
     setRuntimeError(MESSAGES.bootstrapErrorLabel, error);
+    await forceRevealMainWindowOnBootstrapFailure(currentWindowLabel);
     renderFatalBootstrapError(error);
   }
 };

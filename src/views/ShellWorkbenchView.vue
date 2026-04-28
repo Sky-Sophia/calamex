@@ -92,7 +92,7 @@ v-show="isWorkbenchContentVisible" ref="runPanelRef" :terminal-output-length="ed
 
     <template #right-sidebar>
       <AiAssistantPanel
-        v-show="isWorkbenchContentVisible && isAiPanelVisible"
+        v-show="isWorkbenchContentVisible"
         :document="editorStore.document"
         :active-run="editorStore.activeRunSummary"
         :analysis="editorStore.activeScriptAnalysis"

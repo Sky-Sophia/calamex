@@ -1,0 +1,141 @@
+[
+    {
+        "name": "app-runtime-js",
+        "path": [
+            "dist/assets/index-*.js",
+            "dist/assets/modulepreload-polyfill-*.js",
+            "dist/assets/rolldown-runtime-*.js",
+            "dist/assets/core-*.js",
+            "dist/assets/event-*.js",
+            "dist/assets/error-*.js",
+            "dist/assets/vendor-core-*.js",
+            "dist/assets/vendor-shell-analysis-*.js",
+            "dist/assets/router-*.js",
+            "dist/assets/App-*.js",
+            "dist/assets/window-*.js",
+            "dist/assets/ShellWorkbenchView-*.js",
+            "dist/assets/dist-js-*.js",
+            "dist/assets/desktop-*.js",
+            "dist/assets/shell-catalog-*.js",
+            "dist/assets/_plugin-vue_export-helper-*.js"
+        ],
+        "gzip": true,
+        "brotli": false,
+        "limit": "500 KB"
+    },
+    {
+        "name": "first-screen-js-without-monaco",
+        "path": [
+            "dist/assets/index-*.js",
+            "dist/assets/modulepreload-polyfill-*.js",
+            "dist/assets/rolldown-runtime-*.js",
+            "dist/assets/core-*.js",
+            "dist/assets/event-*.js",
+            "dist/assets/error-*.js",
+            "dist/assets/vendor-core-*.js",
+            "dist/assets/vendor-shell-analysis-*.js"
+        ],
+        "gzip": true,
+        "brotli": false,
+        "limit": "150 KB"
+    },
+    {
+        "name": "monaco-base-browser-chunk",
+        "path": "dist/assets/monaco-base-browser-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "monaco-base-common-chunk",
+        "path": "dist/assets/monaco-base-common-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "monaco-core-chunk",
+        "path": "dist/assets/monaco-core-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "monaco-standalone-chunk",
+        "path": "dist/assets/monaco-standalone-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "monaco-platform-chunk",
+        "path": "dist/assets/monaco-platform-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "monaco-editor-browser-chunk",
+        "path": "dist/assets/monaco-editor-browser-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "monaco-editor-common-chunk",
+        "path": "dist/assets/monaco-editor-common-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "monaco-contrib-clipboard-chunk",
+        "path": "dist/assets/monaco-contrib-clipboard-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "monaco-contrib-comment-chunk",
+        "path": "dist/assets/monaco-contrib-comment-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "monaco-contrib-find-chunk",
+        "path": "dist/assets/monaco-contrib-find-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "monaco-quickaccess-chunk",
+        "path": "dist/assets/monaco-quickaccess-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "monaco-language-chunk",
+        "path": "dist/assets/monaco-language-*.js",
+        "gzip": true,
+        "brotli": false,
+        "limit": "200 KB"
+    },
+    {
+        "name": "app-css-total",
+        "path": [
+            "dist/assets/index-*.css",
+            "dist/assets/Welcome-*.css",
+            "dist/assets/App-*.css",
+            "dist/assets/vendor-xterm-*.css",
+            "dist/assets/window-*.css",
+            "dist/assets/ShellWorkbenchView-*.css",
+            "dist/assets/styles-*.css"
+        ],
+        "gzip": true,
+        "brotli": false,
+        "limit": "50 KB"
+    }
+]

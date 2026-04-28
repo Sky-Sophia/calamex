@@ -11,6 +11,8 @@ const props = defineProps<{
     id: string;
     name: string;
     sizeLabel: string;
+    kind: 'text' | 'image';
+    detailLabel?: string;
   }[];
   hasAttachments: boolean;
 }>();
@@ -66,6 +68,21 @@ const handleFileChange = (event: Event): void => {
   emit('fileSelected', file);
 };
 
+const handlePaste = (event: ClipboardEvent): void => {
+  if (props.disabled) return;
+  const imageFiles = Array.from(event.clipboardData?.items ?? [])
+    .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
+
+  if (imageFiles.length === 0) return;
+
+  event.preventDefault();
+  for (const file of imageFiles) {
+    emit('fileSelected', file);
+  }
+};
+
 watch(modelValue, () => {
   void resizeTextarea();
 });
@@ -88,18 +105,21 @@ onMounted(() => {
     </div>
     <div v-if="attachments.length" class="ai-attachment-strip" aria-label="已添加附件">
       <span v-for="attachment in attachments" :key="attachment.id" class="ai-attachment-chip">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+        <svg v-if="attachment.kind === 'image'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <circle cx="8.5" cy="9" r="1.5" />
+          <path d="m21 15-4.5-4.5L7 20" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
           <path d="M14 2v6h6" />
         </svg>
         <span class="ai-attachment-name">{{ attachment.name }}</span>
-        <span class="ai-attachment-size">{{ attachment.sizeLabel }}</span>
-        <button
-          type="button"
-          aria-label="移除附件"
-          title="移除附件"
-          @click="emit('removeFile', attachment.id)"
-        >
+        <span v-if="attachment.kind !== 'image' && attachment.detailLabel" class="ai-attachment-detail">{{
+          attachment.detailLabel }}</span>
+        <span v-if="attachment.kind !== 'image'" class="ai-attachment-size">{{ attachment.sizeLabel }}</span>
+        <button type="button" aria-label="移除附件" title="移除附件" @click="emit('removeFile', attachment.id)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <path d="M18 6 6 18" />
             <path d="m6 6 12 12" />
@@ -108,50 +128,22 @@ onMounted(() => {
       </span>
     </div>
     <div class="ai-input-row">
-      <label
-        class="ai-icon-button ai-file-button"
-        :class="{ disabled }"
-        aria-label="上传文件"
-        title="上传文件"
-      >
+      <label class="ai-icon-button ai-file-button" :class="{ disabled }" aria-label="添加附件" title="添加附件">
         <input class="ai-file-input" type="file" :disabled="disabled" @change="handleFileChange" />
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
           <path
-            d="M21.44 11.05L12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
-          />
+            d="M21.44 11.05L12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
         </svg>
       </label>
-      <textarea
-        ref="textareaRef"
-        v-model="modelValue"
-        rows="1"
-        placeholder="输入消息…"
-        aria-label="输入消息"
-        :disabled="disabled"
-        @input="resizeTextarea"
-        @keydown="handleKeydown"
-      />
-      <button
-        v-if="disabled"
-        type="button"
-        class="ai-icon-button"
-        aria-label="停止"
-        title="停止"
-        @click="emit('stop')"
-      >
+      <textarea ref="textareaRef" v-model="modelValue" rows="1" placeholder="输入消息…" aria-label="输入消息"
+        :disabled="disabled" @input="resizeTextarea" @keydown="handleKeydown" @paste="handlePaste" />
+      <button v-if="disabled" type="button" class="ai-icon-button" aria-label="停止" title="停止" @click="emit('stop')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
           <rect x="7" y="7" width="10" height="10" rx="1" />
         </svg>
       </button>
-      <button
-        v-else
-        type="button"
-        class="ai-icon-button"
-        :aria-label="submitLabel"
-        :title="submitLabel"
-        :disabled="!modelValue.trim() && !hasAttachments"
-        @click="emit('submit')"
-      >
+      <button v-else type="button" class="ai-icon-button" :aria-label="submitLabel" :title="submitLabel"
+        :disabled="!modelValue.trim() && !hasAttachments" @click="emit('submit')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
           <path d="M21.5 2.5L11 13" />
           <path d="M21.5 2.5l-6.5 19-4-8.5-8.5-4 19-6.5z" />
@@ -243,7 +235,7 @@ onMounted(() => {
   padding: 0 5px 0 7px;
 }
 
-.ai-attachment-chip > svg {
+.ai-attachment-chip>svg {
   width: 13px;
   height: 13px;
   flex: 0 0 auto;
@@ -261,6 +253,11 @@ onMounted(() => {
 }
 
 .ai-attachment-size {
+  flex: 0 0 auto;
+  color: var(--text-quaternary);
+}
+
+.ai-attachment-detail {
   flex: 0 0 auto;
   color: var(--text-quaternary);
 }

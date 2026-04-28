@@ -61,20 +61,14 @@
             </p>
 
             <div class="source-control-setup-actions">
-              <button
-                type="button"
-                class="source-control-setup-btn source-control-setup-btn-primary"
-                :disabled="isBusy || isLoading"
-                :aria-busy="pendingAction === 'init-repository'"
+              <button type="button" class="source-control-setup-btn source-control-setup-btn-primary"
+                :disabled="isBusy || isLoading" :aria-busy="pendingAction === 'init-repository'"
                 @click="handleInitRepository">
                 {{ initRepositoryButtonLabel }}
               </button>
 
-              <button
-                type="button"
-                class="source-control-setup-btn source-control-setup-btn-secondary"
-                :disabled="isBusy || isLoading"
-                @click="handleOpenCloneGuide">
+              <button type="button" class="source-control-setup-btn source-control-setup-btn-secondary"
+                :disabled="isBusy || isLoading" @click="handleOpenCloneGuide">
                 从远程克隆...
               </button>
             </div>
@@ -119,11 +113,7 @@
       </div>
 
       <div class="source-control-toolbar" aria-label="Git 快捷操作">
-        <button
-          type="button"
-          class="source-control-toolbar-icon"
-          :disabled="isBusy"
-          title="刷新 Git 状态"
+        <button type="button" class="source-control-toolbar-icon" :disabled="isBusy" title="刷新 Git 状态"
           aria-label="刷新 Git 状态" @click="handleRefresh">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M20 7v5h-5" />
@@ -141,10 +131,7 @@
           全部取消
         </button>
 
-        <button
-          type="button"
-          class="source-control-toolbar-btn is-danger"
-          :disabled="!canDiscardAll"
+        <button type="button" class="source-control-toolbar-btn is-danger" :disabled="!canDiscardAll"
           @click="handleDiscardAll">
           放弃未暂存
         </button>
@@ -171,10 +158,9 @@
       </div>
 
       <nav class="source-control-nav" aria-label="源代码管理导航">
-        <button
-          v-for="item in navItems" :key="item.key" type="button" class="source-control-nav-item"
-          :class="{ 'is-active': item.active, 'is-inactive': !item.active }"
-          :aria-pressed="item.active" @click="selectNavItem(item.key)">
+        <button v-for="item in navItems" :key="item.key" type="button" class="source-control-nav-item"
+          :class="{ 'is-active': item.active, 'is-inactive': !item.active }" :aria-pressed="item.active"
+          @click="selectNavItem(item.key)">
           <svg v-if="item.key === 'changes'" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <path d="m7 10 5-5 5 5" />
@@ -217,8 +203,7 @@
             <p class="source-control-empty-text">{{ emptyChangesText }}</p>
           </section>
 
-          <section
-            v-for="section in filteredSections" :key="section.key" class="source-control-section"
+          <section v-for="section in filteredSections" :key="section.key" class="source-control-section"
             :class="{ 'is-collapsed': collapsedSections[section.key] }">
             <button type="button" class="source-control-section-header" @click="toggleSectionCollapse(section.key)">
               <svg class="source-control-section-chevron" viewBox="0 0 24 24" aria-hidden="true">
@@ -229,9 +214,8 @@
             </button>
 
             <div class="source-control-file-list">
-              <article
-                v-for="entry in section.entries" :key="section.key + ':' + entry.path" class="source-control-file"
-                :class="{ 'is-active': isActivePath(entry.path) }"
+              <article v-for="entry in section.entries" :key="section.key + ':' + entry.path"
+                class="source-control-file" :class="{ 'is-active': isActivePath(entry.path) }"
                 @contextmenu.prevent.stop="handleEntryContextMenu($event, section.key, entry)">
                 <button type="button" class="source-control-file-main" @click="handleOpenFile(entry.path)">
                   <span class="source-control-file-tag" :class="'is-' + resolveEntryTagTone(section.key, entry)">
@@ -245,10 +229,9 @@
                 </button>
 
                 <div v-if="resolveEntryActions(section.key, entry).length > 0" class="source-control-file-actions">
-                  <button
-                    v-for="action in resolveEntryActions(section.key, entry)"
-                    :key="section.key + ':' + entry.path + ':' + action.key" type="button" class="source-control-icon-btn"
-                    :disabled="isBusy" :aria-label="action.title" :title="action.title"
+                  <button v-for="action in resolveEntryActions(section.key, entry)"
+                    :key="section.key + ':' + entry.path + ':' + action.key" type="button"
+                    class="source-control-icon-btn" :disabled="isBusy" :aria-label="action.title" :title="action.title"
                     @click.stop="handleEntryAction(action.key, section.key, entry)">
                     <svg v-if="action.icon === 'plus'" viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M12 5v14" />
@@ -305,25 +288,17 @@
       </div>
 
       <footer v-if="activeTab === 'changes'" class="source-control-commit">
-        <textarea
-          v-model="commitMessage" class="source-control-commit-input" rows="3"
-          placeholder="feat(scope): 简短说明（Ctrl+Enter 提交）"
+        <textarea v-model="commitMessage" class="source-control-commit-input" rows="3" placeholder="Ctrl+Enter 提交"
           :disabled="isBusy" @keydown.ctrl.enter.prevent="handleCommit" @keydown.meta.enter.prevent="handleCommit" />
 
-        <p class="source-control-commit-hint" :class="{ 'is-warning': commitValidationMessage }">
-          {{ commitValidationMessage ?? '建议使用 Conventional Commit，例如 feat(terminal): 修复提示符' }}
-        </p>
-
         <div class="source-control-commit-actions">
-          <button
-            type="button" class="source-control-btn source-control-btn-primary" :disabled="!canCommit"
+          <button type="button" class="source-control-btn source-control-btn-primary" :disabled="!canCommit"
             @click="handleCommit">
             {{ commitButtonLabel }}
           </button>
 
-          <button
-            type="button" class="source-control-btn source-control-btn-icon" :disabled="isBusy" aria-label="更多 Git 操作"
-            title="更多 Git 操作" @click="handleMoreActions">
+          <button type="button" class="source-control-btn source-control-btn-icon" :disabled="isBusy"
+            aria-label="更多 Git 操作" title="更多 Git 操作" @click="handleMoreActions">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <polyline points="6 9 12 15 18 9" />
             </svg>
@@ -336,15 +311,8 @@
         <span>{{ statusbarText }}</span>
       </div>
 
-      <LinearContextMenu
-        :open="scmMenuState.open"
-        :x="scmMenuState.x"
-        :y="scmMenuState.y"
-        :groups="scmMenuGroups"
-        theme="dark"
-        submenu-direction="right"
-        @select="handleContextMenuSelect"
-      />
+      <LinearContextMenu :open="scmMenuState.open" :x="scmMenuState.x" :y="scmMenuState.y" :groups="scmMenuGroups"
+        theme="dark" submenu-direction="right" @select="handleContextMenuSelect" />
     </template>
   </aside>
 </template>
@@ -380,22 +348,6 @@ const SOURCE_CONTROL_MENU_WIDTH = 240;
 const SOURCE_CONTROL_MENU_HEIGHT = 320;
 const SOURCE_CONTROL_MENU_VIEWPORT_PADDING = 12;
 const SOURCE_CONTROL_MENU_ROOT_SELECTOR = '.linear-context-menu-root';
-const COMMIT_MESSAGE_TYPES = [
-  'feat',
-  'fix',
-  'docs',
-  'style',
-  'refactor',
-  'perf',
-  'test',
-  'build',
-  'ci',
-  'chore',
-  'revert',
-] as const;
-const COMMIT_MESSAGE_PATTERN =
-  /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9_.-]+\))?!?: .+$/u;
-const COMMIT_SUBJECT_MAX_LENGTH = 50;
 
 type TGitSectionKey = 'conflicts' | 'staged' | 'changes' | 'untracked';
 type TGitNavKey = 'changes' | 'history' | 'branches' | 'pull-requests' | 'stash';
@@ -698,35 +650,11 @@ const filteredSections = computed<IGitSection[]>(() => {
     .filter((section) => section.entries.length > 0);
 });
 
-const validateCommitMessage = (messageValue: string): string | null => {
-  const trimmedMessage = messageValue.trim();
-  if (!trimmedMessage) {
-    return null;
-  }
-
-  if (!COMMIT_MESSAGE_PATTERN.test(trimmedMessage)) {
-    return `提交格式需为 ${COMMIT_MESSAGE_TYPES.join('|')}(scope): 说明`;
-  }
-
-  const subject = trimmedMessage.split(': ', 2)[1] ?? '';
-  if (Array.from(subject).length > COMMIT_SUBJECT_MAX_LENGTH) {
-    return `提交说明需不超过 ${COMMIT_SUBJECT_MAX_LENGTH} 个字符`;
-  }
-
-  if (/[。.]$/u.test(subject)) {
-    return '提交说明结尾不要加句号';
-  }
-
-  return null;
-};
-
 const hasVisibleChanges = computed(() => filteredSections.value.some((section) => section.entries.length > 0));
-const commitValidationMessage = computed(() => validateCommitMessage(commitMessage.value));
 const canCommit = computed(
   () =>
     status.value.stagedCount > 0 &&
     commitMessage.value.trim().length > 0 &&
-    commitValidationMessage.value === null &&
     !isBusy.value,
 );
 
@@ -1117,25 +1045,8 @@ const handleCommit = async (): Promise<void> => {
     return;
   }
 
-  const validationMessage = validateCommitMessage(nextCommitMessage);
-  if (validationMessage) {
-    message.warning(validationMessage);
-    return;
-  }
-
   if (status.value.stagedCount === 0) {
     message.warning('请先暂存至少一项变更。');
-    return;
-  }
-
-  const action = await dialog.confirm({
-    title: '创建 Git 提交？',
-    description: `将提交 ${status.value.stagedCount} 项已暂存变更。\n\n${nextCommitMessage}`,
-    confirmText: '提交',
-    cancelText: '取消',
-    variant: 'default',
-  });
-  if (action !== 'confirm') {
     return;
   }
 

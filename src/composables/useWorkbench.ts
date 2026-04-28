@@ -20,7 +20,7 @@ import { desktopRuntimeReady, waitForDesktopRuntime } from '@/utils/desktop-runt
 import { toErrorMessage } from '@/utils/error';
 import { isShellScriptPath } from '@/utils/file-assets';
 import { COMMAND_TEMPLATES, COMMENT_TEMPLATES, DEFAULT_EXECUTOR } from '@/utils/templates';
-import { computed } from 'vue';
+import { computed, onScopeDispose } from 'vue';
 
 const EMPTY_ENVIRONMENT: IExecutionEnvironment = {
   recommended: DEFAULT_EXECUTOR,
@@ -40,11 +40,36 @@ export const useWorkbench = () => {
   const notifier = useMessage();
   useTheme();
   useWindowResizeState();
+  let executionEnvironmentSyncTimerId: number | null = null;
+
+  onScopeDispose(() => {
+    if (executionEnvironmentSyncTimerId !== null) {
+      window.clearTimeout(executionEnvironmentSyncTimerId);
+      executionEnvironmentSyncTimerId = null;
+    }
+  });
 
   const reportError = (scene: string, error: unknown, fallbackMessage: string): void => {
     const message = toErrorMessage(error, fallbackMessage);
     editorStore.appendLog('error', scene, message);
     notifier.error(message);
+  };
+
+  const syncExecutionEnvironment = async (): Promise<void> => {
+    try {
+      const environment = await tauriService.detectEnvironment();
+      editorStore.setEnvironment(environment);
+      editorStore.selectedExecutor = DEFAULT_EXECUTOR;
+      editorStore.appendLog(
+        environment.hasAny ? 'success' : 'error',
+        '执行环境检测',
+        environment.hasAny
+          ? '已检测到可用的 WSL2 运行环境。'
+          : '当前系统未发现可用的 WSL2 运行环境，建议先安装或启用 WSL2。',
+      );
+    } catch (error) {
+      reportError('执行环境检测失败', error, '执行环境检测失败');
+    }
   };
 
   const canRun = computed(() => {
@@ -144,20 +169,12 @@ export const useWorkbench = () => {
       };
     }
 
-    try {
-      const environment = await tauriService.detectEnvironment();
-      editorStore.setEnvironment(environment);
-      editorStore.selectedExecutor = DEFAULT_EXECUTOR;
-      editorStore.appendLog(
-        environment.hasAny ? 'success' : 'error',
-        '执行环境检测',
-        environment.hasAny
-          ? '已检测到可用的 WSL2 运行环境。'
-          : '当前系统未发现可用的 WSL2 运行环境，建议先安装或启用 WSL2。',
-      );
-    } catch (error) {
-      reportError('执行环境检测失败', error, '执行环境检测失败');
-    }
+    editorStore.setEnvironment(EMPTY_ENVIRONMENT);
+    editorStore.selectedExecutor = DEFAULT_EXECUTOR;
+    executionEnvironmentSyncTimerId = window.setTimeout(() => {
+      executionEnvironmentSyncTimerId = null;
+      void syncExecutionEnvironment();
+    }, 0);
 
 
     return {

@@ -3,6 +3,7 @@
 mod ai;
 mod ai_agent;
 mod ai_context;
+mod ai_edit;
 mod ai_index;
 mod ai_patch;
 mod ai_tools;
@@ -11,9 +12,10 @@ mod error;
 mod terminal;
 
 use commands::{
-    ai_apply_patch, ai_build_index, ai_cancel, ai_chat, ai_chat_stream, ai_clear_credentials, ai_code_action, ai_get_config,
-    ai_inline_complete, ai_list_tools, ai_plan_task, ai_propose_patch, ai_query_index,
-    ai_save_config, ai_save_credentials, ai_test_provider, analyze_script, apply_window_stage,
+    ai_apply_patch, ai_build_index, ai_cancel, ai_chat, ai_chat_stream, ai_clear_credentials, ai_code_action, ai_connect_provider, ai_edit_get_auth_level,
+    ai_edit_list_timeline, ai_edit_restore_snapshot, ai_edit_set_auth_level, ai_edit_undo_operation, ai_get_config, ai_inline_complete,
+    ai_list_tools, ai_plan_task, ai_propose_patch, ai_query_index,
+    ai_save_config, ai_save_credentials, ai_test_provider, ai_test_provider_config, analyze_script, apply_window_stage,
     begin_startup_transition, cancel_terminal_run, close_terminal_session, commit_git_index,
     create_ssh_directory, create_workspace_path, delete_ssh_path, delete_workspace_path,
     detect_execution_environment, discard_git_paths, dispatch_script_to_terminal,
@@ -24,9 +26,8 @@ use commands::{
     set_window_background, shutdown_all_terminal_sessions, stage_git_paths, test_ssh_connection,
     unstage_git_paths, upload_ssh_file, write_terminal_input, TerminalSessionState,
 };
-use std::time::Duration;
+use ai_edit::AiEditState;
 use tauri::{Manager, WindowEvent};
-use tokio::time::sleep;
 
 #[cfg(windows)]
 fn disable_webview_default_context_menu<R: tauri::Runtime>(
@@ -64,6 +65,7 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .manage(AiEditState::default())
         .manage(TerminalSessionState::default())
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { .. } = event {
@@ -90,28 +92,6 @@ fn main() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
             }
-
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                sleep(Duration::from_millis(1_500)).await;
-
-                let main_visible = app_handle
-                    .get_webview_window("main")
-                    .and_then(|window| window.is_visible().ok())
-                    .unwrap_or(false);
-
-                let Some(welcome_window) = app_handle.get_webview_window("welcome") else {
-                    return;
-                };
-
-                let welcome_visible = welcome_window.is_visible().unwrap_or(false);
-                if welcome_visible || main_visible {
-                    return;
-                }
-
-                let _ = welcome_window.show();
-                let _ = welcome_window.set_focus();
-            });
 
             Ok(())
         })
@@ -157,6 +137,8 @@ fn main() {
             ai_save_credentials,
             ai_clear_credentials,
             ai_test_provider,
+            ai_test_provider_config,
+            ai_connect_provider,
             ai_chat,
             ai_chat_stream,
             ai_cancel,
@@ -167,6 +149,11 @@ fn main() {
             ai_query_index,
             ai_propose_patch,
             ai_apply_patch,
+            ai_edit_get_auth_level,
+            ai_edit_set_auth_level,
+            ai_edit_list_timeline,
+            ai_edit_restore_snapshot,
+            ai_edit_undo_operation,
             ai_list_tools
         ]);
 

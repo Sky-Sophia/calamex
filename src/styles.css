@@ -402,6 +402,8 @@ button:disabled,
 .app-window-shell[data-layout-resizing='true'],
 .app-window-shell[data-workbench-motion-state='opening'],
 .app-window-shell[data-workbench-motion-state='closing'],
+.app-window-shell[data-workbench-motion-state='right-sidebar-opening'],
+.app-window-shell[data-workbench-motion-state='right-sidebar-closing'],
 .app-window-shell[data-workbench-motion-state='terminal-opening'],
 .app-window-shell[data-workbench-motion-state='terminal-closing'],
 .app-window-shell[data-workbench-motion-state='settling'] {
@@ -410,6 +412,8 @@ button:disabled,
 
 .app-window-shell[data-workbench-motion-state='opening'] .app-shell-pane,
 .app-window-shell[data-workbench-motion-state='closing'] .app-shell-pane,
+.app-window-shell[data-workbench-motion-state='right-sidebar-opening'] .app-shell-pane,
+.app-window-shell[data-workbench-motion-state='right-sidebar-closing'] .app-shell-pane,
 .app-window-shell[data-workbench-motion-state='terminal-opening'] .app-shell-pane,
 .app-window-shell[data-workbench-motion-state='terminal-closing'] .app-shell-pane,
 .app-window-shell[data-workbench-motion-state='settling'] .app-shell-pane {
@@ -418,6 +422,8 @@ button:disabled,
 
 .app-window-shell[data-workbench-motion-state='opening'] .editor-surface,
 .app-window-shell[data-workbench-motion-state='closing'] .editor-surface,
+.app-window-shell[data-workbench-motion-state='right-sidebar-opening'] .editor-surface,
+.app-window-shell[data-workbench-motion-state='right-sidebar-closing'] .editor-surface,
 .app-window-shell[data-workbench-motion-state='terminal-opening'] .editor-surface,
 .app-window-shell[data-workbench-motion-state='terminal-closing'] .editor-surface,
 .app-window-shell[data-workbench-motion-state='settling'] .editor-surface,
@@ -1281,6 +1287,10 @@ button:disabled,
 
 .explorer-sidebar-host {
   background: var(--sidebar-bg);
+}
+
+.ssh-sidebar-host {
+  background: #1c1c1f;
 }
 
 .explorer-sidebar {
@@ -2769,17 +2779,6 @@ button:disabled,
 
 .source-control-commit-input::placeholder {
   color: var(--scm-text-faint);
-}
-
-.source-control-commit-hint {
-  margin: -2px 0 0;
-  color: var(--scm-text-faint);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.source-control-commit-hint.is-warning {
-  color: #fbbf24;
 }
 
 .source-control-commit-actions {

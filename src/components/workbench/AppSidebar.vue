@@ -5,6 +5,7 @@
       'source-control-sidebar-host': isSourceControlView,
       'explorer-sidebar-host': isExplorerView,
       'search-sidebar-host': isSearchView,
+      'ssh-sidebar-host': isSshView,
     }"
   >
     <SourceControlPanel

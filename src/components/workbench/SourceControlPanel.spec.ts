@@ -197,7 +197,7 @@ describe('SourceControlPanel', () => {
     });
   });
 
-  it('提交前校验 Conventional Commit 并弹出确认', async () => {
+  it('提交时允许任意非空提交说明并直接提交', async () => {
     const stagedStatus = createStatus({
       stagedCount: 1,
       unstagedCount: 0,
@@ -218,18 +218,13 @@ describe('SourceControlPanel', () => {
     });
     const wrapper = await mountPanel(stagedStatus);
 
-    await wrapper.find('.source-control-commit-input').setValue('hello');
-
-    expect(wrapper.find('.source-control-commit-hint').text()).toContain('提交格式需为');
-    expect(wrapper.find('.source-control-btn-primary').attributes('disabled')).toBeDefined();
-
-    await wrapper.find('.source-control-commit-input').setValue('feat(scm): 补齐源代码管理');
+    await wrapper.find('.source-control-commit-input').setValue('随便写点提交说明。');
     await wrapper.find('.source-control-btn-primary').trigger('click');
     await flushPromises();
 
     expect(tauriServiceMock.commitGitIndex).toHaveBeenCalledWith({
       repositoryRootPath: 'D:/repo',
-      message: 'feat(scm): 补齐源代码管理',
+      message: '随便写点提交说明。',
     });
   });
 });

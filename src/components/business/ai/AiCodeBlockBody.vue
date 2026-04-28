@@ -1,5 +1,7 @@
 ﻿<script setup lang="ts">
-defineProps<{
+import { onMounted, ref, watch } from 'vue';
+
+const props = defineProps<{
   highlightedHtml: string;
   isFolded: boolean;
   isWrapped: boolean;
@@ -7,6 +9,63 @@ defineProps<{
   lineNumbers: number[];
   truncated: boolean;
 }>();
+
+const preRef = ref<HTMLPreElement | null>(null);
+const codeRef = ref<HTMLElement | null>(null);
+
+const syncAttributes = (target: HTMLElement, source: HTMLElement): void => {
+  const sourceAttributeNames = new Set(source.getAttributeNames());
+
+  for (const name of target.getAttributeNames()) {
+    if (!sourceAttributeNames.has(name)) {
+      target.removeAttribute(name);
+    }
+  }
+
+  for (const name of sourceAttributeNames) {
+    const value = source.getAttribute(name);
+    if (value === null) {
+      target.removeAttribute(name);
+      continue;
+    }
+    target.setAttribute(name, value);
+  }
+};
+
+const syncHighlightedHtml = (highlightedHtml: string): void => {
+  if (!preRef.value || !codeRef.value || typeof document === 'undefined') {
+    return;
+  }
+
+  const template = document.createElement('template');
+  template.innerHTML = highlightedHtml.trim();
+
+  const nextPre = template.content.firstElementChild;
+  if (!(nextPre instanceof HTMLPreElement)) {
+    return;
+  }
+
+  const nextCode = nextPre.querySelector('code');
+  if (!(nextCode instanceof HTMLElement)) {
+    return;
+  }
+
+  syncAttributes(preRef.value, nextPre);
+  syncAttributes(codeRef.value, nextCode);
+  codeRef.value.innerHTML = nextCode.innerHTML;
+};
+
+onMounted(() => {
+  syncHighlightedHtml(props.highlightedHtml);
+});
+
+watch(
+  () => props.highlightedHtml,
+  (value) => {
+    syncHighlightedHtml(value);
+  },
+  { flush: 'post' },
+);
 </script>
 
 <template>
@@ -14,8 +73,9 @@ defineProps<{
     <div v-if="showLineNumbers" class="ai-code-lines" aria-hidden="true">
       <span v-for="line in lineNumbers" :key="line">{{ line }}</span>
     </div>
-    <!-- eslint-disable-next-line vue/no-v-html -- Shiki 输出仅消费已转义代码，高亮失败时走 escapeHtml 降级。 -->
-    <div class="ai-code-scroll" v-html="highlightedHtml"></div>
+    <div class="ai-code-scroll">
+      <pre ref="preRef" class="shiki ai-code-plain"><code ref="codeRef"></code></pre>
+    </div>
     <div v-if="truncated" class="ai-code-truncated">内容过大，已截断显示。</div>
   </div>
 </template>

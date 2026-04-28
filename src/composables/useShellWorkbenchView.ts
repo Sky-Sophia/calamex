@@ -9,11 +9,12 @@ import type {
 } from '@/types/editor';
 import type { ITerminalRunCompletedPayload } from '@/types/terminal';
 import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
+import { dispatchWorkbenchReadyEvent } from '@/utils/startup-ready';
 import { consumeProgrammaticWindowCloseAllowance } from '@/utils/window-close';
 import {
   SHELL_WINDOW_RESIZE_END_EVENT,
-  SHELL_WINDOW_RESIZE_START_EVENT,
   SHELL_WINDOW_RESIZE_SETTLED_EVENT,
+  SHELL_WINDOW_RESIZE_START_EVENT,
 } from '@/utils/window-resize-events';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
@@ -33,6 +34,7 @@ export type TSettingsOverlayExpose = {
 type TWorkbenchSurfaceMode = 'workbench' | 'settings';
 
 const SETTINGS_STATUS_MESSAGE_DURATION_MS = 2200;
+const READY_PAINT_FALLBACK_TIMEOUT_MS = 96;
 const WIDE_SIDEBAR_VIEWS: readonly TWorkbenchSidebarView[] = [
   'source-control',
   'explorer',
@@ -44,6 +46,12 @@ const WIDE_SIDEBAR_VIEWS: readonly TWorkbenchSidebarView[] = [
 
 const clampNumber = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
+
+const isPrimaryModifierShortcut = (event: KeyboardEvent, code: string, key: string): boolean =>
+  (event.ctrlKey || event.metaKey) &&
+  !event.altKey &&
+  !event.shiftKey &&
+  (event.code === code || event.key.toLowerCase() === key);
 
 const resolveDiagnosticsPanelWidth = (availableWidth: number): number => {
   const normalizedWidth = Math.max(0, Math.round(availableWidth));
@@ -76,6 +84,46 @@ const resolveDiagnosticsPanelWidth = (availableWidth: number): number => {
 
   return clampNumber(preferredWidth, resolvedMinWidth, resolvedMaxWidth);
 };
+
+const waitForInitialWorkbenchPaint = async (): Promise<void> =>
+  new Promise((resolve) => {
+    let settled = false;
+    let firstFrameId: number | null = null;
+    let secondFrameId: number | null = null;
+    let timeoutId: number | null = null;
+
+    const finish = (): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+
+      if (firstFrameId !== null) {
+        window.cancelAnimationFrame(firstFrameId);
+      }
+
+      if (secondFrameId !== null) {
+        window.cancelAnimationFrame(secondFrameId);
+      }
+
+      resolve();
+    };
+
+    firstFrameId = window.requestAnimationFrame(() => {
+      firstFrameId = null;
+      secondFrameId = window.requestAnimationFrame(() => {
+        secondFrameId = null;
+        finish();
+      });
+    });
+
+    timeoutId = window.setTimeout(finish, READY_PAINT_FALLBACK_TIMEOUT_MS);
+  });
 
 export const useShellWorkbenchView = (onReady: () => void) => {
   const editorRef = ref<TEditorExpose | null>(null);
@@ -111,7 +159,6 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   let editorLayoutAfterSidebarFrameId: number | null = null;
   let focusBeforeSettingsOpen: HTMLElement | null = null;
   let globalKeydownCleanup: (() => void) | null = null;
-  let previousSidebarView: TWorkbenchSidebarView = 'explorer';
 
   const sidebarWidth = computed(() =>
     WIDE_SIDEBAR_VIEWS.includes(activeSidebarView.value) ? 280 : 240,
@@ -341,11 +388,6 @@ export const useShellWorkbenchView = (onReady: () => void) => {
 
   const openTerminal = async (): Promise<void> => {
     await runAfterClosingSettings(() => {
-      isAiPanelVisible.value = false;
-      if (activeSidebarView.value === 'ai') {
-        activeSidebarView.value = previousSidebarView;
-        isSidebarVisible.value = true;
-      }
       isTerminalVisible.value = true;
     });
   };
@@ -358,8 +400,6 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   };
 
   const toggleTerminalMaximize = (): void => {
-    isAiPanelVisible.value = false;
-
     if (!isTerminalVisible.value) {
       isTerminalVisible.value = true;
     }
@@ -440,6 +480,14 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     await runAfterClosingSettings(() => workbench.requestCloseApplication());
   };
 
+  const saveActiveDocumentFromShortcut = async (): Promise<void> => {
+    if (!isWorkbenchContentVisible.value || !workbench.isDesktopRuntime.value || !workbench.canSave.value) {
+      return;
+    }
+
+    await workbench.saveDocument();
+  };
+
   const handleGlobalKeydownCapture = (event: KeyboardEvent): void => {
     if (event.defaultPrevented || event.isComposing) {
       return;
@@ -455,6 +503,16 @@ export const useShellWorkbenchView = (onReady: () => void) => {
       event.preventDefault();
       event.stopPropagation();
       void toggleSettingsView();
+      return;
+    }
+
+    if (isPrimaryModifierShortcut(event, 'KeyS', 's')) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!event.repeat) {
+        void saveActiveDocumentFromShortcut();
+      }
       return;
     }
 
@@ -488,27 +546,16 @@ export const useShellWorkbenchView = (onReady: () => void) => {
 
   const showSidebarView = (view: TWorkbenchSidebarView): void => {
     activeSidebarView.value = view;
-    previousSidebarView = view;
-    isAiPanelVisible.value = false;
     isSidebarVisible.value = true;
     scheduleEditorLayoutAfterSidebarChange();
   };
 
   const openAiPanel = (): void => {
-    activeSidebarView.value = 'ai';
     isAiPanelVisible.value = true;
-    isTerminalVisible.value = false;
-    isSidebarVisible.value = false;
-    scheduleEditorLayoutAfterSidebarChange();
   };
 
   const closeAiPanel = (): void => {
     isAiPanelVisible.value = false;
-    if (activeSidebarView.value === 'ai') {
-      activeSidebarView.value = previousSidebarView;
-      isSidebarVisible.value = true;
-    }
-    scheduleEditorLayoutAfterSidebarChange();
   };
 
   const handleSelectSidebarView = async (view: TWorkbenchSidebarView): Promise<void> => {
@@ -558,18 +605,31 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     }
 
     await nextTick();
-    await new Promise<void>((resolve) => {
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => resolve());
-      });
-    });
+    await waitForInitialWorkbenchPaint();
 
     if (isUnmounted || hasEmittedReady.value) {
       return;
     }
 
     hasEmittedReady.value = true;
+    dispatchWorkbenchReadyEvent();
     onReady();
+  };
+
+  const restoreWorkbenchSession = async (): Promise<void> => {
+    try {
+      await workbench.restoreSession();
+    } catch (error) {
+      if (isUnmounted) {
+        return;
+      }
+
+      workbench.editorStore.appendLog(
+        'error',
+        '恢复会话失败',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   };
 
   const initializeWorkbench = async (): Promise<void> => {
@@ -579,8 +639,13 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     }
 
     startupWorkspaceRoot.value = result.startupWorkspaceDirectory;
-    await workbench.restoreSession();
     await emitWorkbenchReady();
+
+    if (isUnmounted) {
+      return;
+    }
+
+    void restoreWorkbenchSession();
   };
 
   const bindNativeWindowCloseRequest = async (): Promise<void> => {
@@ -614,11 +679,6 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   const handleRunScript = async (): Promise<void> => {
     await runAfterClosingSettings(async () => {
       closeDiagnosticsPanel();
-      isAiPanelVisible.value = false;
-      if (activeSidebarView.value === 'ai') {
-        activeSidebarView.value = previousSidebarView;
-        isSidebarVisible.value = true;
-      }
       isTerminalVisible.value = true;
       await workbench.runScript();
     });

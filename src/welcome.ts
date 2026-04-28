@@ -1,6 +1,5 @@
 import svgRaw from '@/assets/svg/welcome-isometric.svg?raw';
 
-const WELCOME_STAGE = 'welcome';
 const STARTUP_WELCOME_EPOCH_STORAGE_KEY = 'sh.startup.welcomeEpochMs';
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 const TAURI_RUNTIME_WAIT_TIMEOUT_MS = 2_000;
@@ -66,20 +65,6 @@ const waitForTauriRuntime = async (timeoutMs = TAURI_RUNTIME_WAIT_TIMEOUT_MS): P
   return typeof resolveInvoke() === 'function';
 };
 
-const invokeRuntimeCommand = async (
-  command: string,
-  args?: Record<string, unknown>,
-): Promise<void> => {
-  const invokeFn = (window as Window & { __TAURI_INTERNALS__?: ITauriInternals })
-    .__TAURI_INTERNALS__?.invoke;
-
-  if (typeof invokeFn !== 'function') {
-    return;
-  }
-
-  await invokeFn(command, args);
-};
-
 const applyReducedMotionPreference = (matches: boolean): void => {
   const svgElement = getWelcomeSvg();
   if (!svgElement) {
@@ -112,10 +97,7 @@ const bootWelcomeSurface = async (): Promise<void> => {
   );
 
   await waitForNextPaint();
-
-  if (await waitForTauriRuntime()) {
-    await invokeRuntimeCommand('apply_window_stage', { stage: WELCOME_STAGE });
-  }
+  await waitForTauriRuntime();
 };
 
 void bootWelcomeSurface().catch((error) => {

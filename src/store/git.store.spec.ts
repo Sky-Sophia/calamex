@@ -1,7 +1,18 @@
 import type { IGitRepositoryStatusPayload } from '@/types/git';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { useGitStore } from './git';
+
+// ---------------------------------------------------------------------------
+// Test fixtures & helpers
+// ---------------------------------------------------------------------------
+
+const WORKSPACE_ROOT = 'D:/repo';
+const PARENT_WORKSPACE_ROOT = 'D:/parent';
+
+const MSG_REPO_UNAVAILABLE = '当前工作区未检测到 Git 仓库。';
+const MSG_INIT_MISMATCH = 'Git 初始化目标不一致';
 
 interface IDeferred<T> {
   promise: Promise<T>;
@@ -9,23 +20,25 @@ interface IDeferred<T> {
   reject: (reason?: unknown) => void;
 }
 
-const tauriServiceMock = vi.hoisted(() => ({
-  getGitRepositoryStatus: vi.fn(),
-  initGitRepository: vi.fn(),
-}));
-
-vi.mock('@/services/tauri', () => ({
-  tauriService: tauriServiceMock,
-}));
+const createDeferred = <T>(): IDeferred<T> => {
+  // Promise executor 是同步执行的，下面两个 ! 在 Promise 构造完成前就会被赋值。
+  let resolve!: IDeferred<T>['resolve'];
+  let reject!: IDeferred<T>['reject'];
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+};
 
 const createStatus = (
   overrides: Partial<IGitRepositoryStatusPayload> = {},
 ): IGitRepositoryStatusPayload => ({
   available: true,
   message: null,
-  repositoryRootPath: 'D:/repo',
+  repositoryRootPath: WORKSPACE_ROOT,
   repositoryName: 'repo',
-  gitDirPath: 'D:/repo/.git',
+  gitDirPath: `${WORKSPACE_ROOT}/.git`,
   headBranchName: 'main',
   headShortName: 'main',
   headShortOid: null,
@@ -45,34 +58,30 @@ const createStatus = (
 const createUnavailableStatus = (): IGitRepositoryStatusPayload =>
   createStatus({
     available: false,
-    message: '当前工作区未检测到 Git 仓库。',
+    message: MSG_REPO_UNAVAILABLE,
     repositoryRootPath: null,
     repositoryName: null,
     gitDirPath: null,
     headBranchName: null,
     headShortName: null,
-    isClean: true,
   });
 
-const createDeferred = <T>(): IDeferred<T> => {
-  let resolve: IDeferred<T>['resolve'] = () => {
-    throw new Error('deferred resolve 尚未初始化');
-  };
-  let reject: IDeferred<T>['reject'] = () => {
-    throw new Error('deferred reject 尚未初始化');
-  };
+// ---------------------------------------------------------------------------
+// Module mocks
+// ---------------------------------------------------------------------------
 
-  const promise = new Promise<T>((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
-  });
+const tauriServiceMock = vi.hoisted(() => ({
+  getGitRepositoryStatus: vi.fn(),
+  initGitRepository: vi.fn(),
+}));
 
-  return {
-    promise,
-    resolve,
-    reject,
-  };
-};
+vi.mock('@/services/tauri', () => ({
+  tauriService: tauriServiceMock,
+}));
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 describe('useGitStore', () => {
   beforeEach(() => {
@@ -82,38 +91,47 @@ describe('useGitStore', () => {
 
   it('初始化仓库结果不会被旧刷新请求覆盖回未初始化状态', async () => {
     const gitStore = useGitStore();
-    const staleRefresh = createDeferred<IGitRepositoryStatusPayload>();
-    const initializedStatus = createStatus();
-    const unavailableStatus = createUnavailableStatus();
 
+    // 1) 先发一个永远悬挂的 refresh，让它的 statusRequestId 抢先占位但不解析。
+    const staleRefresh = createDeferred<IGitRepositoryStatusPayload>();
     tauriServiceMock.getGitRepositoryStatus.mockReturnValueOnce(staleRefresh.promise);
+
+    // 2) 紧跟一个 init,它会把 statusRequestId 推到下一个值并立刻完成。
+    const initializedStatus = createStatus();
     tauriServiceMock.initGitRepository.mockResolvedValueOnce(initializedStatus);
 
-    const refreshPromise = gitStore.refreshRepositoryStatus('D:/repo');
-    await gitStore.initRepository('D:/repo');
+    const refreshPromise = gitStore.refreshRepositoryStatus(WORKSPACE_ROOT);
+    await gitStore.initRepository(WORKSPACE_ROOT);
 
+    // init 已经成功落盘。
     expect(gitStore.status.available).toBe(true);
-    expect(gitStore.status.repositoryRootPath).toBe('D:/repo');
+    expect(gitStore.status.repositoryRootPath).toBe(WORKSPACE_ROOT);
 
-    staleRefresh.resolve(unavailableStatus);
+    // 3) 现在让陈旧的 refresh 拿到一份 unavailable 结果——它必须被 staleness 检查丢弃。
+    staleRefresh.resolve(createUnavailableStatus());
     await refreshPromise;
 
     expect(gitStore.status.available).toBe(true);
-    expect(gitStore.status.repositoryRootPath).toBe('D:/repo');
+    expect(gitStore.status.repositoryRootPath).toBe(WORKSPACE_ROOT);
     expect(gitStore.isLoading).toBe(false);
   });
 
   it('初始化返回非当前工作区仓库时会报错且不写入状态', async () => {
     const gitStore = useGitStore();
-    const parentRepositoryStatus = createStatus({
-      repositoryRootPath: 'D:/parent',
-      repositoryName: 'parent',
-      gitDirPath: 'D:/parent/.git',
-    });
 
+    // 故意让 init 返回一个父目录仓库的状态，模拟 git init 命中了上层已存在的 .git。
+    const parentRepositoryStatus = createStatus({
+      repositoryRootPath: PARENT_WORKSPACE_ROOT,
+      repositoryName: 'parent',
+      gitDirPath: `${PARENT_WORKSPACE_ROOT}/.git`,
+    });
     tauriServiceMock.initGitRepository.mockResolvedValueOnce(parentRepositoryStatus);
 
-    await expect(gitStore.initRepository('D:/repo')).rejects.toThrow('Git 初始化目标不一致');
+    await expect(gitStore.initRepository(WORKSPACE_ROOT)).rejects.toThrow(
+      MSG_INIT_MISMATCH,
+    );
+
+    // 抛错走 finally → isLoading 复位；但 applyStatus 没有被调用，状态保持默认空。
     expect(gitStore.status.available).toBe(false);
     expect(gitStore.status.repositoryRootPath).toBeNull();
     expect(gitStore.isLoading).toBe(false);

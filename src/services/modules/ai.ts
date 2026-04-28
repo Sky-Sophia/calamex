@@ -16,6 +16,8 @@ import type {
   IAiInlineCompletionRequest,
   IAiInlineCompletionResult,
   IAiProviderTestPayload,
+  IAiProviderConnectionPayload,
+  IAiProviderConnectionRequest,
   IAiProposePatchPayload,
   IAiProposePatchRequest,
   IAiQueryIndexPayload,
@@ -40,6 +42,12 @@ export const aiService = {
   },
   testProvider(): Promise<IAiProviderTestPayload> {
     return tauriService.aiTestProvider();
+  },
+  testProviderConfig(payload: IAiProviderConnectionRequest): Promise<IAiProviderTestPayload> {
+    return tauriService.aiTestProviderConfig(payload);
+  },
+  connectProvider(payload: IAiProviderConnectionRequest): Promise<IAiProviderConnectionPayload> {
+    return tauriService.aiConnectProvider(payload);
   },
   chat(payload: IAiChatRequest, options: { signal?: AbortSignal } = {}): Promise<IAiChatPayload> {
     return tauriService.aiChat(payload, options);

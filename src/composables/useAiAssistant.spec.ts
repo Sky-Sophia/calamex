@@ -1,38 +1,74 @@
-import { useAiAssistant } from '@/composables/useAiAssistant';
-import type { IAiChatStreamEventPayload } from '@/types/ai';
-import type { IAnalyzeScriptPayload, IEditorDocument } from '@/types/editor';
-import type { IGitRepositoryStatusPayload } from '@/types/git';
+import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ref } from 'vue';
 
+import { useAiAssistant } from '@/composables/useAiAssistant';
+import { useAiConversationStore } from '@/store/aiConversation';
+import type { IAiChatStreamEventPayload } from '@/types/ai';
+import type { IAnalyzeScriptPayload, IEditorDocument } from '@/types/editor';
+import type { IGitRepositoryStatusPayload } from '@/types/git';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const STREAM_ID = 'stream-1' as const;
+const ASSISTANT_MESSAGE_ID = 'assistant-1' as const;
+const MOCK_MODEL = 'mock-ide-assistant' as const;
+const WORKSPACE_ROOT = 'd:/com.xiaojianc/my_desktop_app' as const;
+
+// ---------------------------------------------------------------------------
+// AI service mock (hoisted so vi.mock factory can reach it)
+// ---------------------------------------------------------------------------
+
 const aiServiceMock = vi.hoisted(() => {
-    let streamHandler: ((payload: IAiChatStreamEventPayload) => void) | null = null;
+    type StreamHandler = (payload: IAiChatStreamEventPayload) => void;
+
+    let streamHandler: StreamHandler | null = null;
+
+    const onChatStream = vi.fn(async (handler: StreamHandler) => {
+        streamHandler = handler;
+        return vi.fn(); // unsubscribe
+    });
+
+    const chatStream = vi.fn(async () => ({
+        streamId: STREAM_ID,
+        assistantMessageId: ASSISTANT_MESSAGE_ID,
+        providerType: 'mock',
+        model: MOCK_MODEL,
+    }));
+
+    const cancel = vi.fn(async (_payload: { streamId: string }) => undefined);
+
+    const queryIndex = vi.fn(async () => ({
+        rootPath: WORKSPACE_ROOT,
+        results: [],
+    }));
 
     return {
-        onChatStream: vi.fn(async (handler: (payload: IAiChatStreamEventPayload) => void) => {
-            streamHandler = handler;
-            return vi.fn();
-        }),
-        chatStream: vi.fn(async () => ({
-            streamId: 'stream-1',
-            assistantMessageId: 'assistant-1',
-            providerType: 'mock',
-            model: 'mock-ide-assistant',
-        })),
-        cancel: vi.fn(async () => undefined),
-        queryIndex: vi.fn(async () => ({
-            rootPath: 'd:/com.xiaojianc/my_desktop_app',
-            results: [],
-        })),
-        emit(event: IAiChatStreamEventPayload) {
+        onChatStream,
+        chatStream,
+        cancel,
+        queryIndex,
+        emit(event: IAiChatStreamEventPayload): void {
             streamHandler?.(event);
         },
-        reset() {
+        emitDelta(delta: string): void {
+            streamHandler?.({
+                streamId: STREAM_ID,
+                assistantMessageId: ASSISTANT_MESSAGE_ID,
+                kind: 'delta',
+                delta,
+                message: null,
+                model: MOCK_MODEL,
+            });
+        },
+        reset(): void {
             streamHandler = null;
-            this.onChatStream.mockClear();
-            this.chatStream.mockClear();
-            this.cancel.mockClear();
-            this.queryIndex.mockClear();
+            onChatStream.mockClear();
+            chatStream.mockClear();
+            cancel.mockClear();
+            queryIndex.mockClear();
         },
     };
 });
@@ -46,6 +82,10 @@ vi.mock('@/services/modules/ai', () => ({
     },
 }));
 
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
 const flushMicrotasks = async (): Promise<void> => {
     await Promise.resolve();
     await Promise.resolve();
@@ -53,14 +93,18 @@ const flushMicrotasks = async (): Promise<void> => {
 
 const waitForStartedStream = async (
     resolveMessageId: () => string | undefined,
+    expectedId: string = ASSISTANT_MESSAGE_ID,
+    maxAttempts = 8,
 ): Promise<void> => {
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-        if (resolveMessageId() === 'assistant-1') {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (resolveMessageId() === expectedId) {
             return;
         }
         await flushMicrotasks();
     }
-    throw new Error('assistant stream did not start in time');
+    throw new Error(
+        `assistant stream did not start in time (expected id="${expectedId}" within ${maxAttempts} ticks)`,
+    );
 };
 
 const createDocument = (): IEditorDocument => ({
@@ -105,13 +149,31 @@ const createGitStatus = (): IGitRepositoryStatusPayload => ({
     lastCommit: null,
 });
 
+const createAssistantHarness = (): ReturnType<typeof useAiAssistant> =>
+    useAiAssistant({
+        document: ref(createDocument()),
+        activeRun: ref(null),
+        analysis: ref(createAnalysis()),
+        selection: ref(null),
+        gitStatus: ref(createGitStatus()),
+        workspaceRootPath: ref(WORKSPACE_ROOT),
+    });
+
+// ---------------------------------------------------------------------------
+// Suite
+// ---------------------------------------------------------------------------
+
 describe('useAiAssistant streaming integration', () => {
     beforeEach(() => {
+        setActivePinia(createPinia());
         aiServiceMock.reset();
-        vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number => {
-            callback(0);
-            return 1;
-        });
+        vi.stubGlobal(
+            'requestAnimationFrame',
+            (callback: FrameRequestCallback): number => {
+                callback(0);
+                return 1;
+            },
+        );
         vi.stubGlobal('cancelAnimationFrame', vi.fn());
     });
 
@@ -120,34 +182,23 @@ describe('useAiAssistant streaming integration', () => {
     });
 
     it('pipes streaming delta through the fence parser into message.stream', async () => {
-        const assistant = useAiAssistant({
-            document: ref(createDocument()),
-            activeRun: ref(null),
-            analysis: ref(createAnalysis()),
-            selection: ref(null),
-            gitStatus: ref(createGitStatus()),
-            workspaceRootPath: ref('d:/com.xiaojianc/my_desktop_app'),
-        });
-        assistant.draft.value = '解释这段代码';
+        const assistant = createAssistantHarness();
 
+        assistant.draft.value = '解释这段代码';
         const sendPromise = assistant.sendMessage();
+
         await waitForStartedStream(() => assistant.messages.value.at(-1)?.id);
 
-        aiServiceMock.emit({
-            streamId: 'stream-1',
-            assistantMessageId: 'assistant-1',
-            kind: 'delta',
-            delta: '前文 **markdown**\n\n```ts\nconst pending = true;',
-            message: null,
-            model: 'mock-ide-assistant',
-        });
+        aiServiceMock.emitDelta('前文 **markdown**\n\n```ts\nconst pending = true;');
         await flushMicrotasks();
 
         const assistantMessage = assistant.messages.value.at(-1);
-        expect(assistantMessage?.content).toBe('前文 **markdown**\n\n```ts\nconst pending = true;');
+        expect(assistantMessage?.content).toBe(
+            '前文 **markdown**\n\n```ts\nconst pending = true;',
+        );
         expect(assistantMessage?.stream?.stableContent).toBe('前文 **markdown**\n\n');
         expect(assistantMessage?.stream?.status).toBe('streaming');
-        expect(assistantMessage?.stream?.openBlock?.id).toBe('assistant-1:0');
+        expect(assistantMessage?.stream?.openBlock?.id).toBe(`${ASSISTANT_MESSAGE_ID}:0`);
         expect(assistantMessage?.stream?.openBlock?.content).toBe('const pending = true;');
         expect(assistantMessage?.stream?.openBlock?.streamState).toBe('open');
 
@@ -156,50 +207,120 @@ describe('useAiAssistant streaming integration', () => {
     });
 
     it('marks the open block cancelled immediately on stop and ignores late delta', async () => {
-        const assistant = useAiAssistant({
-            document: ref(createDocument()),
-            activeRun: ref(null),
-            analysis: ref(createAnalysis()),
-            selection: ref(null),
-            gitStatus: ref(createGitStatus()),
-            workspaceRootPath: ref('d:/com.xiaojianc/my_desktop_app'),
-        });
-        assistant.draft.value = '继续';
+        const assistant = createAssistantHarness();
 
+        assistant.draft.value = '继续';
         const sendPromise = assistant.sendMessage();
+
         await waitForStartedStream(() => assistant.messages.value.at(-1)?.id);
 
-        aiServiceMock.emit({
-            streamId: 'stream-1',
-            assistantMessageId: 'assistant-1',
-            kind: 'delta',
-            delta: '```ts\nconst pending = true;\n',
-            message: null,
-            model: 'mock-ide-assistant',
-        });
+        aiServiceMock.emitDelta('```ts\nconst pending = true;\n');
         await flushMicrotasks();
 
         assistant.stopCurrentRequest();
 
         const cancelledMessage = assistant.messages.value.at(-1);
-        expect(aiServiceMock.cancel).toHaveBeenCalledWith({ streamId: 'stream-1' });
+        expect(aiServiceMock.cancel).toHaveBeenCalledWith({ streamId: STREAM_ID });
         expect(cancelledMessage?.stream?.status).toBe('cancelled');
         expect(cancelledMessage?.stream?.openBlock?.streamState).toBe('cancelled');
         expect(cancelledMessage?.stream?.openBlock?.content).toBe('const pending = true;\n');
 
         const contentBeforeLateDelta = cancelledMessage?.content;
-        aiServiceMock.emit({
-            streamId: 'stream-1',
-            assistantMessageId: 'assistant-1',
-            kind: 'delta',
-            delta: '```\n不应该进入消息',
-            message: null,
-            model: 'mock-ide-assistant',
-        });
+
+        // Late delta arriving after cancel must not mutate the message.
+        aiServiceMock.emitDelta('```\n不应该进入消息');
         await flushMicrotasks();
 
         expect(assistant.messages.value.at(-1)?.content).toBe(contentBeforeLateDelta);
 
         await sendPromise;
+    });
+
+    it('accepts image attachments and includes them in outgoing references', async () => {
+        vi.stubGlobal('createImageBitmap', vi.fn(async () => ({
+            width: 640,
+            height: 480,
+            close: vi.fn(),
+        })));
+
+        const assistant = createAssistantHarness();
+        const image = new File(['image-bytes'], 'pasted-image.png', { type: 'image/png' });
+
+        await assistant.attachFile(image);
+
+        expect(assistant.attachedFiles.value).toHaveLength(1);
+        expect(assistant.attachedFiles.value[0]?.kind).toBe('image');
+        expect(assistant.attachedFiles.value[0]?.detailLabel).toBe('640 × 480');
+        expect(assistant.attachedFiles.value[0]?.reference.kind).toBe('image-attachment');
+        expect(assistant.attachedFiles.value[0]?.reference.content).toBeUndefined();
+
+        assistant.draft.value = '';
+        const sendPromise = assistant.sendMessage();
+
+        await waitForStartedStream(() => assistant.messages.value.at(-1)?.id);
+
+        expect(aiServiceMock.chatStream).toHaveBeenCalledTimes(1);
+        expect(aiServiceMock.chatStream.mock.calls[0]?.[0]?.references).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    kind: 'image-attachment',
+                    label: '图片附件 · pasted-image.png',
+                }),
+            ]),
+        );
+
+        assistant.stopCurrentRequest();
+        await sendPromise;
+    });
+
+    it('starts a new conversation by clearing draft and transient state', () => {
+        const assistant = createAssistantHarness();
+
+        assistant.draft.value = '还没发送的内容';
+        assistant.messages.value = [{
+            id: 'assistant-1',
+            role: 'assistant',
+            content: '旧会话消息',
+            createdAt: '2026-04-28T10:00:00.000Z',
+            references: [],
+        }];
+        assistant.currentReferences.value = [{
+            id: 'ref-1',
+            kind: 'current-file',
+            label: '当前文件',
+            path: 'src/app.ts',
+            range: null,
+            contentPreview: 'const start = true;',
+            redacted: false,
+        }];
+        assistant.errorMessage.value = '旧错误';
+
+        assistant.startNewConversation();
+
+        expect(assistant.draft.value).toBe('');
+        expect(assistant.messages.value).toHaveLength(0);
+        expect(assistant.historyThreads.value).toHaveLength(1);
+        expect(assistant.historyThreads.value[0]?.messages[0]?.id).toBe('assistant-1');
+        expect(assistant.currentReferences.value).toHaveLength(0);
+        expect(assistant.errorMessage.value).toBe('');
+    });
+
+    it('hydrates persisted messages from the conversation store', () => {
+        const conversationStore = useAiConversationStore();
+
+        conversationStore.replaceMessages([
+            {
+                id: 'persisted-message',
+                role: 'assistant',
+                content: '持久化历史消息',
+                createdAt: '2026-04-28T10:00:00.000Z',
+                references: [],
+            },
+        ]);
+
+        const assistant = createAssistantHarness();
+
+        expect(assistant.messages.value).toHaveLength(1);
+        expect(assistant.messages.value[0]?.id).toBe('persisted-message');
     });
 });

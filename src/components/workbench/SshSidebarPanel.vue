@@ -1540,7 +1540,7 @@ v-else-if="action.key === 'upload'" viewBox="0 0 24 24" fill="none" stroke="curr
 
 <style scoped>
 .ssh-sidebar-panel {
-  --ssh-sidebar-bg: #0e0e10;
+  --ssh-sidebar-bg: #1c1c1f;
   --ssh-sidebar-border: rgba(255, 255, 255, 0.06);
   --ssh-sidebar-text-primary: #e8e8ed;
   --ssh-sidebar-text-secondary: #b0b0bc;

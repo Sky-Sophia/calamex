@@ -1,8 +1,16 @@
 const SECRET_MARKERS: &[&str] = &[
     "api_key",
     "apikey",
+    "api-key",
+    "authorization",
+    "bearer ",
+    "sk-",
     "access_token",
     "refresh_token",
+    "token=",
+    "token:",
+    "\"token\"",
+    "secret",
     "password",
     "private key",
     "-----begin",
@@ -42,4 +50,28 @@ pub fn redact_text(value: &str) -> RedactionResult {
         .join("\n");
 
     RedactionResult { text, blocked }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_text;
+
+    #[test]
+    fn redacts_api_key_lines() {
+        let result = redact_text("ok\napi_key=sk-test-secret-value\nnext");
+
+        assert!(result.blocked);
+        assert!(result.text.contains("[已脱敏：疑似敏感内容]"));
+        assert!(!result.text.contains("sk-test-secret-value"));
+        assert!(result.text.contains("ok"));
+        assert!(result.text.contains("next"));
+    }
+
+    #[test]
+    fn redacts_authorization_bearer_lines() {
+        let result = redact_text("Authorization: Bearer token-value-1234567890");
+
+        assert!(result.blocked);
+        assert!(!result.text.contains("token-value-1234567890"));
+    }
 }

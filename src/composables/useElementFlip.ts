@@ -85,7 +85,7 @@ export const useElementFlip = () => {
       }
 
       const last = item.element.getBoundingClientRect();
-      item.element.style.transformOrigin = options.transformOrigin ?? 'top left';
+      item.element.style.transformOrigin = item.transformOrigin ?? options.transformOrigin ?? 'top left';
       item.element.style.willChange = item.opacity || options.opacity ? 'transform, opacity' : 'transform';
 
       const keyframes: Keyframe[] = [];

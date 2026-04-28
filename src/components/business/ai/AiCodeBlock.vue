@@ -1,12 +1,12 @@
 ﻿<script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import { storeToRefs } from 'pinia';
 import AiCodeBlockBody from '@/components/business/ai/AiCodeBlockBody.vue';
 import AiCodeBlockDiff from '@/components/business/ai/AiCodeBlockDiff.vue';
 import AiCodeBlockHeader from '@/components/business/ai/AiCodeBlockHeader.vue';
 import { useShikiHighlighter } from '@/composables/useShikiHighlighter';
 import { useAiCodeBlockStore } from '@/store/aiCodeBlock';
 import type { IAiCodeBlock, IAiCodePathTarget } from '@/types/ai-code';
+import { storeToRefs } from 'pinia';
+import { computed, ref, watch } from 'vue';
 
 const props = defineProps<{
   block: IAiCodeBlock;
@@ -20,8 +20,10 @@ const emit = defineEmits<{
 
 const store = useAiCodeBlockStore();
 const { foldedBlockIds, wrappedBlockIds, recentlyCopiedId, lineNumberMode } = storeToRefs(store);
-const { highlightAiCode } = useShikiHighlighter();
-const highlightedHtml = ref('<pre class="shiki ai-code-plain"><code></code></pre>');
+const { highlightAiCode, themeVersion } = useShikiHighlighter();
+const EMPTY_HIGHLIGHT_HTML = '<pre class="shiki ai-code-plain"><code></code></pre>';
+const highlightedHtml = ref(EMPTY_HIGHLIGHT_HTML);
+let highlightRequestId = 0;
 
 const lineCount = computed(() => Math.max(1, props.block.content.split(/\r?\n/).length));
 const lineNumbers = computed(() => Array.from({ length: lineCount.value }, (_, index) => index + 1));
@@ -40,11 +42,19 @@ const showLineNumbers = computed(() => {
 const streamLabel = computed(() => (props.block.streamState === 'cancelled' ? '已取消' : '正在生成…'));
 
 const refreshHighlight = async (): Promise<void> => {
+  const requestId = ++highlightRequestId;
+
   if (!shouldHighlight.value) {
-    highlightedHtml.value = '<pre class="shiki ai-code-plain"><code></code></pre>';
+    highlightedHtml.value = EMPTY_HIGHLIGHT_HTML;
     return;
   }
-  highlightedHtml.value = await highlightAiCode(props.block.content, props.block.fence.lang);
+
+  const nextHtml = await highlightAiCode(props.block.content, props.block.fence.lang);
+  if (requestId !== highlightRequestId) {
+    return;
+  }
+
+  highlightedHtml.value = nextHtml;
 };
 
 const copyCode = async (): Promise<void> => {
@@ -63,7 +73,13 @@ const openPath = (): void => {
 };
 
 watch(
-  () => [props.block.content, props.block.fence.lang, props.block.closed, props.block.streamState] as const,
+  () => [
+    props.block.content,
+    props.block.fence.lang,
+    props.block.closed,
+    props.block.streamState,
+    themeVersion.value,
+  ] as const,
   () => {
     void refreshHighlight();
   },
@@ -73,23 +89,11 @@ watch(
 
 <template>
   <section class="ai-code-block" :class="{ 'is-diff': block.fence.meta.isDiff, 'is-streaming': !block.closed }">
-    <AiCodeBlockHeader
-      :block="block"
-      :is-copied="isCopied"
-      :is-folded="isFolded"
-      :is-wrapped="isWrapped"
-      :can-apply="canApplyBlock"
-      @copy="copyCode"
-      @wrap="store.toggleWrap(block.id)"
-      @fold="store.toggleFold(block.id)"
-      @apply="emit('apply', block)"
-      @open-path="openPath"
-    />
-    <div
-      v-if="!block.closed"
-      class="ai-code-stream-body"
-      :class="{ 'is-folded': isFolded, 'is-wrapped': isWrapped, 'is-cancelled': block.streamState === 'cancelled' }"
-    >
+    <AiCodeBlockHeader :block="block" :is-copied="isCopied" :is-folded="isFolded" :is-wrapped="isWrapped"
+      :can-apply="canApplyBlock" @copy="copyCode" @wrap="store.toggleWrap(block.id)" @fold="store.toggleFold(block.id)"
+      @apply="emit('apply', block)" @open-path="openPath" />
+    <div v-if="!block.closed" class="ai-code-stream-body"
+      :class="{ 'is-folded': isFolded, 'is-wrapped': isWrapped, 'is-cancelled': block.streamState === 'cancelled' }">
       <div v-if="showLineNumbers" class="ai-code-stream-lines" aria-hidden="true">
         <span v-for="line in lineNumbers" :key="line">{{ line }}</span>
       </div>
@@ -102,20 +106,9 @@ watch(
       </div>
       <div v-if="block.truncated" class="ai-code-truncated">内容过大，已截断显示。</div>
     </div>
-    <AiCodeBlockDiff
-      v-else-if="block.fence.meta.isDiff"
-      :block="block"
-      :is-folded="isFolded"
-    />
-    <AiCodeBlockBody
-      v-else
-      :highlighted-html="highlightedHtml"
-      :is-folded="isFolded"
-      :is-wrapped="isWrapped"
-      :show-line-numbers="showLineNumbers"
-      :line-numbers="lineNumbers"
-      :truncated="block.truncated"
-    />
+    <AiCodeBlockDiff v-else-if="block.fence.meta.isDiff" :block="block" :is-folded="isFolded" />
+    <AiCodeBlockBody v-else :highlighted-html="highlightedHtml" :is-folded="isFolded" :is-wrapped="isWrapped"
+      :show-line-numbers="showLineNumbers" :line-numbers="lineNumbers" :truncated="block.truncated" />
   </section>
 </template>
 
@@ -128,7 +121,7 @@ watch(
   box-shadow: inset 0 1px 0 color-mix(in srgb, white 3%, transparent);
 }
 
-.ai-code-block + .ai-code-block {
+.ai-code-block+.ai-code-block {
   margin-top: 10px;
 }
 

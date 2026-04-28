@@ -16,73 +16,75 @@ import {
 } from '@/types/settings';
 import { defineStore } from 'pinia';
 import { computed, onScopeDispose, ref } from 'vue';
+
 import { APP_STORE_KEY } from './index';
 
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 const DEFAULT_THEME: TThemeMode = 'dark';
+const DARK_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 
-const isKnownThemePreference = (value: unknown): value is TThemePreference =>
-  typeof value === 'string' && THEME_PREFERENCES.some((theme) => theme === value);
+/** [min, max] 闭区间。clampNumber 会先 Math.round,再夹紧到该区间。 */
+type TNumberRange = readonly [min: number, max: number];
 
-const isKnownAccentColor = (value: unknown): value is TAccentColor =>
-  typeof value === 'string' && ACCENT_COLORS.some((color) => color === value);
+const RANGE_INTERFACE_FONT_SIZE = [12, 16] as const satisfies TNumberRange;
+const RANGE_RECENT_FILE_LIMIT = [5, 100] as const satisfies TNumberRange;
+const RANGE_EDITOR_FONT_SIZE = [11, 20] as const satisfies TNumberRange;
+const RANGE_EDITOR_TAB_SIZE = [2, 8] as const satisfies TNumberRange;
+const RANGE_SUGGESTION_DELAY_MS = [0, 2000] as const satisfies TNumberRange;
+const RANGE_TERMINAL_FONT_SIZE = [11, 20] as const satisfies TNumberRange;
+const RANGE_TERMINAL_SCROLLBACK = [1000, 20000] as const satisfies TNumberRange;
+const RANGE_RUN_STOP_TIMEOUT_S = [1, 30] as const satisfies TNumberRange;
+const RANGE_PRESERVED_TERMINAL_COUNT = [1, 20] as const satisfies TNumberRange;
+const RANGE_SHFMT_INDENT_SIZE = [2, 8] as const satisfies TNumberRange;
+const RANGE_RULER_COLUMN = [60, 240] as const satisfies TNumberRange;
+const RANGE_SSH_CONNECT_TIMEOUT_S = [3, 60] as const satisfies TNumberRange;
 
-const isKnownUiDensity = (value: unknown): value is TUiDensity =>
-  typeof value === 'string' && UI_DENSITIES.some((density) => density === value);
+const MAX_COMPLETION_TRIGGERS = 12;
+const MAX_IGNORED_RULES = 16;
+const MAX_ENVIRONMENT_VARIABLES = 20;
 
-const isKnownRadiusPreset = (value: unknown): value is TRadiusPreset =>
-  typeof value === 'string' && RADIUS_PRESETS.some((preset) => preset === value);
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
 
 const hasWindow = (): boolean => typeof window !== 'undefined';
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   Object.prototype.toString.call(value) === '[object Object]';
 
-const mergeSettingsValue = <T>(defaults: T, value: unknown): T => {
-  if (Array.isArray(defaults)) {
-    return (Array.isArray(value) ? value : defaults) as T;
-  }
+/** 由有限字符串元组生成 type guard,所有 isKnown* 共用。 */
+const createTupleGuard =
+  <T extends string>(allowed: readonly T[]) =>
+    (value: unknown): value is T =>
+      typeof value === 'string' && (allowed as readonly string[]).includes(value);
 
-  if (isPlainObject(defaults)) {
-    if (!isPlainObject(value)) {
-      return defaults;
-    }
+const isKnownThemePreference = createTupleGuard<TThemePreference>(THEME_PREFERENCES);
+const isKnownAccentColor = createTupleGuard<TAccentColor>(ACCENT_COLORS);
+const isKnownUiDensity = createTupleGuard<TUiDensity>(UI_DENSITIES);
+const isKnownRadiusPreset = createTupleGuard<TRadiusPreset>(RADIUS_PRESETS);
 
-    const nextValue = { ...defaults } as Record<string, unknown>;
+/** value 通过 guard 时返回自身,否则回退 fallback。 */
+const coerceEnum = <T>(
+  value: unknown,
+  guard: (candidate: unknown) => candidate is T,
+  fallback: T,
+): T => (guard(value) ? value : fallback);
 
-    Object.keys(defaults).forEach((key) => {
-      nextValue[key] = mergeSettingsValue(
-        (defaults as Record<string, unknown>)[key],
-        value[key],
-      );
-    });
-
-    return nextValue as T;
-  }
-
-  if (typeof defaults === 'number') {
-    return (typeof value === 'number' && Number.isFinite(value) ? value : defaults) as T;
-  }
-
-  if (typeof defaults === 'boolean') {
-    return (typeof value === 'boolean' ? value : defaults) as T;
-  }
-
-  if (typeof defaults === 'string') {
-    return (typeof value === 'string' ? value : defaults) as T;
-  }
-
-  return defaults;
-};
-
-const clampNumber = (value: number, min: number, max: number): number =>
+const clampNumber = (value: number, [min, max]: TNumberRange): number =>
   Math.min(max, Math.max(min, Math.round(value)));
+
+// ---------------------------------------------------------------------------
+// Theme helpers
+// ---------------------------------------------------------------------------
 
 const resolveSystemTheme = (): TThemeMode => {
   if (!hasWindow() || typeof window.matchMedia !== 'function') {
     return DEFAULT_THEME;
   }
-
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return window.matchMedia(DARK_MEDIA_QUERY).matches ? 'dark' : 'light';
 };
 
 const resolveEffectiveTheme = (
@@ -90,63 +92,132 @@ const resolveEffectiveTheme = (
   systemTheme: TThemeMode,
 ): TThemeMode => (themePreference === 'system' ? systemTheme : themePreference);
 
+// ---------------------------------------------------------------------------
+// Settings normalization
+// ---------------------------------------------------------------------------
+
+/** persist 钩子里只关心 settings 字段,投影出局部形状以避开 pinia 通用 Store 类型缺字段的问题。 */
+interface IAppStorePersistShape {
+  settings: IAppSettings;
+}
+
+/**
+ * 按 defaults 的形状深度合并 value:
+ * - 数组:value 必须是数组才被采纳;不再递归合并元素(由调用方做形状校验/裁剪)。
+ * - 对象:仅保留 defaults 的键(白名单),递归合并子值。
+ * - 数字 / 布尔 / 字符串:类型不符或非有限数则回退到 defaults。
+ * - 其他:直接返回 defaults。
+ */
+const mergeSettingsValue = <T>(defaults: T, value: unknown): T => {
+  if (Array.isArray(defaults)) {
+    return (Array.isArray(value) ? value : defaults) as T;
+  }
+  if (isPlainObject(defaults)) {
+    if (!isPlainObject(value)) {
+      return defaults;
+    }
+    const defaultsRecord = defaults as Record<string, unknown>;
+    const merged: Record<string, unknown> = {};
+    Object.keys(defaultsRecord).forEach((key) => {
+      merged[key] = mergeSettingsValue(defaultsRecord[key], value[key]);
+    });
+    return merged as T;
+  }
+  if (typeof defaults === 'number') {
+    return (typeof value === 'number' && Number.isFinite(value) ? value : defaults) as T;
+  }
+  if (typeof defaults === 'boolean') {
+    return (typeof value === 'boolean' ? value : defaults) as T;
+  }
+  if (typeof defaults === 'string') {
+    return (typeof value === 'string' ? value : defaults) as T;
+  }
+  return defaults;
+};
+
+const normalizeAppearance = (
+  appearance: IAppSettings['appearance'],
+  defaults: IAppSettings['appearance'],
+): IAppSettings['appearance'] => ({
+  ...appearance,
+  themePreference: coerceEnum(
+    appearance.themePreference,
+    isKnownThemePreference,
+    defaults.themePreference,
+  ),
+  accentColor: coerceEnum(appearance.accentColor, isKnownAccentColor, defaults.accentColor),
+  uiDensity: coerceEnum(appearance.uiDensity, isKnownUiDensity, defaults.uiDensity),
+  radiusPreset: coerceEnum(appearance.radiusPreset, isKnownRadiusPreset, defaults.radiusPreset),
+  interfaceFontSize: clampNumber(appearance.interfaceFontSize, RANGE_INTERFACE_FONT_SIZE),
+});
+
 const normalizeSettings = (value: unknown): IAppSettings => {
   const defaults = createDefaultAppSettings();
   const merged = mergeSettingsValue(defaults, value);
 
-  merged.appearance.themePreference = isKnownThemePreference(merged.appearance.themePreference)
-    ? merged.appearance.themePreference
-    : defaults.appearance.themePreference;
-  merged.appearance.accentColor = isKnownAccentColor(merged.appearance.accentColor)
-    ? merged.appearance.accentColor
-    : defaults.appearance.accentColor;
-  merged.appearance.uiDensity = isKnownUiDensity(merged.appearance.uiDensity)
-    ? merged.appearance.uiDensity
-    : defaults.appearance.uiDensity;
-  merged.appearance.radiusPreset = isKnownRadiusPreset(merged.appearance.radiusPreset)
-    ? merged.appearance.radiusPreset
-    : defaults.appearance.radiusPreset;
-  merged.appearance.interfaceFontSize = clampNumber(
-    merged.appearance.interfaceFontSize,
-    12,
-    16,
+  merged.appearance = normalizeAppearance(merged.appearance, defaults.appearance);
+
+  merged.general.recentFileLimit = clampNumber(
+    merged.general.recentFileLimit,
+    RANGE_RECENT_FILE_LIMIT,
   );
-  merged.general.recentFileLimit = clampNumber(merged.general.recentFileLimit, 5, 100);
-  merged.editor.fontSize = clampNumber(merged.editor.fontSize, 11, 20);
-  merged.editor.tabSize = clampNumber(merged.editor.tabSize, 2, 8);
-  merged.editor.suggestionDelay = clampNumber(merged.editor.suggestionDelay, 0, 2000);
-  merged.terminal.fontSize = clampNumber(merged.terminal.fontSize, 11, 20);
-  merged.terminal.scrollback = clampNumber(merged.terminal.scrollback, 1000, 20000);
-  merged.run.stopTimeoutSeconds = clampNumber(merged.run.stopTimeoutSeconds, 1, 30);
-  merged.run.preservedTerminalCount = clampNumber(merged.run.preservedTerminalCount, 1, 20);
-  merged.style.shfmtIndentSize = clampNumber(merged.style.shfmtIndentSize, 2, 8);
-  merged.style.rulerColumn = clampNumber(merged.style.rulerColumn, 60, 240);
+
+  merged.editor.fontSize = clampNumber(merged.editor.fontSize, RANGE_EDITOR_FONT_SIZE);
+  merged.editor.tabSize = clampNumber(merged.editor.tabSize, RANGE_EDITOR_TAB_SIZE);
+  merged.editor.suggestionDelay = clampNumber(
+    merged.editor.suggestionDelay,
+    RANGE_SUGGESTION_DELAY_MS,
+  );
+
+  merged.terminal.fontSize = clampNumber(merged.terminal.fontSize, RANGE_TERMINAL_FONT_SIZE);
+  merged.terminal.scrollback = clampNumber(merged.terminal.scrollback, RANGE_TERMINAL_SCROLLBACK);
+
+  merged.run.stopTimeoutSeconds = clampNumber(
+    merged.run.stopTimeoutSeconds,
+    RANGE_RUN_STOP_TIMEOUT_S,
+  );
+  merged.run.preservedTerminalCount = clampNumber(
+    merged.run.preservedTerminalCount,
+    RANGE_PRESERVED_TERMINAL_COUNT,
+  );
+
+  merged.style.shfmtIndentSize = clampNumber(
+    merged.style.shfmtIndentSize,
+    RANGE_SHFMT_INDENT_SIZE,
+  );
+  merged.style.rulerColumn = clampNumber(merged.style.rulerColumn, RANGE_RULER_COLUMN);
+
   merged.integrations.sshConnectTimeoutSeconds = clampNumber(
     merged.integrations.sshConnectTimeoutSeconds,
-    3,
-    60,
+    RANGE_SSH_CONNECT_TIMEOUT_S,
   );
 
   merged.editor.completionTriggers = merged.editor.completionTriggers
     .map((item) => item.trim())
     .filter(Boolean)
-    .slice(0, 12);
+    .slice(0, MAX_COMPLETION_TRIGGERS);
+
   merged.style.ignoredRules = merged.style.ignoredRules
     .map((item) => item.trim().toUpperCase())
     .filter(Boolean)
-    .slice(0, 16);
+    .slice(0, MAX_IGNORED_RULES);
+
   merged.run.environmentVariables = merged.run.environmentVariables
     .filter((item) => Boolean(item.id))
-    .slice(0, 20);
+    .slice(0, MAX_ENVIRONMENT_VARIABLES);
 
   return merged;
 };
 
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+
 export const useAppStore = defineStore(
   'app',
   () => {
-    // 初始值：由 pinia-plugin-persistedstate 在 hydrate 阶段从 localStorage 恢复；
-    // 此处使用默认值，afterHydrate 钩子会完成 normalize。
+    // 初始值:由 pinia-plugin-persistedstate 在 hydrate 阶段从 localStorage 恢复;
+    // 此处使用默认值,afterHydrate 钩子会完成 normalize。
     const settings = ref<IAppSettings>(createDefaultAppSettings());
     const systemTheme = ref<TThemeMode>(resolveSystemTheme());
 
@@ -154,20 +225,17 @@ export const useAppStore = defineStore(
     const theme = computed<TThemeMode>(() =>
       resolveEffectiveTheme(themePreference.value, systemTheme.value),
     );
-    const effectiveTheme = computed(() => theme.value);
-
     const isDark = computed(() => theme.value === 'dark');
 
-    // ── 系统主题监听（媒体查询，非 localStorage）──────────────────────────────
+    // ── 系统主题监听(媒体查询,非 localStorage)──────────────────────────────
     if (hasWindow() && typeof window.matchMedia === 'function') {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const mediaQuery = window.matchMedia(DARK_MEDIA_QUERY);
       const handleChange = (event: MediaQueryListEvent): void => {
         const next: TThemeMode = event.matches ? 'dark' : 'light';
         if (next !== systemTheme.value) {
           systemTheme.value = next;
         }
       };
-
       if (typeof mediaQuery.addEventListener === 'function') {
         mediaQuery.addEventListener('change', handleChange);
         onScopeDispose(() => {
@@ -180,7 +248,6 @@ export const useAppStore = defineStore(
       if (!isKnownThemePreference(value)) {
         return;
       }
-
       settings.value.appearance.themePreference = value;
     };
 
@@ -192,7 +259,9 @@ export const useAppStore = defineStore(
       settings.value = normalizeSettings(nextSettings);
     };
 
-    const resetSettingsSection = (section: TAppSettingsSectionKey): void => {
+    // 用泛型把 section 收紧到具体字面量 key,两侧都成为 IAppSettings[K],
+    // 避免 union key 索引赋值时 TS 取交集导致 ts(2322) "不能分配"。
+    const resetSettingsSection = <K extends TAppSettingsSectionKey>(section: K): void => {
       settings.value[section] = createDefaultAppSettings()[section];
     };
 
@@ -201,7 +270,8 @@ export const useAppStore = defineStore(
       systemTheme,
       themePreference,
       theme,
-      effectiveTheme,
+      // 历史 API 兼容:effectiveTheme 与 theme 同源,新代码请直接用 theme。
+      effectiveTheme: theme,
       isDark,
       applyTheme,
       toggleTheme,
@@ -212,12 +282,13 @@ export const useAppStore = defineStore(
   {
     persist: {
       key: APP_STORE_KEY,
-      // 只持久化用户设置，排除派生状态（systemTheme 来自系统，不需持久化）
+      // 只持久化用户设置,排除派生状态(systemTheme 来自系统,不需持久化)
       pick: ['settings'],
       // hydrate 完成后 normalize 确保存储数据合法
       afterHydrate(ctx) {
-        // ctx.store.settings 是 pinia setup store 中返回的 ref 的值
-        const store = ctx.store as { settings: IAppSettings };
+        // ctx.store 是 pinia 通用 Store<...> 类型,缺少 settings 字段;
+        // 必须经过 unknown 中转(否则 ts(2352) "不能充分重叠")。
+        const store = ctx.store as unknown as IAppStorePersistShape;
         store.settings = normalizeSettings(store.settings);
       },
     },

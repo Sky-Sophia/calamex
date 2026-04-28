@@ -63,6 +63,7 @@ ref="terminalPaneRef" class="app-shell-pane min-h-0 overflow-hidden bg-(--panel-
         </div>
 
         <aside
+          ref="rightSidebarRef"
           class="app-shell-pane min-h-0 overflow-hidden bg-(--sidebar-bg)"
           :style="rightSidebarStyle"
           :class="[
@@ -144,6 +145,7 @@ const WINDOW_RESIZE_SETTLE_MS = 140;
 const mainRef = ref<HTMLElement | null>(null);
 const shellRef = ref<HTMLElement | null>(null);
 const sidebarRef = ref<HTMLElement | null>(null);
+const rightSidebarRef = ref<HTMLElement | null>(null);
 const terminalPaneRef = ref<HTMLElement | null>(null);
 const layoutTransitionsEnabled = ref(true);
 let resizeObserver: ResizeObserver | null = null;
@@ -221,9 +223,10 @@ const setLayoutTransitionsEnabled = (enabled: boolean): void => {
   layoutTransitionsEnabled.value = enabled;
 };
 
-const { motionState, transitionSidebar, transitionTerminal } = useWorkbenchMotion({
+const { motionState, transitionSidebars, transitionTerminal } = useWorkbenchMotion({
   shellRef,
   sidebarRef,
+  rightSidebarRef,
   terminalRef: terminalPaneRef,
   setLayoutTransitionsEnabled,
 });
@@ -447,13 +450,19 @@ watch(
 );
 
 watch(
-  () => props.sidebarVisible,
-  (nextVisible, previousVisible) => {
-    if (nextVisible === previousVisible) {
+  () => [props.sidebarVisible, props.rightSidebarVisible] as const,
+  ([nextSidebarVisible, nextRightSidebarVisible], [previousSidebarVisible, previousRightSidebarVisible]) => {
+    const sidebarChanged = nextSidebarVisible !== previousSidebarVisible;
+    const rightSidebarChanged = nextRightSidebarVisible !== previousRightSidebarVisible;
+
+    if (!sidebarChanged && !rightSidebarChanged) {
       return;
     }
 
-    void transitionSidebar(nextVisible);
+    void transitionSidebars(nextSidebarVisible, nextRightSidebarVisible, {
+      sidebarChanged,
+      rightSidebarChanged,
+    });
   },
   { flush: 'pre' },
 );

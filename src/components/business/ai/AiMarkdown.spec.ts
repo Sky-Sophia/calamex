@@ -3,12 +3,13 @@ import { createStreamingFenceParser } from '@/composables/useStreamingFenceParse
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { nextTick } from 'vue';
+import { nextTick, ref } from 'vue';
 
 const highlightAiCode = vi.fn(async () => '<pre class="shiki"><code>highlighted</code></pre>');
+const themeVersion = ref(0);
 
 vi.mock('@/composables/useShikiHighlighter', () => ({
-  useShikiHighlighter: () => ({ highlightAiCode }),
+  useShikiHighlighter: () => ({ highlightAiCode, themeVersion }),
 }));
 
 const flushAsyncUpdates = async (): Promise<void> => {

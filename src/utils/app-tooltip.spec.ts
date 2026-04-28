@@ -1,49 +1,112 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { initAppTooltipSystem } from './app-tooltip';
 
+// ---------------------------------------------------------------------------
+// Test fixtures & constants
+// ---------------------------------------------------------------------------
+
 const TOOLTIP_TEXT = '延迟显示提示';
+
+/** initAppTooltipSystem 内部约定的悬停延迟,与实现保持同步;改一处即可。 */
+const TOOLTIP_HOVER_DELAY_MS = 3000;
+
+/** 模拟目标元素的 BoundingClientRect。 */
+const TARGET_RECT = {
+  x: 20,
+  y: 24,
+  width: 80,
+  height: 24,
+  top: 24,
+  right: 100,
+  bottom: 48,
+  left: 20,
+} as const;
+
+/** 落在 TARGET_RECT 内部的任意一个点(不必是中点,实现只关心命中)。 */
+const INSIDE_TARGET_POINT = { x: 36, y: 32 } as const;
+
+/** initAppTooltipSystem 在 window 上挂的卸载句柄(双下划线命名约定)。 */
+const TOOLTIP_CLEANUP_KEY = '__SH_APP_TOOLTIP_CLEANUP__' as const;
+
+const TOOLTIP_VISIBLE_CLASS = 'is-visible';
+const TOOLTIP_ELEMENT_SELECTOR = '#app-global-tooltip';
+
+// ---------------------------------------------------------------------------
+// DOM helpers
+// ---------------------------------------------------------------------------
 
 const createTooltipTarget = (): HTMLButtonElement => {
   const target = document.createElement('button');
   target.type = 'button';
   target.className = 'app-tooltip-target';
   target.dataset.tooltip = TOOLTIP_TEXT;
-  target.getBoundingClientRect = () =>
-    ({
-      x: 20,
-      y: 24,
-      width: 80,
-      height: 24,
-      top: 24,
-      right: 100,
-      bottom: 48,
-      left: 20,
-      toJSON: () => undefined,
-    }) as DOMRect;
+  target.getBoundingClientRect = (): DOMRect => ({
+    ...TARGET_RECT,
+    toJSON: () => undefined,
+  }) as DOMRect;
 
   document.body.appendChild(target);
   return target;
 };
 
+/** 取 tooltip DOM 节点;首次调用时打桩 offsetWidth/offsetHeight,jsdom 默认两者为 0。 */
 const getTooltipElement = (): HTMLDivElement => {
-  const tooltipElement = document.querySelector<HTMLDivElement>('#app-global-tooltip');
+  const tooltipElement = document.querySelector<HTMLDivElement>(TOOLTIP_ELEMENT_SELECTOR);
   if (!tooltipElement) {
     throw new Error('Tooltip element not initialized');
   }
 
-  Object.defineProperty(tooltipElement, 'offsetWidth', {
-    configurable: true,
-    get: () => 96,
-  });
-  Object.defineProperty(tooltipElement, 'offsetHeight', {
-    configurable: true,
-    get: () => 28,
-  });
+  Object.defineProperty(tooltipElement, 'offsetWidth', { configurable: true, get: () => 96 });
+  Object.defineProperty(tooltipElement, 'offsetHeight', { configurable: true, get: () => 28 });
 
   return tooltipElement;
 };
 
+// ---------------------------------------------------------------------------
+// Event dispatch helpers
+// ---------------------------------------------------------------------------
+
+const dispatchPointerOver = (
+  target: Element,
+  point: { x: number; y: number } = INSIDE_TARGET_POINT,
+): void => {
+  target.dispatchEvent(
+    new MouseEvent('pointerover', {
+      bubbles: true,
+      clientX: point.x,
+      clientY: point.y,
+    }),
+  );
+};
+
+const dispatchPointerOut = (target: Element): void => {
+  target.dispatchEvent(
+    new MouseEvent('pointerout', {
+      bubbles: true,
+      relatedTarget: null,
+    }),
+  );
+};
+
+const dispatchFocusIn = (target: Element): void => {
+  target.dispatchEvent(
+    new FocusEvent('focusin', {
+      bubbles: true,
+      relatedTarget: null,
+    }),
+  );
+};
+
+const isTooltipVisible = (tooltipElement: HTMLElement): boolean =>
+  tooltipElement.classList.contains(TOOLTIP_VISIBLE_CLASS);
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 describe('initAppTooltipSystem', () => {
+  /** 由 elementFromPoint stub 闭包读取,逐用例改写以模拟 hit-test 命中目标。 */
   let hoverHitTarget: Element | null = null;
 
   beforeEach(() => {
@@ -57,56 +120,45 @@ describe('initAppTooltipSystem', () => {
   });
 
   afterEach(() => {
-    window.__SH_APP_TOOLTIP_CLEANUP__?.();
-    window.__SH_APP_TOOLTIP_CLEANUP__ = undefined;
+    window[TOOLTIP_CLEANUP_KEY]?.();
+    window[TOOLTIP_CLEANUP_KEY] = undefined;
     vi.restoreAllMocks();
     vi.useRealTimers();
     document.body.innerHTML = '';
   });
 
-  it('鼠标悬停满 3 秒后才显示 tooltip', () => {
+  it(`鼠标悬停满 ${TOOLTIP_HOVER_DELAY_MS / 1000} 秒后才显示 tooltip`, () => {
     const target = createTooltipTarget();
     hoverHitTarget = target;
 
     initAppTooltipSystem();
     const tooltipElement = getTooltipElement();
 
-    target.dispatchEvent(new MouseEvent('pointerover', {
-      bubbles: true,
-      clientX: 36,
-      clientY: 32,
-    }));
+    dispatchPointerOver(target);
 
-    expect(tooltipElement.classList.contains('is-visible')).toBe(false);
+    expect(isTooltipVisible(tooltipElement)).toBe(false);
 
-    vi.advanceTimersByTime(2999);
-    expect(tooltipElement.classList.contains('is-visible')).toBe(false);
+    vi.advanceTimersByTime(TOOLTIP_HOVER_DELAY_MS - 1);
+    expect(isTooltipVisible(tooltipElement)).toBe(false);
 
     vi.advanceTimersByTime(1);
-    expect(tooltipElement.classList.contains('is-visible')).toBe(true);
+    expect(isTooltipVisible(tooltipElement)).toBe(true);
     expect(tooltipElement.textContent).toBe(TOOLTIP_TEXT);
   });
 
-  it('鼠标在 3 秒内移出时不显示 tooltip', () => {
+  it(`鼠标在 ${TOOLTIP_HOVER_DELAY_MS / 1000} 秒内移出时不显示 tooltip`, () => {
     const target = createTooltipTarget();
     hoverHitTarget = target;
 
     initAppTooltipSystem();
     const tooltipElement = getTooltipElement();
 
-    target.dispatchEvent(new MouseEvent('pointerover', {
-      bubbles: true,
-      clientX: 36,
-      clientY: 32,
-    }));
+    dispatchPointerOver(target);
     hoverHitTarget = null;
-    target.dispatchEvent(new MouseEvent('pointerout', {
-      bubbles: true,
-      relatedTarget: null,
-    }));
+    dispatchPointerOut(target);
 
-    vi.advanceTimersByTime(3000);
-    expect(tooltipElement.classList.contains('is-visible')).toBe(false);
+    vi.advanceTimersByTime(TOOLTIP_HOVER_DELAY_MS);
+    expect(isTooltipVisible(tooltipElement)).toBe(false);
     expect(tooltipElement.textContent).toBe('');
   });
 
@@ -116,12 +168,9 @@ describe('initAppTooltipSystem', () => {
     initAppTooltipSystem();
     const tooltipElement = getTooltipElement();
 
-    target.dispatchEvent(new FocusEvent('focusin', {
-      bubbles: true,
-      relatedTarget: null,
-    }));
+    dispatchFocusIn(target);
 
-    expect(tooltipElement.classList.contains('is-visible')).toBe(true);
+    expect(isTooltipVisible(tooltipElement)).toBe(true);
     expect(tooltipElement.textContent).toBe(TOOLTIP_TEXT);
   });
 });

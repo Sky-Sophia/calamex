@@ -1,5 +1,6 @@
 use super::errors;
 use super::provider::{AiProviderChatRequest, AiProviderMessage, AiProviderResponse};
+use super::redaction::redact_text;
 use super::transport::sse::{parse_sse_line, SseParseOutcome};
 use serde::Deserialize;
 use serde_json::json;
@@ -133,10 +134,10 @@ where
 
     let status = response.status();
     if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err(errors::error("AI_PROVIDER_AUTH_FAILED", "AI Provider ?????"));
+        return Err(errors::error("AI_PROVIDER_AUTH_FAILED", "AI Provider 鉴权失败。"));
     }
     if status.as_u16() == 429 {
-        return Err(errors::error("AI_PROVIDER_RATE_LIMITED", "AI Provider ?????"));
+        return Err(errors::error("AI_PROVIDER_RATE_LIMITED", "AI Provider 触发限流。"));
     }
     if !status.is_success() {
         let body = response
@@ -145,7 +146,7 @@ where
             .map_err(|error| errors::error("AI_PROVIDER_UNAVAILABLE", error.to_string()))?;
         return Err(errors::error(
             "AI_PROVIDER_UNAVAILABLE",
-            format!("AI Provider ???? {status}: {}", summarize_body(&body)),
+            format!("AI Provider 返回错误 {status}: {}", summarize_body(&body)),
         ));
     }
 
@@ -156,7 +157,7 @@ where
         .map_err(|error| errors::error("AI_PROVIDER_UNAVAILABLE", error.to_string()))?
     {
         if is_cancelled() {
-            return Err(errors::error("AI_REQUEST_CANCELLED", "AI ????????"));
+            return Err(errors::error("AI_REQUEST_CANCELLED", "AI 请求已取消。"));
         }
         buffer.push_str(&String::from_utf8_lossy(&chunk));
         while let Some(line_end) = buffer.find('\n') {
@@ -216,5 +217,18 @@ fn validate_base_url(value: &str) -> Result<String, String> {
 }
 
 fn summarize_body(value: &str) -> String {
-    value.chars().take(600).collect()
+    redact_text(value).text.chars().take(600).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summarize_body;
+
+    #[test]
+    fn summarize_body_redacts_provider_error_secrets() {
+        let summary = summarize_body(r#"{"error":"bad","api_key":"sk-test-secret-value"}"#);
+
+        assert!(!summary.contains("sk-test-secret-value"));
+        assert!(summary.contains("[已脱敏：疑似敏感内容]"));
+    }
 }

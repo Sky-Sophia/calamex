@@ -114,6 +114,92 @@ pub fn clear_credentials() -> Result<(), String> {
     CredentialStore::clear()
 }
 
+struct AiProviderConnectionCandidate {
+    provider_type: String,
+    selected_model: Option<String>,
+    base_url: Option<String>,
+    api_key_for_test: Option<String>,
+    api_key_for_save: Option<String>,
+    inline_completion_enabled: bool,
+    chat_enabled: bool,
+    agent_enabled: bool,
+}
+
+fn build_provider_connection_candidate(
+    provider_type: &str,
+    selected_model: Option<String>,
+    base_url: Option<String>,
+    inline_completion_enabled: bool,
+    chat_enabled: bool,
+    agent_enabled: bool,
+    api_key: Option<&str>,
+) -> Result<AiProviderConnectionCandidate, String> {
+    validate_provider(provider_type)?;
+    let normalized_base_url = normalize_base_url(provider_type, base_url)?;
+    let model = selected_model
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| default_model(provider_type));
+
+    if provider_type == "mock" {
+        return Ok(AiProviderConnectionCandidate {
+            provider_type: provider_type.to_string(),
+            selected_model: model,
+            base_url: normalized_base_url,
+            api_key_for_test: None,
+            api_key_for_save: None,
+            inline_completion_enabled,
+            chat_enabled,
+            agent_enabled,
+        });
+    }
+
+    let provided_api_key = api_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let api_key_for_test = match provided_api_key.clone() {
+        Some(value) => value,
+        None => CredentialStore::get(provider_type)?,
+    };
+
+    if api_key_for_test.trim().is_empty() {
+        return Err(errors::error("AI_PROVIDER_AUTH_FAILED", "请填写 API Key。"));
+    }
+
+    Ok(AiProviderConnectionCandidate {
+        provider_type: provider_type.to_string(),
+        selected_model: model,
+        base_url: normalized_base_url,
+        api_key_for_test: Some(api_key_for_test),
+        api_key_for_save: provided_api_key,
+        inline_completion_enabled,
+        chat_enabled,
+        agent_enabled,
+    })
+}
+
+async fn test_provider_connection_candidate(
+    candidate: &AiProviderConnectionCandidate,
+) -> Result<(), String> {
+    if candidate.provider_type == "mock" {
+        return Ok(());
+    }
+
+    let base_url = candidate.base_url.as_deref().ok_or_else(|| {
+        errors::error("AI_PROVIDER_NOT_CONFIGURED", "请先配置 Provider API 地址。")
+    })?;
+    let api_key = candidate.api_key_for_test.as_deref().ok_or_else(|| {
+        errors::error("AI_PROVIDER_AUTH_FAILED", "请填写 API Key。")
+    })?;
+    let model = candidate
+        .selected_model
+        .as_deref()
+        .unwrap_or(DEFAULT_OPENAI_MODEL);
+
+    openai_compatible::test(base_url, api_key, model).await
+}
+
 pub async fn test_provider() -> Result<(), String> {
     let config = current_config()?;
     if config.provider_type == "mock" {
@@ -126,6 +212,61 @@ pub async fn test_provider() -> Result<(), String> {
         .as_deref()
         .unwrap_or(DEFAULT_OPENAI_MODEL);
     openai_compatible::test(base_url, &api_key, model).await
+}
+
+pub async fn test_provider_config(
+    provider_type: &str,
+    selected_model: Option<String>,
+    base_url: Option<String>,
+    inline_completion_enabled: bool,
+    chat_enabled: bool,
+    agent_enabled: bool,
+    api_key: Option<&str>,
+) -> Result<(), String> {
+    let candidate = build_provider_connection_candidate(
+        provider_type,
+        selected_model,
+        base_url,
+        inline_completion_enabled,
+        chat_enabled,
+        agent_enabled,
+        api_key,
+    )?;
+    test_provider_connection_candidate(&candidate).await
+}
+
+pub async fn connect_provider(
+    provider_type: &str,
+    selected_model: Option<String>,
+    base_url: Option<String>,
+    inline_completion_enabled: bool,
+    chat_enabled: bool,
+    agent_enabled: bool,
+    api_key: Option<&str>,
+) -> Result<AiConfigPayload, String> {
+    let candidate = build_provider_connection_candidate(
+        provider_type,
+        selected_model,
+        base_url,
+        inline_completion_enabled,
+        chat_enabled,
+        agent_enabled,
+        api_key,
+    )?;
+    test_provider_connection_candidate(&candidate).await?;
+
+    if let Some(api_key_to_save) = candidate.api_key_for_save.as_deref() {
+        CredentialStore::save(&candidate.provider_type, api_key_to_save)?;
+    }
+
+    save_config(
+        &candidate.provider_type,
+        candidate.selected_model,
+        candidate.base_url,
+        candidate.inline_completion_enabled,
+        candidate.chat_enabled,
+        candidate.agent_enabled,
+    )
 }
 
 pub async fn chat(payload: AiChatRequest) -> Result<AiProviderResponse, String> {
@@ -246,7 +387,7 @@ pub async fn chat_stream(app: AppHandle, payload: AiChatRequest) -> Result<AiCha
                             assistant_message_id: task_assistant_message_id.clone(),
                             kind: "cancelled".to_string(),
                             delta: None,
-                            message: Some("AI ????????".to_string()),
+                            message: Some("AI 请求已取消。".to_string()),
                             model: Some(task_model.clone()),
                         },
                     );
@@ -306,7 +447,7 @@ async fn stream_mock_response(
     let response = MockProvider::chat(request).content;
     for chunk in response.as_bytes().chunks(16) {
         if stream_manager::is_cancelled(stream_id) {
-            return Err(errors::error("AI_REQUEST_CANCELLED", "AI ????????"));
+            return Err(errors::error("AI_REQUEST_CANCELLED", "AI 请求已取消。"));
         }
         let delta = String::from_utf8_lossy(chunk).to_string();
         emit_stream_event(

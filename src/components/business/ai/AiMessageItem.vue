@@ -1,8 +1,10 @@
-﻿<script setup lang="ts">
-import { computed } from 'vue';
+<script setup lang="ts">
+import { computed, onBeforeUnmount, ref } from 'vue';
 import AiMarkdown from '@/components/business/ai/AiMarkdown.vue';
+import { useMessage } from '@/composables/useMessage';
 import type { IAiChatMessage } from '@/types/ai';
 import type { IAiCodeBlock, IAiCodePathTarget } from '@/types/ai-code';
+import { tryWriteClipboardText } from '@/utils/clipboard';
 
 const props = defineProps<{
   message: IAiChatMessage;
@@ -15,23 +17,82 @@ const emit = defineEmits<{
   openCodePath: [target: IAiCodePathTarget];
 }>();
 
-const metaLabel = computed(() => {
-  if (props.message.role === 'user') return timeLabel.value;
-  if (props.message.role === 'tool') return '工具';
-  if (props.message.role === 'system') return '系统';
-  return 'AI';
+const notifier = useMessage();
+const isCopied = ref(false);
+let copiedResetTimerId: number | null = null;
+
+const clearCopiedResetTimer = (): void => {
+  if (copiedResetTimerId === null) {
+    return;
+  }
+
+  window.clearTimeout(copiedResetTimerId);
+  copiedResetTimerId = null;
+};
+
+const markCopied = (): void => {
+  isCopied.value = true;
+  clearCopiedResetTimer();
+  copiedResetTimerId = window.setTimeout(() => {
+    isCopied.value = false;
+    copiedResetTimerId = null;
+  }, 1600);
+};
+
+const formatOpenCodeBlockForCopy = (block: IAiCodeBlock): string => {
+  const language = block.fence.lang.trim();
+  return `\`\`\`${language}\n${block.content}\n\`\`\``;
+};
+
+const hasRenderableContent = computed(() =>
+  Boolean(
+    props.message.content.trim()
+    || props.message.stream?.stableContent.trim()
+    || props.message.stream?.openBlock,
+  ),
+);
+
+const copyableContent = computed(() => {
+  const parts: string[] = [];
+  const markdownContent = props.message.stream?.stableContent ?? props.message.content;
+
+  if (markdownContent.trim().length > 0) {
+    parts.push(markdownContent);
+  }
+
+  if (props.message.stream?.openBlock) {
+    parts.push(formatOpenCodeBlockForCopy(props.message.stream.openBlock));
+  }
+
+  return parts.join('\n\n');
 });
 
-const timeLabel = computed(() => {
-  const timestamp = Date.parse(props.message.createdAt);
-  if (!Number.isFinite(timestamp)) return '刚刚';
-  const deltaSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  if (deltaSeconds < 60) return '刚刚';
-  return new Intl.DateTimeFormat('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date(timestamp));
+const canCopyContent = computed(() => copyableContent.value.trim().length > 0);
+
+const shouldShowInlineLoader = computed(
+  () => props.message.role === 'assistant'
+    && props.message.stream?.status === 'streaming'
+    && !hasRenderableContent.value,
+);
+
+const copyMessageContent = async (): Promise<void> => {
+  if (!canCopyContent.value) {
+    notifier.warning('暂无可复制内容');
+    return;
+  }
+
+  const copied = await tryWriteClipboardText(copyableContent.value);
+  if (copied) {
+    markCopied();
+    notifier.success('已复制对话内容');
+    return;
+  }
+
+  notifier.error('当前环境不支持剪贴板写入');
+};
+
+onBeforeUnmount(() => {
+  clearCopiedResetTimer();
 });
 </script>
 
@@ -57,8 +118,17 @@ const timeLabel = computed(() => {
       referrerpolicy="no-referrer"
     />
     <div class="ai-message-main">
-      <div class="ai-message-bubble">
+      <div
+        class="ai-message-bubble"
+        :class="{ 'is-loading': shouldShowInlineLoader }"
+      >
+        <div v-if="shouldShowInlineLoader" class="ai-inline-loader" aria-label="AI 正在思考">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
         <AiMarkdown
+          v-else
           :message-id="message.id"
           :content="message.content"
           :stable-content="message.stream?.stableContent"
@@ -68,9 +138,23 @@ const timeLabel = computed(() => {
           @open-code-path="emit('openCodePath', $event)"
         />
       </div>
-      <div class="ai-message-meta">
-        <template v-if="message.role === 'user'">{{ metaLabel }}</template>
-        <template v-else>{{ metaLabel }} · {{ timeLabel }}</template>
+      <div v-if="canCopyContent" class="ai-message-actions">
+        <button
+          type="button"
+          class="ai-message-copy-button"
+          :class="{ 'is-copied': isCopied }"
+          :aria-label="isCopied ? '已复制对话内容' : '复制对话内容'"
+          :title="isCopied ? '已复制' : '复制对话内容'"
+          @click.stop="copyMessageContent"
+        >
+          <svg v-if="isCopied" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path d="M5 12.5l4.2 4.2L19 7" />
+          </svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <rect x="9" y="9" width="10" height="10" rx="2" />
+            <path d="M5 15V7a2 2 0 0 1 2-2h8" />
+          </svg>
+        </button>
       </div>
     </div>
   </article>
@@ -119,21 +203,118 @@ const timeLabel = computed(() => {
   border-top-left-radius: 4px;
 }
 
+.ai-message-bubble.is-loading {
+  min-width: 42px;
+}
+
+.ai-inline-loader {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-quaternary);
+}
+
+.ai-inline-loader span {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  animation: ai-inline-loader-blink 1.2s infinite ease-in-out;
+  background: currentColor;
+}
+
+.ai-inline-loader span:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.ai-inline-loader span:nth-child(3) {
+  animation-delay: 280ms;
+}
+
 .ai-message.is-user .ai-message-bubble {
   border-top-right-radius: 4px;
   background: var(--accent-strong);
   color: var(--accent-foreground, white);
 }
 
-.ai-message-meta {
-  margin-top: 4px;
-  color: var(--text-quaternary);
-  font-size: 11px;
-  line-height: 14px;
-  letter-spacing: 0.02em;
+.ai-message-actions {
+  display: flex;
+  min-height: 18px;
+  justify-content: flex-start;
+  padding-top: 3px;
 }
 
-.ai-message.is-user .ai-message-meta {
-  text-align: right;
+.ai-message.is-user .ai-message-actions {
+  justify-content: flex-end;
+}
+
+.ai-message-copy-button {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-quaternary);
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  transform: translateY(-1px);
+  transition:
+    opacity 120ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 120ms cubic-bezier(0.23, 1, 0.32, 1),
+    color 120ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.ai-message-main:hover .ai-message-copy-button,
+.ai-message-main:focus-within .ai-message-copy-button {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.ai-message-copy-button:hover {
+  color: var(--text-primary);
+}
+
+.ai-message-copy-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-strong) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.ai-message-copy-button svg {
+  width: 15px;
+  height: 15px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.ai-message.is-user .ai-message-copy-button {
+  color: color-mix(in srgb, var(--accent-foreground, white) 82%, transparent);
+}
+
+.ai-message.is-user .ai-message-copy-button:hover {
+  color: var(--accent-foreground, white);
+}
+
+.ai-message-copy-button.is-copied {
+  color: var(--accent-strong);
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+@keyframes ai-inline-loader-blink {
+
+  0%,
+  80%,
+  100% {
+    opacity: 0.28;
+  }
+
+  40% {
+    opacity: 1;
+  }
 }
 </style>

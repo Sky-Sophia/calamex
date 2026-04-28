@@ -1,5 +1,7 @@
 ﻿import { z } from 'zod';
 
+import { aiCodeBlockSchema } from '@/types/ai-code.schema';
+
 export const aiProviderTypeSchema = z.enum([
   'mock',
   'openai',
@@ -22,6 +24,7 @@ export const aiContextKindSchema = z.enum([
   'git-diff',
   'terminal-log',
   'search-result',
+  'image-attachment',
   'symbol-definition',
   'symbol-references',
   'project-tree',
@@ -54,7 +57,7 @@ export const aiChatMessageSchema = z.object({
   })).optional(),
   stream: z.object({
     stableContent: z.string(),
-    openBlock: z.unknown().nullable(),
+    openBlock: aiCodeBlockSchema.nullable(),
     status: z.enum(['streaming', 'completed', 'cancelled']),
   }).optional(),
 });
@@ -124,6 +127,27 @@ export const aiSaveCredentialsRequestSchema = z.object({
   apiKey: z.string().min(1),
 });
 
+export const aiProviderConnectionRequestSchema = z.object({
+  providerType: aiProviderTypeSchema,
+  selectedModel: z.string().nullable(),
+  baseUrl: z.string().nullable(),
+  inlineCompletionEnabled: z.boolean(),
+  chatEnabled: z.boolean(),
+  agentEnabled: z.boolean(),
+  apiKey: z.string().nullable(),
+});
+
+export const aiProviderTestPayloadSchema = z.object({
+  ok: z.boolean(),
+  code: z.string(),
+  message: z.string(),
+});
+
+export const aiProviderConnectionPayloadSchema = z.object({
+  config: aiConfigPayloadSchema,
+  test: aiProviderTestPayloadSchema,
+});
+
 export const aiPatchSetSchema = z.object({
   summary: z.string(),
   files: z.array(z.object({
@@ -137,6 +161,14 @@ export const aiPatchSetSchema = z.object({
       lines: z.array(z.string()),
     })),
   })),
+});
+
+export const aiApplyPatchMetadataSchema = z.object({
+  taskId: z.string().min(1).nullable().optional(),
+  turnId: z.string().min(1).nullable().optional(),
+  reason: z.string().min(1).nullable().optional(),
+  toolCallId: z.string().min(1).nullable().optional(),
+  confirmedByUser: z.boolean().nullable().optional(),
 });
 
 export const aiCodeActionRequestSchema = z.object({

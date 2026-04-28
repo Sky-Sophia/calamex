@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import type { IAiChatMessage } from '@/types/ai';
 import type { IAiCodeBlock, IAiCodePathTarget } from '@/types/ai-code';
 import AiMessageItem from './AiMessageItem.vue';
@@ -17,6 +17,15 @@ const emit = defineEmits<{
   applyCode: [block: IAiCodeBlock];
   openCodePath: [target: IAiCodePathTarget];
 }>();
+
+const hasInlineStreamingMessage = computed(() => {
+  const lastMessage = props.messages.at(-1);
+  return lastMessage?.role === 'assistant' && lastMessage.stream?.status === 'streaming';
+});
+
+const shouldRenderStandaloneTyping = computed(
+  () => props.isTyping && !hasInlineStreamingMessage.value,
+);
 
 const scrollToBottom = async (): Promise<void> => {
   await nextTick();
@@ -39,35 +48,14 @@ onMounted(() => {
 
 <template>
   <div ref="listRef" class="ai-chat-list" aria-label="AI 对话记录">
-    <AiMessageItem
-      v-for="message in messages"
-      :key="message.id"
-      :message="message"
-      :avatar-url="avatarUrl"
-      :avatar-alt="avatarAlt"
-      @apply-code="emit('applyCode', $event)"
-      @open-code-path="emit('openCodePath', $event)"
-    />
-    <article v-if="isTyping" class="ai-message-typing" aria-label="AI 正在输入">
-      <svg
-        v-if="!avatarUrl"
-        class="ai-logo"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        aria-hidden="true"
-      >
+    <AiMessageItem v-for="message in messages" :key="message.id" :message="message" :avatar-url="avatarUrl"
+      :avatar-alt="avatarAlt" @apply-code="emit('applyCode', $event)" @open-code-path="emit('openCodePath', $event)" />
+    <article v-if="shouldRenderStandaloneTyping" class="ai-message-typing" aria-label="AI 正在输入">
+      <svg v-if="!avatarUrl" class="ai-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
         <path d="M12 3l1.9 5.2L19 10l-5.1 1.8L12 17l-1.9-5.2L5 10l5.1-1.8L12 3z" />
         <path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8L18 15z" />
       </svg>
-      <img
-        v-else
-        class="ai-logo"
-        :src="avatarUrl"
-        :alt="avatarAlt"
-        loading="lazy"
-        referrerpolicy="no-referrer"
-      />
+      <img v-else class="ai-logo" :src="avatarUrl" :alt="avatarAlt" loading="lazy" referrerpolicy="no-referrer" />
       <div class="typing-bubble">
         <span></span>
         <span></span>
@@ -148,6 +136,7 @@ onMounted(() => {
 }
 
 @keyframes ai-blink {
+
   0%,
   80%,
   100% {

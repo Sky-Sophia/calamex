@@ -1,6 +1,6 @@
 import type { IWorkbenchMotionTokens } from '@/types/motion';
 
-export const WORKBENCH_MOTION_TOKENS: IWorkbenchMotionTokens = {
+export const WORKBENCH_MOTION_TOKENS = {
   duration: {
     instant: 0,
     fast: 140,
@@ -37,7 +37,7 @@ export const WORKBENCH_MOTION_TOKENS: IWorkbenchMotionTokens = {
     openScaleTo: 1,
     closeScaleTo: 0.985,
   },
-} as const;
+} as const satisfies IWorkbenchMotionTokens;
 
 export const WORKBENCH_MOTION_CSS_VARS = {
   durationOpen: '--motion-duration-workbench-open',
@@ -45,4 +45,4 @@ export const WORKBENCH_MOTION_CSS_VARS = {
   easingStandard: '--motion-easing-standard',
   easingEmphasized: '--motion-easing-emphasized',
   easingExit: '--motion-easing-exit',
-} as const;
+} as const satisfies Record<string, `--${string}`>;

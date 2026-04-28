@@ -1,14 +1,17 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
 import AiChatThread from '@/components/business/ai/AiChatThread.vue';
 import AiContextChips from '@/components/business/ai/AiContextChips.vue';
+import AiEditTimeline from '@/components/business/ai/AiEditTimeline.vue';
 import AiPatchPreview from '@/components/business/ai/AiPatchPreview.vue';
 import AiPromptInput from '@/components/business/ai/AiPromptInput.vue';
 import AiProviderSettings from '@/components/business/ai/AiProviderSettings.vue';
-import AiTaskPlan from '@/components/business/ai/AiTaskPlan.vue';
 import { useAiAssistant } from '@/composables/useAiAssistant';
 import { findAiProviderPreset } from '@/constants/ai-providers';
-import type { IAiChatMessage, IAiConfigPayload } from '@/types/ai';
+import type {
+  IAiChatMessage,
+  IAiConfigPayload,
+  IAiProviderSettingsActionFeedback,
+} from '@/types/ai';
 import type { IAiCodePathTarget } from '@/types/ai-code';
 import type {
   IActiveRunSummary,
@@ -17,6 +20,9 @@ import type {
   IEditorSelectionSummary,
 } from '@/types/editor';
 import type { IGitRepositoryStatusPayload } from '@/types/git';
+import { computed, onMounted, ref } from 'vue';
+
+const MAX_HISTORY_MESSAGES = 20;
 
 const props = defineProps<{
   document: IEditorDocument;
@@ -56,11 +62,30 @@ const aiAvatarUrl = computed(() =>
   assistant.config.value.isConfigured ? currentProviderPreset.value.iconUrl : null,
 );
 const aiAvatarAlt = computed(() => currentProviderPreset.value.label);
-const recentMessages = computed(() => assistant.messages.value.slice(-8).reverse());
+const historyThreads = computed(() => assistant.historyThreads.value.slice(-MAX_HISTORY_MESSAGES).reverse());
+const historyCountLabel = computed(() => `最近 ${historyThreads.value.length} 组`);
 
 const openSettings = (): void => {
   settingsDraft.value = { ...assistant.config.value };
   assistant.isSettingsOpen.value = true;
+};
+
+const startNewConversation = (): void => {
+  if (assistant.isSending.value) {
+    assistant.stopCurrentRequest();
+  }
+  isHistoryOpen.value = false;
+  isModeMenuOpen.value = false;
+  assistant.startNewConversation();
+};
+
+const openHistoryThread = (threadId: string): void => {
+  if (assistant.isSending.value) {
+    assistant.stopCurrentRequest();
+  }
+  assistant.switchConversation(threadId);
+  isHistoryOpen.value = false;
+  isModeMenuOpen.value = false;
 };
 
 const selectMode = (mode: 'chat' | 'agent'): void => {
@@ -68,15 +93,8 @@ const selectMode = (mode: 'chat' | 'agent'): void => {
   isModeMenuOpen.value = false;
 };
 
-const getMessageRoleLabel = (message: IAiChatMessage): string => {
-  if (message.role === 'user') return '用户';
-  if (message.role === 'tool') return '工具';
-  if (message.role === 'system') return '系统';
-  return 'AI';
-};
-
-const getMessageTimeLabel = (message: IAiChatMessage): string => {
-  const timestamp = Date.parse(message.createdAt);
+const getHistoryTimeLabel = (timestampText: string): string => {
+  const timestamp = Date.parse(timestampText);
   if (!Number.isFinite(timestamp)) return '刚刚';
   return new Intl.DateTimeFormat('zh-CN', {
     hour: '2-digit',
@@ -85,34 +103,57 @@ const getMessageTimeLabel = (message: IAiChatMessage): string => {
   }).format(new Date(timestamp));
 };
 
-const getMessagePreview = (message: IAiChatMessage): string => {
-  const normalized = message.content.replace(/\s+/g, ' ').trim();
-  return normalized || '空消息';
+const getHistoryPreview = (messages: IAiChatMessage[]): string => {
+  const lastMessage = [...messages].reverse().find((message) => message.content.trim());
+  if (!lastMessage) return '空对话';
+  const normalized = lastMessage.content.replace(/\s+/g, ' ').trim();
+  return normalized.length > 64 ? `${normalized.slice(0, 64)}…` : normalized;
 };
 
-const saveSettings = async (config: IAiConfigPayload): Promise<void> => {
-  await assistant.saveConfig(config);
-  if (settingsApiKey.value.trim()) {
-    await assistant.saveCredentials(settingsApiKey.value, config.providerType);
+const getHistoryMessageCountLabel = (messages: IAiChatMessage[]): string => `${messages.length} 条消息`;
+
+const toErrorMessage = (error: unknown, fallback: string): string =>
+  error instanceof Error && error.message.trim() ? error.message : fallback;
+
+const saveSettings = async (
+  config: IAiConfigPayload,
+  apiKey: string,
+  feedback: IAiProviderSettingsActionFeedback,
+): Promise<void> => {
+  try {
+    const message = await assistant.connectProvider(config, apiKey);
     settingsApiKey.value = '';
+    settingsDraft.value = { ...assistant.config.value };
+    feedback.onSuccess(message);
+  } catch (error) {
+    feedback.onError(toErrorMessage(error, 'AI 连接失败'));
   }
-  settingsDraft.value = { ...assistant.config.value };
 };
 
-const saveCredentials = async (apiKey: string): Promise<void> => {
-  await assistant.saveCredentials(apiKey, settingsDraft.value.providerType);
-  settingsApiKey.value = '';
-  settingsDraft.value = { ...assistant.config.value };
-};
-
-const testProvider = async (): Promise<string> => {
-  await assistant.saveConfig(settingsDraft.value);
-  if (settingsApiKey.value.trim()) {
-    await assistant.saveCredentials(settingsApiKey.value, settingsDraft.value.providerType);
+const saveCredentials = async (
+  apiKey: string,
+  feedback: IAiProviderSettingsActionFeedback,
+): Promise<void> => {
+  try {
+    await assistant.saveCredentials(apiKey, settingsDraft.value.providerType);
     settingsApiKey.value = '';
+    settingsDraft.value = { ...assistant.config.value };
+    feedback.onSuccess('API Key 已保存到系统凭证');
+  } catch (error) {
+    feedback.onError(toErrorMessage(error, 'API Key 保存失败'));
   }
-  settingsDraft.value = { ...assistant.config.value };
-  return assistant.testProvider();
+};
+
+const testProvider = async (
+  config: IAiConfigPayload,
+  apiKey: string,
+  feedback: IAiProviderSettingsActionFeedback,
+): Promise<void> => {
+  try {
+    feedback.onSuccess(await assistant.testProviderConfig(config, apiKey));
+  } catch (error) {
+    feedback.onError(toErrorMessage(error, '连接测试失败'));
+  }
 };
 
 onMounted(() => {
@@ -126,50 +167,35 @@ onMounted(() => {
 <template>
   <section class="ai-assistant-panel" aria-label="AI 助手面板">
     <header class="ai-panel-header">
-      <img
-        v-if="aiAvatarUrl"
-        class="ai-provider-avatar"
-        :src="aiAvatarUrl"
-        :alt="aiAvatarAlt"
-        loading="lazy"
-        referrerpolicy="no-referrer"
-      />
+      <img v-if="aiAvatarUrl" class="ai-provider-avatar" :src="aiAvatarUrl" :alt="aiAvatarAlt" loading="lazy"
+        referrerpolicy="no-referrer" />
       <span v-else class="ai-status-dot" aria-hidden="true"></span>
       <div class="ai-model-switch">
-        <button
-          type="button"
-          class="ai-model-button"
-          :aria-expanded="isModeMenuOpen"
-          aria-haspopup="menu"
-          aria-label="切换 AI 模式"
-          @click="isModeMenuOpen = !isModeMenuOpen"
-        >
+        <button type="button" class="ai-model-button" :aria-expanded="isModeMenuOpen" aria-haspopup="menu"
+          aria-label="切换 AI 模式" @click="isModeMenuOpen = !isModeMenuOpen">
           <span>{{ assistant.config.value.selectedModel ?? 'AI Assistant' }}</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <path d="m6 9 6 6 6-6" />
           </svg>
         </button>
         <div v-if="isModeMenuOpen" class="ai-mode-menu" role="menu">
-          <button
-            type="button"
-            role="menuitemradio"
-            :aria-checked="assistant.activeMode.value === 'chat'"
-            :class="{ active: assistant.activeMode.value === 'chat' }"
-            @click="selectMode('chat')"
-          >
+          <button type="button" role="menuitemradio" :aria-checked="assistant.activeMode.value === 'chat'"
+            :class="{ active: assistant.activeMode.value === 'chat' }" @click="selectMode('chat')">
             Chat
           </button>
-          <button
-            type="button"
-            role="menuitemradio"
-            :aria-checked="assistant.activeMode.value === 'agent'"
-            :class="{ active: assistant.activeMode.value === 'agent' }"
-            @click="selectMode('agent')"
-          >
+          <button type="button" role="menuitemradio" :aria-checked="assistant.activeMode.value === 'agent'"
+            :class="{ active: assistant.activeMode.value === 'agent' }" @click="selectMode('agent')">
             Agent
           </button>
         </div>
       </div>
+      <button type="button" class="ai-icon-button" aria-label="新建对话" @click="startNewConversation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M12 5v14" />
+          <path d="M5 12h14" />
+          <path d="M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
+        </svg>
+      </button>
       <button type="button" class="ai-icon-button" aria-label="AI 设置" @click="openSettings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
           <path d="M20 7h-7" />
@@ -179,41 +205,37 @@ onMounted(() => {
         </svg>
       </button>
       <div class="ai-history-anchor">
-        <button
-          type="button"
-          class="ai-icon-button"
-          aria-label="对话记录"
-          aria-haspopup="dialog"
-          :aria-expanded="isHistoryOpen"
-          @click="isHistoryOpen = !isHistoryOpen"
-        >
+        <button type="button" class="ai-icon-button" aria-label="对话记录" aria-haspopup="dialog"
+          :aria-expanded="isHistoryOpen" @click="isHistoryOpen = !isHistoryOpen">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <path d="M3 3v5h5" />
             <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
             <path d="M12 7v5l4 2" />
           </svg>
         </button>
-        <section v-if="isHistoryOpen" class="ai-history-popover" role="dialog" aria-label="最近对话">
-          <header class="ai-history-header">最近对话</header>
-          <div v-if="recentMessages.length" class="ai-history-list">
-            <article
-              v-for="message in recentMessages"
-              :key="message.id"
-              class="ai-history-item"
-            >
-              <div class="ai-history-meta">
-                <span>{{ getMessageRoleLabel(message) }}</span>
-                <time>{{ getMessageTimeLabel(message) }}</time>
-              </div>
-              <p>{{ getMessagePreview(message) }}</p>
+        <section v-if="isHistoryOpen" class="ai-history-popover" role="dialog" aria-label="最近 20 组对话记录">
+          <header class="ai-history-header">
+            <div class="ai-history-title-group">
+              <strong>对话记录</strong>
+              <span>{{ historyCountLabel }}</span>
+            </div>
+          </header>
+          <div v-if="historyThreads.length" class="ai-history-list">
+            <article v-for="thread in historyThreads" :key="thread.id" class="ai-history-item"
+              :class="{ 'is-active': thread.id === assistant.activeConversationId.value }">
+              <button type="button" class="ai-history-button" @click="openHistoryThread(thread.id)">
+                <div class="ai-history-meta">
+                  <strong class="ai-history-title">{{ thread.title }}</strong>
+                  <time>{{ getHistoryTimeLabel(thread.updatedAt) }}</time>
+                </div>
+                <p class="ai-history-content">{{ getHistoryPreview(thread.messages) }}</p>
+                <div class="ai-history-subtitle">{{ getHistoryMessageCountLabel(thread.messages) }}</div>
+              </button>
             </article>
           </div>
-          <div v-else class="ai-history-empty">暂无对话记录</div>
+          <div v-else class="ai-history-empty">最近 20 组对话会显示在这里</div>
           <footer v-if="assistant.messages.value.length" class="ai-history-footer">
-            <button
-              type="button"
-              @click="assistant.isClearDialogOpen.value = true; isHistoryOpen = false"
-            >
+            <button type="button" @click="assistant.isClearDialogOpen.value = true; isHistoryOpen = false">
               清空当前对话
             </button>
           </footer>
@@ -222,59 +244,40 @@ onMounted(() => {
     </header>
 
     <AiContextChips :references="assistant.currentReferences.value" />
-    <AiTaskPlan :steps="assistant.agentSteps.value" />
-    <AiChatThread
-      :messages="assistant.messages.value"
-      :is-typing="assistant.isSending.value"
-      :avatar-url="aiAvatarUrl"
-      :avatar-alt="aiAvatarAlt"
-      @apply-code="assistant.previewPatchFromCodeBlock"
-      @open-code-path="emit('openCodePath', $event)"
-    />
+    <AiEditTimeline />
+    <AiChatThread :messages="assistant.messages.value" :is-typing="assistant.isSending.value" :avatar-url="aiAvatarUrl"
+      :avatar-alt="aiAvatarAlt" @apply-code="assistant.previewPatchFromCodeBlock"
+      @open-code-path="emit('openCodePath', $event)" />
     <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
       <button type="button" class="ai-quick-action" @click="assistant.previewPatchFromLastAnswer">
         预览为 Patch
       </button>
     </div>
-    <AiPatchPreview
-      :patch="assistant.proposedPatch.value"
-      :is-applying="assistant.isApplyingPatch.value"
-      @apply="assistant.applyProposedPatch"
-      @close="assistant.proposedPatch.value = null"
-    />
-    <AiPromptInput
-      v-model="assistant.draft.value"
-      :disabled="assistant.isSending.value"
+    <AiPatchPreview :patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
+      @apply="assistant.applyProposedPatch" @close="assistant.proposedPatch.value = null" />
+    <AiPromptInput v-model="assistant.draft.value" :disabled="assistant.isSending.value"
       :error-message="assistant.errorMessage.value"
       :submit-label="assistant.activeMode.value === 'agent' ? '规划任务' : assistant.sendButtonLabel.value"
-      :attachments="assistant.attachedFiles.value"
-      :has-attachments="assistant.attachedFiles.value.length > 0"
-      @submit="assistant.sendMessage"
-      @stop="assistant.stopCurrentRequest"
-      @file-selected="assistant.attachFile"
-      @remove-file="assistant.removeAttachedFile"
-    />
+      :attachments="assistant.attachedFiles.value" :has-attachments="assistant.attachedFiles.value.length > 0"
+      @submit="assistant.sendMessage" @stop="assistant.stopCurrentRequest" @file-selected="assistant.attachFile"
+      @remove-file="assistant.removeAttachedFile" />
 
-    <AiProviderSettings
-      v-model:draft="settingsDraft"
-      v-model:api-key="settingsApiKey"
-      :open="assistant.isSettingsOpen.value"
-      :config="assistant.config.value"
-      @close="assistant.isSettingsOpen.value = false"
-      @save="saveSettings"
-      @save-credentials="saveCredentials"
-      @test-provider="testProvider"
-    />
+    <AiProviderSettings v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
+      :open="assistant.isSettingsOpen.value" :config="assistant.config.value"
+      @close="assistant.isSettingsOpen.value = false" @save="saveSettings" @save-credentials="saveCredentials"
+      @test-provider="testProvider" />
 
     <Teleport to="body">
-      <div v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop" @click.self="assistant.isClearDialogOpen.value = false">
+      <div v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop"
+        @click.self="assistant.isClearDialogOpen.value = false">
         <section class="ai-dialog is-compact" role="alertdialog" aria-modal="true">
           <div class="ai-dialog-copy">
             <h3>清空当前对话？</h3>
             <p>这只会清空面板里的临时对话记录，不会删除任何文件。</p>
           </div>
           <div class="ai-dialog-actions">
-            <button type="button" class="ai-button is-ghost" @click="assistant.isClearDialogOpen.value = false">取消</button>
+            <button type="button" class="ai-button is-ghost"
+              @click="assistant.isClearDialogOpen.value = false">取消</button>
             <button type="button" class="ai-button is-danger" @click="assistant.clearConversation">清空</button>
           </div>
         </section>
@@ -439,42 +442,94 @@ onMounted(() => {
   right: 0;
   z-index: 10;
   display: grid;
-  width: 260px;
-  max-height: 320px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: 332px;
+  max-height: 452px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--shell-divider) 100%, rgba(255, 255, 255, 0.1));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--panel-bg) 96%, var(--sidebar-bg));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel-bg) 97%, var(--sidebar-bg));
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
 }
 
 .ai-history-header {
-  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
   border-bottom: 1px solid var(--shell-divider);
-  color: var(--text-secondary);
+  padding: 0 12px;
+}
+
+.ai-history-title-group {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-history-title-group strong {
+  color: var(--text-primary);
   font-size: 12px;
   font-weight: 600;
-  line-height: 33px;
-  padding: 0 10px;
+  letter-spacing: -0.01em;
+}
+
+.ai-history-title-group span {
+  color: var(--text-quaternary);
+  font-size: 11px;
+  line-height: 16px;
 }
 
 .ai-history-list {
-  display: grid;
-  max-height: 234px;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
   overflow-y: auto;
-  padding: 5px;
+  overscroll-behavior: contain;
+  padding: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--shell-divider) 88%, transparent) transparent;
+}
+
+.ai-history-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ai-history-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--shell-divider) 88%, transparent);
 }
 
 .ai-history-item {
-  display: grid;
-  gap: 3px;
+  display: block;
   min-width: 0;
-  border-radius: 7px;
-  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--shell-divider) 78%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-soft) 72%, transparent);
+  overflow: hidden;
 }
 
 .ai-history-item:hover {
-  background: var(--surface-soft);
+  border-color: color-mix(in srgb, var(--shell-divider) 100%, rgba(255, 255, 255, 0.12));
+  background: color-mix(in srgb, var(--surface-soft) 100%, transparent);
+}
+
+.ai-history-item.is-active {
+  border-color: color-mix(in srgb, var(--accent-strong) 34%, var(--shell-divider));
+  background: color-mix(in srgb, var(--accent-strong) 8%, var(--surface-soft));
+}
+
+.ai-history-button {
+  display: grid;
+  width: 100%;
+  gap: 6px;
+  color: inherit;
+  text-align: left;
+  padding: 10px;
 }
 
 .ai-history-meta {
@@ -482,27 +537,45 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: var(--text-quaternary);
   font-size: 11px;
-  line-height: 14px;
+  line-height: 16px;
 }
 
-.ai-history-item p {
-  display: -webkit-box;
-  margin: 0;
+.ai-history-title {
+  min-width: 0;
   overflow: hidden;
-  -webkit-box-orient: vertical;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-history-meta time {
+  color: var(--text-quaternary);
+}
+
+.ai-history-content {
+  margin: 0;
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 18px;
-  -webkit-line-clamp: 2;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-history-subtitle {
+  color: var(--text-quaternary);
+  font-size: 11px;
+  line-height: 16px;
 }
 
 .ai-history-empty {
   color: var(--text-quaternary);
   font-size: 12px;
   line-height: 18px;
-  padding: 16px 10px;
+  padding: 20px 16px;
   text-align: center;
 }
 
@@ -510,15 +583,15 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   border-top: 1px solid var(--shell-divider);
-  padding: 6px;
+  padding: 8px;
 }
 
 .ai-history-footer button {
-  height: 24px;
+  height: 26px;
   border-radius: 6px;
   color: var(--text-tertiary);
   font-size: 12px;
-  padding: 0 7px;
+  padding: 0 9px;
 }
 
 .ai-history-footer button:hover {

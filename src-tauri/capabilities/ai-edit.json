@@ -1,0 +1,9 @@
+{
+    "$schema": "../gen/schemas/desktop-schema.json",
+    "identifier": "ai-edit",
+    "description": "AED 写能力与回滚能力。负责授权门控、自动写盘、时间线、快照与回滚。",
+    "windows": [
+        "main"
+    ],
+    "permissions": []
+}

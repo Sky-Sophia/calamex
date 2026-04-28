@@ -14,9 +14,10 @@ mod workspace_fs;
 const CREATE_NO_WINDOW_FLAG: u32 = 0x0800_0000;
 
 pub use ai::{
-    ai_apply_patch, ai_build_index, ai_cancel, ai_chat, ai_chat_stream, ai_clear_credentials, ai_code_action, ai_get_config,
-    ai_inline_complete, ai_list_tools, ai_plan_task, ai_propose_patch, ai_query_index,
-    ai_save_config, ai_save_credentials, ai_test_provider,
+    ai_apply_patch, ai_build_index, ai_cancel, ai_chat, ai_chat_stream, ai_clear_credentials, ai_code_action, ai_connect_provider, ai_edit_get_auth_level,
+    ai_edit_list_timeline, ai_edit_restore_snapshot, ai_edit_set_auth_level, ai_edit_undo_operation, ai_get_config, ai_inline_complete,
+    ai_list_tools, ai_plan_task, ai_propose_patch, ai_query_index,
+    ai_save_config, ai_save_credentials, ai_test_provider, ai_test_provider_config,
 };
 pub use contracts::{
     AnalyzeScriptPayload, AnalyzeScriptRequest, ExecutionEnvironment, ExecutionOption,

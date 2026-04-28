@@ -2,6 +2,8 @@ export type TWorkbenchMotionState =
   | 'idle'
   | 'opening'
   | 'closing'
+  | 'right-sidebar-opening'
+  | 'right-sidebar-closing'
   | 'terminal-opening'
   | 'terminal-closing'
   | 'settling'
@@ -70,6 +72,7 @@ export interface IFlipElementDescriptor {
   element: HTMLElement;
   key: string;
   opacity?: boolean;
+  transformOrigin?: string;
 }
 
 export interface IFlipAnimationOptions {

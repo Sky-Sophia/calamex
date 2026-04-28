@@ -8,6 +8,32 @@ const WINDOWS_PATH_PATTERN = /^[a-zA-Z]:\//;
 const UNC_PATH_PATTERN = /^\/\//;
 const WINDOWS_DRIVE_ROOT_PATTERN = /^[a-zA-Z]:\/$/;
 const UNC_SHARE_ROOT_PATTERN = /^\/\/[^/]+\/[^/]+\/?$/;
+const WINDOWS_VERBATIM_UNC_PREFIX = '\\\\?\\UNC\\';
+const WINDOWS_VERBATIM_PREFIX = '\\\\?\\';
+const NORMALIZED_WINDOWS_VERBATIM_UNC_PREFIX = '//?/UNC/';
+const NORMALIZED_WINDOWS_VERBATIM_PREFIX = '//?/';
+
+const stripWindowsVerbatimPrefix = (value: string): string => {
+  const lowerValue = value.toLowerCase();
+
+  if (lowerValue.startsWith(WINDOWS_VERBATIM_UNC_PREFIX.toLowerCase())) {
+    return `\\\\${value.slice(WINDOWS_VERBATIM_UNC_PREFIX.length)}`;
+  }
+
+  if (lowerValue.startsWith(WINDOWS_VERBATIM_PREFIX.toLowerCase())) {
+    return value.slice(WINDOWS_VERBATIM_PREFIX.length);
+  }
+
+  if (lowerValue.startsWith(NORMALIZED_WINDOWS_VERBATIM_UNC_PREFIX.toLowerCase())) {
+    return `//${value.slice(NORMALIZED_WINDOWS_VERBATIM_UNC_PREFIX.length)}`;
+  }
+
+  if (lowerValue.startsWith(NORMALIZED_WINDOWS_VERBATIM_PREFIX.toLowerCase())) {
+    return value.slice(NORMALIZED_WINDOWS_VERBATIM_PREFIX.length);
+  }
+
+  return value;
+};
 
 const collapseDuplicateSeparators = (value: string): string => {
   if (value.startsWith('//')) {
@@ -36,7 +62,8 @@ export const normalizeFileSystemPath = (
     return '';
   }
 
-  let normalized = value.replace(/\\/g, '/');
+  let normalized = stripWindowsVerbatimPrefix(value).replace(/\\/g, '/');
+  normalized = stripWindowsVerbatimPrefix(normalized);
 
   if (options.collapseDuplicateSeparators) {
     normalized = collapseDuplicateSeparators(normalized);

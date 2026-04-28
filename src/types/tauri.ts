@@ -1,4 +1,42 @@
 import type {
+  IAiAgentPlanPayload,
+  IAiAgentPlanRequest,
+  IAiApplyPatchPayload,
+  IAiApplyPatchRequest,
+  IAiBuildIndexPayload,
+  IAiBuildIndexRequest,
+  IAiChatPayload,
+  IAiChatRequest,
+  IAiChatStreamEventPayload,
+  IAiChatStreamPayload,
+  IAiCodeActionRequest,
+  IAiCodeActionResult,
+  IAiConfigPayload,
+  IAiInlineCompletionRequest,
+  IAiInlineCompletionResult,
+  IAiProposePatchPayload,
+  IAiProposePatchRequest,
+  IAiProviderConnectionPayload,
+  IAiProviderConnectionRequest,
+  IAiProviderTestPayload,
+  IAiQueryIndexPayload,
+  IAiQueryIndexRequest,
+  IAiSaveConfigRequest,
+  IAiSaveCredentialsRequest,
+} from './ai';
+import type {
+  IAiEditAuthState,
+  IAiEditListTimelinePayload,
+  IAiEditListTimelineRequest,
+  IAiEditRestoreSnapshotPayload,
+  IAiEditRestoreSnapshotRequest,
+  IAiEditRevertTaskPayload,
+  IAiEditRevertTaskRequest,
+  IAiEditSetAuthLevelRequest,
+  IAiEditUndoOperationPayload,
+  IAiEditUndoOperationRequest,
+} from './ai-edit';
+import type {
   IAnalyzeScriptPayload,
   IAnalyzeScriptRequest,
   IExecutionEnvironment,
@@ -22,9 +60,10 @@ import type {
   IGitPathOperationRequest,
   IGitRepositoryStatusPayload,
 } from './git';
+import type { IWorkspaceSearchPayload, IWorkspaceSearchRequest } from './search';
 import type {
-  ICloseTerminalSessionRequest,
   ICancelTerminalRunRequest,
+  ICloseTerminalSessionRequest,
   IDispatchTerminalScriptPayload,
   IDispatchTerminalScriptRequest,
   IEnsureTerminalSessionRequest,
@@ -32,31 +71,6 @@ import type {
   ITerminalSessionPayload,
   IWriteTerminalInputRequest,
 } from './terminal';
-import type { IWorkspaceSearchPayload, IWorkspaceSearchRequest } from './search';
-import type {
-  IAiChatPayload,
-  IAiChatRequest,
-  IAiChatStreamEventPayload,
-  IAiChatStreamPayload,
-  IAiAgentPlanPayload,
-  IAiAgentPlanRequest,
-  IAiApplyPatchPayload,
-  IAiApplyPatchRequest,
-  IAiBuildIndexPayload,
-  IAiBuildIndexRequest,
-  IAiCodeActionRequest,
-  IAiCodeActionResult,
-  IAiConfigPayload,
-  IAiInlineCompletionRequest,
-  IAiInlineCompletionResult,
-  IAiProviderTestPayload,
-  IAiProposePatchPayload,
-  IAiProposePatchRequest,
-  IAiQueryIndexPayload,
-  IAiQueryIndexRequest,
-  IAiSaveCredentialsRequest,
-  IAiSaveConfigRequest,
-} from './ai';
 
 export interface ISshConnectionTestRequest {
   host: string;
@@ -187,6 +201,8 @@ export interface ITauriService {
   aiSaveCredentials(payload: IAiSaveCredentialsRequest): Promise<IAiConfigPayload>;
   aiClearCredentials(): Promise<void>;
   aiTestProvider(): Promise<IAiProviderTestPayload>;
+  aiTestProviderConfig(payload: IAiProviderConnectionRequest): Promise<IAiProviderTestPayload>;
+  aiConnectProvider(payload: IAiProviderConnectionRequest): Promise<IAiProviderConnectionPayload>;
   aiChat(payload: IAiChatRequest, options?: { signal?: AbortSignal }): Promise<IAiChatPayload>;
   aiChatStream(payload: IAiChatRequest): Promise<IAiChatStreamPayload>;
   aiCancel(payload: { streamId: string }): Promise<void>;
@@ -198,4 +214,14 @@ export interface ITauriService {
   aiQueryIndex(payload: IAiQueryIndexRequest): Promise<IAiQueryIndexPayload>;
   aiProposePatch(payload: IAiProposePatchRequest): Promise<IAiProposePatchPayload>;
   aiApplyPatch(payload: IAiApplyPatchRequest): Promise<IAiApplyPatchPayload>;
+  aiEditGetAuthLevel(): Promise<IAiEditAuthState>;
+  aiEditSetAuthLevel(payload: IAiEditSetAuthLevelRequest): Promise<IAiEditAuthState>;
+  aiEditListTimeline(payload: IAiEditListTimelineRequest): Promise<IAiEditListTimelinePayload>;
+  aiEditRestoreSnapshot(
+    payload: IAiEditRestoreSnapshotRequest,
+  ): Promise<IAiEditRestoreSnapshotPayload>;
+  aiEditUndoOperation(
+    payload: IAiEditUndoOperationRequest,
+  ): Promise<IAiEditUndoOperationPayload>;
+  aiEditRevertTask(payload: IAiEditRevertTaskRequest): Promise<IAiEditRevertTaskPayload>;
 }

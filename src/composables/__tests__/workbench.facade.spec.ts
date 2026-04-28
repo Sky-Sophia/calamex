@@ -388,6 +388,25 @@ describe('useWorkbench 特征化快照', () => {
       expect(mockTauriService.listWorkspaceEntries).not.toHaveBeenCalled();
       expect(mockTauriService.loadScript).not.toHaveBeenCalled();
     });
+
+    it('执行环境检测未返回时也不会阻塞初始化', async () => {
+      vi.useFakeTimers();
+      mockTauriService.detectEnvironment.mockReturnValueOnce(new Promise(() => undefined));
+
+      try {
+        const result = await workbench.initialize();
+
+        expect(result.startupWorkspaceDirectory).toBeNull();
+        expect(mockTauriService.detectEnvironment).not.toHaveBeenCalled();
+        expect(editorStore.environment.hasAny).toBe(false);
+
+        await vi.runAllTimersAsync();
+
+        expect(mockTauriService.detectEnvironment).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe('requestCloseDocument()', () => {

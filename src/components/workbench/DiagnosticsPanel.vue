@@ -652,7 +652,6 @@ viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
     gap: 8px;
     height: 36px;
     padding: 0 10px 0 12px;
-    border-bottom: 1px solid var(--diagnostics-border);
     flex: none;
 }
 
@@ -723,7 +722,6 @@ viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
     align-items: center;
     gap: 2px;
     padding: 6px 8px;
-    border-bottom: 1px solid var(--diagnostics-border);
     flex: none;
 }
 
@@ -789,13 +787,26 @@ viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
 .diagnostics-panel__body {
     flex: 1;
     min-height: 0;
+    overflow: hidden;
 }
 
 .diagnostics-panel__body--center {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 32px 24px 40px;
+    align-items: safe center;
+    justify-content: safe center;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding: 16px 24px 28px;
+}
+
+.diagnostics-panel__body--center::-webkit-scrollbar {
+    display: none;
+}
+
+.diagnostics-panel__body--center > .diagnostics-panel__notice,
+.diagnostics-panel__body--center > .diagnostics-panel__empty-state {
+    flex: none;
 }
 
 .diagnostics-panel__notice {

@@ -28,9 +28,6 @@ fn show_main_window(window: &WebviewWindow) -> Result<(), String> {
     window
         .show()
         .map_err(|error| format!("failed to show main window: {error}"))?;
-    window
-        .set_focus()
-        .map_err(|error| format!("failed to focus main window: {error}"))?;
 
     Ok(())
 }
@@ -60,9 +57,6 @@ fn show_welcome_window(window: &WebviewWindow) -> Result<(), String> {
     window
         .show()
         .map_err(|error| format!("failed to show welcome window: {error}"))?;
-    window
-        .set_focus()
-        .map_err(|error| format!("failed to focus welcome window: {error}"))?;
 
     Ok(())
 }
@@ -111,15 +105,9 @@ pub fn begin_startup_transition(app: AppHandle) -> Result<(), String> {
 pub fn finalize_startup_transition(app: AppHandle) -> Result<(), String> {
     if let Some(welcome_window) = app.get_webview_window(WELCOME_WINDOW_LABEL) {
         let _ = welcome_window.hide();
-        welcome_window
-            .close()
-            .map_err(|error| format!("failed to close welcome window: {error}"))?;
+        // Windows 上关闭隐藏 welcome 窗口偶发阻塞；这里不把关闭当作启动收尾的同步前置条件。
+        let _ = welcome_window.close();
     }
-
-    let main_window = resolve_window(&app, MAIN_WINDOW_LABEL)?;
-    main_window
-        .set_focus()
-        .map_err(|error| format!("failed to refocus main window: {error}"))?;
 
     Ok(())
 }

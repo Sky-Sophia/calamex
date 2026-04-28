@@ -1,13 +1,10 @@
 <script setup lang="ts">
+import startupWelcomeSvgRaw from '@/assets/svg/welcome-isometric.svg?raw';
 import AppDialogHost from '@/components/common/AppDialogHost.vue';
 import BrowserContextMenuHost from '@/components/common/BrowserContextMenuHost.vue';
-import startupWelcomeSvgRaw from '@/assets/svg/welcome-isometric.svg?raw';
-import {
-  beginStartupTransition,
-  finalizeStartupTransition,
-} from '@/services/modules/window';
 import { getCurrentAppWindowLabel, WELCOME_WINDOW_LABEL } from '@/utils/app-window';
-import { runtimeErrorState, setRuntimeError } from '@/utils/runtime-diagnostics';
+import { runtimeErrorState } from '@/utils/runtime-diagnostics';
+import { WORKBENCH_READY_EVENT } from '@/utils/startup-ready';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 const STARTUP_VEIL_FADE_DURATION_MS = 180;
@@ -89,12 +86,6 @@ const finalizeWelcomeWindowDisposal = async (): Promise<void> => {
   }
 
   hasFinalizedStartupTransition.value = true;
-
-  try {
-    await finalizeStartupTransition();
-  } catch (error) {
-    setRuntimeError('Failed to finalize startup transition', error);
-  }
 };
 
 const hideStartupVeil = (): void => {
@@ -139,19 +130,16 @@ const revealMainWindow = async (): Promise<void> => {
   }
 
   hasStartedStartupTransition.value = true;
-  let transitionBegan = false;
-
-  try {
-    await beginStartupTransition();
-    transitionBegan = true;
-  } catch (error) {
-    setRuntimeError('Failed to begin startup transition', error);
-  } finally {
-    if (transitionBegan) {
-      startStartupVeilLeave();
-    }
-  }
+  startStartupVeilLeave();
 };
+
+const handleWindowWorkbenchReady = (): void => {
+  void revealMainWindow();
+};
+
+if (!isWelcomeWindow.value && typeof window !== 'undefined') {
+  window.addEventListener(WORKBENCH_READY_EVENT, handleWindowWorkbenchReady);
+}
 
 watch(runtimeErrorState, (error) => {
   if (!error || isWelcomeWindow.value) {
@@ -166,6 +154,10 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  if (!isWelcomeWindow.value && typeof window !== 'undefined') {
+    window.removeEventListener(WORKBENCH_READY_EVENT, handleWindowWorkbenchReady);
+  }
+
   clearStartupVeilTimer();
   pauseStartupBridgeAnimations();
 });
@@ -175,18 +167,10 @@ onBeforeUnmount(() => {
   <div class="app-root-stage" :class="{ 'is-welcome-window': isWelcomeWindow }">
     <AppDialogHost v-if="!isWelcomeWindow" />
     <BrowserContextMenuHost v-if="!isWelcomeWindow" />
-    <div
-      v-if="isStartupVeilVisible && !isWelcomeWindow"
-      data-testid="startup-veil"
-      class="startup-veil"
-      :class="{ 'is-leaving': isStartupVeilLeaving }"
-    >
+    <div v-if="isStartupVeilVisible && !isWelcomeWindow" data-testid="startup-veil" class="startup-veil"
+      :class="{ 'is-leaving': isStartupVeilLeaving }">
       <!-- eslint-disable vue/no-v-html -->
-      <div
-        ref="startupBridgeWrapRef"
-        class="startup-veil__welcome-bridge"
-        v-html="startupWelcomeSvgRaw"
-      />
+      <div ref="startupBridgeWrapRef" class="startup-veil__welcome-bridge" v-html="startupWelcomeSvgRaw" />
       <!-- eslint-enable vue/no-v-html -->
     </div>
     <section v-if="runtimeErrorState" class="app-runtime-error" role="alert" aria-live="assertive">
