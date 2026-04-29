@@ -57,4 +57,35 @@ describe('AiChatThread', () => {
 
     expect(wrapper.find('.ai-message-typing').exists()).toBe(true);
   });
+
+  it('forwards message actions with both payload arguments intact', async () => {
+    const wrapper = mount(AiChatThread, {
+      props: {
+        messages: [createMessage({
+          actions: [{
+            id: 'allow-agent-execution',
+            label: '允许执行',
+          }],
+        })],
+        isTyping: false,
+        avatarUrl: null,
+        avatarAlt: 'AI',
+      },
+      global: {
+        stubs: {
+          AiMessageItem: {
+            props: ['message'],
+            emits: ['messageAction'],
+            template: '<button class="message-action-stub" @click="$emit(\'messageAction\', message.id, \'allow-agent-execution\')">action</button>',
+          },
+        },
+      },
+    });
+
+    await wrapper.find('.message-action-stub').trigger('click');
+
+    expect(wrapper.emitted('messageAction')).toEqual([
+      ['message-1', 'allow-agent-execution'],
+    ]);
+  });
 });

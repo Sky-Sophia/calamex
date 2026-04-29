@@ -170,4 +170,31 @@ describe('AiMessageItem', () => {
       '可以这样写：\n\n```bash\necho hello\n```',
     );
   });
+
+  it('点击消息选项时向上抛出动作事件', async () => {
+    const wrapper = mount(AiMessageItem, {
+      props: {
+        message: createMessage({
+          content: '是否允许 AI 开始执行这个任务？',
+          actions: [{
+            id: 'allow-agent-execution',
+            label: '允许执行',
+          }],
+        }),
+        avatarUrl: null,
+        avatarAlt: 'AI',
+      },
+      global: {
+        stubs: {
+          AiMarkdown: { template: '<div class="markdown-stub">是否允许 AI 开始执行这个任务？</div>' },
+        },
+      },
+    });
+
+    await wrapper.find('.ai-message-option-button').trigger('click');
+
+    expect(wrapper.emitted('messageAction')).toEqual([
+      ['assistant-message', 'allow-agent-execution'],
+    ]);
+  });
 });

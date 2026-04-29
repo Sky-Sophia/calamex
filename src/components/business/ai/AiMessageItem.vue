@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue';
 import AiMarkdown from '@/components/business/ai/AiMarkdown.vue';
 import { useMessage } from '@/composables/useMessage';
-import type { IAiChatMessage } from '@/types/ai';
+import type { IAiChatMessage, TAiChatMessageActionId } from '@/types/ai';
 import type { IAiCodeBlock, IAiCodePathTarget } from '@/types/ai-code';
 import { tryWriteClipboardText } from '@/utils/clipboard';
+import { computed, onBeforeUnmount, ref } from 'vue';
 
 const props = defineProps<{
   message: IAiChatMessage;
@@ -15,6 +15,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   applyCode: [block: IAiCodeBlock];
   openCodePath: [target: IAiCodePathTarget];
+  messageAction: [messageId: string, actionId: TAiChatMessageActionId];
 }>();
 
 const notifier = useMessage();
@@ -98,55 +99,36 @@ onBeforeUnmount(() => {
 
 <template>
   <article class="ai-message" :class="`is-${message.role}`">
-    <svg
-      v-if="message.role !== 'user' && !avatarUrl"
-      class="ai-logo"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      aria-hidden="true"
-    >
+    <svg v-if="message.role !== 'user' && !avatarUrl" class="ai-logo" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" aria-hidden="true">
       <path d="M12 3l1.9 5.2L19 10l-5.1 1.8L12 17l-1.9-5.2L5 10l5.1-1.8L12 3z" />
       <path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8L18 15z" />
     </svg>
-    <img
-      v-else-if="message.role !== 'user'"
-      class="ai-logo"
-      :src="avatarUrl"
-      :alt="avatarAlt"
-      loading="lazy"
-      referrerpolicy="no-referrer"
-    />
+    <img v-else-if="message.role !== 'user'" class="ai-logo" :src="avatarUrl" :alt="avatarAlt" loading="lazy"
+      referrerpolicy="no-referrer" />
     <div class="ai-message-main">
-      <div
-        class="ai-message-bubble"
-        :class="{ 'is-loading': shouldShowInlineLoader }"
-      >
+      <div class="ai-message-bubble" :class="{ 'is-loading': shouldShowInlineLoader }">
         <div v-if="shouldShowInlineLoader" class="ai-inline-loader" aria-label="AI 正在思考">
           <span></span>
           <span></span>
           <span></span>
         </div>
-        <AiMarkdown
-          v-else
-          :message-id="message.id"
-          :content="message.content"
-          :stable-content="message.stream?.stableContent"
-          :open-block="message.stream?.openBlock"
-          :can-apply-code="message.role === 'assistant'"
-          @apply-code="emit('applyCode', $event)"
-          @open-code-path="emit('openCodePath', $event)"
-        />
+        <AiMarkdown v-else :message-id="message.id" :content="message.content"
+          :stable-content="message.stream?.stableContent" :open-block="message.stream?.openBlock"
+          :can-apply-code="message.role === 'assistant'" @apply-code="emit('applyCode', $event)"
+          @open-code-path="emit('openCodePath', $event)" />
+      </div>
+      <div v-if="message.actions?.length" class="ai-message-options" aria-label="AI 选项">
+        <button v-for="action in message.actions" :key="`${message.id}:${action.id}`" type="button"
+          class="ai-message-option-button" :disabled="action.disabled"
+          @click.stop="emit('messageAction', message.id, action.id)">
+          {{ action.label }}
+        </button>
       </div>
       <div v-if="canCopyContent" class="ai-message-actions">
-        <button
-          type="button"
-          class="ai-message-copy-button"
-          :class="{ 'is-copied': isCopied }"
-          :aria-label="isCopied ? '已复制对话内容' : '复制对话内容'"
-          :title="isCopied ? '已复制' : '复制对话内容'"
-          @click.stop="copyMessageContent"
-        >
+        <button type="button" class="ai-message-copy-button" :class="{ 'is-copied': isCopied }"
+          :aria-label="isCopied ? '已复制对话内容' : '复制对话内容'" :title="isCopied ? '已复制' : '复制对话内容'"
+          @click.stop="copyMessageContent">
           <svg v-if="isCopied" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <path d="M5 12.5l4.2 4.2L19 7" />
           </svg>
@@ -241,6 +223,36 @@ onBeforeUnmount(() => {
   min-height: 18px;
   justify-content: flex-start;
   padding-top: 3px;
+}
+
+.ai-message-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.ai-message-option-button {
+  border: 1px solid color-mix(in srgb, var(--accent-strong) 24%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-strong) 10%, transparent);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 8px 12px;
+  transition: transform 160ms ease-out, border-color 160ms ease-out, background-color 160ms ease-out;
+}
+
+.ai-message-option-button:active {
+  transform: scale(0.97);
+}
+
+.ai-message-option-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  transform: none;
 }
 
 .ai-message.is-user .ai-message-actions {

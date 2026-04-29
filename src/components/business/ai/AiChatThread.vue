@@ -1,7 +1,7 @@
 ﻿<script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import type { IAiChatMessage } from '@/types/ai';
+import type { IAiChatMessage, TAiChatMessageActionId } from '@/types/ai';
 import type { IAiCodeBlock, IAiCodePathTarget } from '@/types/ai-code';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import AiMessageItem from './AiMessageItem.vue';
 
 const props = defineProps<{
@@ -16,6 +16,7 @@ const listRef = ref<HTMLElement | null>(null);
 const emit = defineEmits<{
   applyCode: [block: IAiCodeBlock];
   openCodePath: [target: IAiCodePathTarget];
+  messageAction: [messageId: string, actionId: TAiChatMessageActionId];
 }>();
 
 const hasInlineStreamingMessage = computed(() => {
@@ -26,6 +27,13 @@ const hasInlineStreamingMessage = computed(() => {
 const shouldRenderStandaloneTyping = computed(
   () => props.isTyping && !hasInlineStreamingMessage.value,
 );
+
+const handleMessageAction = (
+  messageId: string,
+  actionId: TAiChatMessageActionId,
+): void => {
+  emit('messageAction', messageId, actionId);
+};
 
 const scrollToBottom = async (): Promise<void> => {
   await nextTick();
@@ -48,9 +56,9 @@ onMounted(() => {
 
 <template>
   <div ref="listRef" class="ai-chat-list" aria-label="AI 对话记录">
-    <AiMessageItem
-v-for="message in messages" :key="message.id" :message="message" :avatar-url="avatarUrl"
-      :avatar-alt="avatarAlt" @apply-code="emit('applyCode', $event)" @open-code-path="emit('openCodePath', $event)" />
+    <AiMessageItem v-for="message in messages" :key="message.id" :message="message" :avatar-url="avatarUrl"
+      :avatar-alt="avatarAlt" @apply-code="emit('applyCode', $event)" @open-code-path="emit('openCodePath', $event)"
+      @message-action="handleMessageAction" />
     <article v-if="shouldRenderStandaloneTyping" class="ai-message-typing" aria-label="AI 正在输入">
       <svg v-if="!avatarUrl" class="ai-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
         <path d="M12 3l1.9 5.2L19 10l-5.1 1.8L12 17l-1.9-5.2L5 10l5.1-1.8L12 3z" />

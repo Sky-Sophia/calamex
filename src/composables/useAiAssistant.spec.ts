@@ -325,4 +325,42 @@ describe('useAiAssistant streaming integration', () => {
         expect(assistant.messages.value).toHaveLength(1);
         expect(assistant.messages.value[0]?.id).toBe('persisted-message');
     });
+
+    it('asks for confirmation before starting agent execution', async () => {
+        const assistant = createAssistantHarness();
+
+        assistant.activeMode.value = 'agent';
+        assistant.draft.value = '在当前文件里整理数据库备份示例';
+
+        await assistant.sendMessage();
+
+        expect(aiServiceMock.chatStream).not.toHaveBeenCalled();
+        expect(assistant.messages.value).toHaveLength(2);
+        expect(assistant.messages.value[0]?.role).toBe('user');
+        expect(assistant.messages.value[1]?.content).toContain('是否允许 AI 开始执行这个任务');
+        expect(assistant.messages.value[1]?.actions).toEqual([
+            {
+                id: 'allow-agent-execution',
+                label: '允许执行',
+            },
+        ]);
+
+        const confirmPromise = assistant.handleMessageAction(
+            assistant.messages.value[1]?.id ?? '',
+            'allow-agent-execution',
+        );
+
+        await waitForStartedStream(() => assistant.messages.value.at(-1)?.id);
+
+        expect(aiServiceMock.chatStream).toHaveBeenCalledTimes(1);
+        expect(aiServiceMock.chatStream.mock.calls[0]?.[0]?.messages[0]).toEqual(
+            expect.objectContaining({
+                role: 'system',
+            }),
+        );
+        expect(assistant.messages.value[1]?.content).toContain('已允许开始执行');
+
+        assistant.stopCurrentRequest();
+        await confirmPromise;
+    });
 });

@@ -20,6 +20,7 @@ import type {
   IAiProviderConnectionRequest,
   IAiTaskPlanStep,
   IAiToolDefinitionPayload,
+  TAiChatMessageActionId,
 } from '@/types/ai';
 import type { IAiCodeBlock } from '@/types/ai-code';
 import type {
@@ -87,6 +88,10 @@ const CONTEXT_TOKEN_PATTERN =
 const CODE_BLOCK_PATTERN = /```[a-zA-Z0-9_-]*\n([\s\S]*?)```/;
 
 const PROJECT_SEARCH_TOKENS = ['project', 'folder', 'search', 'symbol'] as const;
+const AGENT_EXECUTION_ACTION_ID: TAiChatMessageActionId = 'allow-agent-execution';
+const AGENT_CONFIRMATION_PROMPT = '是否允许 AI 开始执行这个任务？';
+const AGENT_CONFIRMATION_DETAIL = '写文件、运行命令和 Git 操作前仍会逐项向你确认。';
+const AGENT_EXECUTION_SYSTEM_PROMPT = '你现在处于 Agent 执行模式。请继续完成任务，但在写文件、运行命令或执行 Git 操作前必须先征求用户确认。不要假设已经获得授权。';
 
 // 占位中文文案：请按你仓库的实际原文回填（原贴的 `?` 串疑似编码丢失）
 const MSG_STREAM_CANCELLED = 'AI 流已被取消';
@@ -99,6 +104,9 @@ const MSG_CALL_FAILED = 'AI 调用失败';
 
 const createMessageId = (role: IAiChatMessage['role']): string =>
   `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createAgentConfirmationContent = (): string =>
+  `${AGENT_CONFIRMATION_PROMPT}\n\n${AGENT_CONFIRMATION_DETAIL}`;
 
 const clipText = (value: string, limit: number): string => {
   const chars = [...value];
@@ -218,6 +226,25 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const activeAssistantBaseMessages = ref<IAiChatMessage[]>([]);
 
   const aiStream = useAiStream();
+
+  const replaceMessageById = (
+    messageId: string,
+    updater: (message: IAiChatMessage) => IAiChatMessage,
+  ): IAiChatMessage[] => {
+    const nextMessages = messages.value.map((message) => (
+      message.id === messageId ? updater(message) : message
+    ));
+    messages.value = nextMessages;
+    return nextMessages;
+  };
+
+  const createAgentExecutionSystemMessage = (goal: string): IAiChatMessage => ({
+    id: createMessageId('system'),
+    role: 'system',
+    content: `${AGENT_EXECUTION_SYSTEM_PROMPT}\n\n当前任务：${goal}`,
+    createdAt: new Date().toISOString(),
+    references: [],
+  });
 
   // -----------------------------------------------------------------------
   // Computed
@@ -666,9 +693,148 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     return { handleEvent, startAssistantStream, cleanupRaf };
   };
 
+  const executeAiRequest = async (
+    requestMessages: IAiChatMessage[],
+    visibleMessages: IAiChatMessage[],
+    messageContent: string,
+    references: IAiContextReference[],
+  ): Promise<void> => {
+    errorMessage.value = '';
+    isSending.value = true;
+
+    const assistantMessage: IAiChatMessage = {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      content: '',
+      createdAt: new Date().toISOString(),
+      references: [],
+      stream: { stableContent: '', openBlock: null, status: 'streaming' },
+    };
+    activeAssistantMessage.value = assistantMessage;
+    activeAssistantBaseMessages.value = visibleMessages;
+    messages.value = [...visibleMessages, assistantMessage];
+
+    let unlisten: (() => void) | null = null;
+    let hasSettledStream = false;
+    const settle = (): void => {
+      hasSettledStream = true;
+      activeStreamResolve.value?.();
+    };
+
+    const pipeline = createStreamPipeline(assistantMessage, messageContent, settle);
+
+    try {
+      unlisten = await aiService.onChatStream(pipeline.handleEvent);
+
+      const stream = await aiService.chatStream({
+        threadId: null,
+        messages: requestMessages,
+        references,
+      });
+      pipeline.startAssistantStream(stream.streamId, stream.assistantMessageId);
+
+      await new Promise<void>((resolve) => {
+        if (hasSettledStream) {
+          resolve();
+          return;
+        }
+        activeStreamResolve.value = resolve;
+      });
+    } finally {
+      pipeline.cleanupRaf();
+      unlisten?.();
+      activeStreamResolve.value = null;
+      activeStreamId.value = null;
+      activeAbortController.value = null;
+      activeAssistantMessage.value = null;
+      activeAssistantBaseMessages.value = [];
+      isSending.value = false;
+    }
+  };
+
   // -----------------------------------------------------------------------
   // sendMessage / planAgentTask
   // -----------------------------------------------------------------------
+
+  const queueAgentExecutionConfirmation = (
+    goal: string,
+    references: IAiContextReference[],
+  ): void => {
+    const timestamp = new Date().toISOString();
+    const userMessage: IAiChatMessage = {
+      id: createMessageId('user'),
+      role: 'user',
+      content: goal,
+      createdAt: timestamp,
+      references,
+    };
+    const confirmationMessage: IAiChatMessage = {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      content: createAgentConfirmationContent(),
+      createdAt: new Date().toISOString(),
+      references: [],
+      actions: [{
+        id: AGENT_EXECUTION_ACTION_ID,
+        label: '允许执行',
+      }],
+      agentConfirmation: {
+        goal,
+        references,
+        status: 'pending',
+      },
+    };
+
+    messages.value = [...messages.value, userMessage, confirmationMessage];
+    draft.value = '';
+    errorMessage.value = '';
+    agentSteps.value = [];
+    attachedFiles.value = [];
+  };
+
+  const handleMessageAction = async (
+    messageId: string,
+    actionId: TAiChatMessageActionId,
+  ): Promise<void> => {
+    if (actionId !== AGENT_EXECUTION_ACTION_ID || isSending.value) {
+      return;
+    }
+
+    const targetMessage = messages.value.find((message) => message.id === messageId);
+    const confirmation = targetMessage?.agentConfirmation;
+    if (!targetMessage || !confirmation || confirmation.status !== 'pending') {
+      return;
+    }
+
+    const nextVisibleMessages = replaceMessageById(messageId, (message) => ({
+      ...message,
+      content: '已允许开始执行，AI 正在处理…',
+      actions: [],
+      agentConfirmation: message.agentConfirmation
+        ? {
+          ...message.agentConfirmation,
+          status: 'running',
+        }
+        : undefined,
+    }));
+    const requestMessages = [
+      createAgentExecutionSystemMessage(confirmation.goal),
+      ...nextVisibleMessages.filter((message) => message.id !== messageId),
+    ];
+
+    try {
+      await executeAiRequest(
+        requestMessages,
+        nextVisibleMessages,
+        confirmation.goal,
+        confirmation.references,
+      );
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error, MSG_CALL_FAILED);
+      draft.value = confirmation.goal;
+      replaceMessageById(messageId, () => targetMessage);
+    }
+  };
 
   const sendMessage = async (): Promise<void> => {
     const content = draft.value.trim();
@@ -690,7 +856,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     currentReferences.value = references;
 
     if (activeMode.value === 'agent') {
-      await planAgentTask(messageContent, references);
+      queueAgentExecutionConfirmation(messageContent, references);
       return;
     }
 
@@ -705,107 +871,12 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     messages.value = nextMessages;
     draft.value = '';
     errorMessage.value = '';
-    isSending.value = true;
-
-    const assistantMessage: IAiChatMessage = {
-      id: createMessageId('assistant'),
-      role: 'assistant',
-      content: '',
-      createdAt: new Date().toISOString(),
-      references: [],
-      stream: { stableContent: '', openBlock: null, status: 'streaming' },
-    };
-    activeAssistantMessage.value = assistantMessage;
-    activeAssistantBaseMessages.value = nextMessages;
-    messages.value = [...nextMessages, assistantMessage];
-
-    let unlisten: (() => void) | null = null;
-    let hasSettledStream = false;
-    const settle = (): void => {
-      hasSettledStream = true;
-      activeStreamResolve.value?.();
-    };
-
-    const pipeline = createStreamPipeline(assistantMessage, messageContent, settle);
 
     try {
-      unlisten = await aiService.onChatStream(pipeline.handleEvent);
-
-      const stream = await aiService.chatStream({
-        threadId: null,
-        messages: nextMessages,
-        references,
-      });
-      pipeline.startAssistantStream(stream.streamId, stream.assistantMessageId);
-
-      await new Promise<void>((resolve) => {
-        if (hasSettledStream) {
-          resolve();
-          return;
-        }
-        activeStreamResolve.value = resolve;
-      });
+      await executeAiRequest(nextMessages, nextMessages, messageContent, references);
     } catch (error) {
       errorMessage.value = toErrorMessage(error, MSG_CALL_FAILED);
       draft.value = messageContent;
-    } finally {
-      pipeline.cleanupRaf();
-      unlisten?.();
-      activeStreamResolve.value = null;
-      activeStreamId.value = null;
-      activeAbortController.value = null;
-      activeAssistantMessage.value = null;
-      activeAssistantBaseMessages.value = [];
-      isSending.value = false;
-    }
-  };
-
-  const planAgentTask = async (
-    goal: string,
-    references: IAiContextReference[],
-  ): Promise<void> => {
-    if (!config.value.agentEnabled) {
-      errorMessage.value = '请先在 AI 设置中启用 Agent。';
-      isSettingsOpen.value = true;
-      return;
-    }
-
-    const userMessage: IAiChatMessage = {
-      id: createMessageId('user'),
-      role: 'user',
-      content: goal,
-      createdAt: new Date().toISOString(),
-      references,
-    };
-    messages.value = [...messages.value, userMessage];
-    draft.value = '';
-    errorMessage.value = '';
-    isSending.value = true;
-
-    try {
-      const payload = await aiService.planTask({ goal, context: references });
-      agentSteps.value = payload.steps;
-
-      const summary = payload.steps
-        .map((step, index) => `${index + 1}. ${step.title}（${step.status}）`)
-        .join('\n');
-
-      messages.value = [
-        ...messages.value,
-        {
-          id: createMessageId('assistant'),
-          role: 'assistant',
-          content: `Agent 已生成受控执行计划。写文件、运行命令、Git 操作都需要你确认。\n\n${summary}`,
-          createdAt: new Date().toISOString(),
-          references: [],
-        },
-      ];
-      attachedFiles.value = [];
-    } catch (error) {
-      errorMessage.value = toErrorMessage(error, 'Agent 规划失败');
-      draft.value = goal;
-    } finally {
-      isSending.value = false;
     }
   };
 
@@ -988,6 +1059,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     attachFile,
     removeAttachedFile,
     sendMessage,
+    handleMessageAction,
     stopCurrentRequest,
     previewPatchFromLastAnswer,
     previewPatchFromCodeBlock,

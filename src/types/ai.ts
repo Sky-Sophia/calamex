@@ -43,6 +43,20 @@ export interface IAiChatStreamRenderState {
   status: 'streaming' | 'completed' | 'cancelled';
 }
 
+export type TAiChatMessageActionId = 'allow-agent-execution';
+
+export interface IAiChatMessageAction {
+  id: TAiChatMessageActionId;
+  label: string;
+  disabled?: boolean;
+}
+
+export interface IAiAgentConfirmationState {
+  goal: string;
+  references: IAiContextReference[];
+  status: 'pending' | 'running';
+}
+
 export interface IAiChatMessage {
   id: string;
   role: TAiChatRole;
@@ -50,6 +64,8 @@ export interface IAiChatMessage {
   createdAt: string;
   references: IAiContextReference[];
   toolCalls?: IAiToolCall[];
+  actions?: IAiChatMessageAction[];
+  agentConfirmation?: IAiAgentConfirmationState;
   stream?: IAiChatStreamRenderState;
 }
 

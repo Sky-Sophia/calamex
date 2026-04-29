@@ -11,6 +11,7 @@ import type {
   IAiChatMessage,
   IAiConfigPayload,
   IAiProviderSettingsActionFeedback,
+  TAiChatMessageActionId,
 } from '@/types/ai';
 import type { IAiCodePathTarget } from '@/types/ai-code';
 import type {
@@ -156,6 +157,13 @@ const testProvider = async (
   }
 };
 
+const handleMessageAction = async (
+  messageId: string,
+  actionId: TAiChatMessageActionId,
+): Promise<void> => {
+  await assistant.handleMessageAction(messageId, actionId);
+};
+
 onMounted(() => {
   assistant.loadConfig().then(() => {
     settingsDraft.value = { ...assistant.config.value };
@@ -167,13 +175,11 @@ onMounted(() => {
 <template>
   <section class="ai-assistant-panel" aria-label="AI 助手面板">
     <header class="ai-panel-header">
-      <img
-v-if="aiAvatarUrl" class="ai-provider-avatar" :src="aiAvatarUrl" :alt="aiAvatarAlt" loading="lazy"
+      <img v-if="aiAvatarUrl" class="ai-provider-avatar" :src="aiAvatarUrl" :alt="aiAvatarAlt" loading="lazy"
         referrerpolicy="no-referrer" />
       <span v-else class="ai-status-dot" aria-hidden="true"></span>
       <div class="ai-model-switch">
-        <button
-type="button" class="ai-model-button" :aria-expanded="isModeMenuOpen" aria-haspopup="menu"
+        <button type="button" class="ai-model-button" :aria-expanded="isModeMenuOpen" aria-haspopup="menu"
           aria-label="切换 AI 模式" @click="isModeMenuOpen = !isModeMenuOpen">
           <span>{{ assistant.config.value.selectedModel ?? 'AI Assistant' }}</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
@@ -181,13 +187,11 @@ type="button" class="ai-model-button" :aria-expanded="isModeMenuOpen" aria-haspo
           </svg>
         </button>
         <div v-if="isModeMenuOpen" class="ai-mode-menu" role="menu">
-          <button
-type="button" role="menuitemradio" :aria-checked="assistant.activeMode.value === 'chat'"
+          <button type="button" role="menuitemradio" :aria-checked="assistant.activeMode.value === 'chat'"
             :class="{ active: assistant.activeMode.value === 'chat' }" @click="selectMode('chat')">
             Chat
           </button>
-          <button
-type="button" role="menuitemradio" :aria-checked="assistant.activeMode.value === 'agent'"
+          <button type="button" role="menuitemradio" :aria-checked="assistant.activeMode.value === 'agent'"
             :class="{ active: assistant.activeMode.value === 'agent' }" @click="selectMode('agent')">
             Agent
           </button>
@@ -209,8 +213,7 @@ type="button" role="menuitemradio" :aria-checked="assistant.activeMode.value ===
         </svg>
       </button>
       <div class="ai-history-anchor">
-        <button
-type="button" class="ai-icon-button" aria-label="对话记录" aria-haspopup="dialog"
+        <button type="button" class="ai-icon-button" aria-label="对话记录" aria-haspopup="dialog"
           :aria-expanded="isHistoryOpen" @click="isHistoryOpen = !isHistoryOpen">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <path d="M3 3v5h5" />
@@ -226,8 +229,7 @@ type="button" class="ai-icon-button" aria-label="对话记录" aria-haspopup="di
             </div>
           </header>
           <div v-if="historyThreads.length" class="ai-history-list">
-            <article
-v-for="thread in historyThreads" :key="thread.id" class="ai-history-item"
+            <article v-for="thread in historyThreads" :key="thread.id" class="ai-history-item"
               :class="{ 'is-active': thread.id === assistant.activeConversationId.value }">
               <button type="button" class="ai-history-button" @click="openHistoryThread(thread.id)">
                 <div class="ai-history-meta">
@@ -251,35 +253,30 @@ v-for="thread in historyThreads" :key="thread.id" class="ai-history-item"
 
     <AiContextChips :references="assistant.currentReferences.value" />
     <AiEditTimeline />
-    <AiChatThread
-:messages="assistant.messages.value" :is-typing="assistant.isSending.value" :avatar-url="aiAvatarUrl"
+    <AiChatThread :messages="assistant.messages.value" :is-typing="assistant.isSending.value" :avatar-url="aiAvatarUrl"
       :avatar-alt="aiAvatarAlt" @apply-code="assistant.previewPatchFromCodeBlock"
-      @open-code-path="emit('openCodePath', $event)" />
+      @open-code-path="emit('openCodePath', $event)" @message-action="handleMessageAction" />
     <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
       <button type="button" class="ai-quick-action" @click="assistant.previewPatchFromLastAnswer">
         预览为 Patch
       </button>
     </div>
-    <AiPatchPreview
-:patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
+    <AiPatchPreview :patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
       @apply="assistant.applyProposedPatch" @close="assistant.proposedPatch.value = null" />
-    <AiPromptInput
-v-model="assistant.draft.value" :disabled="assistant.isSending.value"
+    <AiPromptInput v-model="assistant.draft.value" :disabled="assistant.isSending.value"
       :error-message="assistant.errorMessage.value"
       :submit-label="assistant.activeMode.value === 'agent' ? '规划任务' : assistant.sendButtonLabel.value"
       :attachments="assistant.attachedFiles.value" :has-attachments="assistant.attachedFiles.value.length > 0"
       @submit="assistant.sendMessage" @stop="assistant.stopCurrentRequest" @file-selected="assistant.attachFile"
       @remove-file="assistant.removeAttachedFile" />
 
-    <AiProviderSettings
-v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
+    <AiProviderSettings v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
       :open="assistant.isSettingsOpen.value" :config="assistant.config.value"
       @close="assistant.isSettingsOpen.value = false" @save="saveSettings" @save-credentials="saveCredentials"
       @test-provider="testProvider" />
 
     <Teleport to="body">
-      <div
-v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop"
+      <div v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop"
         @click.self="assistant.isClearDialogOpen.value = false">
         <section class="ai-dialog is-compact" role="alertdialog" aria-modal="true">
           <div class="ai-dialog-copy">
@@ -287,8 +284,7 @@ v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop"
             <p>这只会清空面板里的临时对话记录，不会删除任何文件。</p>
           </div>
           <div class="ai-dialog-actions">
-            <button
-type="button" class="ai-button is-ghost"
+            <button type="button" class="ai-button is-ghost"
               @click="assistant.isClearDialogOpen.value = false">取消</button>
             <button type="button" class="ai-button is-danger" @click="assistant.clearConversation">清空</button>
           </div>

@@ -556,31 +556,8 @@ pub async fn plan_task(payload: AiAgentPlanRequest) -> Result<AiAgentPlanPayload
             "请输入 Agent 任务目标。",
         ));
     }
-    let context_count = payload.context.len();
-    Ok(AiAgentPlanPayload {
-        steps: vec![
-            AiTaskPlanStepPayload {
-                id: "understand".to_string(),
-                title: format!("理解任务：{goal}"),
-                status: "completed".to_string(),
-            },
-            AiTaskPlanStepPayload {
-                id: "collect-context".to_string(),
-                title: format!("读取有限上下文（{context_count} 个引用）"),
-                status: "completed".to_string(),
-            },
-            AiTaskPlanStepPayload {
-                id: "propose-patch".to_string(),
-                title: "生成 patch 预览，不直接写入文件".to_string(),
-                status: "requires-confirmation".to_string(),
-            },
-            AiTaskPlanStepPayload {
-                id: "run-tests".to_string(),
-                title: "等待用户确认后运行测试".to_string(),
-                status: "requires-confirmation".to_string(),
-            },
-        ],
-    })
+    let _ = payload;
+    Ok(AiAgentPlanPayload { steps: Vec::new() })
 }
 
 fn collect_messages(

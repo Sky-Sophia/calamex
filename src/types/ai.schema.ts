@@ -43,6 +43,18 @@ export const aiContextReferenceSchema = z.object({
   redacted: z.boolean(),
 });
 
+export const aiChatMessageActionSchema = z.object({
+  id: z.enum(['allow-agent-execution']),
+  label: z.string().min(1),
+  disabled: z.boolean().optional(),
+});
+
+export const aiAgentConfirmationStateSchema = z.object({
+  goal: z.string().min(1),
+  references: z.array(aiContextReferenceSchema),
+  status: z.enum(['pending', 'running']),
+});
+
 export const aiChatMessageSchema = z.object({
   id: z.string().min(1),
   role: z.enum(['user', 'assistant', 'system', 'tool']),
@@ -55,6 +67,8 @@ export const aiChatMessageSchema = z.object({
     status: z.enum(['pending', 'running', 'succeeded', 'failed', 'denied']),
     summary: z.string(),
   })).optional(),
+  actions: z.array(aiChatMessageActionSchema).optional(),
+  agentConfirmation: aiAgentConfirmationStateSchema.optional(),
   stream: z.object({
     stableContent: z.string(),
     openBlock: aiCodeBlockSchema.nullable(),

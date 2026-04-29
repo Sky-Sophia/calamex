@@ -93,6 +93,7 @@ const createAssistantMock = (
         previewPatchFromLastAnswer: vi.fn(),
         applyProposedPatch: vi.fn(),
         sendMessage: vi.fn(),
+        handleMessageAction: vi.fn(),
         stopCurrentRequest: vi.fn(),
         startNewConversation: vi.fn(),
         switchConversation: vi.fn(),
