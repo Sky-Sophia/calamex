@@ -1,4 +1,12 @@
 import type {
+  IAgentSidecarApprovalResolveRequest,
+  IAgentSidecarChatRequest,
+  IAgentSidecarExecuteRequest,
+  IAgentSidecarHealthPayload,
+  IAgentSidecarPlanRequest,
+  IAgentSidecarResponsePayload,
+} from './agent-sidecar';
+import type {
   IAiAgentApprovePlanPayload,
   IAiAgentApprovePlanRequest,
   IAiAgentClassifyTaskPayload,
@@ -13,8 +21,6 @@ import type {
   IAiAgentRunStepRequest,
   IAiAgentResolveToolConfirmationRequest,
   IAiAgentSetNetworkPermissionRequest,
-  IAiAgentToolLoopChatPayload,
-  IAiAgentToolLoopChatRequest,
   IAiApplyPatchPayload,
   IAiApplyPatchRequest,
   IAiBuildIndexPayload,
@@ -190,6 +196,13 @@ export interface ISshConfigHostPayload {
 }
 
 export interface ITauriService {
+  agentSidecarHealth(): Promise<IAgentSidecarHealthPayload>;
+  agentSidecarChat(payload: IAgentSidecarChatRequest): Promise<IAgentSidecarResponsePayload>;
+  agentSidecarPlan(payload: IAgentSidecarPlanRequest): Promise<IAgentSidecarResponsePayload>;
+  agentSidecarExecute(payload: IAgentSidecarExecuteRequest): Promise<IAgentSidecarResponsePayload>;
+  agentSidecarResolveApproval(
+    payload: IAgentSidecarApprovalResolveRequest,
+  ): Promise<IAgentSidecarResponsePayload>;
   analyzeScript(payload: IAnalyzeScriptRequest): Promise<IAnalyzeScriptPayload>;
   formatScript(payload: IFormatScriptRequest): Promise<IFormatScriptPayload>;
   loadScript(path: string): Promise<IScriptFilePayload>;
@@ -256,9 +269,6 @@ export interface ITauriService {
   aiAgentResolveToolConfirmation(
     payload: IAiAgentResolveToolConfirmationRequest,
   ): Promise<IAiAgentRunPayload>;
-  aiAgentToolLoopChat(
-    payload: IAiAgentToolLoopChatRequest,
-  ): Promise<IAiAgentToolLoopChatPayload>;
   aiBuildIndex(payload: IAiBuildIndexRequest): Promise<IAiBuildIndexPayload>;
   aiQueryIndex(payload: IAiQueryIndexRequest): Promise<IAiQueryIndexPayload>;
   aiProposePatch(payload: IAiProposePatchRequest): Promise<IAiProposePatchPayload>;

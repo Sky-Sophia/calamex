@@ -3,8 +3,8 @@ import AiMarkdown from '@/components/business/ai/AiMarkdown.vue';
 import AiToolActivityInline from '@/components/business/ai/AiToolActivityInline.vue';
 import { useMessage } from '@/composables/useMessage';
 import type { IAiChatMessage, TAiChatMessageActionId } from '@/types/ai';
-import type { IAiCodeBlock, IAiCodePathTarget } from '@/types/ai-code';
 import { tryWriteClipboardText } from '@/utils/clipboard';
+import { LoaderCircle } from 'lucide-vue-next';
 import { computed, onBeforeUnmount, ref } from 'vue';
 
 const props = defineProps<{
@@ -14,8 +14,6 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  applyCode: [block: IAiCodeBlock];
-  openCodePath: [target: IAiCodePathTarget];
   messageAction: [messageId: string, actionId: TAiChatMessageActionId];
 }>();
 
@@ -41,17 +39,8 @@ const markCopied = (): void => {
   }, 1600);
 };
 
-const formatOpenCodeBlockForCopy = (block: IAiCodeBlock): string => {
-  const language = block.fence.lang.trim();
-  return `\`\`\`${language}\n${block.content}\n\`\`\``;
-};
-
 const hasRenderableContent = computed(() =>
-  Boolean(
-    props.message.content.trim()
-    || props.message.stream?.stableContent.trim()
-    || props.message.stream?.openBlock,
-  ),
+  Boolean(props.message.content.trim()),
 );
 
 const hasToolCalls = computed(() => Boolean(props.message.toolCalls?.length));
@@ -71,22 +60,15 @@ const isToolProgressContent = computed(() => {
 });
 
 const shouldShowMessageBubble = computed(
-  () => shouldShowInlineLoader.value || (hasRenderableContent.value && !isToolProgressContent.value),
+  () => hasRenderableContent.value && !isToolProgressContent.value,
 );
 
 const copyableContent = computed(() => {
-  const parts: string[] = [];
-  const markdownContent = props.message.stream?.stableContent ?? props.message.content;
-
-  if (!isToolProgressContent.value && markdownContent.trim().length > 0) {
-    parts.push(markdownContent);
+  if (isToolProgressContent.value) {
+    return '';
   }
 
-  if (props.message.stream?.openBlock) {
-    parts.push(formatOpenCodeBlockForCopy(props.message.stream.openBlock));
-  }
-
-  return parts.join('\n\n');
+  return props.message.content;
 });
 
 const canCopyContent = computed(() => copyableContent.value.trim().length > 0);
@@ -94,7 +76,8 @@ const canCopyContent = computed(() => copyableContent.value.trim().length > 0);
 const shouldShowInlineLoader = computed(
   () => props.message.role === 'assistant'
     && props.message.stream?.status === 'streaming'
-    && !hasRenderableContent.value,
+    && !hasRenderableContent.value
+    && !hasToolCalls.value,
 );
 
 const copyMessageContent = async (): Promise<void> => {
@@ -141,21 +124,15 @@ onBeforeUnmount(() => {
     />
     <div class="ai-message-main">
       <AiToolActivityInline v-if="message.toolCalls?.length" :tool-calls="message.toolCalls" />
-      <div v-if="shouldShowMessageBubble" class="ai-message-bubble" :class="{ 'is-loading': shouldShowInlineLoader }">
-        <div v-if="shouldShowInlineLoader" class="ai-inline-loader" aria-label="AI 正在思考">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
+      <div v-if="shouldShowInlineLoader" class="ai-message-status-line" role="status" aria-live="polite">
+        <LoaderCircle class="ai-message-status-icon" aria-hidden="true" />
+        <span>AI 正在生成回答</span>
+      </div>
+      <div v-if="shouldShowMessageBubble" class="ai-message-bubble">
         <AiMarkdown
-          v-else
           :message-id="message.id"
           :content="message.content"
-          :stable-content="message.stream?.stableContent"
-          :open-block="message.stream?.openBlock"
-          :can-apply-code="message.role === 'assistant'"
-          @apply-code="emit('applyCode', $event)"
-          @open-code-path="emit('openCodePath', $event)"
+          :stream-status="message.stream?.status"
         />
       </div>
       <div v-if="message.actions?.length" class="ai-message-options" aria-label="AI 选项">
@@ -221,7 +198,8 @@ onBeforeUnmount(() => {
   max-width: 310px;
 }
 
-.ai-message-main > .ai-tool-activity-inline + .ai-message-bubble {
+.ai-message-main > .ai-tool-activity-inline + .ai-message-bubble,
+.ai-message-main > .ai-tool-activity-inline + .ai-message-status-line {
   margin-top: 6px;
 }
 
@@ -239,31 +217,22 @@ onBeforeUnmount(() => {
   border-top-left-radius: 4px;
 }
 
-.ai-message-bubble.is-loading {
-  min-width: 42px;
-}
-
-.ai-inline-loader {
+.ai-message-status-line {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   color: var(--text-quaternary);
+  font-size: 12px;
+  line-height: 18px;
 }
 
-.ai-inline-loader span {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  animation: ai-inline-loader-blink 1.2s infinite ease-in-out;
-  background: currentColor;
-}
-
-.ai-inline-loader span:nth-child(2) {
-  animation-delay: 140ms;
-}
-
-.ai-inline-loader span:nth-child(3) {
-  animation-delay: 280ms;
+.ai-message-status-icon {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  animation: ai-message-status-spin 900ms linear infinite;
+  color: var(--text-tertiary);
+  stroke-width: 2;
 }
 
 .ai-message.is-user .ai-message-bubble {
@@ -371,16 +340,15 @@ onBeforeUnmount(() => {
   transform: translateY(0);
 }
 
-@keyframes ai-inline-loader-blink {
-
-  0%,
-  80%,
-  100% {
-    opacity: 0.28;
+@keyframes ai-message-status-spin {
+  to {
+    transform: rotate(360deg);
   }
+}
 
-  40% {
-    opacity: 1;
+@media (prefers-reduced-motion: reduce) {
+  .ai-message-status-icon {
+    animation: none;
   }
 }
 </style>

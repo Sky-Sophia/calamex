@@ -1,9 +1,7 @@
-import { mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-
 import AiMessageItem from '@/components/business/ai/AiMessageItem.vue';
 import type { IAiChatMessage } from '@/types/ai';
-import type { IAiCodeBlock } from '@/types/ai-code';
+import { mount } from '@vue/test-utils';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { successMock, errorMock, warningMock, tryWriteClipboardTextMock } = vi.hoisted(() => ({
   successMock: vi.fn(),
@@ -33,26 +31,6 @@ const createMessage = (overrides: Partial<IAiChatMessage>): IAiChatMessage => ({
   ...overrides,
 });
 
-const createOpenBlock = (): IAiCodeBlock => ({
-  id: 'block-1',
-  messageId: 'assistant-message',
-  index: 0,
-  fence: {
-    rawInfo: 'bash',
-    lang: 'bash',
-    meta: {},
-    detection: {
-      source: 'fence',
-      confidence: 1,
-    },
-  },
-  content: 'echo hello',
-  closed: false,
-  streamState: 'open',
-  byteLength: 10,
-  truncated: false,
-});
-
 describe('AiMessageItem', () => {
   beforeEach(() => {
     successMock.mockReset();
@@ -67,8 +45,6 @@ describe('AiMessageItem', () => {
       props: {
         message: createMessage({
           stream: {
-            stableContent: '',
-            openBlock: null,
             status: 'streaming',
           },
         }),
@@ -82,7 +58,8 @@ describe('AiMessageItem', () => {
       },
     });
 
-    expect(wrapper.find('.ai-inline-loader').exists()).toBe(true);
+    expect(wrapper.find('.ai-message-status-line').exists()).toBe(true);
+    expect(wrapper.find('.ai-message-bubble').exists()).toBe(false);
     expect(wrapper.find('.markdown-stub').exists()).toBe(false);
   });
 
@@ -91,8 +68,6 @@ describe('AiMessageItem', () => {
       props: {
         message: createMessage({
           stream: {
-            stableContent: '',
-            openBlock: null,
             status: 'streaming',
           },
         }),
@@ -110,14 +85,12 @@ describe('AiMessageItem', () => {
       message: createMessage({
         content: '你好',
         stream: {
-          stableContent: '你好',
-          openBlock: null,
           status: 'streaming',
         },
       }),
     });
 
-    expect(wrapper.find('.ai-inline-loader').exists()).toBe(false);
+    expect(wrapper.find('.ai-message-status-line').exists()).toBe(false);
     expect(wrapper.find('.markdown-stub').exists()).toBe(true);
   });
 
@@ -144,13 +117,13 @@ describe('AiMessageItem', () => {
     expect(successMock).toHaveBeenCalledWith('已复制对话内容');
   });
 
-  it('复制流式代码块时保留 Markdown 代码围栏', async () => {
+  it('复制流式代码块时直接保留当前 Markdown 内容', async () => {
+    const content = '可以这样写：\n\n```bash\necho hello';
     const wrapper = mount(AiMessageItem, {
       props: {
         message: createMessage({
+          content,
           stream: {
-            stableContent: '可以这样写：',
-            openBlock: createOpenBlock(),
             status: 'streaming',
           },
         }),
@@ -166,9 +139,7 @@ describe('AiMessageItem', () => {
 
     await wrapper.find('.ai-message-copy-button').trigger('click');
 
-    expect(tryWriteClipboardTextMock).toHaveBeenCalledWith(
-      '可以这样写：\n\n```bash\necho hello\n```',
-    );
+    expect(tryWriteClipboardTextMock).toHaveBeenCalledWith(content);
   });
 
   it('点击消息选项时向上抛出动作事件', async () => {
@@ -229,9 +200,43 @@ describe('AiMessageItem', () => {
     });
 
     expect(wrapper.find('.ai-tool-activity-inline').exists()).toBe(true);
-    expect(wrapper.text()).toContain('已搜索：搜索项目内容');
-    expect(wrapper.text()).toContain('正在加载网页: registry.npmjs.org/mini-cc…');
-    expect(wrapper.find('.ai-tool-running-dots').exists()).toBe(true);
+    expect(wrapper.text()).toContain('搜索');
+    expect(wrapper.text()).toContain('项目内容');
+    expect(wrapper.text()).toContain('网页');
+    expect(wrapper.text()).toContain('registry.npmjs.org/mini-cc');
+    expect(wrapper.find('.ai-tool-running-dots').exists()).toBe(false);
+    expect(wrapper.find('.ai-message-bubble').exists()).toBe(false);
+  });
+
+  it('工具调用流式更新时不额外显示 dots 加载气泡', () => {
+    const wrapper = mount(AiMessageItem, {
+      props: {
+        message: createMessage({
+          content: '',
+          toolCalls: [
+            {
+              id: 'tool-1',
+              name: 'read_file',
+              status: 'running',
+              summary: '正在读取 AiMessageItem.vue…',
+            },
+          ],
+          stream: {
+            status: 'streaming',
+          },
+        }),
+        avatarUrl: null,
+        avatarAlt: 'AI',
+      },
+      global: {
+        stubs: {
+          AiMarkdown: { template: '<div class="markdown-stub" />' },
+        },
+      },
+    });
+
+    expect(wrapper.find('.ai-tool-activity-inline').exists()).toBe(true);
+    expect(wrapper.find('.ai-message-status-line').exists()).toBe(false);
     expect(wrapper.find('.ai-message-bubble').exists()).toBe(false);
   });
 });

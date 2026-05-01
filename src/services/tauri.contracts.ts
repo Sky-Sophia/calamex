@@ -1,4 +1,12 @@
 import {
+  agentSidecarApprovalResolveRequestSchema,
+  agentSidecarChatRequestSchema,
+  agentSidecarExecuteRequestSchema,
+  agentSidecarHealthPayloadSchema,
+  agentSidecarPlanRequestSchema,
+  agentSidecarResponsePayloadSchema,
+} from '@/types/agent-sidecar.schema';
+import {
   aiEditAuthStateSchema,
   aiEditCreateSnapshotPayloadSchema,
   aiEditCreateSnapshotRequestSchema,
@@ -33,8 +41,6 @@ import {
   aiAgentRunStepRequestSchema,
   aiAgentResolveToolConfirmationRequestSchema,
   aiAgentSetNetworkPermissionRequestSchema,
-  aiAgentToolLoopChatPayloadSchema,
-  aiAgentToolLoopChatRequestSchema,
   aiApplyPatchMetadataSchema,
   aiChatPayloadSchema,
   aiChatRequestSchema,
@@ -262,6 +268,26 @@ const executionEnvironmentPayloadSnakeSchema = z.object({
 }));
 
 export const tauriContracts = {
+  agentSidecarHealth: {
+    inSchema: z.void(),
+    outSchema: agentSidecarHealthPayloadSchema,
+  },
+  agentSidecarChat: {
+    inSchema: agentSidecarChatRequestSchema,
+    outSchema: agentSidecarResponsePayloadSchema,
+  },
+  agentSidecarPlan: {
+    inSchema: agentSidecarPlanRequestSchema,
+    outSchema: agentSidecarResponsePayloadSchema,
+  },
+  agentSidecarExecute: {
+    inSchema: agentSidecarExecuteRequestSchema,
+    outSchema: agentSidecarResponsePayloadSchema,
+  },
+  agentSidecarResolveApproval: {
+    inSchema: agentSidecarApprovalResolveRequestSchema,
+    outSchema: agentSidecarResponsePayloadSchema,
+  },
   analyzeScript: {
     inSchema: z.object({
       path: z.string().nullable(),
@@ -634,10 +660,6 @@ export const tauriContracts = {
   aiAgentResolveToolConfirmation: {
     inSchema: aiAgentResolveToolConfirmationRequestSchema,
     outSchema: aiAgentRunPayloadSchema,
-  },
-  aiAgentToolLoopChat: {
-    inSchema: aiAgentToolLoopChatRequestSchema,
-    outSchema: aiAgentToolLoopChatPayloadSchema,
   },
   aiWebSearch: {
     inSchema: aiWebSearchInputSchema,

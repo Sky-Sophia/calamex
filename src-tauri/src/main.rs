@@ -2,6 +2,7 @@
 
 mod ai;
 mod ai_agent;
+mod agent_sidecar;
 mod ai_context;
 mod ai_edit;
 mod ai_index;
@@ -14,10 +15,12 @@ mod terminal;
 
 use ai_edit::AiEditState;
 use commands::{
+    agent_sidecar_chat, agent_sidecar_execute, agent_sidecar_health, agent_sidecar_plan,
+    agent_sidecar_resolve_approval,
     ai_agent_approve_plan, ai_agent_cancel, ai_agent_classify_task, ai_agent_get_run,
     ai_agent_list_runs, ai_agent_pause, ai_agent_resolve_tool_confirmation, ai_agent_resume,
-    ai_agent_run_plan, ai_agent_run_step, ai_agent_set_network_permission, ai_agent_tool_loop_chat,
-    ai_apply_patch, ai_build_index, ai_cancel, ai_chat, ai_chat_stream, ai_clear_credentials,
+    ai_agent_run_plan, ai_agent_run_step, ai_agent_set_network_permission, ai_apply_patch,
+    ai_build_index, ai_cancel, ai_chat, ai_chat_stream, ai_clear_credentials,
     ai_code_action, ai_connect_provider, ai_edit_create_snapshot, ai_edit_get_auth_level,
     ai_edit_get_diff, ai_edit_list_timeline, ai_edit_restore_snapshot, ai_edit_revert_file,
     ai_edit_revert_hunk, ai_edit_revert_task, ai_edit_set_auth_level, ai_edit_undo_operation,
@@ -131,6 +134,11 @@ fn main() {
             write_terminal_input,
             resize_terminal_session,
             close_terminal_session,
+            agent_sidecar_health,
+            agent_sidecar_chat,
+            agent_sidecar_plan,
+            agent_sidecar_execute,
+            agent_sidecar_resolve_approval,
             test_ssh_connection,
             list_ssh_config_hosts,
             list_ssh_directory,
@@ -163,7 +171,6 @@ fn main() {
             ai_agent_list_runs,
             ai_agent_set_network_permission,
             ai_agent_resolve_tool_confirmation,
-            ai_agent_tool_loop_chat,
             ai_web_search,
             ai_web_fetch,
             ai_build_index,

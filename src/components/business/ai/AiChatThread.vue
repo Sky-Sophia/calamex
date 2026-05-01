@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import type { IAiChatMessage, TAiChatMessageActionId } from '@/types/ai';
-import type { IAiCodeBlock, IAiCodePathTarget } from '@/types/ai-code';
+import { LoaderCircle } from 'lucide-vue-next';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import AiMessageItem from './AiMessageItem.vue';
 
@@ -14,18 +14,29 @@ const props = defineProps<{
 const listRef = ref<HTMLElement | null>(null);
 
 const emit = defineEmits<{
-  applyCode: [block: IAiCodeBlock];
-  openCodePath: [target: IAiCodePathTarget];
   messageAction: [messageId: string, actionId: TAiChatMessageActionId];
 }>();
 
-const hasInlineStreamingMessage = computed(() => {
+const TOOL_PROGRESS_PREFIXES = [
+  'AI 正在自动分析并按需调用工具…',
+  'AI 正在自动使用工具：',
+  'Agent 正在调用工具…',
+  'Agent 正在根据你的确认继续执行…',
+] as const;
+
+const hasInlineProgressMessage = computed(() => {
   const lastMessage = props.messages.at(-1);
-  return lastMessage?.role === 'assistant' && lastMessage.stream?.status === 'streaming';
+  if (lastMessage?.role !== 'assistant') {
+    return false;
+  }
+
+  return lastMessage.stream?.status === 'streaming'
+    || Boolean(lastMessage.toolCalls?.length)
+    || TOOL_PROGRESS_PREFIXES.some((prefix) => lastMessage.content.trim().startsWith(prefix));
 });
 
 const shouldRenderStandaloneTyping = computed(
-  () => props.isTyping && !hasInlineStreamingMessage.value,
+  () => props.isTyping && !hasInlineProgressMessage.value,
 );
 
 const handleMessageAction = (
@@ -56,20 +67,24 @@ onMounted(() => {
 
 <template>
   <div ref="listRef" class="ai-chat-list" aria-label="AI 对话记录">
-    <AiMessageItem v-for="message in messages" :key="message.id" :message="message" :avatar-url="avatarUrl"
-      :avatar-alt="avatarAlt" @apply-code="emit('applyCode', $event)" @open-code-path="emit('openCodePath', $event)"
-      @message-action="handleMessageAction" />
+    <AiMessageItem
+      v-for="message in messages"
+      :key="message.id"
+      :message="message"
+      :avatar-url="avatarUrl"
+      :avatar-alt="avatarAlt"
+      @message-action="handleMessageAction"
+    />
     <slot name="after-messages"></slot>
-    <article v-if="shouldRenderStandaloneTyping" class="ai-message-typing" aria-label="AI 正在输入">
+    <article v-if="shouldRenderStandaloneTyping" class="ai-message-typing" aria-label="AI 正在准备回复">
       <svg v-if="!avatarUrl" class="ai-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
         <path d="M12 3l1.9 5.2L19 10l-5.1 1.8L12 17l-1.9-5.2L5 10l5.1-1.8L12 3z" />
         <path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8L18 15z" />
       </svg>
       <img v-else class="ai-logo" :src="avatarUrl" :alt="avatarAlt" loading="lazy" referrerpolicy="no-referrer" />
-      <div class="typing-bubble">
-        <span></span>
-        <span></span>
-        <span></span>
+      <div class="typing-status" role="status" aria-live="polite">
+        <LoaderCircle class="typing-status-icon" aria-hidden="true" />
+        <span>AI 正在准备回复</span>
       </div>
     </article>
   </div>
@@ -118,43 +133,34 @@ onMounted(() => {
   stroke-linejoin: round;
 }
 
-.typing-bubble {
-  display: flex;
-  width: fit-content;
+.typing-status {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  border-radius: 8px;
-  border-top-left-radius: 4px;
-  background: color-mix(in srgb, var(--surface-soft) 78%, transparent);
-  padding: 9px 11px;
+  gap: 6px;
+  color: var(--text-quaternary);
+  font-size: 12px;
+  line-height: 18px;
+  min-height: 22px;
 }
 
-.typing-bubble span {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  animation: ai-blink 1.2s infinite ease-in-out;
-  background: var(--text-quaternary);
+.typing-status-icon {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  animation: ai-typing-status-spin 900ms linear infinite;
+  color: var(--text-tertiary);
+  stroke-width: 2;
 }
 
-.typing-bubble span:nth-child(2) {
-  animation-delay: 140ms;
-}
-
-.typing-bubble span:nth-child(3) {
-  animation-delay: 280ms;
-}
-
-@keyframes ai-blink {
-
-  0%,
-  80%,
-  100% {
-    opacity: 0.28;
+@keyframes ai-typing-status-spin {
+  to {
+    transform: rotate(360deg);
   }
+}
 
-  40% {
-    opacity: 1;
+@media (prefers-reduced-motion: reduce) {
+  .typing-status-icon {
+    animation: none;
   }
 }
 </style>

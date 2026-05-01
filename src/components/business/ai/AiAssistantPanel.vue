@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import AiChatThread from '@/components/business/ai/AiChatThread.vue';
 import AiContextChips from '@/components/business/ai/AiContextChips.vue';
-import AiAgentRunTimeline from '@/components/business/ai/AiAgentRunTimeline.vue';
 import AiPatchPreview from '@/components/business/ai/AiPatchPreview.vue';
 import AiPlanModePanel from '@/components/business/ai/AiPlanModePanel.vue';
 import AiPromptInput from '@/components/business/ai/AiPromptInput.vue';
 import AiProviderSettings from '@/components/business/ai/AiProviderSettings.vue';
+import AiToolConfirmationCard from '@/components/business/ai/AiToolConfirmationCard.vue';
 import AiWebSourcesPanel from '@/components/business/ai/AiWebSourcesPanel.vue';
 import { useAiAgentNetwork } from '@/composables/useAiAgentNetwork';
 import { useAiAgentRun } from '@/composables/useAiAgentRun';
@@ -21,12 +21,13 @@ import type {
   IAiAgentStepToolResultSummary,
   IAiAgentStepWebSourceSummary,
   IAiTaskPlanStep,
+  IAiToolActivityInline,
+  IAiToolCall,
   IAiWebSourceEntry,
   TAiAgentNetworkPermission,
   TAiChatMessageActionId,
   TAiToolConfirmationDecision,
 } from '@/types/ai';
-import type { IAiCodePathTarget } from '@/types/ai-code';
 import type {
   IActiveRunSummary,
   IAnalyzeScriptPayload,
@@ -38,6 +39,7 @@ import { toErrorMessage } from '@/utils/error';
 import { computed, onMounted, ref } from 'vue';
 
 const MAX_HISTORY_MESSAGES = 20;
+type TAiAssistantViewMode = 'chat' | 'agent' | 'plan';
 
 const props = defineProps<{
   document: IEditorDocument;
@@ -46,10 +48,6 @@ const props = defineProps<{
   selection: IEditorSelectionSummary | null;
   gitStatus: IGitRepositoryStatusPayload;
   workspaceRootPath: string | null;
-}>();
-
-const emit = defineEmits<{
-  openCodePath: [target: IAiCodePathTarget];
 }>();
 
 const documentRef = computed(() => props.document);
@@ -68,9 +66,7 @@ const assistant = useAiAssistant({
 });
 const agentRun = useAiAgentRun();
 const agentNetwork = useAiAgentNetwork();
-const agentStream = useAiAgentStream({
-  onToolActivity: assistant.applyProviderToolActivity,
-});
+const agentStream = useAiAgentStream();
 const webSources = useAiWebSources();
 const settingsDraft = ref<IAiConfigPayload>({ ...assistant.config.value });
 const settingsApiKey = ref('');
@@ -101,17 +97,30 @@ const networkPermissionLabel = computed(() => {
   }
 });
 const planStore = computed(() => assistant.agentPlan.store);
+const hasPlannedAgentState = computed(() =>
+  planStore.value.hasPlan ||
+  planStore.value.isClassifying ||
+  planStore.value.isPlanning ||
+  Boolean(planStore.value.errorMessage) ||
+  Boolean(planStore.value.activeRun),
+);
 const planVisible = computed(() => {
+  if (assistant.activeMode.value !== 'plan') {
+    return false;
+  }
+
+  return hasPlannedAgentState.value ||
+    Boolean(planStore.value.pendingToolConfirmation && (
+      planStore.value.hasPlan ||
+      planStore.value.activeRun
+    ));
+});
+const directToolConfirmationVisible = computed(() => {
   if (assistant.activeMode.value !== 'agent') {
     return false;
   }
 
-  return planStore.value.hasPlan ||
-    planStore.value.isClassifying ||
-    planStore.value.isPlanning ||
-    Boolean(planStore.value.errorMessage) ||
-    Boolean(planStore.value.activeToolActivity) ||
-    Boolean(planStore.value.pendingToolConfirmation);
+  return Boolean(planStore.value.pendingToolConfirmation) && !planVisible.value;
 });
 const activePlanStep = computed(() => {
   const currentStepId = planStore.value.activeRun?.currentStepId;
@@ -123,13 +132,115 @@ const activePlanStep = computed(() => {
   return planStore.value.steps.find((step) => step.isActive) ?? null;
 });
 const webSourcesVisible = computed(() => {
-  if (assistant.activeMode.value !== 'agent') {
+  if (assistant.activeMode.value === 'chat') {
     return false;
   }
 
   return webSources.sources.value.length > 0 ||
     Boolean(webSources.activity.value) ||
     Boolean(webSources.errorMessage.value);
+});
+
+const mapActivityToToolCallStatus = (
+  state: IAiToolActivityInline['state'],
+): IAiToolCall['status'] => {
+  switch (state) {
+    case 'starting':
+    case 'running':
+    case 'waiting-confirmation':
+      return 'running';
+    case 'succeeded':
+      return 'succeeded';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'denied';
+    default:
+      return 'running';
+  }
+};
+
+const normalizeToolActivitySummary = (activity: IAiToolActivityInline): string => {
+  const source = activity.targetPreview?.trim() || activity.label.trim();
+  const withoutEllipsis = source.replace(/…+$/u, '').trim();
+  const withoutPrefix = withoutEllipsis
+    .replace(/^正在(?:读取|搜索|加载|使用|应用|生成|验证|执行)\s*[：:：]?\s*/u, '')
+    .replace(/^已(?:读取|搜索|加载|使用|应用|生成|验证|执行)\s*[：:：]?\s*/u, '')
+    .trim();
+
+  return withoutPrefix || withoutEllipsis || activity.toolName;
+};
+
+const buildAgentFlowToolCalls = (run: IAiAgentRun | null): IAiToolCall[] => {
+  if (!run) {
+    return [];
+  }
+
+  return planStore.value
+    .getToolActivities(run.id)
+    .map((activity) => ({
+      id: activity.id,
+      name: activity.toolName,
+      status: mapActivityToToolCallStatus(activity.state),
+      summary: activity.label,
+      targetPreview: normalizeToolActivitySummary(activity),
+    }));
+};
+
+const activeAgentFlowMessage = computed<IAiChatMessage | null>(() => {
+  if (assistant.activeMode.value !== 'plan') {
+    return null;
+  }
+
+  const run = planStore.value.activeRun;
+  const toolCalls = buildAgentFlowToolCalls(run);
+  const latestAnswer = run
+    ? planStore.value.getStepFinalAnswers(run.id).at(-1) ?? null
+    : null;
+
+  if (!run && toolCalls.length === 0) {
+    return null;
+  }
+
+  const latestToolCall = toolCalls.at(-1);
+  const createdAt = latestAnswer?.createdAt ?? run?.updatedAt ?? new Date().toISOString();
+  const content = latestAnswer?.content.trim() ||
+    (latestToolCall
+      ? `AI 正在自动使用工具：${latestToolCall.summary}`
+      : 'Agent 正在执行计划。');
+
+  return {
+    id: run ? `agent-flow:${run.id}` : `agent-flow:${latestToolCall?.id ?? 'activity'}`,
+    role: 'assistant',
+    content,
+    createdAt,
+    references: [],
+    toolCalls,
+  };
+});
+
+const threadMessages = computed<IAiChatMessage[]>(() => {
+  const flowMessage = activeAgentFlowMessage.value;
+
+  if (!flowMessage) {
+    return assistant.messages.value;
+  }
+
+  return [
+    ...assistant.messages.value.filter((message) => message.id !== flowMessage.id),
+    flowMessage,
+  ];
+});
+const submitLabel = computed(() => {
+  if (assistant.activeMode.value === 'plan') {
+    return '生成计划';
+  }
+
+  if (assistant.activeMode.value === 'agent') {
+    return '开始执行';
+  }
+
+  return assistant.sendButtonLabel.value;
 });
 
 const openSettings = (): void => {
@@ -158,7 +269,7 @@ const openHistoryThread = (threadId: string): void => {
   isNetworkMenuOpen.value = false;
 };
 
-const selectMode = (mode: 'chat' | 'agent'): void => {
+const selectMode = (mode: TAiAssistantViewMode): void => {
   assistant.activeMode.value = mode;
   isModeMenuOpen.value = false;
   isNetworkMenuOpen.value = false;
@@ -416,7 +527,7 @@ const handleResetPlan = (): void => {
 
 const handleRunStep = async (): Promise<void> => {
   await withAgentRunAction(
-    (runId) => agentRun.runStepWithProviderLoop(runId, {
+    (runId) => agentRun.runStepWithSidecar(runId, {
       goal: planStore.value.activeGoal,
       context: assistant.currentReferences.value,
       workspaceRootPath: props.workspaceRootPath,
@@ -460,7 +571,7 @@ const handleResolveToolConfirmation = async (
     planStore.value.errorMessage = '';
 
     try {
-      await assistant.resolveProviderToolLoopConfirmation(decision);
+      await assistant.resolveSidecarToolConfirmation(decision);
     } catch (error) {
       setPlanError(error, '处理 Provider 工具确认失败。');
     } finally {
@@ -470,14 +581,14 @@ const handleResolveToolConfirmation = async (
     return;
   }
 
-  if (agentRun.hasProviderStepToolConfirmation(confirmation.id)) {
+  if (agentRun.hasSidecarStepToolConfirmation(confirmation.id)) {
     isAgentRunActionPending.value = true;
     planStore.value.errorMessage = '';
 
     try {
-      await agentRun.resolveProviderStepToolConfirmation(confirmation.id, decision);
+      await agentRun.resolveSidecarStepToolConfirmation(confirmation.id, decision);
     } catch (error) {
-      setPlanError(error, '处理 Provider step 工具确认失败。');
+      setPlanError(error, '处理 Sidecar step 工具确认失败。');
     } finally {
       isAgentRunActionPending.value = false;
     }
@@ -503,26 +614,6 @@ const handleResolveToolConfirmation = async (
   if (nextRunningStep) {
     await runWebToolsForStep(nextRunningStep);
   }
-};
-
-const handleOpenDiffPreview = (payload: {
-  diffRef: string;
-  filePath: string;
-  patchRef?: string;
-  runId: string;
-  stepId: string;
-}): void => {
-  emit('openCodePath', {
-    kind: 'ai-diff',
-    path: payload.filePath,
-    startLine: null,
-    endLine: null,
-    title: `${payload.filePath} (AI Diff)`,
-    diffRef: payload.diffRef,
-    ...(payload.patchRef ? { patchRef: payload.patchRef } : {}),
-    runId: payload.runId,
-    stepId: payload.stepId,
-  });
 };
 
 const saveSettings = async (
@@ -604,6 +695,10 @@ onMounted(() => {
           <button type="button" role="menuitemradio" :aria-checked="assistant.activeMode.value === 'agent'"
             :class="{ active: assistant.activeMode.value === 'agent' }" @click="selectMode('agent')">
             Agent
+          </button>
+          <button type="button" role="menuitemradio" :aria-checked="assistant.activeMode.value === 'plan'"
+            :class="{ active: assistant.activeMode.value === 'plan' }" @click="selectMode('plan')">
+            Plan
           </button>
         </div>
       </div>
@@ -707,18 +802,8 @@ onMounted(() => {
     </header>
 
     <AiContextChips :references="assistant.currentReferences.value" />
-    <AiChatThread :messages="assistant.messages.value" :is-typing="assistant.isSending.value" :avatar-url="aiAvatarUrl"
-      :avatar-alt="aiAvatarAlt" @apply-code="assistant.previewPatchFromCodeBlock"
-      @open-code-path="emit('openCodePath', $event)" @message-action="handleMessageAction">
-      <template #after-messages>
-        <AiAgentRunTimeline
-          v-if="planStore.activeRun"
-          :run="planStore.activeRun"
-          :step-details="planStore.stepDetails"
-          :patch-summaries="planStore.getPatchSummaries(planStore.activeRun.id)"
-          @open-diff="handleOpenDiffPreview"
-        />
-      </template>
+    <AiChatThread :messages="threadMessages" :is-typing="assistant.isSending.value" :avatar-url="aiAvatarUrl"
+      :avatar-alt="aiAvatarAlt" @message-action="handleMessageAction">
     </AiChatThread>
     <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
       <button type="button" class="ai-quick-action" @click="assistant.previewPatchFromLastAnswer">
@@ -765,9 +850,19 @@ onMounted(() => {
         @cancel-run="handleCancelRun"
         @resolve-tool-confirmation="handleResolveToolConfirmation"
       />
+      <div
+        v-if="directToolConfirmationVisible && planStore.pendingToolConfirmation"
+        class="ai-direct-tool-confirmation"
+      >
+        <AiToolConfirmationCard
+          :confirmation="planStore.pendingToolConfirmation"
+          :disabled="isAgentRunActionPending"
+          @resolve="handleResolveToolConfirmation"
+        />
+      </div>
       <AiPromptInput v-model="assistant.draft.value" :disabled="assistant.isSending.value"
         :error-message="assistant.errorMessage.value"
-        :submit-label="assistant.activeMode.value === 'agent' ? '开始执行' : assistant.sendButtonLabel.value"
+        :submit-label="submitLabel"
         :attachments="assistant.attachedFiles.value" :has-attachments="assistant.attachedFiles.value.length > 0"
         @submit="assistant.sendMessage" @stop="assistant.stopCurrentRequest" @file-selected="assistant.attachFile"
         @remove-file="assistant.removeAttachedFile" />
@@ -1240,6 +1335,10 @@ onMounted(() => {
 .ai-composer-shell :deep(.ai-plan-mode-panel) {
   border-top: 0;
   background: transparent;
+  padding: 8px 10px 0;
+}
+
+.ai-direct-tool-confirmation {
   padding: 8px 10px 0;
 }
 

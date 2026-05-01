@@ -1,8 +1,6 @@
-import { nextTick, ref, type Ref } from 'vue';
+import { ref, type Ref } from 'vue';
 
 import type { IAiCodeActionRequest } from '@/types/ai';
-import type { IAiCodePathTarget } from '@/types/ai-code';
-import type { IAiDiffEditorPreview } from '@/types/ai-patch';
 import type { IScriptDiagnostic } from '@/types/editor';
 
 export type TTitlebarExpose = {
@@ -19,20 +17,9 @@ type TAiCodeActionEditorExpose = {
 
 interface IUseShellWorkbenchAiBridgeOptions {
     editorRef: Ref<unknown>;
-    getWorkspaceRootPath: () => string | null;
-    openDocumentByPath: (path: string) => Promise<void>;
-    openAiDiffPreview: (preview: IAiDiffEditorPreview) => void;
     openTerminal: () => Promise<void>;
     handleSelectDiagnostic: (line: number, column: number) => void;
 }
-
-const ABSOLUTE_FILE_SYSTEM_PATH_PATTERN = /^(?:[a-zA-Z]:[\\/]|[\\/])/;
-
-const trimTrailingPathSeparators = (value: string): string =>
-    value.replace(/[\\/]+$/, '');
-
-const trimLeadingPathSeparators = (value: string): string =>
-    value.replace(/^[\\/]+/, '');
 
 export const useShellWorkbenchAiBridge = (options: IUseShellWorkbenchAiBridgeOptions) => {
     const titlebarRef = ref<TTitlebarExpose | null>(null);
@@ -70,48 +57,6 @@ export const useShellWorkbenchAiBridge = (options: IUseShellWorkbenchAiBridgeOpt
         runPanelRef.value?.openShellCheck();
     };
 
-    const resolveAiCodePath = (path: string): string => {
-        const workspaceRootPath = options.getWorkspaceRootPath();
-        if (ABSOLUTE_FILE_SYSTEM_PATH_PATTERN.test(path) || !workspaceRootPath) {
-            return path;
-        }
-
-        const separator = workspaceRootPath.includes('/') ? '/' : '\\';
-
-        return [
-            trimTrailingPathSeparators(workspaceRootPath),
-            trimLeadingPathSeparators(path),
-        ].join(separator);
-    };
-
-    const handleOpenAiCodePath = async (target: IAiCodePathTarget): Promise<void> => {
-        if (target.kind === 'ai-diff') {
-            if (!target.diffRef) {
-                return;
-            }
-
-            const previewId = `ai-diff:${target.diffRef}`;
-            options.openAiDiffPreview({
-                id: previewId,
-                title: target.title ?? `${target.path} (AI Diff)`,
-                filePath: target.path,
-                diffRef: target.diffRef,
-                ...(target.patchRef ? { patchRef: target.patchRef } : {}),
-                ...(target.runId ? { runId: target.runId } : {}),
-                ...(target.stepId ? { stepId: target.stepId } : {}),
-                hunks: [],
-            });
-            return;
-        }
-
-        await options.openDocumentByPath(resolveAiCodePath(target.path));
-
-        if (target.startLine) {
-            await nextTick();
-            options.handleSelectDiagnostic(target.startLine, 1);
-        }
-    };
-
     return {
         titlebarRef,
         runPanelRef,
@@ -119,6 +64,5 @@ export const useShellWorkbenchAiBridge = (options: IUseShellWorkbenchAiBridgeOpt
         handleAiCodeAction,
         handleAiFixDiagnostic,
         handleOpenShellCheck,
-        handleOpenAiCodePath,
     };
 };

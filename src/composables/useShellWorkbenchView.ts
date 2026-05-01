@@ -9,7 +9,6 @@ import type {
   IEditorSelectionSummary,
   IWorkspaceDirectoryPayload,
 } from '@/types/editor';
-import type { IAiDiffEditorPreview } from '@/types/ai-patch';
 import type { ITerminalRunCompletedPayload } from '@/types/terminal';
 import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
 import { dispatchWorkbenchReadyEvent } from '@/utils/startup-ready';
@@ -638,15 +637,6 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     workbench.handleIntegratedTerminalRunCompleted(payload);
   };
 
-  const openAiDiffPreview = (preview: IAiDiffEditorPreview): void => {
-    const { reusedExisting } = workbench.editorStore.openAiDiffDocument(preview);
-    workbench.editorStore.appendLog(
-      reusedExisting ? 'info' : 'success',
-      'AI Diff Preview',
-      reusedExisting ? `已切换到 ${preview.title}` : `已打开 ${preview.title}`,
-    );
-  };
-
   const {
     titlebarRef,
     runPanelRef,
@@ -654,12 +644,8 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     handleAiCodeAction,
     handleAiFixDiagnostic,
     handleOpenShellCheck,
-    handleOpenAiCodePath,
   } = useShellWorkbenchAiBridge({
     editorRef,
-    getWorkspaceRootPath: () => workbench.editorStore.workspaceRootPath,
-    openDocumentByPath: workbench.openDocumentByPath,
-    openAiDiffPreview,
     openTerminal,
     handleSelectDiagnostic,
   });
@@ -796,6 +782,5 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     handleAiCodeAction,
     handleAiFixDiagnostic,
     handleOpenShellCheck,
-    handleOpenAiCodePath,
   };
 };

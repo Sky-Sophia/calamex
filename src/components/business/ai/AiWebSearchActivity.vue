@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { LoaderCircle } from 'lucide-vue-next';
 import { computed } from 'vue';
 
 import type { IAiWebActivity } from '@/types/ai';
@@ -28,11 +29,7 @@ const shouldAnimate = computed(() => {
     aria-live="polite"
   >
     <span class="ai-web-activity-rail" aria-hidden="true">
-      <span v-if="shouldAnimate" class="ai-web-activity-dots">
-        <span></span>
-        <span></span>
-        <span></span>
-      </span>
+      <LoaderCircle v-if="shouldAnimate" class="ai-web-activity-spinner" aria-hidden="true" />
       <span v-else class="ai-web-activity-dot"></span>
     </span>
     <span class="ai-web-activity-copy">
@@ -77,14 +74,6 @@ const shouldAnimate = computed(() => {
   padding-top: 7px;
 }
 
-.ai-web-activity-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding-top: 1px;
-}
-
-.ai-web-activity-dots span,
 .ai-web-activity-dot {
   width: 4px;
   height: 4px;
@@ -92,16 +81,12 @@ const shouldAnimate = computed(() => {
   background: var(--text-tertiary);
 }
 
-.ai-web-activity-dots span {
-  animation: ai-web-dot-pulse 1.05s infinite ease-in-out;
-}
-
-.ai-web-activity-dots span:nth-child(2) {
-  animation-delay: 120ms;
-}
-
-.ai-web-activity-dots span:nth-child(3) {
-  animation-delay: 240ms;
+.ai-web-activity-spinner {
+  width: 13px;
+  height: 13px;
+  animation: ai-web-spinner-rotate 900ms linear infinite;
+  color: var(--text-tertiary);
+  stroke-width: 2;
 }
 
 .ai-web-activity-dot {
@@ -126,22 +111,14 @@ const shouldAnimate = computed(() => {
   color: var(--danger);
 }
 
-@keyframes ai-web-dot-pulse {
-  0%,
-  80%,
-  100% {
-    opacity: 0.32;
-    transform: scale(0.86);
-  }
-
-  40% {
-    opacity: 1;
-    transform: scale(1);
+@keyframes ai-web-spinner-rotate {
+  to {
+    transform: rotate(360deg);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ai-web-activity-dots span {
+  .ai-web-activity-spinner {
     animation: none;
   }
 }

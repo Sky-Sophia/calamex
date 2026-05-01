@@ -1,3 +1,4 @@
+mod agent_sidecar;
 mod ai;
 pub(crate) mod contracts;
 mod git;
@@ -13,17 +14,21 @@ mod workspace_fs;
 #[cfg(windows)]
 const CREATE_NO_WINDOW_FLAG: u32 = 0x0800_0000;
 
+pub use agent_sidecar::{
+    agent_sidecar_chat, agent_sidecar_execute, agent_sidecar_health, agent_sidecar_plan,
+    agent_sidecar_resolve_approval,
+};
 pub use ai::{
     ai_agent_approve_plan, ai_agent_cancel, ai_agent_classify_task, ai_agent_get_run,
     ai_agent_list_runs, ai_agent_pause, ai_agent_resolve_tool_confirmation, ai_agent_resume,
-    ai_agent_run_plan, ai_agent_run_step, ai_agent_set_network_permission, ai_agent_tool_loop_chat,
-    ai_apply_patch, ai_build_index, ai_cancel, ai_chat, ai_chat_stream, ai_clear_credentials,
-    ai_code_action, ai_connect_provider, ai_edit_create_snapshot, ai_edit_get_auth_level,
-    ai_edit_get_diff, ai_edit_list_timeline, ai_edit_restore_snapshot, ai_edit_revert_file,
-    ai_edit_revert_hunk, ai_edit_revert_task, ai_edit_set_auth_level, ai_edit_undo_operation,
-    ai_get_config, ai_inline_complete, ai_list_tools, ai_plan_task, ai_propose_patch,
-    ai_query_index, ai_save_config, ai_save_credentials, ai_test_provider, ai_test_provider_config,
-    ai_web_fetch, ai_web_search,
+    ai_agent_run_plan, ai_agent_run_step, ai_agent_set_network_permission, ai_apply_patch,
+    ai_build_index, ai_cancel, ai_chat, ai_chat_stream, ai_clear_credentials, ai_code_action,
+    ai_connect_provider, ai_edit_create_snapshot, ai_edit_get_auth_level, ai_edit_get_diff,
+    ai_edit_list_timeline, ai_edit_restore_snapshot, ai_edit_revert_file, ai_edit_revert_hunk,
+    ai_edit_revert_task, ai_edit_set_auth_level, ai_edit_undo_operation, ai_get_config,
+    ai_inline_complete, ai_list_tools, ai_plan_task, ai_propose_patch, ai_query_index,
+    ai_save_config, ai_save_credentials, ai_test_provider, ai_test_provider_config, ai_web_fetch,
+    ai_web_search,
 };
 pub use contracts::{
     AnalyzeScriptPayload, AnalyzeScriptRequest, ExecutionEnvironment, ExecutionOption,

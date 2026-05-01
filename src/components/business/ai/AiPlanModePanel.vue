@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { ChevronDown, LoaderCircle } from 'lucide-vue-next';
+import { computed, ref } from 'vue';
 
 import AiPlanApprovalBar from '@/components/business/ai/AiPlanApprovalBar.vue';
 import AiPlanStepList from '@/components/business/ai/AiPlanStepList.vue';
@@ -30,6 +31,9 @@ const props = defineProps<{
     toolActivity?: IAiToolActivityInline | null;
     toolConfirmation?: IAiToolConfirmationRequest | null;
 }>();
+
+const isCollapsed = ref(false);
+const planContentId = 'ai-plan-mode-panel-content';
 
 const emit = defineEmits<{
     updateStepTitle: [stepId: string, title: string];
@@ -132,6 +136,10 @@ const loadingLabel = computed(() =>
     props.isClassifying ? '正在判断是否需要计划…' : '正在生成计划…',
 );
 
+const collapseLabel = computed(() =>
+    isCollapsed.value ? '展开待办事项' : '收起待办事项',
+);
+
 const shouldShowContextLine = computed(() =>
     !props.steps.length && Boolean(props.goal || props.classificationReason),
 );
@@ -177,116 +185,121 @@ const handleUpdateStepTitle = (stepId: string, title: string): void => {
 const handleRemoveStep = (stepId: string): void => {
     emit('removeStep', stepId);
 };
+
+const toggleCollapsed = (): void => {
+    isCollapsed.value = !isCollapsed.value;
+};
 </script>
 
 <template>
     <section class="ai-plan-mode-panel" aria-label="计划模式">
         <header class="ai-plan-header">
-            <div class="ai-plan-title-group">
-                <span class="ai-plan-caret" aria-hidden="true">⌄</span>
+            <button
+                type="button"
+                class="ai-plan-title-button"
+                :aria-expanded="!isCollapsed"
+                :aria-controls="planContentId"
+                :aria-label="collapseLabel"
+                @click="toggleCollapsed"
+            >
+                <ChevronDown class="ai-plan-caret" :class="{ 'is-collapsed': isCollapsed }" aria-hidden="true" />
                 <h3>{{ todoTitle }}</h3>
-            </div>
-            <span>{{ planStateLabel }}</span>
+            </button>
+            <span class="ai-plan-state-label">{{ planStateLabel }}</span>
         </header>
 
-        <p v-if="shouldShowContextLine" class="ai-plan-reason">
-            {{ goal || classificationReason }}
-        </p>
-        <p v-if="approvedAt && !activeRun" class="ai-plan-approved">计划已批准，正在等待启动 Agent run。</p>
-        <p v-if="errorMessage" class="ai-plan-error">
-            <strong>计划生成失败</strong>
-            <span>{{ errorMessage }}</span>
-        </p>
+        <div v-if="!isCollapsed" :id="planContentId" class="ai-plan-body">
+            <p v-if="shouldShowContextLine" class="ai-plan-reason">
+                {{ goal || classificationReason }}
+            </p>
+            <p v-if="approvedAt && !activeRun" class="ai-plan-approved">计划已批准，正在等待启动 Agent run。</p>
+            <p v-if="errorMessage" class="ai-plan-error">
+                <strong>计划生成失败</strong>
+                <span>{{ errorMessage }}</span>
+            </p>
 
-        <div v-if="isClassifying || isPlanning" class="ai-plan-loading">
-            <span class="ai-plan-tool-dots" aria-hidden="true">
-                <span></span>
-                <span></span>
-                <span></span>
-            </span>
-            <span>{{ loadingLabel }}</span>
+            <div v-if="isClassifying || isPlanning" class="ai-plan-loading">
+                <LoaderCircle class="ai-plan-status-icon is-spinning" aria-hidden="true" />
+                <span>{{ loadingLabel }}</span>
+            </div>
+
+            <AiPlanStepList
+                v-if="steps.length"
+                :steps="steps"
+                @update-title="handleUpdateStepTitle"
+                @remove-step="handleRemoveStep"
+            />
+
+            <AiWebSearchActivity :activity="webActivity ?? null" />
+
+            <AiToolConfirmationCard
+                v-if="toolConfirmation"
+                :confirmation="toolConfirmation"
+                :disabled="isRunActionPending"
+                @resolve="emit('resolveToolConfirmation', $event)"
+            />
+
+            <div v-if="toolActivity" class="ai-plan-tool-activity" aria-live="polite">
+                <LoaderCircle class="ai-plan-status-icon is-spinning" aria-hidden="true" />
+                <span>{{ toolActivity.label }}</span>
+            </div>
+
+            <section v-if="activeRun" class="ai-plan-run-card" aria-label="Agent run 状态">
+                <header class="ai-plan-run-header">
+                    <span class="ai-plan-run-dot" :class="runStatusClass" aria-hidden="true"></span>
+                    <strong>{{ runStatusLabel }}</strong>
+                    <span>{{ completedStepCount }}/{{ activeRun.steps.length }} 步</span>
+                </header>
+                <p v-if="currentStepTitle" class="ai-plan-run-current">当前步骤：{{ currentStepTitle }}</p>
+                <p v-if="activeRun.errorMessage" class="ai-plan-error">{{ activeRun.errorMessage }}</p>
+                <footer class="ai-plan-run-actions">
+                    <button
+                        v-if="canResumeRun"
+                        type="button"
+                        class="ai-plan-button is-primary"
+                        :disabled="isRunActionPending"
+                        @click="emit('resumeRun')"
+                    >
+                        继续运行
+                    </button>
+                    <button
+                        v-else
+                        type="button"
+                        class="ai-plan-button is-primary"
+                        :disabled="!canRunStep"
+                        @click="emit('runStep')"
+                    >
+                        {{ isRunActionPending ? '执行中...' : runStepLabel }}
+                    </button>
+                    <button
+                        type="button"
+                        class="ai-plan-button"
+                        :disabled="!canPauseRun"
+                        @click="emit('pauseRun')"
+                    >
+                        暂停
+                    </button>
+                    <button
+                        type="button"
+                        class="ai-plan-button"
+                        :disabled="!canCancelRun"
+                        @click="emit('cancelRun')"
+                    >
+                        取消
+                    </button>
+                </footer>
+            </section>
+
+            <AiPlanApprovalBar
+                :is-planning="Boolean(isClassifying) || isPlanning"
+                :is-approving="isApproving"
+                :can-approve="canApprove"
+                :approved-at="approvedAt"
+                @regenerate="emit('regenerate')"
+                @reset="emit('reset')"
+                @approve="emit('approve')"
+            />
         </div>
-
-        <AiPlanStepList
-            v-if="steps.length"
-            :steps="steps"
-            @update-title="handleUpdateStepTitle"
-            @remove-step="handleRemoveStep"
-        />
-
-        <AiWebSearchActivity :activity="webActivity ?? null" />
-
-        <AiToolConfirmationCard
-            v-if="toolConfirmation"
-            :confirmation="toolConfirmation"
-            :disabled="isRunActionPending"
-            @resolve="emit('resolveToolConfirmation', $event)"
-        />
-
-        <div v-if="toolActivity" class="ai-plan-tool-activity" aria-live="polite">
-            <span class="ai-plan-tool-dots" aria-hidden="true">
-                <span></span>
-                <span></span>
-                <span></span>
-            </span>
-            <span>{{ toolActivity.label }}</span>
-        </div>
-
-        <section v-if="activeRun" class="ai-plan-run-card" aria-label="Agent run 状态">
-            <header class="ai-plan-run-header">
-                <span class="ai-plan-run-dot" :class="runStatusClass" aria-hidden="true"></span>
-                <strong>{{ runStatusLabel }}</strong>
-                <span>{{ completedStepCount }}/{{ activeRun.steps.length }} 步</span>
-            </header>
-            <p v-if="currentStepTitle" class="ai-plan-run-current">当前步骤：{{ currentStepTitle }}</p>
-            <p v-if="activeRun.errorMessage" class="ai-plan-error">{{ activeRun.errorMessage }}</p>
-            <footer class="ai-plan-run-actions">
-                <button
-                    v-if="canResumeRun"
-                    type="button"
-                    class="ai-plan-button is-primary"
-                    :disabled="isRunActionPending"
-                    @click="emit('resumeRun')"
-                >
-                    继续运行
-                </button>
-                <button
-                    v-else
-                    type="button"
-                    class="ai-plan-button is-primary"
-                    :disabled="!canRunStep"
-                    @click="emit('runStep')"
-                >
-                    {{ isRunActionPending ? '执行中...' : runStepLabel }}
-                </button>
-                <button
-                    type="button"
-                    class="ai-plan-button"
-                    :disabled="!canPauseRun"
-                    @click="emit('pauseRun')"
-                >
-                    暂停
-                </button>
-                <button
-                    type="button"
-                    class="ai-plan-button"
-                    :disabled="!canCancelRun"
-                    @click="emit('cancelRun')"
-                >
-                    取消
-                </button>
-            </footer>
-        </section>
-
-        <AiPlanApprovalBar
-            :is-planning="Boolean(isClassifying) || isPlanning"
-            :is-approving="isApproving"
-            :can-approve="canApprove"
-            :approved-at="approvedAt"
-            @regenerate="emit('regenerate')"
-            @reset="emit('reset')"
-            @approve="emit('approve')"
-        />
     </section>
 </template>
 
@@ -306,17 +319,36 @@ const handleRemoveStep = (stepId: string): void => {
     gap: 8px;
 }
 
-.ai-plan-title-group {
+.ai-plan-title-button {
     display: inline-flex;
     min-width: 0;
     align-items: center;
     gap: 6px;
+    border-radius: 6px;
+    color: inherit;
+    padding: 2px 4px 2px 0;
+    transition:
+        color 120ms cubic-bezier(0.23, 1, 0.32, 1),
+        transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.ai-plan-title-button:hover {
+    color: var(--text-primary);
+}
+
+.ai-plan-title-button:active {
+    transform: scale(0.99);
 }
 
 .ai-plan-caret {
+    width: 13px;
+    height: 13px;
     color: var(--text-quaternary);
-    font-size: 13px;
-    line-height: 1;
+    transition: transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.ai-plan-caret.is-collapsed {
+    transform: rotate(-90deg);
 }
 
 .ai-plan-header h3 {
@@ -326,10 +358,15 @@ const handleRemoveStep = (stepId: string): void => {
     font-weight: 600;
 }
 
-.ai-plan-header span {
+.ai-plan-state-label {
     color: var(--text-quaternary);
     font-size: 11px;
     white-space: nowrap;
+}
+
+.ai-plan-body {
+    display: grid;
+    gap: 6px;
 }
 
 .ai-plan-goal,
@@ -395,27 +432,16 @@ const handleRemoveStep = (stepId: string): void => {
     white-space: nowrap;
 }
 
-.ai-plan-tool-dots {
-    display: inline-flex;
+.ai-plan-status-icon {
+    width: 13px;
+    height: 13px;
     flex: 0 0 auto;
-    align-items: center;
-    gap: 3px;
+    color: var(--text-tertiary);
+    stroke-width: 2;
 }
 
-.ai-plan-tool-dots span {
-    width: 4px;
-    height: 4px;
-    border-radius: 999px;
-    animation: ai-plan-tool-dot-pulse 1.05s infinite ease-in-out;
-    background: var(--text-tertiary);
-}
-
-.ai-plan-tool-dots span:nth-child(2) {
-    animation-delay: 120ms;
-}
-
-.ai-plan-tool-dots span:nth-child(3) {
-    animation-delay: 240ms;
+.ai-plan-status-icon.is-spinning {
+    animation: ai-plan-status-spin 900ms linear infinite;
 }
 
 .ai-plan-run-card {
@@ -499,22 +525,14 @@ const handleRemoveStep = (stepId: string): void => {
     cursor: not-allowed;
 }
 
-@keyframes ai-plan-tool-dot-pulse {
-    0%,
-    80%,
-    100% {
-        opacity: 0.32;
-        transform: scale(0.86);
-    }
-
-    40% {
-        opacity: 1;
-        transform: scale(1);
+@keyframes ai-plan-status-spin {
+    to {
+        transform: rotate(360deg);
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .ai-plan-tool-dots span {
+    .ai-plan-status-icon.is-spinning {
         animation: none;
     }
 }

@@ -6,6 +6,7 @@ import type {
     IAiAgentClassifyTaskPayload,
     IAiAgentRun,
     IAiAgentStepDetail,
+    IAiAgentStepFinalAnswer,
     IAiAgentStepToolResultSummary,
     IAiAgentStepWebSourceSummary,
     IAiToolConfirmationRequest,
@@ -32,6 +33,7 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
     const activeRunId = ref<string | null>(null);
     const runs = ref<IAiAgentRun[]>([]);
     const stepDetails = ref<Record<string, IAiAgentStepDetail>>({});
+    const stepFinalAnswers = ref<Record<string, IAiAgentStepFinalAnswer[]>>({});
     const patchSummaries = ref<Record<string, IAiAgentPatchSummary[]>>({});
     const toolActivities = ref<Record<string, IAiToolActivityInline[]>>({});
     const pendingToolConfirmation = ref<IAiToolConfirmationRequest | null>(null);
@@ -82,6 +84,29 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         classification.value = payload.classification;
         shouldEnterPlanMode.value = payload.shouldEnterPlanMode;
         classificationReason.value = payload.reason;
+    };
+
+    const beginPlanning = (goal: string): void => {
+        activeGoal.value = goal;
+        steps.value = [];
+        approvedAt.value = null;
+        activeRunId.value = null;
+        classification.value = null;
+        classificationReason.value = '';
+        shouldEnterPlanMode.value = false;
+        pendingToolConfirmation.value = null;
+        errorMessage.value = '';
+    };
+
+    const failPlanning = (goal: string, message: string): void => {
+        activeGoal.value = goal;
+        steps.value = [];
+        approvedAt.value = null;
+        activeRunId.value = null;
+        shouldEnterPlanMode.value = false;
+        pendingToolConfirmation.value = null;
+        errorMessage.value = message;
+        mode.value = 'plan';
     };
 
     const setNetworkPermission = (permission: TAiAgentNetworkPermission): void => {
@@ -184,6 +209,20 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
     const getPatchSummaries = (runId: string): IAiAgentPatchSummary[] =>
         patchSummaries.value[runId] ?? [];
 
+    const getStepFinalAnswers = (runId: string): IAiAgentStepFinalAnswer[] =>
+        stepFinalAnswers.value[runId] ?? [];
+
+    const appendStepFinalAnswer = (answer: IAiAgentStepFinalAnswer): void => {
+        const previous = getStepFinalAnswers(answer.runId);
+        stepFinalAnswers.value = {
+            ...stepFinalAnswers.value,
+            [answer.runId]: [
+                ...previous.filter((item) => item.id !== answer.id),
+                answer,
+            ].slice(-50),
+        };
+    };
+
     const appendPatchSummary = (summary: IAiAgentPatchSummary): void => {
         const previous = getPatchSummaries(summary.runId);
         patchSummaries.value = {
@@ -255,6 +294,7 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         activeRunId,
         runs,
         stepDetails,
+        stepFinalAnswers,
         patchSummaries,
         toolActivities,
         pendingToolConfirmation,
@@ -264,9 +304,12 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         activeToolActivity,
         getStepDetail,
         getPatchSummaries,
+        getStepFinalAnswers,
         getToolActivities,
         setNetworkPermission,
         setClassification,
+        beginPlanning,
+        failPlanning,
         setPlan,
         replaceStep,
         removeStep,
@@ -277,6 +320,7 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         upsertStepDetail,
         setStepWebSources,
         appendStepToolResults,
+        appendStepFinalAnswer,
         appendPatchSummary,
         appendToolActivity,
         setPendingToolConfirmation,

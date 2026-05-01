@@ -554,6 +554,41 @@ const definePayloadIpc = <TInSchema extends z.ZodTypeAny, TOutSchema extends z.Z
   });
 
 
+const agentSidecarHealthIpc = defineContractIpc(
+  'agent_sidecar_health',
+  '读取 Agent sidecar 健康状态',
+  tauriContracts.agentSidecarHealth,
+  { idempotent: true, audit: 'sensitive', timeoutMs: 10_000 },
+);
+
+const agentSidecarChatIpc = definePayloadIpc(
+  'agent_sidecar_chat',
+  '通过 Node sidecar 执行 Agent Ask',
+  tauriContracts.agentSidecarChat,
+  { audit: 'sensitive', timeoutMs: 180_000, measureInput: measureAiChatInput },
+);
+
+const agentSidecarPlanIpc = definePayloadIpc(
+  'agent_sidecar_plan',
+  '通过 Node sidecar 生成 Agent 计划',
+  tauriContracts.agentSidecarPlan,
+  { audit: 'sensitive', timeoutMs: 180_000, measureInput: measureAiChatInput },
+);
+
+const agentSidecarExecuteIpc = definePayloadIpc(
+  'agent_sidecar_execute',
+  '通过 Node sidecar 执行 Agent 任务',
+  tauriContracts.agentSidecarExecute,
+  { audit: 'sensitive', timeoutMs: 180_000, measureInput: measureAiChatInput },
+);
+
+const agentSidecarResolveApprovalIpc = definePayloadIpc(
+  'agent_sidecar_resolve_approval',
+  '处理 Agent sidecar 工具审批',
+  tauriContracts.agentSidecarResolveApproval,
+  { audit: 'sensitive', timeoutMs: 30_000 },
+);
+
 const analyzeScriptIpc = definePayloadIpc(
   'analyze_script',
   '执行 ShellCheck 实时诊断',
@@ -902,13 +937,6 @@ const aiAgentResolveToolConfirmationIpc = definePayloadIpc(
   { audit: 'sensitive', timeoutMs: 15_000 },
 );
 
-const aiAgentToolLoopChatIpc = definePayloadIpc(
-  'ai_agent_tool_loop_chat',
-  '执行 AI Agent Provider 工具循环',
-  tauriContracts.aiAgentToolLoopChat,
-  { audit: 'sensitive', timeoutMs: 180_000, measureInput: measureAiChatInput },
-);
-
 const aiWebSearchIpc = definePayloadIpc(
   'ai_web_search',
   '执行 AI Agent 网络搜索',
@@ -1080,6 +1108,15 @@ export const tauriService: ITauriService & {
   pickOpenFolderPath(): Promise<string | null>;
   pickSavePath(defaultPath: string): Promise<string | null>;
 } = {
+  agentSidecarHealth: () => agentSidecarHealthIpc(undefined),
+
+  agentSidecarChat: agentSidecarChatIpc,
+
+  agentSidecarPlan: agentSidecarPlanIpc,
+
+  agentSidecarExecute: agentSidecarExecuteIpc,
+
+  agentSidecarResolveApproval: agentSidecarResolveApprovalIpc,
 
   analyzeScript: analyzeScriptIpc,
 
@@ -1267,8 +1304,6 @@ export const tauriService: ITauriService & {
   aiAgentSetNetworkPermission: aiAgentSetNetworkPermissionIpc,
 
   aiAgentResolveToolConfirmation: aiAgentResolveToolConfirmationIpc,
-
-  aiAgentToolLoopChat: aiAgentToolLoopChatIpc,
 
   aiWebSearch: aiWebSearchIpc,
 

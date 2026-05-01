@@ -12,7 +12,8 @@ const aiServiceMock = vi.hoisted(() => {
   const resumeRun = vi.fn();
   const cancelRun = vi.fn();
   const resolveToolConfirmation = vi.fn();
-  const toolLoopChat = vi.fn();
+  const sidecarExecute = vi.fn();
+  const sidecarResolveApproval = vi.fn();
   const getRun = vi.fn();
   const listRuns = vi.fn();
 
@@ -23,7 +24,8 @@ const aiServiceMock = vi.hoisted(() => {
     resumeRun,
     cancelRun,
     resolveToolConfirmation,
-    toolLoopChat,
+    sidecarExecute,
+    sidecarResolveApproval,
     getRun,
     listRuns,
     reset(): void {
@@ -33,7 +35,8 @@ const aiServiceMock = vi.hoisted(() => {
       resumeRun.mockReset();
       cancelRun.mockReset();
       resolveToolConfirmation.mockReset();
-      toolLoopChat.mockReset();
+      sidecarExecute.mockReset();
+      sidecarResolveApproval.mockReset();
       getRun.mockReset();
       listRuns.mockReset();
     },
@@ -48,7 +51,8 @@ vi.mock('@/services/modules/ai', () => ({
     resumeRun: aiServiceMock.resumeRun,
     cancelRun: aiServiceMock.cancelRun,
     resolveToolConfirmation: aiServiceMock.resolveToolConfirmation,
-    toolLoopChat: aiServiceMock.toolLoopChat,
+    sidecarExecute: aiServiceMock.sidecarExecute,
+    sidecarResolveApproval: aiServiceMock.sidecarResolveApproval,
     getRun: aiServiceMock.getRun,
     listRuns: aiServiceMock.listRuns,
   },
@@ -130,7 +134,7 @@ describe('useAiAgentRun', () => {
     expect(agentRun.store.steps[0]?.status).toBe('running');
   });
 
-  it('通过 Provider tool loop 执行复杂任务 step，并跳过旧 step 工具执行完成步骤', async () => {
+  it('通过 Strands sidecar 执行复杂任务 step，并跳过旧 step 工具执行完成步骤', async () => {
     const runningRun = createRun({
       status: 'running-step',
       currentStepId: 'plan-step-1',
@@ -143,39 +147,42 @@ describe('useAiAgentRun', () => {
     aiServiceMock.runStep
       .mockResolvedValueOnce({ run: runningRun })
       .mockResolvedValueOnce({ run: completedRun });
-    aiServiceMock.toolLoopChat.mockResolvedValueOnce({
-      content: '步骤已完成。',
-      model: 'mock-ide-assistant',
-      stopReason: 'completed',
-      turns: 1,
-      pendingDecisionKey: null,
-      pendingConfirmation: null,
-      toolResults: [
+    aiServiceMock.sidecarExecute.mockResolvedValueOnce({
+      sessionId: 'sidecar-step-session-1',
+      events: [
         {
-          id: 'tool-result-1',
-          runId: 'agent-run-1',
-          stepId: 'tool-call-step:search_text:call-1',
-          toolName: 'search_text',
-          status: 'succeeded',
-          requiresUserConfirmation: false,
-          summary: '已检索上下文。',
-          startedAt: '2026-04-29T10:00:00.000Z',
-          endedAt: '2026-04-29T10:00:01.000Z',
+          type: 'tool_start',
+          toolName: 'search_project_files',
+          input: { query: 'Step Runtime' },
+        },
+        {
+          type: 'tool_result',
+          toolName: 'search_project_files',
+          output: { summary: '已检索上下文。' },
+        },
+        {
+          type: 'done',
+          result: '步骤已完成。',
         },
       ],
+      result: '步骤已完成。',
     });
 
     const agentRun = useAiAgentRun();
     const store = useAiAgentStore();
     store.upsertRun(createRun());
 
-    await agentRun.runStepWithProviderLoop('agent-run-1', {
+    await agentRun.runStepWithSidecar('agent-run-1', {
       goal: '实现 Step Runtime',
       context: [],
       workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
     });
 
-    expect(aiServiceMock.toolLoopChat).toHaveBeenCalledTimes(1);
+    expect(aiServiceMock.sidecarExecute).toHaveBeenCalledTimes(1);
+    expect(aiServiceMock.sidecarExecute.mock.calls[0]?.[0]).toMatchObject({
+      goal: '实现 Step Runtime',
+      workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+    });
     expect(aiServiceMock.runStep).toHaveBeenLastCalledWith({
       runId: 'agent-run-1',
       stepId: 'plan-step-1',
@@ -184,9 +191,10 @@ describe('useAiAgentRun', () => {
     expect(store.activeRun?.steps[0]?.status).toBe('done');
     expect(store.getStepDetail('agent-run-1', 'plan-step-1')?.toolResults[0]?.summary)
       .toBe('已检索上下文。');
+    expect(store.getStepFinalAnswers('agent-run-1')[0]?.content).toBe('步骤已完成。');
   });
 
-  it('Provider step 工具确认后继续 tool loop 并按 call id 传回决策', async () => {
+  it('Sidecar step 工具确认后通过 sidecar approval 继续并完成步骤', async () => {
     const runningRun = createRun({
       status: 'running-step',
       currentStepId: 'plan-step-1',
@@ -199,58 +207,61 @@ describe('useAiAgentRun', () => {
     aiServiceMock.runStep
       .mockResolvedValueOnce({ run: runningRun })
       .mockResolvedValueOnce({ run: completedRun });
-    aiServiceMock.toolLoopChat
-      .mockResolvedValueOnce({
-        content: '',
-        model: 'mock-ide-assistant',
-        stopReason: 'tool-confirmation-required',
-        turns: 1,
-        pendingDecisionKey: 'call-run-test',
-        pendingConfirmation: {
-          id: 'call-run-test',
-          runId: 'agent-run-1',
-          stepId: 'tool-call-step:run_test:call-run-test',
-          toolName: 'run_test',
-          question: '允许 Agent 使用 run_test 吗？',
-          summary: '步骤请求运行测试。',
-          riskLevel: 'medium',
-          reversible: true,
-          createdAt: '2026-04-29T10:00:00.000Z',
-          options: [],
+    aiServiceMock.sidecarExecute.mockResolvedValueOnce({
+      sessionId: 'sidecar-step-session-confirm',
+      events: [
+        {
+          type: 'approval_required',
+          request: {
+            id: 'call-run-test',
+            toolName: 'run_shell_command',
+            question: '允许 Agent 使用 run_test 吗？',
+            summary: '步骤请求运行测试。',
+            riskLevel: 'medium',
+            reversible: true,
+            createdAt: '2026-04-29T10:00:00.000Z',
+          },
         },
-        toolResults: [],
-      })
-      .mockResolvedValueOnce({
-        content: '验证完成。',
-        model: 'mock-ide-assistant',
-        stopReason: 'completed',
-        turns: 2,
-        pendingDecisionKey: null,
-        pendingConfirmation: null,
-        toolResults: [],
-      });
+        {
+          type: 'done',
+          result: '等待用户确认。',
+        },
+      ],
+      result: '等待用户确认。',
+    });
+    aiServiceMock.sidecarResolveApproval.mockResolvedValueOnce({
+      sessionId: 'sidecar-step-session-confirm-2',
+      events: [
+        {
+          type: 'done',
+          result: '验证完成。',
+        },
+      ],
+      result: '验证完成。',
+    });
 
     const agentRun = useAiAgentRun();
     const store = useAiAgentStore();
     store.upsertRun(createRun());
 
-    await agentRun.runStepWithProviderLoop('agent-run-1', {
+    await agentRun.runStepWithSidecar('agent-run-1', {
       goal: '实现 Step Runtime',
       context: [],
       workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
     });
 
     const confirmationId = store.pendingToolConfirmation?.id;
-    expect(confirmationId).toContain('provider-step-tool-confirmation:');
+    expect(confirmationId).toContain('sidecar-step-tool-confirmation:');
 
-    await agentRun.resolveProviderStepToolConfirmation(confirmationId ?? '', 'allow-once');
+    await agentRun.resolveSidecarStepToolConfirmation(confirmationId ?? '', 'allow-once');
 
-    expect(aiServiceMock.toolLoopChat.mock.calls[1]?.[0]?.toolDecisions).toMatchObject({
-      'call-run-test': 'allow-once',
-      run_test: 'allow-once',
+    expect(aiServiceMock.sidecarResolveApproval).toHaveBeenCalledWith({
+      requestId: 'call-run-test',
+      decision: 'allow-once',
     });
     expect(store.pendingToolConfirmation).toBeNull();
     expect(store.activeRun?.steps[0]?.status).toBe('done');
+    expect(store.getStepFinalAnswers('agent-run-1')[0]?.content).toBe('验证完成。');
   });
 
   it('暂停、继续、取消 run 都通过 service 并回写 store', async () => {

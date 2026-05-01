@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils';
+﻿import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 
 import AiChatThread from '@/components/business/ai/AiChatThread.vue';
@@ -20,8 +20,6 @@ describe('AiChatThread', () => {
         messages: [
           createMessage({
             stream: {
-              stableContent: '',
-              openBlock: null,
               status: 'streaming',
             },
           }),
@@ -43,7 +41,7 @@ describe('AiChatThread', () => {
   it('keeps the standalone typing bubble for non-streaming loading states', () => {
     const wrapper = mount(AiChatThread, {
       props: {
-        messages: [createMessage({ role: 'user', content: '你好', stream: undefined })],
+        messages: [createMessage({ role: 'user', content: '浣犲ソ', stream: undefined })],
         isTyping: true,
         avatarUrl: null,
         avatarAlt: 'AI',
@@ -64,7 +62,7 @@ describe('AiChatThread', () => {
         messages: [createMessage({
           actions: [{
             id: 'allow-agent-execution',
-            label: '允许执行',
+            label: '鍏佽鎵ц',
           }],
         })],
         isTyping: false,
@@ -89,12 +87,12 @@ describe('AiChatThread', () => {
     ]);
   });
 
-  it('renders realtime provider tool activity inside the assistant message', () => {
+  it('renders realtime provider tool activity inside the assistant message without standalone dots', () => {
     const wrapper = mount(AiChatThread, {
       props: {
         messages: [
           createMessage({
-            content: 'AI 正在自动使用工具：read_file',
+            content: 'AI 姝ｅ湪鑷姩浣跨敤宸ュ叿锛歳ead_file',
             toolCalls: [{
               id: 'tool-call-read-file',
               name: 'read_file',
@@ -102,8 +100,6 @@ describe('AiChatThread', () => {
               summary: 'test.sh',
             }],
             stream: {
-              stableContent: '',
-              openBlock: null,
               status: 'streaming',
             },
           }),
@@ -119,8 +115,32 @@ describe('AiChatThread', () => {
       },
     });
 
-    expect(wrapper.text()).toContain('正在读取 test.sh…');
-    expect(wrapper.find('.ai-tool-running-dots').exists()).toBe(true);
+    expect(wrapper.text()).toContain('璇诲彇');
+    expect(wrapper.text()).toContain('test.sh');
+    expect(wrapper.find('.ai-tool-running-dots').exists()).toBe(false);
+    expect(wrapper.find('.ai-message-typing').exists()).toBe(false);
+  });
+
+  it('hides the standalone typing bubble when agent progress is already visible', () => {
+    const wrapper = mount(AiChatThread, {
+      props: {
+        messages: [
+          createMessage({
+            content: 'Agent 正在调用工具…',
+            stream: undefined,
+          }),
+        ],
+        isTyping: true,
+        avatarUrl: null,
+        avatarAlt: 'AI',
+      },
+      global: {
+        stubs: {
+          AiMessageItem: { template: '<div class="message-item-stub" />' },
+        },
+      },
+    });
+
     expect(wrapper.find('.ai-message-typing').exists()).toBe(false);
   });
 });

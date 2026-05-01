@@ -10,26 +10,22 @@ import {
   buildGitDiffReference,
   buildSelectionReference,
 } from '@/services/modules/ai-context';
-import { tauriService } from '@/services/tauri';
 import { useAiConversationStore } from '@/store/aiConversation';
-import { AI_AGENT_TOOL_LOOP_DEFAULT_MAX_TURNS } from '@/types/ai-agent.schema';
+import { projectSidecarExecuteResponse } from '@/utils/agent-sidecar-events';
 
+import type { IAgentSidecarMessage } from '@/types/agent-sidecar';
 import type {
   IAiApplyPatchMetadata,
   IAiChatMessage,
   IAiChatStreamEventPayload,
   IAiConfigPayload,
   IAiContextReference,
-  IAiAgentToolLoopChatPayload,
-  IAiToolActivityInline,
   IAiPatchSet,
   IAiProviderConnectionRequest,
-  IAiToolCall,
   IAiToolDefinitionPayload,
   TAiChatMessageActionId,
   TAiToolConfirmationDecision,
 } from '@/types/ai';
-import type { IAiCodeBlock } from '@/types/ai-code';
 import type {
   IActiveRunSummary,
   IAnalyzeScriptPayload,
@@ -47,20 +43,9 @@ import { areFileSystemPathsEqual, normalizeFileSystemPath } from '@/utils/path';
 
 type TAiQuickActionId = 'explain' | 'fix' | 'review';
 
-type TAiAssistantMode = 'chat' | 'agent';
+type TAiAssistantMode = 'chat' | 'agent' | 'plan';
 
 type TAiAttachmentKind = 'text' | 'image';
-
-type TAgentToolName =
-  | 'read_current_file'
-  | 'read_selected_text'
-  | 'search_files'
-  | 'search_text'
-  | 'search_symbols'
-  | 'get_diagnostics'
-  | 'get_git_diff'
-  | 'get_terminal_log'
-  | 'propose_patch';
 
 type TAgentExecutionStepStatus =
   | 'pending'
@@ -75,31 +60,12 @@ interface IAiImageDimensions {
   height: number;
 }
 
-interface IAgentToolCallEnvelope {
-  type: 'tool_call';
-  name: TAgentToolName;
-  summary?: string;
-  arguments?: Record<string, unknown>;
-}
-
-interface IAgentFinalEnvelope {
-  type: 'final';
-  content: string;
-}
-
-interface IAgentToolExecutionResult {
-  summary: string;
-  content: string;
-  status: 'succeeded' | 'failed';
-}
-
-interface IProviderToolLoopSession {
-  runId: string;
+interface ISidecarAgentSession {
+  sessionId: string;
   assistantMessageId: string;
   baseMessages: IAiChatMessage[];
   messageContent: string;
   references: IAiContextReference[];
-  toolDecisions: Record<string, TAiToolConfirmationDecision>;
 }
 
 interface IAgentExecutionStep {
@@ -161,33 +127,6 @@ const CONTEXT_TOKEN_PATTERN =
 const CODE_BLOCK_PATTERN = /```[a-zA-Z0-9_-]*\n([\s\S]*?)```/;
 
 const PROJECT_SEARCH_TOKENS = ['project', 'folder', 'search', 'symbol'] as const;
-
-const MAX_AGENT_TOOL_ROUNDS = AI_AGENT_TOOL_LOOP_DEFAULT_MAX_TURNS;
-const MAX_AGENT_TOOL_RESULT_CHARS = 6_000;
-
-const AGENT_TOOL_LABELS: Record<TAgentToolName, string> = {
-  read_current_file: '读取当前文件',
-  read_selected_text: '读取当前选区',
-  search_files: '搜索文件名',
-  search_text: '搜索文本内容',
-  search_symbols: '搜索符号',
-  get_diagnostics: '读取诊断',
-  get_git_diff: '读取 Git 变更',
-  get_terminal_log: '读取终端日志',
-  propose_patch: '静默写入当前文件',
-};
-
-const FALLBACK_AGENT_TOOLS: IAiToolDefinitionPayload[] = [
-  { name: 'read_current_file', readOnly: true, destructive: false, requiresConfirmation: false },
-  { name: 'read_selected_text', readOnly: true, destructive: false, requiresConfirmation: false },
-  { name: 'search_files', readOnly: true, destructive: false, requiresConfirmation: false },
-  { name: 'search_text', readOnly: true, destructive: false, requiresConfirmation: false },
-  { name: 'search_symbols', readOnly: true, destructive: false, requiresConfirmation: false },
-  { name: 'get_diagnostics', readOnly: true, destructive: false, requiresConfirmation: false },
-  { name: 'get_git_diff', readOnly: true, destructive: false, requiresConfirmation: false },
-  { name: 'get_terminal_log', readOnly: true, destructive: false, requiresConfirmation: false },
-  { name: 'propose_patch', readOnly: false, destructive: false, requiresConfirmation: false },
-];
 
 const MSG_STREAM_CANCELLED = 'AI 流已被取消';
 const MSG_STREAM_ERROR = 'AI 响应出错';
@@ -284,90 +223,6 @@ const clipText = (value: string, limit: number): string => {
   return `${chars.slice(0, limit).join('')}\n\n[内容已截断，仅发送前 ${limit} 个字符]`;
 };
 
-const clipAgentToolResult = (value: string): string => clipText(value, MAX_AGENT_TOOL_RESULT_CHARS);
-
-const extractAgentJsonCandidate = (value: string): string => {
-  const trimmed = value.trim();
-
-  if (trimmed.startsWith('```')) {
-    const withoutFence = trimmed
-      .replace(/^```[a-zA-Z0-9_-]*\s*/, '')
-      .replace(/```\s*$/, '')
-      .trim();
-
-    if (withoutFence) {
-      return withoutFence;
-    }
-  }
-
-  const firstBrace = trimmed.indexOf('{');
-  const lastBrace = trimmed.lastIndexOf('}');
-
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    return trimmed.slice(firstBrace, lastBrace + 1);
-  }
-
-  return trimmed;
-};
-
-const isAgentToolName = (value: unknown): value is TAgentToolName =>
-  typeof value === 'string' && value in AGENT_TOOL_LABELS;
-
-const parseAgentEnvelope = (value: string): IAgentToolCallEnvelope | IAgentFinalEnvelope => {
-  const candidate = extractAgentJsonCandidate(value);
-
-  try {
-    const parsed = JSON.parse(candidate) as Record<string, unknown>;
-
-    if (parsed.type === 'tool_call' && isAgentToolName(parsed.name)) {
-      return {
-        type: 'tool_call',
-        name: parsed.name,
-        summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : undefined,
-        arguments:
-          parsed.arguments && typeof parsed.arguments === 'object' && !Array.isArray(parsed.arguments)
-            ? parsed.arguments as Record<string, unknown>
-            : {},
-      };
-    }
-
-    if (parsed.type === 'final' && typeof parsed.content === 'string') {
-      return {
-        type: 'final',
-        content: parsed.content.trim(),
-      };
-    }
-  } catch {
-    // noop: fallback below turns non-JSON output into final answer text.
-  }
-
-  return {
-    type: 'final',
-    content: value.trim(),
-  };
-};
-
-const getStringArgument = (argumentsMap: Record<string, unknown>, key: string): string =>
-  typeof argumentsMap[key] === 'string' ? argumentsMap[key].trim() : '';
-
-const getPositiveLimitArgument = (
-  argumentsMap: Record<string, unknown>,
-  key: string,
-  fallback: number,
-): number => {
-  const rawValue = argumentsMap[key];
-  const value = typeof rawValue === 'number' ? rawValue : Number(rawValue);
-
-  if (!Number.isFinite(value) || value <= 0) {
-    return fallback;
-  }
-
-  return Math.min(Math.floor(value), 20);
-};
-
-const countPatchHunks = (patch: IAiPatchSet): number =>
-  patch.files.reduce((total, file) => total + file.hunks.length, 0);
-
 const formatBytes = (bytes: number): string => {
   if (bytes < 1024) {
     return `${bytes} B`;
@@ -461,16 +316,6 @@ const mapStreamStatus = (
   return 'streaming';
 };
 
-const mapAgentStepExecutionStatus = (
-  status: IAgentToolExecutionResult['status'],
-): Extract<TAgentExecutionStepStatus, 'done' | 'failed'> =>
-  status === 'succeeded' ? 'done' : 'failed';
-
-const mapToolCallExecutionStatus = (
-  status: IAgentToolExecutionResult['status'],
-): Extract<IAiToolCall['status'], 'succeeded' | 'failed'> =>
-  status === 'succeeded' ? 'succeeded' : 'failed';
-
 // ---------------------------------------------------------------------------
 // Public quick actions
 // ---------------------------------------------------------------------------
@@ -518,7 +363,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const currentReferences = ref<IAiContextReference[]>([]);
   const proposedPatch = ref<IAiPatchSet | null>(null);
   const isApplyingPatch = ref(false);
-  const activeMode = ref<TAiAssistantMode>('chat');
+  const activeMode = ref<TAiAssistantMode>('agent');
   const agentSteps = ref<IAgentExecutionStep[]>([]);
   const toolDefinitions = ref<IAiToolDefinitionPayload[]>([]);
   const attachedFiles = ref<IAiAttachedFile[]>([]);
@@ -528,7 +373,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const activeStreamResolve = ref<(() => void) | null>(null);
   const activeAssistantMessage = ref<IAiChatMessage | null>(null);
   const activeAssistantBaseMessages = ref<IAiChatMessage[]>([]);
-  const activeProviderToolLoopSession = ref<IProviderToolLoopSession | null>(null);
+  const activeSidecarAgentSession = ref<ISidecarAgentSession | null>(null);
 
   const aiStream = useAiStream();
   const agentPlan = useAiAgentPlan();
@@ -588,40 +433,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     return nextMessages;
   };
 
-  const createAgentExecutionSystemMessage = (goal: string): IAiChatMessage => ({
-    id: createMessageId('system'),
-    role: 'system',
-    content: [
-      '你现在处于 IDE Agent 模式。不要再询问用户是否开始执行；你需要直接依据任务自动选择工具。',
-      '如果需要更多上下文，请优先调用工具，而不是先向用户反问。',
-      '如果需要修改当前打开文件，调用 propose_patch 后会直接静默写入；写入操作会自动进入 AED 时间线，用户之后可以回滚。',
-      '响应协议必须严格遵守：',
-      '1. 需要调用工具时，只返回一个 JSON 对象，不要使用 Markdown 代码块：',
-      '{"type":"tool_call","name":"search_text","summary":"搜索错误关键词","arguments":{"query":"...","limit":8}}',
-      '2. 已经可以给最终答复时，只返回一个 JSON 对象：',
-      '{"type":"final","content":"...给用户的最终答复..."}',
-      '3. 除以上 JSON 外不要输出任何多余前缀、解释或代码块。',
-      '可用工具：',
-      ...((toolDefinitions.value.length ? toolDefinitions.value : FALLBACK_AGENT_TOOLS)
-        .filter((tool): tool is IAiToolDefinitionPayload & { name: TAgentToolName } =>
-          isAgentToolName(tool.name))
-        .map((tool) => {
-          const suffix = tool.name === 'propose_patch'
-            ? '参数：updatedContent（完整新文件内容），summary（可选）；执行后会直接写盘并可回滚'
-            : tool.name.startsWith('search_')
-              ? '参数：query，limit（可选）'
-              : tool.name === 'read_current_file'
-                ? '参数：path（可选，默认当前文件）'
-                : '参数：无';
-
-          return `- ${tool.name}：${AGENT_TOOL_LABELS[tool.name]}；${suffix}`;
-        })),
-      `当前任务：${goal}`,
-    ].join('\n'),
-    createdAt: new Date().toISOString(),
-    references: [],
-  });
-
   const updateAgentStep = (
     stepId: string,
     title: string,
@@ -665,359 +476,64 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     }));
   };
 
-  const formatLoadedScript = (
-    path: string,
-    name: string,
-    content: string,
-    isDirty: boolean,
-  ): string => [
-    `文件名：${name}`,
-    `路径：${path}`,
-    `状态：${isDirty ? '有未保存修改' : '已保存'}`,
-    '脚本内容：',
-    '```sh',
-    clipText(content, MAX_CONTEXT_CHARS),
-    '```',
-  ].join('\n');
-
-  const executeAgentTool = async (
-    call: IAgentToolCallEnvelope,
-  ): Promise<IAgentToolExecutionResult> => {
-    const argumentsMap = call.arguments ?? {};
-    const summary = call.summary?.trim() || AGENT_TOOL_LABELS[call.name];
-
-    try {
-      switch (call.name) {
-        case 'read_current_file': {
-          const document = options.document.value;
-          const requestedPath = getStringArgument(argumentsMap, 'path');
-
-          const shouldReadCurrentDocument =
-            !requestedPath ||
-            (document.path
-              ? areFileSystemPathsEqual(requestedPath, document.path)
-              : requestedPath === document.name);
-
-          if (shouldReadCurrentDocument) {
-            if (document.kind !== 'text') {
-              return {
-                summary,
-                content: '当前没有可读取的文本文件。',
-                status: 'failed',
-              };
-            }
-
-            return {
-              summary,
-              content: formatLoadedScript(
-                document.path ?? document.name,
-                document.name,
-                document.content,
-                document.isDirty,
-              ),
-              status: 'succeeded',
-            };
-          }
-
-          const payload = await tauriService.loadScript(requestedPath);
-
-          return {
-            summary,
-            content: formatLoadedScript(
-              payload.path,
-              payload.name,
-              payload.content,
-              false,
-            ),
-            status: 'succeeded',
-          };
-        }
-
-        case 'read_selected_text': {
-          const selection = options.selection.value;
-          const document = options.document.value;
-
-          if (!selection?.text.trim()) {
-            return {
-              summary,
-              content: '当前没有选中的文本片段。',
-              status: 'failed',
-            };
-          }
-
-          return {
-            summary,
-            content: [
-              `文件：${document.name}`,
-              `范围：${selection.startLine}-${selection.endLine}`,
-              '选区内容：',
-              '```text',
-              clipText(selection.text, MAX_CONTEXT_CHARS),
-              '```',
-            ].join('\n'),
-            status: 'succeeded',
-          };
-        }
-
-        case 'search_files':
-        case 'search_text':
-        case 'search_symbols': {
-          const workspaceRootPath = options.workspaceRootPath.value;
-          const query = getStringArgument(argumentsMap, 'query');
-
-          if (!workspaceRootPath) {
-            return {
-              summary,
-              content: '当前没有可搜索的工作区根目录。',
-              status: 'failed',
-            };
-          }
-
-          if (!query) {
-            return {
-              summary,
-              content: '搜索关键词不能为空。',
-              status: 'failed',
-            };
-          }
-
-          const scope = call.name === 'search_files'
-            ? 'file-name'
-            : call.name === 'search_symbols'
-              ? 'symbol'
-              : 'content';
-
-          const payload = await tauriService.searchWorkspace({
-            workspaceRootPath,
-            query,
-            scope,
-            matchCase: false,
-            wholeWord: false,
-            useRegex: false,
-            includePatterns: [],
-            excludePatterns: [],
-            limit: getPositiveLimitArgument(argumentsMap, 'limit', 8),
-          });
-
-          return {
-            summary,
-            content: payload.results.length === 0
-              ? `未在工作区中找到与“${query}”相关的结果。`
-              : [
-                `工作区：${payload.rootPath}`,
-                `扫描文件：${payload.scannedFileCount}`,
-                `命中结果：${payload.results.length}`,
-                '',
-                ...payload.results.map((item) => [
-                  `${item.relativePath}${item.lineNumber ? `:${item.lineNumber}` : ''}`,
-                  item.lineText ?? item.name,
-                ].join('\n')),
-              ].join('\n---\n'),
-            status: 'succeeded',
-          };
-        }
-
-        case 'get_diagnostics': {
-          const reference = buildDiagnosticsReference(
-            options.analysis.value,
-            options.document.value,
-          );
-
-          return {
-            summary,
-            content: reference?.contentPreview || '当前没有可用的诊断信息。',
-            status: reference ? 'succeeded' : 'failed',
-          };
-        }
-
-        case 'get_git_diff': {
-          const reference = buildGitDiffReference(options.gitStatus.value);
-
-          return {
-            summary,
-            content: reference?.contentPreview || '当前没有 Git 变更信息。',
-            status: reference ? 'succeeded' : 'failed',
-          };
-        }
-
-        case 'get_terminal_log': {
-          const reference = buildActiveRunReference(options.activeRun.value);
-
-          return {
-            summary,
-            content: reference?.contentPreview || '当前没有可读取的终端运行记录。',
-            status: reference ? 'succeeded' : 'failed',
-          };
-        }
-
-        case 'propose_patch': {
-          const document = options.document.value;
-          const requestedPath = getStringArgument(argumentsMap, 'path');
-          const updatedContent = getStringArgument(argumentsMap, 'updatedContent');
-          const patchSummary =
-            getStringArgument(argumentsMap, 'summary') || 'Agent 自动静默写盘';
-
-          if (document.kind !== 'text' || !document.path) {
-            return {
-              summary,
-              content: '当前文件尚未保存，无法静默写盘。',
-              status: 'failed',
-            };
-          }
-
-          if (requestedPath && !areFileSystemPathsEqual(requestedPath, document.path)) {
-            return {
-              summary,
-              content: '当前只支持对已打开的当前文件静默写盘。',
-              status: 'failed',
-            };
-          }
-
-          if (!updatedContent) {
-            return {
-              summary,
-              content: 'propose_patch 需要提供 updatedContent（完整新文件内容）。',
-              status: 'failed',
-            };
-          }
-
-          const payload = await aiService.proposePatch({
-            path: document.path,
-            originalContent: document.content,
-            updatedContent,
-            summary: patchSummary,
-          });
-          const activeAgentPatchMetadata = buildActiveAgentPatchMetadata();
-
-          const result = await aiService.applyPatch({
-            patch: payload.patch,
-            metadata: {
-              taskId: activeConversationId.value,
-              turnId:
-                activeAgentMessageId.value ??
-                messages.value.at(-1)?.id ??
-                activeConversationId.value,
-              reason: payload.patch.summary,
-              toolCallId: `agent-tool:${summary}`,
-              confirmedByUser: true,
-              ...activeAgentPatchMetadata,
-            },
-          });
-
-          const appliedPaths = result.appliedFiles.map((file) => file.path);
-
-          syncPatchedDocument(document, payload.patch, appliedPaths);
-
-          proposedPatch.value = null;
-
-          return {
-            summary,
-            content: [
-              `已静默写入 ${document.name}。`,
-              `摘要：${payload.patch.summary}`,
-              `文件数：${payload.patch.files.length}`,
-              `Hunk 数：${countPatchHunks(payload.patch)}`,
-              `已写入路径：${appliedPaths
-                .map((path) => normalizePatchDisplayPath(path))
-                .join('、')}`,
-            ].join('\n'),
-            status: 'succeeded',
-          };
-        }
-      }
-    } catch (error) {
-      return {
-        summary,
-        content: toErrorMessage(error, `${AGENT_TOOL_LABELS[call.name]}失败`),
-        status: 'failed',
-      };
+  const mapSidecarToolCallStatusToStepStatus = (
+    status: NonNullable<IAiChatMessage['toolCalls']>[number]['status'],
+  ): TAgentExecutionStepStatus => {
+    switch (status) {
+      case 'succeeded':
+        return 'done';
+      case 'failed':
+        return 'failed';
+      case 'denied':
+        return 'cancelled';
+      case 'pending':
+        return 'pending';
+      case 'running':
+      default:
+        return 'running';
     }
   };
 
-  const requestAgentAssistantMessage = async (
-    requestMessages: IAiChatMessage[],
+  const buildSidecarContextMessage = (
     references: IAiContextReference[],
-  ): Promise<string> => {
-    let unlisten: (() => void) | null = null;
-    let collectedContent = '';
-    let isSettled = false;
-    let localStreamId: string | null = null;
+  ): IAgentSidecarMessage | null => {
+    if (!references.length) {
+      return null;
+    }
 
-    const cleanup = (): void => {
-      unlisten?.();
-      unlisten = null;
-      activeStreamResolve.value = null;
-      activeStreamId.value = null;
+    return {
+      role: 'system',
+      content: [
+        '当前 UI 已收集到这些上下文，请在需要时结合它们判断任务：',
+        ...references.map((reference, index) => [
+          `#${index + 1} ${reference.label}`,
+          `类型：${reference.kind}`,
+          `路径：${reference.path ?? '无'}`,
+          reference.range
+            ? `范围：${reference.range.startLine}-${reference.range.endLine}`
+            : '范围：无',
+          `已脱敏：${reference.redacted ? '是' : '否'}`,
+          '内容：',
+          reference.contentPreview,
+        ].join('\n')),
+      ].join('\n\n'),
     };
-
-    return new Promise<string>((resolve, reject) => {
-      const settle = (handler: () => void): void => {
-        if (isSettled) {
-          return;
-        }
-
-        isSettled = true;
-        cleanup();
-        handler();
-      };
-
-      const fail = (message: string): void => {
-        settle(() => reject(new Error(message)));
-      };
-
-      const run = async (): Promise<void> => {
-        try {
-          unlisten = await aiService.onChatStream((event) => {
-            if (!localStreamId && event.kind === 'start') {
-              localStreamId = event.streamId;
-              activeStreamId.value = event.streamId;
-              return;
-            }
-
-            if (localStreamId && event.streamId !== localStreamId) {
-              return;
-            }
-
-            if (event.kind === 'delta' && event.delta) {
-              collectedContent += event.delta;
-              return;
-            }
-
-            if (event.kind === 'done') {
-              settle(() => resolve(collectedContent.trim()));
-              return;
-            }
-
-            if (event.kind === 'cancelled') {
-              fail(event.message ?? MSG_STREAM_CANCELLED);
-              return;
-            }
-
-            if (event.kind === 'error') {
-              fail(event.message ?? MSG_STREAM_ERROR);
-            }
-          });
-
-          const stream = await aiService.chatStream({
-            threadId: null,
-            messages: requestMessages,
-            references,
-          });
-
-          localStreamId = stream.streamId;
-          activeStreamId.value = stream.streamId;
-          activeStreamResolve.value = () => fail(MSG_STREAM_CANCELLED);
-        } catch (error) {
-          cleanup();
-          reject(error);
-        }
-      };
-
-      void run();
-    });
   };
 
-  const executeAgentRequest = async (
+  const toSidecarMessages = (
+    visibleMessages: IAiChatMessage[],
+    references: IAiContextReference[],
+  ): IAgentSidecarMessage[] => {
+    const contextMessage = buildSidecarContextMessage(references);
+    const historyMessages = visibleMessages.map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+
+    return contextMessage ? [contextMessage, ...historyMessages] : historyMessages;
+  };
+
+  const executeSidecarAgentRequest = async (
     visibleMessages: IAiChatMessage[],
     messageContent: string,
     references: IAiContextReference[],
@@ -1025,301 +541,72 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     errorMessage.value = '';
     isSending.value = true;
     agentSteps.value = [];
+    agentPlan.store.clearPendingToolConfirmation();
+    activeSidecarAgentSession.value = null;
 
-    const placeholderMessageId = createMessageId('assistant');
-
+    const assistantMessageId = createMessageId('assistant');
     const placeholderMessage: IAiChatMessage = {
-      id: placeholderMessageId,
+      id: assistantMessageId,
       role: 'assistant',
-      content: 'AI 正在自动分析并按需调用工具…',
+      content: 'Agent 正在交给 Strands 执行任务',
       createdAt: new Date().toISOString(),
       references: [],
       toolCalls: [],
     };
 
     messages.value = [...visibleMessages, placeholderMessage];
-    activeAgentMessageId.value = placeholderMessageId;
+    activeAgentMessageId.value = assistantMessageId;
     activeAbortController.value = new AbortController();
 
-    const transcript: IAiChatMessage[] = [
-      createAgentExecutionSystemMessage(messageContent),
-      ...visibleMessages,
-    ];
-
-    const toolCalls: NonNullable<IAiChatMessage['toolCalls']> = [];
-
     try {
-      for (let round = 0; round < MAX_AGENT_TOOL_ROUNDS; round += 1) {
-        const modelContent = await requestAgentAssistantMessage(transcript, references);
-        const envelope = parseAgentEnvelope(modelContent);
-
-        if (envelope.type === 'final') {
-          updateAgentExecutionMessage(
-            placeholderMessageId,
-            envelope.content || 'Agent 已完成，但模型没有返回额外说明。',
-            toolCalls,
-          );
-
-          attachedFiles.value = [];
-          return;
-        }
-
-        const toolCallId = `agent-tool-${round + 1}`;
-        const toolLabel = envelope.summary?.trim() || AGENT_TOOL_LABELS[envelope.name];
-
-        toolCalls.push({
-          id: toolCallId,
-          name: envelope.name,
-          status: 'running',
-          summary: toolLabel,
-        });
-
-        updateAgentStep(toolCallId, toolLabel, 'running');
-
-        updateAgentExecutionMessage(
-          placeholderMessageId,
-          `AI 正在自动使用工具：${toolLabel}`,
-          toolCalls,
-        );
-
-        const result = await executeAgentTool(envelope);
-        const nextToolCallStatus = mapToolCallExecutionStatus(result.status);
-        const nextAgentStepStatus = mapAgentStepExecutionStatus(result.status);
-        const toolCall = toolCalls.find((item) => item.id === toolCallId);
-
-        if (toolCall) {
-          toolCall.status = nextToolCallStatus;
-        }
-
-        updateAgentStep(
-          toolCallId,
-          toolLabel,
-          nextAgentStepStatus,
-        );
-
-        updateAgentExecutionMessage(
-          placeholderMessageId,
-          `AI 已自动完成工具调用：${toolLabel}`,
-          [...toolCalls],
-        );
-
-        transcript.push({
-          id: createMessageId('assistant'),
-          role: 'assistant',
-          content: modelContent,
-          createdAt: new Date().toISOString(),
-          references: [],
-        });
-
-        transcript.push({
-          id: createMessageId('system'),
-          role: 'system',
-          content: [
-            `工具 ${envelope.name} 已执行。`,
-            `摘要：${result.summary}`,
-            `状态：${result.status}`,
-            '结果：',
-            clipAgentToolResult(result.content),
-          ].join('\n'),
-          createdAt: new Date().toISOString(),
-          references: [],
-        });
-      }
-
-      updateAgentExecutionMessage(
-        placeholderMessageId,
-        'Agent 已达到本轮最大工具调用次数，请缩小问题范围后重试。',
-        [...toolCalls],
-      );
-    } catch (error) {
-      const wasAborted = activeAbortController.value?.signal.aborted;
-
-      if (!wasAborted) {
-        updateAgentExecutionMessage(
-          placeholderMessageId,
-          `Agent 执行失败：${toErrorMessage(error, MSG_CALL_FAILED)}`,
-          [...toolCalls],
-        );
-
-        errorMessage.value = toErrorMessage(error, MSG_CALL_FAILED);
-        draft.value = messageContent;
-      }
-    } finally {
-      activeAbortController.value = null;
-      activeAgentMessageId.value = null;
-      isSending.value = false;
-    }
-  };
-
-  const createProviderToolLoopRunId = (): string =>
-    `agent-tool-loop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-  const buildProviderToolCalls = (
-    payload: IAiAgentToolLoopChatPayload,
-  ): IAiToolCall[] =>
-    payload.toolResults.map((result) => ({
-      id: result.id,
-      name: result.toolName,
-      status: result.status,
-      summary: result.summary,
-    }));
-
-  const mapProviderToolActivityStatus = (
-    state: IAiToolActivityInline['state'],
-  ): IAiToolCall['status'] => {
-    switch (state) {
-      case 'starting':
-      case 'running':
-      case 'waiting-confirmation':
-        return 'running';
-      case 'succeeded':
-        return 'succeeded';
-      case 'failed':
-        return 'failed';
-      case 'cancelled':
-        return 'denied';
-      default:
-        return 'running';
-    }
-  };
-
-  const applyProviderToolActivity = (
-    runId: string,
-    activity: IAiToolActivityInline,
-  ): void => {
-    const session = activeProviderToolLoopSession.value;
-
-    if (!session || session.runId !== runId) {
-      return;
-    }
-
-    const nextToolCall: IAiToolCall = {
-      id: activity.id,
-      name: activity.toolName,
-      status: mapProviderToolActivityStatus(activity.state),
-      summary: activity.label,
-    };
-
-    const currentMessage = messages.value.find((message) => message.id === session.assistantMessageId);
-    const previousToolCalls = currentMessage?.toolCalls ?? [];
-    const nextToolCalls = [
-      ...previousToolCalls.filter((toolCall) => toolCall.name !== activity.toolName),
-      nextToolCall,
-    ];
-
-    const content = nextToolCall.status === 'running'
-      ? `AI 正在自动使用工具：${activity.label}`
-      : currentMessage?.content || 'AI 正在自动使用工具…';
-
-    updateAgentExecutionMessage(session.assistantMessageId, content, nextToolCalls);
-  };
-
-  const buildProviderToolLoopSummary = (
-    payload: IAiAgentToolLoopChatPayload,
-  ): string => {
-    if (payload.content.trim()) {
-      return payload.content.trim();
-    }
-
-    if (payload.pendingConfirmation) {
-      return `Agent 正在等待确认：${payload.pendingConfirmation.question}`;
-    }
-
-    if (payload.toolResults.length) {
-      return [
-        'Agent 已完成工具调用。',
-        ...payload.toolResults.map((result) => `- ${result.toolName}: ${result.summary}`),
-      ].join('\n');
-    }
-
-    return 'Agent 已完成。';
-  };
-
-  const executeAgentToolLoopRequest = async (
-    visibleMessages: IAiChatMessage[],
-    messageContent: string,
-    references: IAiContextReference[],
-    existingSession: IProviderToolLoopSession | null = null,
-  ): Promise<void> => {
-    errorMessage.value = '';
-    isSending.value = true;
-    agentSteps.value = [];
-
-    const session = existingSession ?? {
-      runId: createProviderToolLoopRunId(),
-      assistantMessageId: createMessageId('assistant'),
-      baseMessages: visibleMessages,
-      messageContent,
-      references,
-      toolDecisions: {},
-    };
-
-    activeProviderToolLoopSession.value = session;
-    activeAgentMessageId.value = session.assistantMessageId;
-    activeAbortController.value = new AbortController();
-
-    const placeholderMessage: IAiChatMessage = {
-      id: session.assistantMessageId,
-      role: 'assistant',
-      content: 'Agent 正在调用工具…',
-      createdAt: new Date().toISOString(),
-      references: [],
-      toolCalls: [],
-    };
-
-    if (!existingSession) {
-      messages.value = [...visibleMessages, placeholderMessage];
-    } else {
-      updateAgentExecutionMessage(
-        session.assistantMessageId,
-        'Agent 正在根据你的确认继续执行…',
-      );
-    }
-
-    try {
-      const payload = await aiService.toolLoopChat({
-        runId: session.runId,
-        messages: session.baseMessages,
-        context: session.references,
+      const payload = await aiService.sidecarExecute({
+        goal: messageContent,
+        messages: toSidecarMessages(visibleMessages, references),
         workspaceRootPath: options.workspaceRootPath.value,
-        toolDecisions: session.toolDecisions,
-        maxToolTurns: MAX_AGENT_TOOL_ROUNDS,
+        context: references,
       });
+      const projection = projectSidecarExecuteResponse(payload);
 
-      const toolCalls = buildProviderToolCalls(payload);
-
-      for (const toolCall of toolCalls) {
+      for (const toolCall of projection.toolCalls) {
         updateAgentStep(
           toolCall.id,
           toolCall.summary,
-          toolCall.status === 'succeeded' ? 'done' : 'failed',
+          mapSidecarToolCallStatusToStepStatus(toolCall.status),
         );
       }
 
       updateAgentExecutionMessage(
-        session.assistantMessageId,
-        buildProviderToolLoopSummary(payload),
-        toolCalls,
+        assistantMessageId,
+        projection.assistantContent,
+        projection.toolCalls,
       );
 
-      if (payload.pendingConfirmation) {
-        agentPlan.store.setPendingToolConfirmation(payload.pendingConfirmation);
-        activeProviderToolLoopSession.value = session;
+      if (projection.pendingConfirmation) {
+        activeSidecarAgentSession.value = {
+          sessionId: payload.sessionId,
+          assistantMessageId,
+          baseMessages: visibleMessages,
+          messageContent,
+          references,
+        };
+        agentPlan.store.setPendingToolConfirmation(projection.pendingConfirmation);
         return;
       }
 
       agentPlan.store.clearPendingToolConfirmation();
-      activeProviderToolLoopSession.value = null;
+      activeSidecarAgentSession.value = null;
       attachedFiles.value = [];
+
+      if (projection.errorMessage) {
+        errorMessage.value = projection.errorMessage;
+        draft.value = messageContent;
+      }
     } catch (error) {
       const wasAborted = activeAbortController.value?.signal.aborted;
 
       if (!wasAborted) {
         const message = toErrorMessage(error, MSG_CALL_FAILED);
-        updateAgentExecutionMessage(
-          session.assistantMessageId,
-          `Agent 执行失败：${message}`,
-        );
+        updateAgentExecutionMessage(assistantMessageId, `Agent 执行失败：${message}`);
         errorMessage.value = message;
         draft.value = messageContent;
       }
@@ -1330,10 +617,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     }
   };
 
-  const resolveProviderToolLoopConfirmation = async (
+  const resolveSidecarToolConfirmation = async (
     decision: TAiToolConfirmationDecision,
   ): Promise<void> => {
-    const session = activeProviderToolLoopSession.value;
+    const session = activeSidecarAgentSession.value;
     const confirmation = agentPlan.store.pendingToolConfirmation;
 
     if (!session || !confirmation) {
@@ -1341,31 +628,58 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       return;
     }
 
-    session.toolDecisions = {
-      ...session.toolDecisions,
-      [confirmation.id]: decision,
-      [confirmation.toolName]: decision,
-    };
-
     agentPlan.store.clearPendingToolConfirmation(confirmation.id);
 
-    if (decision === 'stop') {
-      activeProviderToolLoopSession.value = null;
+    if (decision === 'stop' || decision === 'skip') {
+      activeSidecarAgentSession.value = null;
       updateAgentExecutionMessage(
         session.assistantMessageId,
-        'Agent 工具调用已停止。',
+        decision === 'stop' ? 'Agent 工具调用已停止。' : 'Agent 工具调用已跳过。',
       );
       return;
     }
 
-    await executeAgentToolLoopRequest(
-      session.baseMessages,
-      session.messageContent,
-      session.references,
-      session,
-    );
-  };
+    isSending.value = true;
+    activeAgentMessageId.value = session.assistantMessageId;
 
+    try {
+      const payload = await aiService.sidecarResolveApproval({
+        requestId: confirmation.id,
+        decision,
+      });
+      const projection = projectSidecarExecuteResponse(payload);
+
+      updateAgentExecutionMessage(
+        session.assistantMessageId,
+        projection.assistantContent,
+        projection.toolCalls,
+      );
+
+      if (projection.pendingConfirmation) {
+        activeSidecarAgentSession.value = {
+          ...session,
+          sessionId: payload.sessionId,
+        };
+        agentPlan.store.setPendingToolConfirmation(projection.pendingConfirmation);
+        return;
+      }
+
+      activeSidecarAgentSession.value = null;
+
+      if (projection.errorMessage) {
+        errorMessage.value = projection.errorMessage;
+        draft.value = session.messageContent;
+      }
+    } catch (error) {
+      const message = toErrorMessage(error, '处理 Agent 工具确认失败。');
+      updateAgentExecutionMessage(session.assistantMessageId, `Agent 执行失败：${message}`);
+      errorMessage.value = message;
+      draft.value = session.messageContent;
+    } finally {
+      activeAgentMessageId.value = null;
+      isSending.value = false;
+    }
+  };
   // -----------------------------------------------------------------------
   // Computed
   // -----------------------------------------------------------------------
@@ -1779,8 +1093,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
 
       current.content = aiStream.content.value;
       current.stream = {
-        stableContent: aiStream.stableContent.value,
-        openBlock: aiStream.openCodeBlock.value,
         status: mapStreamStatus(aiStream.status.value),
       };
 
@@ -1908,8 +1220,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       createdAt: new Date().toISOString(),
       references: [],
       stream: {
-        stableContent: '',
-        openBlock: null,
         status: 'streaming',
       },
     };
@@ -2020,33 +1330,58 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     errorMessage.value = '';
 
     if (activeMode.value === 'agent') {
+      await executeSidecarAgentRequest(
+        nextMessages,
+        messageContent,
+        references,
+      );
+
+      return;
+    }
+
+    if (activeMode.value === 'plan') {
+      agentSteps.value = [];
+
       try {
-        await agentPlan.classifyTask(messageContent, references);
-
-        if (agentPlan.store.shouldEnterPlanMode) {
-          const steps = await agentPlan.createPlan(
-            messageContent,
-            references,
-          );
-
-          agentSteps.value = steps.map((step) => ({
-            id: step.id,
-            title: step.title,
-            status: step.status,
-          }));
-
-          return;
-        }
-
-        await executeAgentToolLoopRequest(
-          nextMessages,
+        const planResult = await agentPlan.createPlan(
           messageContent,
           references,
+          options.workspaceRootPath.value,
         );
+
+        agentSteps.value = planResult.steps.map((step) => ({
+          id: step.id,
+          title: step.title,
+          status: step.status,
+        }));
+
+        messages.value = [
+          ...nextMessages,
+          {
+            id: createMessageId('assistant'),
+            role: 'assistant',
+            content: planResult.assistantContent,
+            createdAt: new Date().toISOString(),
+            references: [],
+            toolCalls: planResult.toolCalls,
+          },
+        ];
 
         return;
       } catch (error) {
-        errorMessage.value = toErrorMessage(error, '生成计划失败。');
+        const message = toErrorMessage(error, '生成计划失败。');
+        errorMessage.value = message;
+        agentSteps.value = [];
+        messages.value = [
+          ...nextMessages,
+          {
+            id: createMessageId('assistant'),
+            role: 'assistant',
+            content: `计划生成失败：${message}`,
+            createdAt: new Date().toISOString(),
+            references: [],
+          },
+        ];
         draft.value = messageContent;
         return;
       }
@@ -2082,7 +1417,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     activeAssistantMessage.value = null;
     activeAssistantBaseMessages.value = [];
     activeAgentMessageId.value = null;
-    activeProviderToolLoopSession.value = null;
+    activeSidecarAgentSession.value = null;
     agentPlan.store.clearPendingToolConfirmation();
     isClearDialogOpen.value = false;
   };
@@ -2122,41 +1457,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     errorMessage.value = '';
   };
 
-  const previewPatchFromCodeBlock = async (
-    block: IAiCodeBlock,
-  ): Promise<void> => {
-    const document = options.document.value;
-
-    if (!document.path || document.kind !== 'text') {
-      errorMessage.value = '当前文件尚未保存，无法生成 Patch 预览。';
-      return;
-    }
-
-    if (block.fence.meta.filePath && block.fence.meta.filePath !== document.path) {
-      errorMessage.value = '代码块目标文件不是当前文件，暂不能直接生成 Patch 预览。';
-      return;
-    }
-
-    if (!block.content.trim()) {
-      errorMessage.value = '代码块内容为空，无法生成 Patch 预览。';
-      return;
-    }
-
-    try {
-      const payload = await aiService.proposePatch({
-        path: document.path,
-        originalContent: document.content,
-        updatedContent: block.content,
-        summary: '应用 AI 代码块',
-      });
-
-      proposedPatch.value = payload.patch;
-      errorMessage.value = '';
-    } catch (error) {
-      errorMessage.value = toErrorMessage(error, 'Patch 预览失败');
-    }
-  };
-
   const applyProposedPatch = async (): Promise<void> => {
     const patch = proposedPatch.value;
 
@@ -2175,6 +1475,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
           reason: patch.summary,
           toolCallId: null,
           confirmedByUser: true,
+          ...(buildActiveAgentPatchMetadata() ?? {}),
         },
       });
 
@@ -2222,8 +1523,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
 
     if (activeAssistantMessage.value) {
       activeAssistantMessage.value.stream = {
-        stableContent: aiStream.stableContent.value,
-        openBlock: aiStream.openCodeBlock.value,
         status: 'cancelled',
       };
       activeAssistantMessage.value.content = aiStream.content.value;
@@ -2242,7 +1541,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       activeAgentMessageId.value = null;
     }
 
-    activeProviderToolLoopSession.value = null;
+    activeSidecarAgentSession.value = null;
     agentPlan.store.clearPendingToolConfirmation();
     isSending.value = false;
     errorMessage.value = MSG_STREAM_CANCELLED;
@@ -2283,14 +1582,11 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     applyQuickAction,
     attachFile,
     removeAttachedFile,
-    executeAgentRequest,
-    applyProviderToolActivity,
-    resolveProviderToolLoopConfirmation,
+    resolveSidecarToolConfirmation,
     sendMessage,
     handleMessageAction,
     stopCurrentRequest,
     previewPatchFromLastAnswer,
-    previewPatchFromCodeBlock,
     applyProposedPatch,
     clearConversation,
     startNewConversation,

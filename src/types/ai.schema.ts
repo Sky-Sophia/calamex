@@ -60,13 +60,9 @@ import {
   aiAgentTimelineItemSchema,
   aiAgentTimelineItemStatusSchema,
   aiAgentTimelineItemTypeSchema,
-  aiAgentToolLoopChatPayloadSchema,
-  aiAgentToolLoopChatRequestSchema,
-  aiAgentToolLoopResultSchema,
   aiAgentToolNameSchema,
   aiTaskPlanStepSchema,
 } from '@/types/ai-agent.schema';
-import { aiCodeBlockSchema } from '@/types/ai-code.schema';
 
 export const aiProviderTypeSchema = z.enum([
   'mock',
@@ -109,8 +105,6 @@ export const aiChatMessageSchema = z.object({
   actions: z.array(aiChatMessageActionSchema).optional(),
   agentConfirmation: aiAgentConfirmationStateSchema.optional(),
   stream: z.object({
-    stableContent: z.string(),
-    openBlock: aiCodeBlockSchema.nullable(),
     status: z.enum(['streaming', 'completed', 'cancelled']),
   }).optional(),
 });
@@ -281,9 +275,6 @@ export {
   aiAgentTimelineItemSchema,
   aiAgentTimelineItemStatusSchema,
   aiAgentTimelineItemTypeSchema,
-  aiAgentToolLoopChatPayloadSchema,
-  aiAgentToolLoopChatRequestSchema,
-  aiAgentToolLoopResultSchema,
   aiAgentToolNameSchema,
   aiContextKindSchema,
   aiContextRangeSchema,

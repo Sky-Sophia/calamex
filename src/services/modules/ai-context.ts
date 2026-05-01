@@ -17,16 +17,26 @@ const clipPreview = (value: string): string => {
   return `${chars.slice(0, MAX_CONTEXT_PREVIEW_CHARS).join('')}\n[已截断]`;
 };
 
+const normalizeContextPath = (path: string | null | undefined): string | null => {
+  if (typeof path !== 'string') {
+    return null;
+  }
+
+  return path.trim() ? path : null;
+};
+
 export const buildCurrentFileReference = (document: IEditorDocument): IAiContextReference | null => {
   if (!document.id || document.kind !== 'text') {
     return null;
   }
 
+  const path = normalizeContextPath(document.path);
+
   return {
-    id: `current-file:${document.path ?? document.id}`,
+    id: `current-file:${path ?? document.id}`,
     kind: 'current-file',
     label: document.name,
-    path: document.path,
+    path,
     range: null,
     contentPreview: clipPreview(document.content),
     redacted: false,
@@ -41,11 +51,13 @@ export const buildSelectionReference = (
     return null;
   }
 
+  const path = normalizeContextPath(document.path);
+
   return {
     id: `selection:${document.id}:${selection.startLine}-${selection.endLine}`,
     kind: 'selection',
     label: `${document.name}:${selection.startLine}-${selection.endLine}`,
-    path: document.path,
+    path,
     range: {
       startLine: selection.startLine,
       endLine: selection.endLine,
@@ -62,15 +74,17 @@ export const buildActiveRunReference = (
     return null;
   }
 
+  const path = normalizeContextPath(activeRun.documentPath);
+
   return {
     id: `terminal-log:${activeRun.runId}`,
     kind: 'terminal-log',
     label: activeRun.documentName,
-    path: activeRun.documentPath,
+    path,
     range: null,
     contentPreview: clipPreview([
       `运行文件：${activeRun.documentName}`,
-      `路径：${activeRun.documentPath ?? '未保存'}`,
+      `路径：${path ?? '未保存'}`,
       `命令：${activeRun.commandLine}`,
       `执行器：${activeRun.executorLabel}`,
       `开始时间：${activeRun.startedAt}`,
@@ -102,7 +116,7 @@ export const buildDiagnosticsReference = (
     id: `diagnostics:${document.id || document.path || document.name}`,
     kind: 'diagnostics',
     label: `${document.name} · ${analysis.diagnostics.length} 个问题`,
-    path: document.path,
+    path: normalizeContextPath(document.path),
     range: null,
     contentPreview: clipPreview(preview),
     redacted: false,
@@ -131,7 +145,7 @@ export const buildGitDiffReference = (
     id: `git-diff:${status.repositoryRootPath ?? 'workspace'}`,
     kind: 'git-diff',
     label: `${status.files.length} 个 Git 变更`,
-    path: status.repositoryRootPath,
+    path: normalizeContextPath(status.repositoryRootPath),
     range: null,
     contentPreview: clipPreview(preview),
     redacted: false,

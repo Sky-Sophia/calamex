@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt;
 use std::ops::Deref;
 
@@ -1181,46 +1180,6 @@ pub struct AiAgentRunIdRequest {
     pub(crate) run_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiAgentToolLoopChatRequest {
-    pub(crate) run_id: String,
-    pub(crate) messages: Vec<AiChatMessagePayload>,
-    #[serde(default)]
-    pub(crate) context: Vec<AiContextReferencePayload>,
-    pub(crate) workspace_root_path: Option<String>,
-    #[serde(default)]
-    pub(crate) tool_decisions: HashMap<String, String>,
-    pub(crate) max_tool_turns: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiAgentToolLoopResultPayload {
-    pub(crate) id: String,
-    pub(crate) run_id: String,
-    pub(crate) step_id: String,
-    pub(crate) tool_name: String,
-    pub(crate) status: String,
-    pub(crate) requires_user_confirmation: bool,
-    pub(crate) summary: String,
-    pub(crate) output_ref: Option<String>,
-    pub(crate) started_at: String,
-    pub(crate) ended_at: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiAgentToolLoopChatPayload {
-    pub(crate) content: String,
-    pub(crate) model: String,
-    pub(crate) stop_reason: String,
-    pub(crate) turns: usize,
-    pub(crate) pending_decision_key: Option<String>,
-    pub(crate) pending_confirmation: Option<AiToolConfirmationRequestPayload>,
-    pub(crate) tool_results: Vec<AiAgentToolLoopResultPayload>,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiAgentRunEnvelopePayload {
@@ -1340,4 +1299,82 @@ pub struct AiIndexResultPayload {
 pub struct AiQueryIndexPayload {
     pub(crate) root_path: String,
     pub(crate) results: Vec<AiIndexResultPayload>,
+}
+
+// ============================================================================
+// Agent sidecar
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSidecarMessagePayload {
+    pub(crate) role: String,
+    pub(crate) content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSidecarChatRequest {
+    pub(crate) session_id: Option<String>,
+    pub(crate) mode: Option<String>,
+    pub(crate) goal: Option<String>,
+    pub(crate) messages: Vec<AgentSidecarMessagePayload>,
+    pub(crate) workspace_root_path: Option<String>,
+    #[serde(default)]
+    pub(crate) context: Vec<AiContextReferencePayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSidecarPlanRequest {
+    pub(crate) session_id: Option<String>,
+    pub(crate) goal: String,
+    pub(crate) messages: Vec<AgentSidecarMessagePayload>,
+    pub(crate) workspace_root_path: Option<String>,
+    #[serde(default)]
+    pub(crate) context: Vec<AiContextReferencePayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSidecarExecuteRequest {
+    pub(crate) session_id: Option<String>,
+    pub(crate) goal: String,
+    pub(crate) messages: Vec<AgentSidecarMessagePayload>,
+    pub(crate) workspace_root_path: Option<String>,
+    #[serde(default)]
+    pub(crate) context: Vec<AiContextReferencePayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSidecarApprovalResolveRequest {
+    pub(crate) request_id: String,
+    pub(crate) decision: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSidecarMcpHealthPayload {
+    pub(crate) configured_servers: u32,
+    pub(crate) server_names: Vec<String>,
+    pub(crate) errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSidecarHealthPayload {
+    pub(crate) ok: bool,
+    pub(crate) status: String,
+    pub(crate) engine: String,
+    pub(crate) version: Option<String>,
+    pub(crate) mcp: AgentSidecarMcpHealthPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSidecarResponsePayload {
+    pub(crate) session_id: String,
+    pub(crate) events: Vec<serde_json::Value>,
+    pub(crate) result: Option<String>,
 }

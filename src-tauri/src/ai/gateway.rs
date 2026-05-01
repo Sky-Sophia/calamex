@@ -6,10 +6,6 @@ use super::provider::{AiProviderChatRequest, AiProviderMessage, AiProviderRespon
 use super::redaction::redact_text;
 use super::stream_manager;
 use crate::ai_agent::planner::AgentPlanner;
-use crate::ai_agent::provider_loop::{
-    run_agent_provider_loop_async, AgentProviderLoopOutcome, AgentProviderLoopRequest,
-};
-use crate::ai_agent::tool_loop::AgentToolRuntimeServices;
 use crate::commands::contracts::{
     AiAgentApprovePlanPayload, AiAgentApprovePlanRequest, AiAgentClassifyTaskPayload,
     AiAgentClassifyTaskRequest, AiAgentPlanPayload, AiAgentPlanRequest, AiChatRequest,
@@ -355,60 +351,6 @@ pub async fn chat(payload: AiChatRequest) -> Result<AiProviderResponse, String> 
             Err(error)
         }
     }
-}
-
-pub async fn agent_tool_loop_chat(
-    request: AgentProviderLoopRequest,
-    services: Option<&dyn AgentToolRuntimeServices>,
-) -> Result<AgentProviderLoopOutcome, String> {
-    audit::emit(AiAuditEventKind::ChatStarted);
-
-    let result = async {
-        let config = current_config()?;
-        ensure_chat_enabled(&config)?;
-
-        run_agent_provider_loop_async(
-            request,
-            services,
-            |provider_request| {
-                let config = config.clone();
-                async move { call_provider_once(config, provider_request).await }
-            },
-            || false,
-        )
-        .await
-    }
-    .await;
-
-    match result {
-        Ok(outcome) => {
-            audit::emit(AiAuditEventKind::ChatCompleted);
-            Ok(outcome)
-        }
-        Err(error) => {
-            audit::emit(AiAuditEventKind::ChatFailed);
-            Err(error)
-        }
-    }
-}
-
-async fn call_provider_once(
-    config: AiRuntimeConfig,
-    request: AiProviderChatRequest,
-) -> Result<AiProviderResponse, String> {
-    if config.provider_type == "mock" {
-        return Ok(MockProvider::chat(request));
-    }
-
-    let base_url = resolve_base_url(&config)?.to_string();
-    let api_key = CredentialStore::get(&config.provider_type)?;
-    let model = config
-        .selected_model
-        .as_deref()
-        .unwrap_or(DEFAULT_OPENAI_MODEL)
-        .to_string();
-
-    openai_compatible::chat(&base_url, &api_key, &model, request).await
 }
 
 pub async fn chat_stream(

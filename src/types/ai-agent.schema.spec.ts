@@ -7,7 +7,6 @@ import {
   aiAgentRunPlanRequestSchema,
   aiAgentPermissionStateSchema,
   aiAgentPlanPayloadSchema,
-  aiAgentToolLoopChatPayloadSchema,
 } from '@/types/ai-agent.schema';
 import { describe, expect, it } from 'vitest';
 
@@ -195,46 +194,4 @@ describe('AI agent schema', () => {
     ).toThrow();
   });
 
-  it('accepts Rust pending-confirmation payload with nullable option fields', () => {
-    const parsed = aiAgentToolLoopChatPayloadSchema.parse({
-      content: '',
-      model: 'deepseek-v4-pro',
-      stopReason: 'tool-confirmation-required',
-      turns: 4,
-      pendingDecisionKey: 'call_00_h3Afrhbr3X1s3Vrp5HMRvNT3',
-      pendingConfirmation: {
-        id: 'call_00_h3Afrhbr3X1s3Vrp5HMRvNT3',
-        runId: 'agent-tool-loop-1777525705908-6obhnx',
-        stepId: 'tool-call-step:propose_patch:call_00_h3Afrhbr3X1s3Vrp5HMRvNT3',
-        toolName: 'propose_patch',
-        question: '允许 Agent 使用 propose_patch 吗？',
-        summary: 'Tool propose_patch requires inline user confirmation.',
-        riskLevel: 'medium',
-        impact: null,
-        reversible: true,
-        createdAt: '2026-04-30T12:00:00.000Z',
-        options: [{
-          id: 'allow-once',
-          label: '允许本次',
-          tone: null,
-        }],
-      },
-      toolResults: [{
-        id: 'agent-tool-loop-1777525705908-6obhnx:tool-call-step:propose_patch:call_00_h3Afrhbr3X1s3Vrp5HMRvNT3:propose_patch',
-        runId: 'agent-tool-loop-1777525705908-6obhnx',
-        stepId: 'tool-call-step:propose_patch:call_00_h3Afrhbr3X1s3Vrp5HMRvNT3',
-        toolName: 'propose_patch',
-        status: 'failed',
-        requiresUserConfirmation: true,
-        summary: 'Tool propose_patch requires inline user confirmation.',
-        outputRef: null,
-        startedAt: '2026-04-30T12:00:00.000Z',
-        endedAt: '2026-04-30T12:00:01.000Z',
-      }],
-    });
-
-    expect(parsed.pendingConfirmation?.impact).toBeUndefined();
-    expect(parsed.pendingConfirmation?.options[0]?.tone).toBeUndefined();
-    expect(parsed.toolResults[0]?.outputRef).toBeUndefined();
-  });
 });

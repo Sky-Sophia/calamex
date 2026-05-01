@@ -1,5 +1,13 @@
 import { tauriService } from '@/services/tauri';
 import type {
+  IAgentSidecarApprovalResolveRequest,
+  IAgentSidecarChatRequest,
+  IAgentSidecarExecuteRequest,
+  IAgentSidecarHealthPayload,
+  IAgentSidecarPlanRequest,
+  IAgentSidecarResponsePayload,
+} from '@/types/agent-sidecar';
+import type {
   IAiEditGetDiffPayload,
   IAiEditGetDiffRequest,
 } from '@/types/ai-edit';
@@ -18,8 +26,6 @@ import type {
   IAiAgentRunStepRequest,
   IAiAgentResolveToolConfirmationRequest,
   IAiAgentSetNetworkPermissionRequest,
-  IAiAgentToolLoopChatPayload,
-  IAiAgentToolLoopChatRequest,
   IAiApplyPatchPayload,
   IAiApplyPatchRequest,
   IAiBuildIndexPayload,
@@ -51,6 +57,23 @@ import type {
 } from '@/types/ai';
 
 export const aiService = {
+  sidecarHealth(): Promise<IAgentSidecarHealthPayload> {
+    return tauriService.agentSidecarHealth();
+  },
+  sidecarChat(payload: IAgentSidecarChatRequest): Promise<IAgentSidecarResponsePayload> {
+    return tauriService.agentSidecarChat(payload);
+  },
+  sidecarPlan(payload: IAgentSidecarPlanRequest): Promise<IAgentSidecarResponsePayload> {
+    return tauriService.agentSidecarPlan(payload);
+  },
+  sidecarExecute(payload: IAgentSidecarExecuteRequest): Promise<IAgentSidecarResponsePayload> {
+    return tauriService.agentSidecarExecute(payload);
+  },
+  sidecarResolveApproval(
+    payload: IAgentSidecarApprovalResolveRequest,
+  ): Promise<IAgentSidecarResponsePayload> {
+    return tauriService.agentSidecarResolveApproval(payload);
+  },
   getConfig(): Promise<IAiConfigPayload> {
     return tauriService.aiGetConfig();
   },
@@ -132,9 +155,6 @@ export const aiService = {
     payload: IAiAgentResolveToolConfirmationRequest,
   ): Promise<IAiAgentRunPayload> {
     return tauriService.aiAgentResolveToolConfirmation(payload);
-  },
-  toolLoopChat(payload: IAiAgentToolLoopChatRequest): Promise<IAiAgentToolLoopChatPayload> {
-    return tauriService.aiAgentToolLoopChat(payload);
   },
   webSearch(payload: IAiWebSearchInput): Promise<IAiWebSearchPayload> {
     return tauriService.aiWebSearch(payload);

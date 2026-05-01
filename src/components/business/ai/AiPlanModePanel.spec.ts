@@ -72,7 +72,7 @@ describe('AiPlanModePanel', () => {
 
     expect(wrapper.text()).toContain('待办事项');
     expect(wrapper.text()).toContain('正在判断是否需要计划');
-    expect(wrapper.find('.ai-plan-tool-dots').exists()).toBe(true);
+    expect(wrapper.find('.ai-plan-status-icon').exists()).toBe(true);
   });
 
   it('展示计划步骤并支持批准计划', async () => {
@@ -86,6 +86,31 @@ describe('AiPlanModePanel', () => {
     await wrapper.find('.ai-plan-button.is-primary').trigger('click');
 
     expect(wrapper.emitted('approve')).toHaveLength(1);
+  });
+
+  it('收起待办事项框后隐藏计划内容和运行按钮', async () => {
+    const steps = [createStep(0), createStep(1), createStep(2)];
+    const wrapper = mountPanel({
+      steps,
+      approvedAt: '2026-04-29T10:00:00.000Z',
+      activeRun: createRun(steps),
+    });
+
+    expect(wrapper.get('.ai-plan-title-button').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.find('.ai-plan-body').exists()).toBe(true);
+    expect(wrapper.text()).toContain('执行下一步');
+
+    await wrapper.get('.ai-plan-title-button').trigger('click');
+
+    expect(wrapper.get('.ai-plan-title-button').attributes('aria-expanded')).toBe('false');
+    expect(wrapper.find('.ai-plan-body').exists()).toBe(false);
+    expect(wrapper.text()).toContain('待办事项(0/3)');
+    expect(wrapper.text()).not.toContain('执行下一步');
+
+    await wrapper.get('.ai-plan-title-button').trigger('click');
+
+    expect(wrapper.get('.ai-plan-title-button').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.find('.ai-plan-body').exists()).toBe(true);
   });
 
   it('计划已批准后禁用批准按钮并展示待执行说明', async () => {
@@ -175,7 +200,7 @@ describe('AiPlanModePanel', () => {
     });
 
     expect(wrapper.text()).toContain('Tauri docs');
-    expect(wrapper.find('.ai-web-activity-dots').exists()).toBe(true);
+    expect(wrapper.find('.ai-web-activity-spinner').exists()).toBe(true);
   });
 
   it('在计划下方实时展示当前普通工具活动', () => {
@@ -191,40 +216,6 @@ describe('AiPlanModePanel', () => {
     });
 
     expect(wrapper.text()).toContain('正在读取当前文件…');
-    expect(wrapper.find('.ai-plan-tool-dots').exists()).toBe(true);
+    expect(wrapper.find('.ai-plan-status-icon').exists()).toBe(true);
   });
-
-  it('展示当前 step detail 的工具结果与来源摘要', () => {
-    const wrapper = mountPanel({
-      activeStepDetail: {
-        runId: 'agent-run-1',
-        stepId: 'plan-step-1',
-        updatedAt: '2026-04-29T10:00:00.000Z',
-        webSources: [{
-          id: 'web-source-1',
-          title: 'Tauri Docs',
-          url: 'https://tauri.app/start/',
-          sourceType: 'docs',
-          status: 'fetched',
-          queryPreview: 'Tauri docs',
-          fetchedAt: '2026-04-29T10:00:00.000Z',
-          textRef: 'web-text:abc',
-          excerpt: 'Tauri docs excerpt',
-        }],
-        toolResults: [{
-          id: 'tool-result-1',
-          runId: 'agent-run-1',
-          stepId: 'plan-step-1',
-          toolName: 'web_search',
-          status: 'succeeded',
-          summary: '搜索到 1 个来源',
-          startedAt: '2026-04-29T10:00:00.000Z',
-          endedAt: '2026-04-29T10:00:01.000Z',
-        }],
-      },
-    });
-
-    expect(wrapper.text()).toContain('Step Detail');
-    expect(wrapper.text()).toContain('Tauri Docs');
-    expect(wrapper.text()).toContain('搜索到 1 个来源');
-  });});
+});

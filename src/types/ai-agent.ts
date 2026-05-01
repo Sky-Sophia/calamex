@@ -149,9 +149,19 @@ export interface IAiPatchSetToolInput {
   files: IAiPatchFileToolInput[];
 }
 
+export interface IAiApplyPatchMetadataToolInput {
+  taskId?: string | null;
+  turnId?: string | null;
+  reason?: string | null;
+  toolCallId?: string | null;
+  confirmedByUser?: boolean | null;
+  agentRunId?: string | null;
+  agentStepId?: string | null;
+}
+
 export interface IAiAutoApplyPatchToolInput {
   patch: IAiPatchSetToolInput;
-  reason: string;
+  metadata?: IAiApplyPatchMetadataToolInput | null;
 }
 
 export interface IAiAgentToolInputs {
@@ -256,6 +266,14 @@ export interface IAiAgentStepDetail {
   updatedAt: string;
 }
 
+export interface IAiAgentStepFinalAnswer {
+  id: string;
+  runId: string;
+  stepId: string;
+  content: string;
+  createdAt: string;
+}
+
 export interface IAiAgentTimelineItem {
   id: string;
   runId: string;
@@ -282,44 +300,6 @@ export interface IAiAgentRunStepRequest {
 
 export interface IAiAgentRunIdRequest {
   runId: string;
-}
-
-export interface IAiAgentToolLoopChatRequest {
-  runId: string;
-  messages: Array<{
-    id: string;
-    role: 'user' | 'assistant' | 'system' | 'tool';
-    content: string;
-    createdAt: string;
-    references: IAiContextReference[];
-  }>;
-  context: IAiContextReference[];
-  workspaceRootPath?: string | null;
-  toolDecisions?: Record<string, TAiToolConfirmationDecision>;
-  maxToolTurns?: number;
-}
-
-export interface IAiAgentToolLoopResult {
-  id: string;
-  runId: string;
-  stepId: string;
-  toolName: TAiAgentToolName;
-  status: 'succeeded' | 'failed';
-  requiresUserConfirmation: boolean;
-  summary: string;
-  outputRef?: string;
-  startedAt: string;
-  endedAt: string;
-}
-
-export interface IAiAgentToolLoopChatPayload {
-  content: string;
-  model: string;
-  stopReason: 'completed' | 'tool-confirmation-required';
-  turns: number;
-  pendingDecisionKey: string | null;
-  pendingConfirmation: IAiToolConfirmationRequest | null;
-  toolResults: IAiAgentToolLoopResult[];
 }
 
 export interface IAiAgentRunPayload {

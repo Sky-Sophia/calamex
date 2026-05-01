@@ -1,10 +1,13 @@
 import AiAssistantPanel from '@/components/business/ai/AiAssistantPanel.vue';
 import type {
+    IAiAgentRun,
+    IAiAgentStepFinalAnswer,
     IAiChatMessage,
     IAiConfigPayload,
     IAiContextReference,
     IAiPatchSet,
     IAiTaskPlanStep,
+    IAiToolActivityInline,
     IAiToolConfirmationRequest,
 } from '@/types/ai';
 import { createPinia, setActivePinia } from 'pinia';
@@ -60,7 +63,7 @@ const createAssistantMock = (
     const messages = ref<IAiChatMessage[]>(messagesList);
     const historyThreads = ref<IAiConversationThreadMock[]>(historyThreadsList);
     const activeConversationId = ref<string | null>(historyThreadsList.at(-1)?.id ?? null);
-    const activeMode = ref<'chat' | 'agent'>('chat');
+    const activeMode = ref<'chat' | 'agent' | 'plan'>('agent');
     const isSettingsOpen = ref(false);
     const isClearDialogOpen = ref(false);
     const isSending = ref(false);
@@ -83,9 +86,20 @@ const createAssistantMock = (
         approvedAt: null,
         errorMessage: '',
         hasPlan: false,
-        activeRun: null,
+        isClassifying: false,
+        activeRunId: null as string | null,
+        activeRun: null as IAiAgentRun | null,
+        stepDetails: {},
+        stepFinalAnswers: {},
+        patchSummaries: {},
+        toolActivities: {},
         pendingToolConfirmation: null as IAiToolConfirmationRequest | null,
         activeToolActivity: null,
+        getToolActivities: vi.fn((): IAiToolActivityInline[] => []),
+        getStepFinalAnswers: vi.fn((): IAiAgentStepFinalAnswer[] => []),
+        getPatchSummaries: vi.fn(() => []),
+        appendStepToolResults: vi.fn(),
+        setStepWebSources: vi.fn(),
     };
 
     return {
@@ -123,9 +137,9 @@ const createAssistantMock = (
         testProviderConfig: vi.fn().mockResolvedValue('ok'),
         connectProvider: vi.fn().mockResolvedValue('ok'),
         testProvider: vi.fn().mockResolvedValue('ok'),
-        previewPatchFromCodeBlock: vi.fn(),
         previewPatchFromLastAnswer: vi.fn(),
         applyProposedPatch: vi.fn(),
+        resolveSidecarToolConfirmation: vi.fn(),
         sendMessage: vi.fn(),
         handleMessageAction: vi.fn(),
         stopCurrentRequest: vi.fn(),
@@ -143,6 +157,39 @@ const createMessage = (index: number): IAiChatMessage => ({
     content: `第 ${index} 条对话内容\n这是完整内容 ${index}`,
     createdAt: new Date(Date.UTC(2026, 3, 28, 10, index % 60, 0)).toISOString(),
     references: [],
+});
+
+const createPlanStep = (
+    id: string,
+    title: string,
+    status: IAiTaskPlanStep['status'] = 'pending',
+): IAiTaskPlanStep => ({
+    id,
+    index: Number(id.replace('plan-step-', '')) - 1,
+    title,
+    goal: title,
+    kind: status === 'done' ? 'verify' : 'inspect',
+    status,
+    expectedOutput: `${title}的输出`,
+    tools: status === 'running' ? ['read_file'] : ['get_diagnostics'],
+    requiresUserApproval: false,
+    riskLevel: 'low',
+});
+
+const createAgentRun = (
+    steps: IAiTaskPlanStep[],
+    currentStepId: string | null,
+): IAiAgentRun => ({
+    id: 'agent-run-complex-1',
+    goal: '把 run timeline 改成对话流里的实时活动，修复计划折叠按钮，并补全过程测试',
+    status: currentStepId ? 'running-step' : 'completed',
+    steps,
+    currentStepId,
+    createdAt: '2026-04-29T10:00:00.000Z',
+    updatedAt: '2026-04-29T10:00:03.000Z',
+    startedAt: '2026-04-29T10:00:00.000Z',
+    completedAt: currentStepId ? null : '2026-04-29T10:00:03.000Z',
+    errorMessage: null,
 });
 
 const createThread = (index: number): IAiConversationThreadMock => {
@@ -203,9 +250,9 @@ describe('AiAssistantPanel', () => {
         setActivePinia(createPinia());
     });
 
-    it('shows plan panel in agent mode when a plan exists', () => {
+    it('shows plan panel only in plan mode when a plan exists', () => {
         const assistantMock = createAssistantMock([]);
-        assistantMock.activeMode.value = 'agent';
+        assistantMock.activeMode.value = 'plan';
         assistantMock.agentPlan.store.hasPlan = true;
         assistantMock.agentPlan.store.activeGoal = '补齐计划模式 UI 接线';
         assistantMock.agentPlan.store.steps = [
@@ -244,7 +291,6 @@ describe('AiAssistantPanel', () => {
                 selection: null as IEditorSelectionSummary | null,
                 gitStatus: createGitStatus(),
                 workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
-                onOpenCodePath: () => undefined,
             },
             global: {
                 stubs: {
@@ -262,7 +308,39 @@ describe('AiAssistantPanel', () => {
         expect(wrapper.find('[data-testid="plan-mode-panel"]').exists()).toBe(true);
     });
 
-    it('shows inline confirmation in agent mode even without an active plan', () => {
+    it('does not show the plan panel in agent mode even when stale plan state exists', () => {
+        const assistantMock = createAssistantMock([]);
+        assistantMock.activeMode.value = 'agent';
+        assistantMock.agentPlan.store.hasPlan = true;
+        assistantMock.agentPlan.store.steps = [createPlanStep('plan-step-1', 'stale plan')];
+        useAiAssistantMock.mockReturnValue(assistantMock);
+
+        const wrapper = mount(AiAssistantPanel, {
+            props: {
+                document: createDocument(),
+                activeRun: null as IActiveRunSummary | null,
+                analysis: createAnalysis(),
+                selection: null as IEditorSelectionSummary | null,
+                gitStatus: createGitStatus(),
+                workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+            },
+            global: {
+                stubs: {
+                    AiChatThread: { template: '<div />' },
+                    AiContextChips: { template: '<div />' },
+                    AiPatchPreview: { template: '<div />' },
+                    AiPromptInput: { template: '<div />' },
+                    AiProviderSettings: { template: '<div />' },
+                    AiPlanModePanel: { template: '<div data-testid="plan-mode-panel" />' },
+                    teleport: true,
+                },
+            },
+        });
+
+        expect(wrapper.find('[data-testid="plan-mode-panel"]').exists()).toBe(false);
+    });
+
+    it('简单工具确认不再冒充计划面板', () => {
         const assistantMock = createAssistantMock([]);
         assistantMock.activeMode.value = 'agent';
         assistantMock.agentPlan.store.pendingToolConfirmation = {
@@ -292,7 +370,6 @@ describe('AiAssistantPanel', () => {
                 selection: null as IEditorSelectionSummary | null,
                 gitStatus: createGitStatus(),
                 workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
-                onOpenCodePath: () => undefined,
             },
             global: {
                 stubs: {
@@ -307,7 +384,168 @@ describe('AiAssistantPanel', () => {
             },
         });
 
-        expect(wrapper.find('[data-testid="plan-mode-panel"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="plan-mode-panel"]').exists()).toBe(false);
+        expect(wrapper.text()).toContain('允许 Agent 执行 pnpm test 吗？');
+        expect(wrapper.text()).toContain('允许一次');
+    });
+
+    it('简单任务的工具活动只留在对话流，不触发计划框', () => {
+        const assistantMock = createAssistantMock([{
+            id: 'message-user-simple',
+            role: 'user',
+            content: '解释当前脚本',
+            createdAt: '2026-04-29T10:00:00.000Z',
+            references: [],
+        }]);
+        assistantMock.activeMode.value = 'agent';
+        assistantMock.agentPlan.store.classificationReason = '任务可在单轮内完成，可直接执行。';
+        assistantMock.agentPlan.store.activeToolActivity = {
+            id: 'activity-read-file',
+            stepId: 'tool-call-step:read_file:call-read',
+            toolName: 'read_file',
+            state: 'running',
+            label: '正在读取 test.sh…',
+            startedAt: '2026-04-29T10:00:01.000Z',
+        };
+        useAiAssistantMock.mockReturnValue(assistantMock);
+
+        const wrapper = mount(AiAssistantPanel, {
+            props: {
+                document: createDocument(),
+                activeRun: null as IActiveRunSummary | null,
+                analysis: createAnalysis(),
+                selection: null as IEditorSelectionSummary | null,
+                gitStatus: createGitStatus(),
+                workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+            },
+            global: {
+                stubs: {
+                    AiChatThread: {
+                        props: ['messages'],
+                        template: `
+                            <section data-testid="chat-thread">
+                                <p v-for="message in messages" :key="message.id">{{ message.content }}</p>
+                            </section>
+                        `,
+                    },
+                    AiContextChips: { template: '<div />' },
+                    AiPatchPreview: { template: '<div />' },
+                    AiPromptInput: { template: '<div />' },
+                    AiProviderSettings: { template: '<div />' },
+                    AiPlanModePanel: { template: '<div data-testid="plan-mode-panel" />' },
+                    teleport: true,
+                },
+            },
+        });
+
+        expect(wrapper.find('[data-testid="plan-mode-panel"]').exists()).toBe(false);
+        expect(wrapper.get('[data-testid="chat-thread"]').text()).toContain('解释当前脚本');
+    });
+
+    it('把复杂任务全过程显示在对话流里，包含用户提问、运行活动和 AI 最终回答', () => {
+        const userQuestion = '把 run timeline 改成对话流里的实时活动，修复计划折叠按钮，并补全过程测试';
+        const finalAnswer = '已修复：运行活动进入对话流，计划按钮可收起，并补齐全过程测试。';
+        const assistantMock = createAssistantMock([
+            {
+                id: 'message-user-complex',
+                role: 'user',
+                content: userQuestion,
+                createdAt: '2026-04-29T10:00:00.000Z',
+                references: [],
+            },
+        ]);
+        const steps = [
+            createPlanStep('plan-step-1', '定位对话流运行反馈', 'done'),
+            createPlanStep('plan-step-2', '修复计划折叠交互', 'running'),
+            createPlanStep('plan-step-3', '执行全过程测试', 'pending'),
+        ];
+        const activeRun = createAgentRun(steps, 'plan-step-2');
+
+        assistantMock.activeMode.value = 'plan';
+        assistantMock.agentPlan.store.hasPlan = true;
+        assistantMock.agentPlan.store.activeGoal = userQuestion;
+        assistantMock.agentPlan.store.steps = steps;
+        assistantMock.agentPlan.store.activeRunId = activeRun.id;
+        assistantMock.agentPlan.store.activeRun = activeRun;
+        assistantMock.agentPlan.store.getToolActivities = vi.fn((): IAiToolActivityInline[] => [
+            {
+                id: 'activity-read-file',
+                stepId: 'plan-step-2',
+                toolName: 'read_file',
+                state: 'running',
+                label: '正在读取 AiAssistantPanel.vue…',
+                startedAt: '2026-04-29T10:00:01.000Z',
+            },
+            {
+                id: 'activity-run-test',
+                stepId: 'plan-step-3',
+                toolName: 'run_test',
+                state: 'succeeded',
+                label: '已运行全过程测试',
+                startedAt: '2026-04-29T10:00:02.000Z',
+            },
+        ]);
+        assistantMock.agentPlan.store.getStepFinalAnswers = vi.fn((): IAiAgentStepFinalAnswer[] => [
+            {
+                id: 'final-answer-1',
+                runId: activeRun.id,
+                stepId: 'plan-step-3',
+                content: finalAnswer,
+                createdAt: '2026-04-29T10:00:03.000Z',
+            },
+        ]);
+        useAiAssistantMock.mockReturnValue(assistantMock);
+
+        const wrapper = mount(AiAssistantPanel, {
+            props: {
+                document: createDocument(),
+                activeRun: null as IActiveRunSummary | null,
+                analysis: createAnalysis(),
+                selection: null as IEditorSelectionSummary | null,
+                gitStatus: createGitStatus(),
+                workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+            },
+            global: {
+                stubs: {
+                    AiChatThread: {
+                        props: ['messages'],
+                        template: `
+                            <section data-testid="chat-thread">
+                                <article
+                                    v-for="message in messages"
+                                    :key="message.id"
+                                    :data-role="message.role"
+                                >
+                                    <p>{{ message.content }}</p>
+                                    <ol v-if="message.toolCalls?.length">
+                                        <li
+                                            v-for="toolCall in message.toolCalls"
+                                            :key="toolCall.id"
+                                        >
+                                            {{ toolCall.name }}:{{ toolCall.status }}:{{ toolCall.summary }}
+                                        </li>
+                                    </ol>
+                                </article>
+                            </section>
+                        `,
+                    },
+                    AiContextChips: { template: '<div />' },
+                    AiPatchPreview: { template: '<div />' },
+                    AiPromptInput: { template: '<div />' },
+                    AiProviderSettings: { template: '<div />' },
+                    AiPlanModePanel: { template: '<div data-testid="plan-mode-panel" />' },
+                    teleport: true,
+                },
+            },
+        });
+
+        const chatThread = wrapper.get('[data-testid="chat-thread"]');
+
+        expect(chatThread.text()).toContain(userQuestion);
+        expect(chatThread.text()).toContain('read_file:running');
+        expect(chatThread.text()).toContain('run_test:succeeded');
+        expect(chatThread.text()).toContain(finalAnswer);
+        expect(wrapper.find('[data-testid="agent-run-timeline"]').exists()).toBe(false);
     });
 
     it('renders a scrollable history view with the latest 20 conversations', async () => {
@@ -324,7 +562,6 @@ describe('AiAssistantPanel', () => {
                 selection: null as IEditorSelectionSummary | null,
                 gitStatus: createGitStatus(),
                 workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
-                onOpenCodePath: () => undefined,
             },
             global: {
                 stubs: {
@@ -361,7 +598,6 @@ describe('AiAssistantPanel', () => {
                 selection: null as IEditorSelectionSummary | null,
                 gitStatus: createGitStatus(),
                 workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
-                onOpenCodePath: () => undefined,
             },
             global: {
                 stubs: {
@@ -394,7 +630,6 @@ describe('AiAssistantPanel', () => {
                 selection: null as IEditorSelectionSummary | null,
                 gitStatus: createGitStatus(),
                 workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
-                onOpenCodePath: () => undefined,
             },
             global: {
                 stubs: {

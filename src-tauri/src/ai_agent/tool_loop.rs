@@ -10,9 +10,7 @@ use ignore::WalkBuilder;
 use serde_json::json;
 
 use crate::ai::errors;
-use crate::ai::provider::AiProviderToolCall;
 use crate::ai::redaction::redact_text;
-use crate::ai_agent::tool_call::{normalize_provider_tool_calls, tool_call_to_plan_step};
 use crate::ai_security::command_classifier::{classify_command, CommandClass};
 use crate::ai_tools::registry;
 use crate::ai_tools::{web_fetch, web_search};
@@ -100,14 +98,6 @@ pub trait AgentToolRuntimeServices: Send + Sync {
         _label: String,
     ) {
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct AgentProviderToolUseRequest {
-    pub run_id: String,
-    pub workspace_root: Option<String>,
-    pub references: Vec<AiContextReferencePayload>,
-    pub tool_decisions: HashMap<String, String>,
 }
 
 pub fn validate_step_tools(step: &AiTaskPlanStepPayload) -> Result<(), String> {
@@ -207,7 +197,7 @@ fn emit_tool_activity(
     }
 }
 
-fn build_tool_activity_label(tool_name: &str, step: &AiTaskPlanStepPayload) -> String {
+pub(crate) fn build_tool_activity_label(tool_name: &str, step: &AiTaskPlanStepPayload) -> String {
     let target = step
         .references
         .as_ref()
@@ -220,9 +210,12 @@ fn build_tool_activity_label(tool_name: &str, step: &AiTaskPlanStepPayload) -> S
             format!("正在读取 {label}…")
         }
         ("read_selected_text", _) => "正在读取当前选区…".to_string(),
-        ("search_files", _) | ("search_text", _) | ("search_symbols", _) => {
-            format!("正在使用 {tool_name}…")
-        }
+        ("search_files", Some(label)) => format!("正在搜索文件名 {label}…"),
+        ("search_files", None) => "正在搜索文件名…".to_string(),
+        ("search_text", Some(label)) => format!("正在搜索项目内容 {label}…"),
+        ("search_text", None) => "正在搜索项目内容…".to_string(),
+        ("search_symbols", Some(label)) => format!("正在搜索符号 {label}…"),
+        ("search_symbols", None) => "正在搜索符号…".to_string(),
         ("get_project_tree", _) => "正在读取项目结构…".to_string(),
         ("get_git_diff", _) => "正在读取 Git Diff…".to_string(),
         ("get_diagnostics", _) => "正在读取诊断信息…".to_string(),
@@ -237,48 +230,6 @@ fn build_tool_activity_label(tool_name: &str, step: &AiTaskPlanStepPayload) -> S
         ("create_commit", _) => "正在创建本地提交…".to_string(),
         _ => format!("正在使用 {tool_name}…"),
     }
-}
-
-pub fn execute_provider_tool_calls_with_services(
-    request: AgentProviderToolUseRequest,
-    calls: Vec<AiProviderToolCall>,
-    services: Option<&dyn AgentToolRuntimeServices>,
-) -> Result<Vec<AgentRunMessage>, String> {
-    let calls = normalize_provider_tool_calls(calls)?;
-    let mut messages = Vec::new();
-
-    for (index, call) in calls.into_iter().enumerate() {
-        let tool_call_id = call.id.clone();
-        let step = tool_call_to_plan_step(call, index)?;
-        let tool_name = step.tools.first().cloned().ok_or_else(|| {
-            errors::error(
-                "AI_AGENT_PLAN_INVALID",
-                "Provider tool call produced an empty tool list.",
-            )
-        })?;
-        let mut tool_decisions = HashMap::new();
-        if let Some(decision) = request
-            .tool_decisions
-            .get(&tool_call_id)
-            .or_else(|| request.tool_decisions.get(&tool_name))
-        {
-            tool_decisions.insert(tool_name.clone(), decision.clone());
-        }
-        let context = AgentToolUseContext {
-            run_id: request.run_id.clone(),
-            step_id: step.id.clone(),
-            permission_level: "standard".to_string(),
-            workspace_root: request.workspace_root.clone(),
-            references: request.references.clone(),
-            tool_decisions,
-        };
-
-        messages.extend(build_tool_loop_messages_with_services(
-            &context, &step, services,
-        )?);
-    }
-
-    Ok(messages)
 }
 
 fn build_tool_call_message(
@@ -608,54 +559,203 @@ fn execute_read_file(
     references: &[AiContextReferencePayload],
     workspace_root: &Path,
 ) -> ToolExecutionSummary {
-    let candidate = references
-        .iter()
-        .find(|reference| reference.kind == "current-file" || reference.kind == "selection")
-        .and_then(|reference| reference.path.as_deref())
-        .or_else(|| {
-            step.references
-                .as_ref()
-                .and_then(|references| {
-                    references
-                        .iter()
-                        .find(|reference| reference.r#type == "file")
-                })
-                .map(|reference| reference.uri.as_str())
-        });
+    let candidates = collect_read_file_candidates(step, references);
 
-    let Some(raw_path) = candidate else {
+    if candidates.is_empty() {
         return ToolExecutionSummary {
             status: "failed".to_string(),
             summary: "read_file requires a file reference.".to_string(),
             output_ref: None,
         };
-    };
+    }
 
-    let path = Path::new(raw_path);
-    let file_path = if path.is_absolute() {
+    let mut last_failure = "read_file target does not exist.".to_string();
+
+    for candidate in candidates {
+        match resolve_workspace_read_path(candidate.raw_path, workspace_root) {
+            Ok(file_path) => return read_workspace_file(&file_path, workspace_root),
+            Err(error) => {
+                last_failure = error.summary().to_string();
+                if let Some(reference) = candidate.preview_reference {
+                    if !reference.content_preview.trim().is_empty() {
+                        return read_file_from_context_preview(reference, candidate.raw_path);
+                    }
+                }
+            }
+        }
+    }
+
+    ToolExecutionSummary {
+        status: "failed".to_string(),
+        summary: last_failure,
+        output_ref: None,
+    }
+}
+
+struct ReadFileCandidate<'a> {
+    raw_path: &'a str,
+    preview_reference: Option<&'a AiContextReferencePayload>,
+}
+
+enum ReadFilePathError {
+    Empty,
+    OutsideWorkspace,
+    NotFound,
+}
+
+impl ReadFilePathError {
+    fn summary(&self) -> &'static str {
+        match self {
+            Self::Empty => "read_file requires a non-empty file path.",
+            Self::OutsideWorkspace => "read_file rejected a path outside workspace.",
+            Self::NotFound => "read_file target does not exist.",
+        }
+    }
+}
+
+fn collect_read_file_candidates<'a>(
+    step: &'a AiTaskPlanStepPayload,
+    references: &'a [AiContextReferencePayload],
+) -> Vec<ReadFileCandidate<'a>> {
+    let mut explicit_candidates = Vec::new();
+
+    if let Some(step_references) = step.references.as_ref() {
+        for reference in step_references
+            .iter()
+            .filter(|reference| reference.r#type == "file")
+        {
+            let raw_path = reference.uri.trim();
+            if raw_path.is_empty() {
+                continue;
+            }
+            explicit_candidates.push(ReadFileCandidate {
+                raw_path,
+                preview_reference: find_matching_context_reference(raw_path, references),
+            });
+        }
+    }
+
+    if !explicit_candidates.is_empty() {
+        return explicit_candidates;
+    }
+
+    references
+        .iter()
+        .filter(|reference| {
+            matches!(
+                reference.kind.as_str(),
+                "current-file" | "selection" | "file"
+            )
+        })
+        .filter_map(|reference| {
+            let raw_path = reference.path.as_deref()?.trim();
+            if raw_path.is_empty() {
+                return None;
+            }
+
+            Some(ReadFileCandidate {
+                raw_path,
+                preview_reference: Some(reference),
+            })
+        })
+        .collect()
+}
+
+fn find_matching_context_reference<'a>(
+    raw_path: &str,
+    references: &'a [AiContextReferencePayload],
+) -> Option<&'a AiContextReferencePayload> {
+    references.iter().find(|reference| {
+        reference
+            .path
+            .as_deref()
+            .is_some_and(|path| paths_loosely_match(raw_path, path))
+    })
+}
+
+fn paths_loosely_match(left: &str, right: &str) -> bool {
+    let left = normalize_path_hint(left);
+    let right = normalize_path_hint(right);
+
+    if left.is_empty() || right.is_empty() {
+        return false;
+    }
+
+    left.eq_ignore_ascii_case(&right)
+        || right.ends_with(&format!("/{left}"))
+        || left.ends_with(&format!("/{right}"))
+}
+
+fn normalize_path_hint(path: &str) -> String {
+    normalize_file_uri_path(path)
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_lowercase()
+}
+
+fn normalize_file_uri_path(raw_path: &str) -> String {
+    let trimmed = raw_path.trim();
+
+    if let Some(rest) = trimmed.strip_prefix("file://") {
+        if cfg!(windows) {
+            return rest.trim_start_matches('/').to_string();
+        }
+
+        return format!("/{}", rest.trim_start_matches('/'));
+    }
+
+    trimmed.to_string()
+}
+
+fn resolve_workspace_read_path(
+    raw_path: &str,
+    workspace_root: &Path,
+) -> Result<PathBuf, ReadFilePathError> {
+    let normalized_path = normalize_file_uri_path(raw_path);
+    let trimmed = normalized_path.trim();
+
+    if trimmed.is_empty() {
+        return Err(ReadFilePathError::Empty);
+    }
+
+    let path = Path::new(trimmed);
+    let candidate = if path.is_absolute() {
         path.to_path_buf()
     } else {
+        if path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        }) {
+            return Err(ReadFilePathError::OutsideWorkspace);
+        }
+
         workspace_root.join(path)
     };
 
-    if !file_path.starts_with(workspace_root) {
-        return ToolExecutionSummary {
-            status: "failed".to_string(),
-            summary: "read_file rejected a path outside workspace.".to_string(),
-            output_ref: None,
-        };
+    let canonical = candidate
+        .canonicalize()
+        .map_err(|_| ReadFilePathError::NotFound)?;
+
+    if !canonical.starts_with(workspace_root) {
+        return Err(ReadFilePathError::OutsideWorkspace);
     }
 
-    let Ok(metadata) = fs::metadata(&file_path) else {
+    Ok(canonical)
+}
+
+fn read_workspace_file(file_path: &Path, workspace_root: &Path) -> ToolExecutionSummary {
+    let Ok(metadata) = fs::metadata(file_path) else {
         return ToolExecutionSummary {
             status: "failed".to_string(),
             summary: "read_file target does not exist.".to_string(),
             output_ref: None,
         };
     };
-    let relative = relative_path(workspace_root, &file_path);
-    let output = if is_small_text_candidate(&file_path) {
-        let Ok(content) = fs::read_to_string(&file_path) else {
+    let relative = relative_path(workspace_root, file_path);
+    let output = if is_small_text_candidate(file_path) {
+        let Ok(content) = fs::read_to_string(file_path) else {
             return ToolExecutionSummary {
                 status: "failed".to_string(),
                 summary: format!("read_file failed to read {relative} as UTF-8 text."),
@@ -680,6 +780,37 @@ fn execute_read_file(
             "Read file content for {} ({} bytes).",
             relative,
             metadata.len()
+        ),
+        output_ref: Some(store_tool_output("read_file", output)),
+    }
+}
+
+fn read_file_from_context_preview(
+    reference: &AiContextReferencePayload,
+    requested_path: &str,
+) -> ToolExecutionSummary {
+    let path = reference.path.as_deref().unwrap_or(requested_path);
+    let range = reference
+        .range
+        .as_ref()
+        .map(|item| format!("{}-{}", item.start_line, item.end_line))
+        .unwrap_or_else(|| "preview".to_string());
+    let redaction = if reference.redacted {
+        "\nRedacted: true"
+    } else {
+        ""
+    };
+    let output = format!(
+        "File: {path}\nSource: frontend context preview\nRange: {range}{redaction}\n\n{}",
+        reference.content_preview
+    );
+
+    ToolExecutionSummary {
+        status: "succeeded".to_string(),
+        summary: format!(
+            "Read file preview for {} from frontend context ({} preview chars).",
+            reference.label,
+            reference.content_preview.chars().count()
         ),
         output_ref: Some(store_tool_output("read_file", output)),
     }
@@ -2208,18 +2339,17 @@ fn relative_path(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_tool_loop_messages_with_services, build_tool_result_messages,
-        build_tool_result_messages_with_services, execute_provider_tool_calls_with_services,
-        truncate_head_tail, validate_step_tools, AgentProviderToolUseRequest, AgentRunMessage,
+        build_tool_activity_label, build_tool_loop_messages_with_services,
+        build_tool_result_messages, build_tool_result_messages_with_services,
+        load_tool_output_ref, truncate_head_tail, validate_step_tools, AgentRunMessage,
         AgentToolResultMessage, AgentToolRuntimeServices, AgentToolUseContext,
     };
-    use crate::ai::provider::AiProviderToolCall;
     use crate::commands::contracts::{
-        AiAgentToolInputsPayload, AiApplyPatchRequest, AiCreateCommitToolInputPayload,
-        AiPatchFilePayload, AiPatchHunkPayload, AiPatchSetPayload, AiProposePatchRequest,
-        AiRunCommandToolInputPayload, AiStageFileToolInputPayload, AiTaskPlanStepPayload,
+        AiAgentToolInputsPayload, AiApplyPatchRequest, AiContextReferencePayload,
+        AiCreateCommitToolInputPayload, AiPatchFilePayload, AiPatchHunkPayload, AiPatchSetPayload,
+        AiProposePatchRequest, AiRunCommandToolInputPayload, AiStageFileToolInputPayload,
+        AiTaskPlanReferencePayload, AiTaskPlanStepPayload,
     };
-    use serde_json::json;
     use std::collections::HashMap;
     use std::fs;
     use std::sync::Mutex;
@@ -2240,6 +2370,23 @@ mod tests {
             requires_user_approval: false,
             risk_level: "low".to_string(),
             rollback_strategy: None,
+        }
+    }
+
+    fn context_reference(
+        kind: &str,
+        label: &str,
+        path: Option<&str>,
+        content_preview: &str,
+    ) -> AiContextReferencePayload {
+        AiContextReferencePayload {
+            id: format!("ref-{kind}-{label}"),
+            kind: kind.to_string(),
+            label: label.to_string(),
+            path: path.map(ToOwned::to_owned),
+            range: None,
+            content_preview: content_preview.to_string(),
+            redacted: false,
         }
     }
 
@@ -2410,6 +2557,119 @@ mod tests {
         let serialized = format!("{messages:?}");
         assert!(serialized.contains("search_text"));
         assert!(!serialized.contains("```"));
+    }
+
+    #[test]
+    fn builds_readable_running_activity_label_for_search_tools() {
+        let mut step = step_with_tools(vec!["search_text"]);
+        step.references = Some(vec![AiTaskPlanReferencePayload {
+            r#type: "file".to_string(),
+            label: "AiAssistantPanel.vue".to_string(),
+            uri: "src/components/business/ai/AiAssistantPanel.vue".to_string(),
+        }]);
+
+        let label = build_tool_activity_label("search_text", &step);
+
+        assert_eq!(label, "正在搜索项目内容 AiAssistantPanel.vue…");
+        assert!(!label.contains("正在校验工具"));
+    }
+
+    #[test]
+    fn read_file_prefers_explicit_step_reference_over_current_file_context() {
+        let workspace_root = std::env::temp_dir().join(format!(
+            "calamex-agent-read-file-explicit-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let src_dir = workspace_root.join("src");
+        fs::create_dir_all(&src_dir).expect("workspace src should be created");
+        fs::write(src_dir.join("current.ts"), "export const current = true;\n")
+            .expect("current file should be written");
+        fs::write(src_dir.join("target.ts"), "export const target = true;\n")
+            .expect("target file should be written");
+        let mut step = step_with_tools(vec!["read_file"]);
+        step.references = Some(vec![AiTaskPlanReferencePayload {
+            r#type: "file".to_string(),
+            label: "target.ts".to_string(),
+            uri: "src/target.ts".to_string(),
+        }]);
+        let context = AgentToolUseContext {
+            run_id: "run-1".to_string(),
+            step_id: "step-1".to_string(),
+            permission_level: "standard".to_string(),
+            workspace_root: Some(workspace_root.to_string_lossy().to_string()),
+            references: vec![context_reference(
+                "current-file",
+                "current.ts",
+                Some("src/current.ts"),
+                "export const current = true;",
+            )],
+            tool_decisions: HashMap::new(),
+        };
+
+        let messages = build_tool_result_messages(&context, &step).expect("messages");
+
+        let result = tool_result_at(&messages, 0);
+        assert_eq!(result.tool_name, "read_file");
+        assert_eq!(result.status, "succeeded");
+        assert!(
+            result.summary.contains("src/target.ts"),
+            "{}",
+            result.summary
+        );
+        let output = load_tool_output_ref(
+            result
+                .output_ref
+                .as_deref()
+                .expect("read_file should store output ref"),
+        )
+        .expect("output ref should be readable");
+        let _ = fs::remove_dir_all(&workspace_root);
+        assert!(output.contains("export const target = true;"));
+        assert!(!output.contains("export const current = true;"));
+    }
+
+    #[test]
+    fn read_file_uses_context_preview_when_path_cannot_resolve_inside_workspace() {
+        let workspace_root = std::env::temp_dir().join(format!(
+            "calamex-agent-read-file-preview-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir_all(&workspace_root).expect("workspace should be created");
+        let step = step_with_tools(vec!["read_file"]);
+        let context = AgentToolUseContext {
+            run_id: "run-1".to_string(),
+            step_id: "step-1".to_string(),
+            permission_level: "standard".to_string(),
+            workspace_root: Some(workspace_root.to_string_lossy().to_string()),
+            references: vec![context_reference(
+                "current-file",
+                "AiAssistantPanel.vue",
+                Some("/mnt/d/com.xiaojianc/my_desktop_app/src/components/business/ai/AiAssistantPanel.vue"),
+                "const activeAgentFlowMessage = computed(() => 'preview');",
+            )],
+            tool_decisions: HashMap::new(),
+        };
+
+        let messages = build_tool_result_messages(&context, &step).expect("messages");
+
+        let result = tool_result_at(&messages, 0);
+        assert_eq!(result.tool_name, "read_file");
+        assert_eq!(result.status, "succeeded");
+        assert!(
+            result.summary.contains("frontend context"),
+            "{}",
+            result.summary
+        );
+        let output = load_tool_output_ref(
+            result
+                .output_ref
+                .as_deref()
+                .expect("preview fallback should store output ref"),
+        )
+        .expect("output ref should be readable");
+        let _ = fs::remove_dir_all(&workspace_root);
+        assert!(output.contains("Source: frontend context preview"));
+        assert!(output.contains("activeAgentFlowMessage"));
     }
 
     #[test]
@@ -2708,110 +2968,4 @@ mod tests {
         assert_eq!(metadata.agent_step_id.as_deref(), Some("step-1"));
     }
 
-    #[test]
-    fn provider_tool_calls_execute_as_tool_call_then_result_messages() {
-        let workspace_root = std::env::temp_dir().join(format!(
-            "calamex-provider-tool-call-{}",
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-        ));
-        fs::create_dir_all(&workspace_root).expect("workspace should be created");
-        let request = AgentProviderToolUseRequest {
-            run_id: "run-provider-1".to_string(),
-            workspace_root: Some(workspace_root.to_string_lossy().to_string()),
-            references: Vec::new(),
-            tool_decisions: HashMap::new(),
-        };
-
-        let messages = execute_provider_tool_calls_with_services(
-            request,
-            vec![AiProviderToolCall {
-                id: "call-tree".to_string(),
-                name: "get_project_tree".to_string(),
-                arguments: json!({}),
-            }],
-            None,
-        )
-        .expect("provider tool call should execute");
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        assert_eq!(messages.len(), 2);
-        let AgentRunMessage::ToolCall(call) = &messages[0] else {
-            panic!("first dynamic message should be tool call");
-        };
-        assert_eq!(call.tool_name, "get_project_tree");
-        let result = tool_result_at(&messages, 1);
-        assert_eq!(result.tool_name, "get_project_tree");
-        assert_eq!(result.status, "succeeded");
-    }
-
-    #[test]
-    fn provider_high_risk_tool_call_requires_decision_before_execution() {
-        let request = AgentProviderToolUseRequest {
-            run_id: "run-provider-2".to_string(),
-            workspace_root: None,
-            references: Vec::new(),
-            tool_decisions: HashMap::new(),
-        };
-
-        let messages = execute_provider_tool_calls_with_services(
-            request,
-            vec![AiProviderToolCall {
-                id: "call-command".to_string(),
-                name: "run_command".to_string(),
-                arguments: json!({
-                    "command": "cargo test --help",
-                    "reason": "unit test dynamic command gate",
-                    "cwdPolicy": "workspace-root",
-                    "timeoutMs": 30000
-                }),
-            }],
-            None,
-        )
-        .expect("provider tool call should produce gated result");
-
-        let result = tool_result_at(&messages, 1);
-        assert_eq!(result.tool_name, "run_command");
-        assert_eq!(result.status, "failed");
-        assert!(result.summary.contains("requires inline user confirmation"));
-        assert!(result.output_ref.is_none());
-    }
-
-    #[test]
-    fn provider_high_risk_tool_call_uses_call_id_decision() {
-        let workspace_root = std::env::temp_dir().join(format!(
-            "calamex-provider-command-{}",
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-        ));
-        fs::create_dir_all(&workspace_root).expect("workspace should be created");
-        let mut tool_decisions = HashMap::new();
-        tool_decisions.insert("call-command".to_string(), "allow-once".to_string());
-        let request = AgentProviderToolUseRequest {
-            run_id: "run-provider-3".to_string(),
-            workspace_root: Some(workspace_root.to_string_lossy().to_string()),
-            references: Vec::new(),
-            tool_decisions,
-        };
-
-        let messages = execute_provider_tool_calls_with_services(
-            request,
-            vec![AiProviderToolCall {
-                id: "call-command".to_string(),
-                name: "run_command".to_string(),
-                arguments: json!({
-                    "command": "cargo test --help",
-                    "reason": "unit test dynamic command execution",
-                    "cwdPolicy": "workspace-root",
-                    "timeoutMs": 30000
-                }),
-            }],
-            None,
-        )
-        .expect("provider tool call should execute after decision");
-
-        let _ = fs::remove_dir_all(&workspace_root);
-        let result = tool_result_at(&messages, 1);
-        assert_eq!(result.tool_name, "run_command");
-        assert!(result.summary.contains("Level 2"));
-        assert!(result.output_ref.is_some());
-    }
 }

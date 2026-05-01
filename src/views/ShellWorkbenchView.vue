@@ -90,7 +90,7 @@
       <AiAssistantPanel v-show="isWorkbenchContentVisible" :document="editorStore.document"
         :active-run="editorStore.activeRunSummary" :analysis="editorStore.activeScriptAnalysis"
         :selection="editorStore.activeSelectionSummary" :git-status="gitStore.status"
-        :workspace-root-path="editorStore.workspaceRootPath" @open-code-path="handleOpenAiCodePath" />
+        :workspace-root-path="editorStore.workspaceRootPath" />
     </template>
 
     <template #statusbar>
@@ -202,6 +202,5 @@ const {
   handleAiCodeAction,
   handleAiFixDiagnostic,
   handleOpenShellCheck,
-  handleOpenAiCodePath,
 } = useShellWorkbenchView(() => emit('ready'));
 </script>

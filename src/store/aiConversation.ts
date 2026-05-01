@@ -42,12 +42,6 @@ const normalizeHydratedMessage = (message: IAiChatMessage): IAiChatMessage => {
     stream: {
       ...message.stream,
       status: 'cancelled',
-      openBlock: message.stream.openBlock && typeof message.stream.openBlock === 'object'
-        ? {
-          ...message.stream.openBlock,
-          streamState: 'cancelled',
-        }
-        : message.stream.openBlock,
     },
   };
 };

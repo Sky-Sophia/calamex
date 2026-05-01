@@ -71,6 +71,6 @@ describe('AiWebSourcesPanel', () => {
 
     expect(wrapper.text()).toContain('Network');
     expect(wrapper.text()).toContain('正在搜索');
-    expect(wrapper.find('.ai-web-activity-dots').exists()).toBe(true);
+    expect(wrapper.find('.ai-web-activity-spinner').exists()).toBe(true);
   });
 });

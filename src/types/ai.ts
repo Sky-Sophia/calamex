@@ -1,4 +1,3 @@
-import type { IAiCodeBlock } from '@/types/ai-code';
 import type { IAiContextReference } from '@/types/ai-context';
 
 export type TAiProviderType =
@@ -75,12 +74,10 @@ export type {
   IAiAgentResolveToolConfirmationRequest,
   IAiAgentSetNetworkPermissionRequest,
   IAiAgentStepDetail,
+  IAiAgentStepFinalAnswer,
   IAiAgentStepToolResultSummary,
   IAiAgentStepWebSourceSummary,
   IAiAgentTimelineItem,
-  IAiAgentToolLoopChatPayload,
-  IAiAgentToolLoopChatRequest,
-  IAiAgentToolLoopResult,
   IAiToolConfirmationOption,
   IAiToolConfirmationRequest,
   TAiAgentNetworkPermission,
@@ -97,8 +94,6 @@ export type {
 } from '@/types/ai-agent';
 
 export interface IAiChatStreamRenderState {
-  stableContent: string;
-  openBlock: IAiCodeBlock | null;
   status: 'streaming' | 'completed' | 'cancelled';
 }
 
@@ -133,6 +128,8 @@ export interface IAiToolCall {
   name: string;
   status: 'pending' | 'running' | 'succeeded' | 'failed' | 'denied';
   summary: string;
+  targetPreview?: string;
+  elapsedMs?: number;
 }
 
 export interface IAiToolDefinitionPayload {
