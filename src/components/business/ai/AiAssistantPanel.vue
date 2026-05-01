@@ -15,12 +15,12 @@ import { useAiAssistant } from '@/composables/useAiAssistant';
 import { useAiWebSources } from '@/composables/useAiWebSources';
 import { findAiServicePlatformByModel } from '@/constants/ai-providers';
 import type {
-  IAiChatMessage,
-  IAiConfigPayload,
-  IAiProviderSettingsActionFeedback,
   IAiAgentRun,
   IAiAgentStepToolResultSummary,
   IAiAgentStepWebSourceSummary,
+  IAiChatMessage,
+  IAiConfigPayload,
+  IAiProviderSettingsActionFeedback,
   IAiTaskPlanStep,
   IAiToolActivityInline,
   IAiToolCall,
@@ -683,15 +683,8 @@ onMounted(() => {
     <header class="ai-panel-header">
       <span class="ai-status-dot" aria-hidden="true"></span>
       <div class="ai-model-switch">
-        <button
-          type="button"
-          class="ai-model-button"
-          :aria-expanded="isModeMenuOpen"
-          aria-haspopup="menu"
-          :title="aiModelButtonLabel"
-          aria-label="切换 AI 模式"
-          @click="isModeMenuOpen = !isModeMenuOpen"
-        >
+        <button type="button" class="ai-model-button" :aria-expanded="isModeMenuOpen" aria-haspopup="menu"
+          :title="aiModelButtonLabel" aria-label="切换 AI 模式" @click="isModeMenuOpen = !isModeMenuOpen">
           <AiProviderIcon class="ai-model-icon" :platform-id="aiIconPlatformId" :title="aiIconTitle" decorative />
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <path d="m6 9 6 6 6-6" />
@@ -713,46 +706,26 @@ onMounted(() => {
         </div>
       </div>
       <div class="ai-network-anchor">
-        <button
-          type="button"
-          class="ai-network-button"
-          :aria-expanded="isNetworkMenuOpen"
-          aria-haspopup="menu"
-          :disabled="isNetworkPermissionPending"
-          @click="isNetworkMenuOpen = !isNetworkMenuOpen"
-        >
+        <button type="button" class="ai-network-button" :aria-expanded="isNetworkMenuOpen" aria-haspopup="menu"
+          :disabled="isNetworkPermissionPending" @click="isNetworkMenuOpen = !isNetworkMenuOpen">
           <span class="ai-network-dot" :class="`is-${agentNetwork.store.networkPermission}`" aria-hidden="true"></span>
           <span>{{ networkPermissionLabel }}</span>
         </button>
         <div v-if="isNetworkMenuOpen" class="ai-network-menu" role="menu" aria-label="AI Agent 网络权限">
-          <button
-            type="button"
-            role="menuitemradio"
-            :aria-checked="agentNetwork.store.networkPermission === 'ask'"
-            :class="{ active: agentNetwork.store.networkPermission === 'ask' }"
-            :disabled="isNetworkPermissionPending"
-            @click="handleSetNetworkPermission('ask')"
-          >
+          <button type="button" role="menuitemradio" :aria-checked="agentNetwork.store.networkPermission === 'ask'"
+            :class="{ active: agentNetwork.store.networkPermission === 'ask' }" :disabled="isNetworkPermissionPending"
+            @click="handleSetNetworkPermission('ask')">
             Ask
           </button>
-          <button
-            type="button"
-            role="menuitemradio"
+          <button type="button" role="menuitemradio"
             :aria-checked="agentNetwork.store.networkPermission === 'allowed-this-run'"
             :class="{ active: agentNetwork.store.networkPermission === 'allowed-this-run' }"
-            :disabled="isNetworkPermissionPending"
-            @click="handleSetNetworkPermission('allowed-this-run')"
-          >
+            :disabled="isNetworkPermissionPending" @click="handleSetNetworkPermission('allowed-this-run')">
             Allowed this run
           </button>
-          <button
-            type="button"
-            role="menuitemradio"
-            :aria-checked="agentNetwork.store.networkPermission === 'off'"
-            :class="{ active: agentNetwork.store.networkPermission === 'off' }"
-            :disabled="isNetworkPermissionPending"
-            @click="handleSetNetworkPermission('off')"
-          >
+          <button type="button" role="menuitemradio" :aria-checked="agentNetwork.store.networkPermission === 'off'"
+            :class="{ active: agentNetwork.store.networkPermission === 'off' }" :disabled="isNetworkPermissionPending"
+            @click="handleSetNetworkPermission('off')">
             Off
           </button>
         </div>
@@ -822,57 +795,28 @@ onMounted(() => {
     </div>
     <AiPatchPreview :patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
       @apply="assistant.applyProposedPatch" @close="assistant.proposedPatch.value = null" />
-    <AiWebSourcesPanel
-      v-if="webSourcesVisible"
-      :sources="webSources.sources.value"
-      :activity="planVisible ? null : webSources.activity.value"
-      :error-message="webSources.errorMessage.value"
-      :is-searching="webSources.isSearching.value"
-      :network-permission="agentNetwork.store.networkPermission"
-      @search="handleSearchWebSources"
-      @fetch-source="handleFetchWebSource"
-      @clear="webSources.clear"
-    />
+    <AiWebSourcesPanel v-if="webSourcesVisible" :sources="webSources.sources.value"
+      :activity="planVisible ? null : webSources.activity.value" :error-message="webSources.errorMessage.value"
+      :is-searching="webSources.isSearching.value" :network-permission="agentNetwork.store.networkPermission"
+      @search="handleSearchWebSources" @fetch-source="handleFetchWebSource" @clear="webSources.clear" />
     <div class="ai-composer-shell" :class="{ 'has-plan': planVisible }">
-      <AiPlanModePanel
-        v-if="planVisible"
-        :goal="planStore.activeGoal"
-        :steps="planStore.steps"
-        :classification-reason="planStore.classificationReason"
-        :error-message="planStore.errorMessage"
-        :is-classifying="planStore.isClassifying"
-        :is-planning="planStore.isPlanning"
-        :is-approving="planStore.isApproving"
-        :approved-at="planStore.approvedAt"
-        :active-run="planStore.activeRun"
-        :is-run-action-pending="isAgentRunActionPending"
-        :web-activity="webSources.activity.value"
-        :tool-activity="planStore.activeToolActivity"
-        :tool-confirmation="planStore.pendingToolConfirmation"
-        @update-step-title="handleUpdatePlanStepTitle"
-        @remove-step="handleRemovePlanStep"
-        @regenerate="handleRegeneratePlan"
-        @approve="handleApprovePlan"
-        @reset="handleResetPlan"
-        @run-step="handleRunStep"
-        @pause-run="handlePauseRun"
-        @resume-run="handleResumeRun"
-        @cancel-run="handleCancelRun"
-        @resolve-tool-confirmation="handleResolveToolConfirmation"
-      />
-      <div
-        v-if="directToolConfirmationVisible && planStore.pendingToolConfirmation"
-        class="ai-direct-tool-confirmation"
-      >
-        <AiToolConfirmationCard
-          :confirmation="planStore.pendingToolConfirmation"
-          :disabled="isAgentRunActionPending"
-          @resolve="handleResolveToolConfirmation"
-        />
+      <AiPlanModePanel v-if="planVisible" :goal="planStore.activeGoal" :steps="planStore.steps"
+        :classification-reason="planStore.classificationReason" :error-message="planStore.errorMessage"
+        :is-classifying="planStore.isClassifying" :is-planning="planStore.isPlanning"
+        :is-approving="planStore.isApproving" :approved-at="planStore.approvedAt" :active-run="planStore.activeRun"
+        :is-run-action-pending="isAgentRunActionPending" :web-activity="webSources.activity.value"
+        :tool-activity="planStore.activeToolActivity" :tool-confirmation="planStore.pendingToolConfirmation"
+        @update-step-title="handleUpdatePlanStepTitle" @remove-step="handleRemovePlanStep"
+        @regenerate="handleRegeneratePlan" @approve="handleApprovePlan" @reset="handleResetPlan"
+        @run-step="handleRunStep" @pause-run="handlePauseRun" @resume-run="handleResumeRun"
+        @cancel-run="handleCancelRun" @resolve-tool-confirmation="handleResolveToolConfirmation" />
+      <div v-if="directToolConfirmationVisible && planStore.pendingToolConfirmation"
+        class="ai-direct-tool-confirmation">
+        <AiToolConfirmationCard :confirmation="planStore.pendingToolConfirmation" :disabled="isAgentRunActionPending"
+          @resolve="handleResolveToolConfirmation" />
       </div>
       <AiPromptInput v-model="assistant.draft.value" :disabled="assistant.isSending.value"
-        :error-message="assistant.errorMessage.value"
-        :submit-label="submitLabel"
+        :error-message="assistant.errorMessage.value" :submit-label="submitLabel"
         :attachments="assistant.attachedFiles.value" :has-attachments="assistant.attachedFiles.value.length > 0"
         @submit="assistant.sendMessage" @stop="assistant.stopCurrentRequest" @file-selected="assistant.attachFile"
         @remove-file="assistant.removeAttachedFile" />
@@ -905,9 +849,9 @@ onMounted(() => {
 <style scoped>
 .ai-assistant-panel {
   display: flex;
-  width: 350px;
-  min-width: 350px;
-  max-width: 350px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
   height: 100%;
   min-height: 0;
   flex: 1;
@@ -968,7 +912,7 @@ onMounted(() => {
   height: 18px;
 }
 
-.ai-model-button > svg:not(.ai-model-icon) {
+.ai-model-button>svg:not(.ai-model-icon) {
   width: 13px;
   height: 13px;
   flex: 0 0 auto;
@@ -1325,11 +1269,9 @@ onMounted(() => {
 
 .ai-composer-shell.has-plan {
   background:
-    linear-gradient(
-      180deg,
+    linear-gradient(180deg,
       color-mix(in srgb, var(--panel-bg) 96%, transparent),
-      color-mix(in srgb, var(--panel-bg) 90%, var(--sidebar-bg))
-    );
+      color-mix(in srgb, var(--panel-bg) 90%, var(--sidebar-bg)));
 }
 
 .ai-composer-shell :deep(.ai-plan-mode-panel) {
@@ -1357,7 +1299,9 @@ onMounted(() => {
 
 .ai-dialog {
   display: grid;
-  width: min(340px, calc(100vw - 32px));
+  inline-size: fit-content;
+  min-inline-size: min(380px, calc(100vw - 32px));
+  max-inline-size: min(460px, calc(100vw - 32px));
   gap: 12px;
   border: 1px solid color-mix(in srgb, var(--shell-divider) 100%, rgba(255, 255, 255, 0.1));
   border-radius: 12px;

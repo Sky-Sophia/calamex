@@ -1,8 +1,9 @@
 <template>
   <AppShellLayout :is-desktop-runtime="isDesktopRuntime" :sidebar-visible="isSidebarVisible"
     :terminal-visible="isTerminalVisible" :terminal-height="terminalHeight" :sidebar-width="sidebarWidth"
-    :right-sidebar-visible="isAiPanelVisible" :right-sidebar-width="350" :content-overlay-visible="isSettingsView"
-    @update:terminal-height="handleTerminalHeightChange">
+    :right-sidebar-visible="isAiPanelVisible" :right-sidebar-width="aiPanelWidth" :right-sidebar-min-width="350"
+    :right-sidebar-max-width="550" :content-overlay-visible="isSettingsView"
+    @update:terminal-height="handleTerminalHeightChange" @update:right-sidebar-width="handleAiPanelWidthChange">
     <template #titlebar>
       <WindowTitleBar ref="titlebarRef" :document-name="editorStore.document.name"
         :is-dirty="editorStore.document.isDirty" :has-active-document="editorStore.hasActiveDocument"
@@ -31,18 +32,17 @@
         :has-run-artifacts="editorStore.hasRunArtifacts" :active-run="editorStore.activeRunSummary"
         :run-history="editorStore.runHistory" :command-templates="commandTemplates"
         :executor="editorStore.selectedExecutor" @open-file="openDocumentByPath" @run="handleRunScript"
-        @open-git-diff="openGitDiffPreview"
-        @create-document="createNewDocument" @open-terminal="openTerminal" @insert-template="handleInsertTemplate"
-        @clear-run-history="clearTerminalLogs" />
+        @open-git-diff="openGitDiffPreview" @create-document="createNewDocument" @open-terminal="openTerminal"
+        @insert-template="handleInsertTemplate" @clear-run-history="clearTerminalLogs" />
     </template>
 
     <template #header>
       <WorkbenchHeader v-show="isWorkbenchContentVisible" :documents="editorStore.documents"
         :active-document-id="editorStore.activeDocumentId"
         :file-path="editorStore.hasActiveDocument ? editorStore.document.path : null"
-        :show-breadcrumb="editorStore.document.kind !== 'git-diff'"
-        :can-navigate-back="canNavigateDocumentBack" :can-navigate-forward="canNavigateDocumentForward"
-        @select-tab="activateDocument" @close-tab="requestCloseDocument" @navigate-back="navigateDocumentBack"
+        :show-breadcrumb="editorStore.document.kind !== 'git-diff'" :can-navigate-back="canNavigateDocumentBack"
+        :can-navigate-forward="canNavigateDocumentForward" @select-tab="activateDocument"
+        @close-tab="requestCloseDocument" @navigate-back="navigateDocumentBack"
         @navigate-forward="navigateDocumentForward" />
     </template>
 
@@ -62,17 +62,12 @@
           @selection-change="handleSelectionChange" @format-request="handleFormatDocument"
           @command-palette-request="handleOpenCommandPalette" @run-request="handleRunScript" />
 
-        <AiDiffPreviewEditor
-          v-else-if="editorStore.document.kind === 'ai-diff' && editorStore.document.aiDiffPreview"
-          :preview="editorStore.document.aiDiffPreview"
-        />
+        <AiDiffPreviewEditor v-else-if="editorStore.document.kind === 'ai-diff' && editorStore.document.aiDiffPreview"
+          :preview="editorStore.document.aiDiffPreview" />
 
-        <GitDiffViewer
-          v-else-if="editorStore.document.kind === 'git-diff' && editorStore.document.gitDiffPreview"
-          :preview="editorStore.document.gitDiffPreview"
-          :theme="appStore.theme"
-          :editor-settings="appStore.settings.editor"
-        />
+        <GitDiffViewer v-else-if="editorStore.document.kind === 'git-diff' && editorStore.document.gitDiffPreview"
+          :preview="editorStore.document.gitDiffPreview" :theme="appStore.theme"
+          :editor-settings="appStore.settings.editor" />
 
         <ImageAssetPreview v-else-if="editorStore.document.path" :path="editorStore.document.path"
           :name="editorStore.document.name" />
@@ -171,6 +166,7 @@ const {
   isTerminalVisible,
   isSidebarVisible,
   isAiPanelVisible,
+  aiPanelWidth,
   isDiagnosticsPanelVisible,
   isSettingsView,
   isWorkbenchContentVisible,
@@ -198,6 +194,7 @@ const {
   handleSelectDiagnostic,
   handleRerunDiagnostics,
   handleTerminalHeightChange,
+  handleAiPanelWidthChange,
   toggleTerminalMaximize,
   closeSettingsView,
   toggleSettingsView,

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { IAiChatStreamRenderState } from '@/types/ai';
-import type { CodeBlockNodeProps, CustomComponents } from 'markstream-vue';
+import AiMarkdownCodeBlock from '@/components/business/ai/AiMarkdownCodeBlock.vue';
+import type { CustomComponents } from 'markstream-vue';
 import MarkdownRender, {
-  MarkdownCodeBlockNode,
   removeCustomComponents,
   setCustomComponents,
   setDefaultI18nMap,
@@ -38,22 +38,8 @@ const AI_MARKDOWN_I18N_MAP = {
 } satisfies TI18nMap;
 
 const AI_MARKDOWN_COMPONENTS = {
-  code_block: MarkdownCodeBlockNode,
+  code_block: AiMarkdownCodeBlock,
 } satisfies Partial<CustomComponents>;
-
-const AI_MARKDOWN_CODE_BLOCK_PROPS = {
-  darkTheme: 'vitesse-dark',
-  lightTheme: 'vitesse-light',
-  showHeader: true,
-  showCopyButton: true,
-  showExpandButton: true,
-  showPreviewButton: true,
-  showCollapseButton: true,
-  showFontSizeButtons: true,
-  showTooltips: true,
-  minWidth: '100%',
-  maxWidth: '100%',
-} satisfies Partial<Omit<CodeBlockNodeProps, 'node'>>;
 
 setDefaultI18nMap(AI_MARKDOWN_I18N_MAP);
 
@@ -90,7 +76,6 @@ onBeforeUnmount(() => {
       :content="content"
       :custom-id="rendererId"
       :final="isFinal"
-      :code-block-props="AI_MARKDOWN_CODE_BLOCK_PROPS"
       :defer-nodes-until-visible="false"
       :max-live-nodes="0"
       :render-batch-size="16"

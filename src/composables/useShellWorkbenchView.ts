@@ -38,6 +38,9 @@ type TWorkbenchSurfaceMode = 'workbench' | 'settings';
 const SETTINGS_STATUS_MESSAGE_DURATION_MS = 2200;
 const READY_PAINT_FALLBACK_TIMEOUT_MS = 96;
 const MAX_DOCUMENT_NAV_HISTORY = 120;
+const AI_PANEL_DEFAULT_WIDTH = 450;
+const AI_PANEL_MIN_WIDTH = 350;
+const AI_PANEL_MAX_WIDTH = 550;
 const WIDE_SIDEBAR_VIEWS: readonly TWorkbenchSidebarView[] = [
   'source-control',
   'explorer',
@@ -103,6 +106,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   const isTerminalVisible = ref(true);
   const isSidebarVisible = ref(true);
   const isAiPanelVisible = ref(false);
+  const aiPanelWidth = ref(AI_PANEL_DEFAULT_WIDTH);
   const isDiagnosticsPanelVisible = ref(false);
   const activeSurfaceMode = ref<TWorkbenchSurfaceMode>('workbench');
   const terminalHeight = ref(236);
@@ -126,6 +130,9 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   const sidebarWidth = computed(() =>
     WIDE_SIDEBAR_VIEWS.includes(activeSidebarView.value) ? 280 : 240,
   );
+
+  const clampAiPanelWidth = (value: number): number =>
+    Math.min(AI_PANEL_MAX_WIDTH, Math.max(AI_PANEL_MIN_WIDTH, Math.round(value)));
 
   const resolveAdjacentDocumentId = (
     currentDocumentId: string,
@@ -351,6 +358,10 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     if (!isTerminalMaximized.value) {
       terminalHeightBeforeMaximize.value = value;
     }
+  };
+
+  const handleAiPanelWidthChange = (value: number): void => {
+    aiPanelWidth.value = clampAiPanelWidth(value);
   };
 
   const toggleTerminalMaximize = (): void => {
@@ -735,6 +746,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     isTerminalVisible,
     isSidebarVisible,
     isAiPanelVisible,
+    aiPanelWidth,
     isDiagnosticsPanelVisible,
     isSettingsView,
     isWorkbenchContentVisible,
@@ -765,6 +777,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     handleSelectDiagnostic,
     handleRerunDiagnostics,
     handleTerminalHeightChange,
+    handleAiPanelWidthChange,
     toggleTerminalMaximize,
     closeSettingsView,
     toggleSettingsView,

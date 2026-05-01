@@ -443,6 +443,38 @@ button:disabled,
   pointer-events: none;
 }
 
+.right-sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 12;
+  width: 8px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.right-sidebar-resize-handle-bar {
+  display: block;
+  width: 1px;
+  height: 100%;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.right-sidebar-resize-handle:hover .right-sidebar-resize-handle-bar,
+.right-sidebar-resize-handle:active .right-sidebar-resize-handle-bar {
+  background: color-mix(in srgb, var(--accent-strong) 20%, var(--shell-divider));
+}
+
+.app-window-shell[data-workbench-motion-state='right-sidebar-opening'] .right-sidebar-resize-handle,
+.app-window-shell[data-workbench-motion-state='right-sidebar-closing'] .right-sidebar-resize-handle {
+  pointer-events: none;
+}
+
 .workbench-scroll-region {
   scrollbar-gutter: stable both-edges;
   overscroll-behavior: contain;

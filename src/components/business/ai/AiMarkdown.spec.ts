@@ -12,7 +12,7 @@ const flushRender = async (): Promise<void> => {
   await nextTick();
 };
 
-describe('AiMarkdown markstream-vue rendering', () => {
+describe('AiMarkdown rendering', () => {
   it('renders Markdown content through markstream-vue', async () => {
     const wrapper = mount(AiMarkdown, {
       props: {
@@ -53,7 +53,7 @@ describe('AiMarkdown markstream-vue rendering', () => {
     expect(wrapper.text()).toContain('done');
   });
 
-  it('uses markstream-vue built-in code block actions', async () => {
+  it('uses vue-markdown-design to highlight custom code blocks', async () => {
     const wrapper = mount(AiMarkdown, {
       props: {
         messageId: 'm-code-actions',
@@ -68,5 +68,6 @@ describe('AiMarkdown markstream-vue rendering', () => {
     expect(wrapper.find('.code-block-header').exists()).toBe(true);
     expect(wrapper.find('.code-action-btn').exists()).toBe(true);
     expect(wrapper.find('button[aria-label="复制"]').exists()).toBe(true);
+    expect(wrapper.find('.hljs').exists()).toBe(true);
   });
 });

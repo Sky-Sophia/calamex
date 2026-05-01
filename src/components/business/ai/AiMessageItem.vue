@@ -115,12 +115,7 @@ onBeforeUnmount(() => {
 
 <template>
   <article v-if="shouldRenderMessage" class="ai-message" :class="`is-${message.role}`">
-    <AiProviderIcon
-      v-if="message.role !== 'user'"
-      class="ai-logo"
-      :platform-id="platformId"
-      :title="providerLabel"
-    />
+    <AiProviderIcon v-if="message.role !== 'user'" class="ai-logo" :platform-id="platformId" :title="providerLabel" />
     <div class="ai-message-main">
       <AiToolActivityInline v-if="message.toolCalls?.length" :tool-calls="message.toolCalls" />
       <div v-if="shouldShowInlineLoader" class="ai-message-status-line" role="status" aria-live="polite">
@@ -128,33 +123,19 @@ onBeforeUnmount(() => {
         <span>AI 正在生成回答</span>
       </div>
       <div v-if="shouldShowMessageBubble" class="ai-message-bubble">
-        <AiMarkdown
-          :message-id="message.id"
-          :content="message.content"
-          :stream-status="message.stream?.status"
-        />
+        <AiMarkdown :message-id="message.id" :content="message.content" :stream-status="message.stream?.status" />
       </div>
       <div v-if="hasMessageActions" class="ai-message-options" aria-label="AI 选项">
-        <button
-          v-for="action in message.actions"
-          :key="`${message.id}:${action.id}`"
-          type="button"
-          class="ai-message-option-button"
-          :disabled="action.disabled"
-          @click.stop="emit('messageAction', message.id, action.id)"
-        >
+        <button v-for="action in message.actions" :key="`${message.id}:${action.id}`" type="button"
+          class="ai-message-option-button" :disabled="action.disabled"
+          @click.stop="emit('messageAction', message.id, action.id)">
           {{ action.label }}
         </button>
       </div>
       <div v-if="canCopyContent" class="ai-message-actions">
-        <button
-          type="button"
-          class="ai-message-copy-button"
-          :class="{ 'is-copied': isCopied }"
-          :aria-label="isCopied ? '已复制对话内容' : '复制对话内容'"
-          :title="isCopied ? '已复制' : '复制对话内容'"
-          @click.stop="copyMessageContent"
-        >
+        <button type="button" class="ai-message-copy-button" :class="{ 'is-copied': isCopied }"
+          :aria-label="isCopied ? '已复制对话内容' : '复制对话内容'" :title="isCopied ? '已复制' : '复制对话内容'"
+          @click.stop="copyMessageContent">
           <svg v-if="isCopied" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <path d="M5 12.5l4.2 4.2L19 7" />
           </svg>
@@ -188,11 +169,11 @@ onBeforeUnmount(() => {
 
 .ai-message-main {
   min-width: 0;
-  max-width: 310px;
+  max-width: calc(100% - 50px);
 }
 
-.ai-message-main > .ai-tool-activity-inline + .ai-message-bubble,
-.ai-message-main > .ai-tool-activity-inline + .ai-message-status-line {
+.ai-message-main>.ai-tool-activity-inline+.ai-message-bubble,
+.ai-message-main>.ai-tool-activity-inline+.ai-message-status-line {
   margin-top: 6px;
 }
 

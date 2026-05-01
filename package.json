@@ -52,6 +52,7 @@
     "tailwind-merge": "^3.5.0",
     "tree-sitter-bash": "^0.25.1",
     "vue": "^3.5.13",
+    "vue-markdown-design": "0.3.2",
     "vue-router": "^4.6.4",
     "web-tree-sitter": "^0.26.8",
     "zod": "^3.24.0"

@@ -1,47 +1,39 @@
 <template>
   <div class="app-surface h-screen">
-    <div
-ref="shellRef"
+    <div ref="shellRef"
       class="app-window-shell relative flex h-full flex-col overflow-hidden border border-(--shell-divider)"
-      :data-layout-resizing="layoutTransitionsEnabled ? 'false' : 'true'"
-      :data-workbench-motion-state="motionState">
+      :data-layout-resizing="layoutTransitionsEnabled ? 'false' : 'true'" :data-workbench-motion-state="motionState">
       <template v-if="isDesktopRuntime">
-        <div
-v-for="handle in resizeHandles" :key="handle.direction" class="window-resize-handle"
+        <div v-for="handle in resizeHandles" :key="handle.direction" class="window-resize-handle"
           :class="handle.className" @mousedown.prevent.stop="startWindowResize(handle.direction, $event)" />
       </template>
 
       <slot name="titlebar" />
 
-      <div
-        class="relative grid min-h-0 flex-1 overflow-hidden bg-(--editor-bg)"
-        :style="shellGridStyle"
-      >
+      <div class="relative grid min-h-0 flex-1 overflow-hidden bg-(--editor-bg)" :style="shellGridStyle">
         <div class="border-r border-(--shell-divider) bg-(--activity-bg)">
           <slot name="activity" />
         </div>
 
-        <div
-ref="sidebarRef" class="app-shell-pane workbench-sidebar-pane min-w-0 overflow-hidden bg-(--sidebar-bg)" :class="[
-          layoutTransitionsEnabled ? sidebarSurfaceTransitionClass : 'transition-none',
-          props.sidebarVisible
-            ? 'translate-x-0 border-r border-(--shell-divider) opacity-100'
-            : '-translate-x-3 opacity-0 pointer-events-none',
-        ]">
+        <div ref="sidebarRef" class="app-shell-pane workbench-sidebar-pane min-w-0 overflow-hidden bg-(--sidebar-bg)"
+          :class="[
+            layoutTransitionsEnabled ? sidebarSurfaceTransitionClass : 'transition-none',
+            props.sidebarVisible
+              ? 'translate-x-0 border-r border-(--shell-divider) opacity-100'
+              : '-translate-x-3 opacity-0 pointer-events-none',
+          ]">
           <slot name="sidebar" />
         </div>
 
         <div class="app-shell-pane flex min-h-0 flex-col bg-(--editor-bg)">
           <slot name="header" />
-          <main
-ref="mainRef" class="grid min-h-0 flex-1"
+          <main ref="mainRef" class="grid min-h-0 flex-1"
             :class="layoutTransitionsEnabled ? layoutRowsTransitionClass : 'transition-none'" :style="mainGridStyle">
             <section class="app-shell-pane min-h-0 editor-surface">
               <slot />
             </section>
 
-            <button
-type="button" class="terminal-resize-handle" :class="[
+            <button type="button" class="terminal-resize-handle" :class="[
               layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none',
               props.terminalVisible
                 ? 'translate-y-0 opacity-100'
@@ -50,8 +42,7 @@ type="button" class="terminal-resize-handle" :class="[
               <span class="terminal-resize-handle-bar" />
             </button>
 
-            <section
-ref="terminalPaneRef" class="app-shell-pane min-h-0 overflow-hidden bg-(--panel-bg)" :class="[
+            <section ref="terminalPaneRef" class="app-shell-pane min-h-0 overflow-hidden bg-(--panel-bg)" :class="[
               layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none',
               props.terminalVisible
                 ? 'translate-y-0 opacity-100'
@@ -62,22 +53,23 @@ ref="terminalPaneRef" class="app-shell-pane min-h-0 overflow-hidden bg-(--panel-
           </main>
         </div>
 
-        <aside
-          ref="rightSidebarRef"
-          class="app-shell-pane min-h-0 overflow-hidden bg-(--sidebar-bg)"
-          :style="rightSidebarStyle"
-          :class="[
+        <aside ref="rightSidebarRef" class="app-shell-pane relative min-h-0 overflow-hidden bg-(--sidebar-bg)"
+          :style="rightSidebarStyle" :class="[
             layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none',
             props.rightSidebarVisible
               ? 'translate-x-0 border-l border-(--shell-divider) opacity-100'
               : 'translate-x-3 opacity-0 pointer-events-none',
-          ]"
-        >
+          ]">
+          <button v-if="props.rightSidebarVisible" type="button" class="right-sidebar-resize-handle"
+            :class="layoutTransitionsEnabled ? surfaceTransitionClass : 'transition-none'" aria-label="调整 AI 面板宽度"
+            @mousedown.prevent.stop="startRightSidebarResize">
+            <span class="right-sidebar-resize-handle-bar" />
+          </button>
+
           <slot name="right-sidebar" />
         </aside>
 
-        <div
-v-if="props.contentOverlayVisible" class="pointer-events-none absolute inset-y-0 right-0 z-35"
+        <div v-if="props.contentOverlayVisible" class="pointer-events-none absolute inset-y-0 right-0 z-35"
           :style="contentOverlayStyle">
           <div class="pointer-events-auto h-full min-h-0">
             <slot name="overlay" />
@@ -94,8 +86,8 @@ v-if="props.contentOverlayVisible" class="pointer-events-none absolute inset-y-0
 import { useWorkbenchMotion } from '@/composables/useWorkbenchMotion';
 import {
   SHELL_WINDOW_RESIZE_END_EVENT,
-  SHELL_WINDOW_RESIZE_START_EVENT,
   SHELL_WINDOW_RESIZE_SETTLED_EVENT,
+  SHELL_WINDOW_RESIZE_START_EVENT,
 } from '@/utils/window-resize-events';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
@@ -123,6 +115,8 @@ const props = withDefaults(
     sidebarWidth?: number;
     rightSidebarVisible?: boolean;
     rightSidebarWidth?: number;
+    rightSidebarMinWidth?: number;
+    rightSidebarMaxWidth?: number;
     contentOverlayVisible?: boolean;
   }>(),
   {
@@ -133,12 +127,15 @@ const props = withDefaults(
     sidebarWidth: 240,
     rightSidebarVisible: false,
     rightSidebarWidth: 350,
+    rightSidebarMinWidth: 350,
+    rightSidebarMaxWidth: 550,
     contentOverlayVisible: false,
   },
 );
 
 const emit = defineEmits<{
   'update:terminalHeight': [value: number];
+  'update:rightSidebarWidth': [value: number];
 }>();
 
 const WINDOW_RESIZE_SETTLE_MS = 140;
@@ -151,13 +148,16 @@ const layoutTransitionsEnabled = ref(true);
 let resizeObserver: ResizeObserver | null = null;
 let shellResizeObserver: ResizeObserver | null = null;
 let terminalResizeCleanup: (() => void) | null = null;
+let rightSidebarResizeCleanup: (() => void) | null = null;
 let resizeSettleTimerId: number | null = null;
 let shellResizeFrameId: number | null = null;
 let terminalViewportSyncFrameId: number | null = null;
 let terminalResizeFrameId: number | null = null;
+let rightSidebarResizeFrameId: number | null = null;
 let previousShellSize = { width: 0, height: 0 };
 let pendingShellSize: { width: number; height: number } | null = null;
 let pendingTerminalResizeHeight: number | null = null;
+let pendingRightSidebarResizeWidth: number | null = null;
 let isShellWindowResizing = false;
 let pendingTerminalViewportSync = false;
 
@@ -186,6 +186,17 @@ const clampTerminalHeight = (rawHeight: number): number => {
   return Math.min(maxHeight, Math.max(TERMINAL_MIN_HEIGHT, Math.round(rawHeight)));
 };
 
+const clampRightSidebarWidth = (rawWidth: number): number => {
+  const normalizedMinWidth = Math.max(0, Math.round(props.rightSidebarMinWidth));
+  const normalizedMaxWidth = Math.max(normalizedMinWidth, Math.round(props.rightSidebarMaxWidth));
+
+  return Math.min(normalizedMaxWidth, Math.max(normalizedMinWidth, Math.round(rawWidth)));
+};
+
+const resolvedRightSidebarWidth = computed(() =>
+  props.rightSidebarVisible ? clampRightSidebarWidth(props.rightSidebarWidth) : 0,
+);
+
 const mainGridStyle = computed(() => {
   const terminalHeight = clampTerminalHeight(props.terminalHeight);
 
@@ -201,7 +212,7 @@ const mainGridStyle = computed(() => {
 });
 
 const shellGridStyle = computed(() => ({
-  gridTemplateColumns: `52px ${props.sidebarVisible ? props.sidebarWidth : 0}px minmax(0, 1fr) ${props.rightSidebarVisible ? props.rightSidebarWidth : 0}px`,
+  gridTemplateColumns: `52px ${props.sidebarVisible ? props.sidebarWidth : 0}px minmax(0, 1fr) ${resolvedRightSidebarWidth.value}px`,
 }));
 
 const contentOverlayStyle = computed(() => ({
@@ -209,8 +220,9 @@ const contentOverlayStyle = computed(() => ({
 }));
 
 const rightSidebarStyle = computed(() => ({
-  width: `${props.rightSidebarVisible ? props.rightSidebarWidth : 0}px`,
-  minWidth: `${props.rightSidebarVisible ? props.rightSidebarWidth : 0}px`,
+  width: `${resolvedRightSidebarWidth.value}px`,
+  minWidth: `${resolvedRightSidebarWidth.value}px`,
+  maxWidth: `${resolvedRightSidebarWidth.value}px`,
 }));
 
 const layoutRowsTransitionClass =
@@ -346,6 +358,30 @@ const queueTerminalResizeHeight = (nextHeight: number): void => {
   terminalResizeFrameId = window.requestAnimationFrame(flushPendingTerminalResizeHeight);
 };
 
+const flushPendingRightSidebarResizeWidth = (): void => {
+  rightSidebarResizeFrameId = null;
+  if (pendingRightSidebarResizeWidth === null) {
+    return;
+  }
+
+  const nextWidth = pendingRightSidebarResizeWidth;
+  pendingRightSidebarResizeWidth = null;
+
+  if (nextWidth !== props.rightSidebarWidth) {
+    emit('update:rightSidebarWidth', nextWidth);
+  }
+};
+
+const queueRightSidebarResizeWidth = (nextWidth: number): void => {
+  pendingRightSidebarResizeWidth = nextWidth;
+
+  if (rightSidebarResizeFrameId !== null) {
+    return;
+  }
+
+  rightSidebarResizeFrameId = window.requestAnimationFrame(flushPendingRightSidebarResizeWidth);
+};
+
 const startTerminalResize = (event: MouseEvent): void => {
   if (!props.terminalVisible || !mainRef.value || event.button !== 0) {
     return;
@@ -377,6 +413,42 @@ const startTerminalResize = (event: MouseEvent): void => {
   };
 
   terminalResizeCleanup = stopResize;
+  window.addEventListener('mousemove', handleMouseMove);
+  window.addEventListener('mouseup', stopResize, { once: true });
+  window.addEventListener('blur', stopResize, { once: true });
+};
+
+const startRightSidebarResize = (event: MouseEvent): void => {
+  if (!props.rightSidebarVisible || event.button !== 0) {
+    return;
+  }
+
+  rightSidebarResizeCleanup?.();
+
+  const startX = event.clientX;
+  const startWidth = resolvedRightSidebarWidth.value;
+  layoutTransitionsEnabled.value = false;
+  window.dispatchEvent(new Event(SHELL_WINDOW_RESIZE_START_EVENT));
+
+  const handleMouseMove = (moveEvent: MouseEvent): void => {
+    const nextWidth = clampRightSidebarWidth(startWidth + (startX - moveEvent.clientX));
+    queueRightSidebarResizeWidth(nextWidth);
+  };
+
+  const stopResize = (): void => {
+    window.removeEventListener('mousemove', handleMouseMove);
+    window.removeEventListener('mouseup', stopResize);
+    window.removeEventListener('blur', stopResize);
+    if (rightSidebarResizeFrameId !== null) {
+      window.cancelAnimationFrame(rightSidebarResizeFrameId);
+      flushPendingRightSidebarResizeWidth();
+    }
+    scheduleLayoutTransitionRestore();
+    rightSidebarResizeCleanup = null;
+    window.dispatchEvent(new Event(SHELL_WINDOW_RESIZE_END_EVENT));
+  };
+
+  rightSidebarResizeCleanup = stopResize;
   window.addEventListener('mousemove', handleMouseMove);
   window.addEventListener('mouseup', stopResize, { once: true });
   window.addEventListener('blur', stopResize, { once: true });
@@ -522,6 +594,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   shellResizeObserver?.disconnect();
   terminalResizeCleanup?.();
+  rightSidebarResizeCleanup?.();
 
   if (shellResizeFrameId !== null) {
     window.cancelAnimationFrame(shellResizeFrameId);
@@ -538,7 +611,13 @@ onBeforeUnmount(() => {
     terminalResizeFrameId = null;
   }
 
+  if (rightSidebarResizeFrameId !== null) {
+    window.cancelAnimationFrame(rightSidebarResizeFrameId);
+    rightSidebarResizeFrameId = null;
+  }
+
   pendingTerminalResizeHeight = null;
+  pendingRightSidebarResizeWidth = null;
 
   if (resizeSettleTimerId !== null) {
     window.clearTimeout(resizeSettleTimerId);

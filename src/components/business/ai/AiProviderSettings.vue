@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useAiAutoApply } from '@/composables/useAiAutoApply';
+import type { TAiServicePlatformId } from '@/constants/ai-providers';
 import {
     AI_SERVICE_PLATFORM_PRESETS,
     DEFAULT_LITELLM_BASE_URL,
@@ -8,7 +9,6 @@ import {
     findAiServicePlatformPreset,
     isAiServicePlatformModel,
 } from '@/constants/ai-providers';
-import type { TAiServicePlatformId } from '@/constants/ai-providers';
 import type {
     IAiConfigPayload,
     IAiProviderSettingsActionFeedback,
@@ -428,19 +428,16 @@ onBeforeUnmount(() => {
                         <div class="form-item">
                             <label class="form-label">AI 服务平台</label>
                             <div class="lr-select" :class="{ open: isPlatformOpen }" data-key="platform">
-                                <button
-type="button" class="lr-select-trigger" aria-haspopup="listbox"
+                                <button type="button" class="lr-select-trigger" aria-haspopup="listbox"
                                     @click.stop="isPlatformOpen = !isPlatformOpen; isModelOpen = false">
                                     <span class="lr-select-value">{{ selectedPlatformLabel }}</span>
-                                    <svg
-class="lr-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    <svg class="lr-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <polyline points="6 9 12 15 18 9" />
                                     </svg>
                                 </button>
                                 <div class="lr-select-menu" role="listbox" @click.stop>
-                                    <div
-v-for="option in platformOptions" :key="option.value"
+                                    <div v-for="option in platformOptions" :key="option.value"
                                         :data-provider-id="option.value" class="lr-option"
                                         :class="{ selected: option.value === activeServicePlatformId }" role="option"
                                         @click="updatePlatform(option.value)">
@@ -453,19 +450,16 @@ v-for="option in platformOptions" :key="option.value"
                         <div class="form-item">
                             <label class="form-label">模型名称</label>
                             <div class="lr-select" :class="{ open: isModelOpen }" data-key="model">
-                                <button
-type="button" class="lr-select-trigger" aria-haspopup="listbox"
+                                <button type="button" class="lr-select-trigger" aria-haspopup="listbox"
                                     @click.stop="isModelOpen = !isModelOpen; isPlatformOpen = false">
                                     <span class="lr-select-value">{{ selectedModelLabel }}</span>
-                                    <svg
-class="lr-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    <svg class="lr-select-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <polyline points="6 9 12 15 18 9" />
                                     </svg>
                                 </button>
                                 <div class="lr-select-menu" role="listbox" @click.stop>
-                                    <div
-v-for="option in modelOptions" :key="option.value" class="lr-option"
+                                    <div v-for="option in modelOptions" :key="option.value" class="lr-option"
                                         :class="{ selected: option.value === nextConfig.selectedModel }" role="option"
                                         @click="updateModel(option.value)">
                                         <span class="lr-option-main">{{ option.label }}</span>
@@ -478,13 +472,11 @@ v-for="option in modelOptions" :key="option.value" class="lr-option"
                     <div class="form-item">
                         <label class="form-label">API Key</label>
                         <div class="key-wrapper">
-                            <input
-v-model="apiKey" type="password" class="form-input"
+                            <input v-model="apiKey" type="password" class="form-input"
                                 :placeholder="activePreset.apiKeyHint || 'sk-xxxx'" />
                             <div class="key-actions">
                                 <button class="key-btn" aria-label="复制" @click="copyKey">
-                                    <svg
-viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                         stroke-linecap="round" stroke-linejoin="round">
                                         <rect x="9" y="9" width="13" height="13" rx="2" />
                                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
@@ -497,23 +489,19 @@ viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
 
                     <div class="form-item">
                         <label class="form-label">API Base URL</label>
-                        <input
-v-model="nextConfig.baseUrl" class="form-input"
-                            :readonly="!activePreset.isEndpointEditable"
-                            :placeholder="activePreset.baseUrl ?? ''" />
+                        <input v-model="nextConfig.baseUrl" class="form-input"
+                            :readonly="!activePreset.isEndpointEditable" :placeholder="activePreset.baseUrl ?? ''" />
                     </div>
 
                     <div class="form-row">
                         <div class="form-item">
                             <label class="form-label">请求超时（秒）</label>
-                            <input
-v-model.number="advancedDraft.timeoutSeconds" type="number" class="form-input"
+                            <input v-model.number="advancedDraft.timeoutSeconds" type="number" class="form-input"
                                 min="5" max="120" />
                         </div>
                         <div class="form-item">
                             <label class="form-label">代理地址（可选）</label>
-                            <input
-v-model="advancedDraft.proxyUrl" class="form-input"
+                            <input v-model="advancedDraft.proxyUrl" class="form-input"
                                 placeholder="http://127.0.0.1:7890" />
                         </div>
                     </div>
@@ -534,8 +522,7 @@ v-model="advancedDraft.proxyUrl" class="form-input"
                     <div class="form-row">
                         <div class="form-item" style="flex: 0 0 200px;">
                             <label class="form-label">最大输出 Tokens</label>
-                            <input
-v-model.number="advancedDraft.maxTokens" type="number" class="form-input" min="256"
+                            <input v-model.number="advancedDraft.maxTokens" type="number" class="form-input" min="256"
                                 max="128000" />
                         </div>
                         <div class="form-item" style="flex: 1;">
@@ -558,8 +545,7 @@ v-model.number="advancedDraft.maxTokens" type="number" class="form-input" min="2
                         <p class="aed-section__copy">控制 Agent patch 是保持手动审批，还是在当前任务 / 当前会话内直接自动应用。</p>
 
                         <div class="aed-auth-grid">
-                            <button
-v-for="option in autoApplyOptions" :key="option.value" type="button"
+                            <button v-for="option in autoApplyOptions" :key="option.value" type="button"
                                 class="aed-auth-card" :class="{
                                     'is-selected': option.value === autoApply.authLevel.value,
                                     'is-manual': option.value === 'manual',
@@ -590,13 +576,11 @@ v-for="option in autoApplyOptions" :key="option.value" type="button"
 
             <div v-if="statusMessage" class="status" :class="[`status-${statusTone}`, 'show']">
                 <span class="status-icon">
-                    <svg
-v-if="statusTone === 'success'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    <svg v-if="statusTone === 'success'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                         stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="20 6 9 17 4 12" />
                     </svg>
-                    <svg
-v-else-if="statusTone === 'error'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    <svg v-else-if="statusTone === 'error'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                         stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="10" />
                         <line x1="12" y1="8" x2="12" y2="12" />
@@ -683,8 +667,8 @@ v-else-if="statusTone === 'error'" viewBox="0 0 24 24" fill="none" stroke="curre
 
 .modal {
     background: var(--bg-elevated);
-    width: 100%;
-    max-width: 560px;
+    width: clamp(560px, 62vw, 720px);
+    max-width: calc(100vw - 48px);
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-modal);
     overflow: hidden;
