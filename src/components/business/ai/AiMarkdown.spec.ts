@@ -66,10 +66,31 @@ describe('AiMarkdown rendering', () => {
 
     expect(wrapper.find('.code-block-container').exists()).toBe(true);
     expect(wrapper.find('.code-block-header').exists()).toBe(true);
-    expect(wrapper.find('.code-action-btn').exists()).toBe(true);
-    expect(wrapper.find('button[aria-label="复制"]').exists()).toBe(true);
+    expect(wrapper.findAll('.code-action-btn')).toHaveLength(2);
+    expect(wrapper.find('button[aria-label="复制代码"]').exists()).toBe(true);
+    expect(wrapper.find('button[aria-label="折叠代码块"]').exists()).toBe(true);
+    expect(wrapper.find('.ai-code-block__copy svg').exists()).toBe(true);
     expect(wrapper.find('.ai-markdown-design-body pre').exists()).toBe(true);
     expect(wrapper.text()).toContain('const ready = true;');
+
+    const toggleButton = wrapper.get('button[aria-label="折叠代码块"]');
+    expect(toggleButton.attributes('aria-expanded')).toBe('true');
+    expect(wrapper.get('.ai-code-block').classes()).not.toContain('is-collapsed');
+    expect(wrapper.get('.ai-code-block__body').attributes('style') ?? '').not.toContain('display: none');
+
+    await toggleButton.trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('button[aria-label="展开代码块"]').exists()).toBe(true);
+    expect(wrapper.get('.ai-code-block').classes()).toContain('is-collapsed');
+    expect(wrapper.get('.ai-code-block__body').attributes('style') ?? '').toContain('display: none');
+
+    await wrapper.get('button[aria-label="展开代码块"]').trigger('click');
+    await nextTick();
+
+    expect(wrapper.find('button[aria-label="折叠代码块"]').exists()).toBe(true);
+    expect(wrapper.get('.ai-code-block').classes()).not.toContain('is-collapsed');
+    expect(wrapper.get('.ai-code-block__body').attributes('style') ?? '').not.toContain('display: none');
   });
 
   it('renders LaTeX formulas through markstream-vue katex support', async () => {

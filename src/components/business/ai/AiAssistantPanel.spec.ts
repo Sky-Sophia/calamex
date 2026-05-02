@@ -10,7 +10,6 @@ import type {
     IAiToolActivityInline,
     IAiToolConfirmationRequest,
 } from '@/types/ai';
-import { createPinia, setActivePinia } from 'pinia';
 import type {
     IActiveRunSummary,
     IAnalyzeScriptPayload,
@@ -19,6 +18,7 @@ import type {
 } from '@/types/editor';
 import type { IGitRepositoryStatusPayload } from '@/types/git';
 import { mount } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { computed, ref } from 'vue';
 
@@ -69,6 +69,7 @@ const createAssistantMock = (
     const isSending = ref(false);
     const draft = ref('');
     const errorMessage = ref('');
+    const providerProfiles = ref([]);
     const currentReferences = ref<IAiContextReference[]>([]);
     const agentSteps = ref<IAiTaskPlanStep[]>([]);
     const attachedFiles = ref([] as Array<{ id: string; name: string; sizeLabel: string; kind: 'text' | 'image' }>);
@@ -113,6 +114,7 @@ const createAssistantMock = (
         isSending,
         draft,
         errorMessage,
+        providerProfiles,
         currentReferences,
         agentSteps,
         attachedFiles,
@@ -132,8 +134,10 @@ const createAssistantMock = (
         sendButtonLabel: computed(() => '发送'),
         loadConfig: vi.fn().mockResolvedValue(undefined),
         loadTools: vi.fn().mockResolvedValue(undefined),
+        loadProviderProfiles: vi.fn().mockResolvedValue(undefined),
         saveConfig: vi.fn().mockResolvedValue(undefined),
         saveCredentials: vi.fn().mockResolvedValue(undefined),
+        getProviderProfileDetail: vi.fn().mockResolvedValue(null),
         testProviderConfig: vi.fn().mockResolvedValue('ok'),
         connectProvider: vi.fn().mockResolvedValue('ok'),
         testProvider: vi.fn().mockResolvedValue('ok'),
@@ -282,6 +286,45 @@ describe('AiAssistantPanel', () => {
         expect(modelButton.find('.ai-provider-icon').exists()).toBe(true);
         expect(modelButton.text()).not.toContain('deepseek/deepseek-v4-pro');
         expect(modelButton.attributes('title')).toContain('DeepSeek');
+    });
+
+    it('将预览 Patch 入口放在预览面板下方并保留点击动作', async () => {
+        const assistantMock = createAssistantMock([]);
+        assistantMock.canPreviewPatch = computed(() => true);
+        useAiAssistantMock.mockReturnValue(assistantMock);
+
+        const wrapper = mount(AiAssistantPanel, {
+            props: {
+                document: createDocument(),
+                activeRun: null as IActiveRunSummary | null,
+                analysis: createAnalysis(),
+                selection: null as IEditorSelectionSummary | null,
+                gitStatus: createGitStatus(),
+                workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+            },
+            global: {
+                stubs: {
+                    AiChatThread: { template: '<div />' },
+                    AiContextChips: { template: '<div />' },
+                    AiPatchPreview: { template: '<div class="patch-preview-stub" />' },
+                    AiPromptInput: { template: '<div />' },
+                    AiProviderSettings: { template: '<div />' },
+                    AiPlanModePanel: { template: '<div />' },
+                    teleport: true,
+                },
+            },
+        });
+
+        const html = wrapper.html();
+        expect(html.indexOf('patch-preview-stub')).toBeLessThan(html.indexOf('ai-patch-entry__button'));
+
+        const trigger = wrapper.get('.ai-patch-entry__button');
+        expect(trigger.text()).toContain('预览为 Patch');
+        expect(trigger.find('svg').exists()).toBe(true);
+
+        await trigger.trigger('click');
+
+        expect(assistantMock.previewPatchFromLastAnswer).toHaveBeenCalledTimes(1);
     });
 
     it('shows plan panel only in plan mode when a plan exists', () => {

@@ -64,4 +64,28 @@ describe('AiPromptInput', () => {
         expect(wrapper.text()).not.toContain('665 × 329');
         expect(wrapper.text()).not.toContain('4.5 KB');
     });
+
+    it('hides file size labels for text attachments', () => {
+        const wrapper = mount(AiPromptInput, {
+            props: {
+                modelValue: '',
+                disabled: false,
+                errorMessage: '',
+                submitLabel: '发送',
+                attachments: [
+                    {
+                        id: 'file-1',
+                        name: 'README.md',
+                        kind: 'text',
+                        sizeLabel: '2.4 KB',
+                    },
+                ],
+                hasAttachments: true,
+                'onUpdate:modelValue': () => undefined,
+            },
+        });
+
+        expect(wrapper.text()).toContain('README.md');
+        expect(wrapper.text()).not.toContain('2.4 KB');
+    });
 });

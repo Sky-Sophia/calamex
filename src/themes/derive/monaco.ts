@@ -144,6 +144,7 @@ function buildMonacoColors(
     const borderWeak = tokens.overlay.border;
     const borderSep = tokens.overlay.separator;
     const btnBg = isDark ? tokens.accent.statusbar : tokens.accent.strong;
+    const diffInsertedBackground = '#294a2b';
 
     return {
         // ── 全局 ──
@@ -223,6 +224,8 @@ function buildMonacoColors(
         'editorGutter.modifiedBackground': tokens.diff.modified,
         'editorGutter.addedBackground': tokens.diff.added,
         'editorGutter.deletedBackground': tokens.diff.deleted,
+        'diffEditor.insertedLineBackground': diffInsertedBackground,
+        'diffEditor.insertedTextBackground': diffInsertedBackground,
 
         // ── Overview Ruler ──
         'editorOverviewRuler.border': '#00000000',

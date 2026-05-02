@@ -4,7 +4,7 @@ import AiProviderIcon from '@/components/business/ai/AiProviderIcon.vue';
 import AiToolActivityInline from '@/components/business/ai/AiToolActivityInline.vue';
 import { useMessage } from '@/composables/useMessage';
 import type { TAiServicePlatformId } from '@/constants/ai-providers';
-import type { IAiChatMessage, TAiChatMessageActionId } from '@/types/ai';
+import type { IAiChatMessage, IAiContextReference, TAiChatMessageActionId } from '@/types/ai';
 import { tryWriteClipboardText } from '@/utils/clipboard';
 import { LoaderCircle } from 'lucide-vue-next';
 import { computed, onBeforeUnmount, ref } from 'vue';
@@ -92,6 +92,31 @@ const shouldRenderMessage = computed(
     || hasMessageActions.value,
 );
 
+const userAttachmentReferences = computed(() => {
+  if (props.message.role !== 'user') {
+    return [];
+  }
+
+  return props.message.references.filter(isAttachmentReference);
+});
+
+function isAttachmentReference(reference: IAiContextReference): boolean {
+  return reference.id.startsWith('attachment:');
+}
+
+function resolveAttachmentLabel(reference: IAiContextReference): string {
+  const path = reference.path?.trim();
+
+  if (path) {
+    return path;
+  }
+
+  return reference.label
+    .replace(/^图片附件\s*·\s*/u, '')
+    .replace(/^附件\s*·\s*/u, '')
+    .trim();
+}
+
 const copyMessageContent = async (): Promise<void> => {
   if (!canCopyContent.value) {
     notifier.warning('暂无可复制内容');
@@ -114,17 +139,29 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <article
-    v-if="shouldRenderMessage"
-    class="ai-message"
-    :class="[`is-${message.role}`, { 'is-inline-loading': shouldShowInlineLoader }]"
-  >
+  <article v-if="shouldRenderMessage" class="ai-message"
+    :class="[`is-${message.role}`, { 'is-inline-loading': shouldShowInlineLoader }]">
     <AiProviderIcon v-if="message.role !== 'user'" class="ai-logo" :platform-id="platformId" :title="providerLabel" />
     <div class="ai-message-main">
       <AiToolActivityInline v-if="message.toolCalls?.length" :tool-calls="message.toolCalls" />
       <div v-if="shouldShowInlineLoader" class="ai-message-status-line" role="status" aria-live="polite">
         <LoaderCircle class="ai-message-status-icon" aria-hidden="true" />
         <span>AI 正在生成回答</span>
+      </div>
+      <div v-if="userAttachmentReferences.length" class="ai-message-attachments" aria-label="已发送附件">
+        <span v-for="reference in userAttachmentReferences" :key="reference.id" class="ai-message-attachment-chip">
+          <svg v-if="reference.kind === 'image-attachment'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <circle cx="8.5" cy="9" r="1.5" />
+            <path d="m21 15-4.5-4.5L7 20" />
+          </svg>
+          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path d="M14 2v6h6" />
+          </svg>
+          <span>{{ resolveAttachmentLabel(reference) }}</span>
+        </span>
       </div>
       <div v-if="shouldShowMessageBubble" class="ai-message-bubble">
         <AiMarkdown :message-id="message.id" :content="message.content" :stream-status="message.stream?.status" />
@@ -189,6 +226,48 @@ onBeforeUnmount(() => {
   margin-top: 6px;
 }
 
+.ai-message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 6px;
+}
+
+.ai-message.is-user .ai-message-attachments {
+  justify-content: flex-end;
+}
+
+.ai-message-attachment-chip {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--shell-divider) 82%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-soft) 74%, transparent);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 20px;
+  padding: 0 8px;
+}
+
+.ai-message-attachment-chip svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ai-message-attachment-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ai-message-bubble {
   border-radius: 8px;
   padding: 9px 11px;
@@ -228,6 +307,12 @@ onBeforeUnmount(() => {
   border-top-right-radius: 4px;
   background: var(--accent-strong);
   color: var(--accent-foreground, white);
+}
+
+.ai-message.is-user .ai-message-attachment-chip {
+  border-color: color-mix(in srgb, var(--accent-strong) 24%, transparent);
+  background: color-mix(in srgb, var(--accent-strong) 10%, transparent);
+  color: var(--text-primary);
 }
 
 .ai-message-actions {

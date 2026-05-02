@@ -136,7 +136,6 @@ const CODE_BLOCK_PATTERN = /```[a-zA-Z0-9_-]*\n([\s\S]*?)```/;
 
 const PROJECT_SEARCH_TOKENS = ['project', 'folder', 'search', 'symbol'] as const;
 
-const MSG_STREAM_CANCELLED = 'AI 流已被取消';
 const MSG_STREAM_ERROR = 'AI 响应出错';
 const MSG_CALL_FAILED = 'AI 调用失败';
 
@@ -1369,7 +1368,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       if (event.kind === 'cancelled') {
         aiStream.stop();
         syncAssistantMessage();
-        errorMessage.value = event.message ?? MSG_STREAM_CANCELLED;
+        errorMessage.value = '';
         settle();
         return;
       }
@@ -1536,9 +1535,9 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     const nextMessages = visibleMessages.map((message) =>
       message.id === userMessage.id
         ? {
-            ...message,
-            references,
-          }
+          ...message,
+          references,
+        }
         : message,
     );
 
@@ -1768,7 +1767,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     activeSidecarAgentSession.value = null;
     agentPlan.store.clearPendingToolConfirmation();
     isSending.value = false;
-    errorMessage.value = MSG_STREAM_CANCELLED;
+    errorMessage.value = '';
   };
 
   // -----------------------------------------------------------------------

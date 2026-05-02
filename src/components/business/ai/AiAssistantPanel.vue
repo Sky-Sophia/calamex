@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import AiChatThread from '@/components/business/ai/AiChatThread.vue';
-import AiContextChips from '@/components/business/ai/AiContextChips.vue';
 import AiPatchPreview from '@/components/business/ai/AiPatchPreview.vue';
 import AiPlanModePanel from '@/components/business/ai/AiPlanModePanel.vue';
 import AiPromptInput from '@/components/business/ai/AiPromptInput.vue';
@@ -25,7 +24,6 @@ import type {
   IAiToolActivityInline,
   IAiToolCall,
   IAiWebSourceEntry,
-  TAiAgentNetworkPermission,
   TAiChatMessageActionId,
   TAiToolConfirmationDecision,
 } from '@/types/ai';
@@ -78,8 +76,6 @@ const settingsDraft = ref<IAiConfigPayload>({ ...assistant.config.value });
 const settingsApiKey = ref('');
 const isAgentRunActionPending = ref(false);
 const isModeMenuOpen = ref(false);
-const isNetworkMenuOpen = ref(false);
-const isNetworkPermissionPending = ref(false);
 const isHistoryOpen = ref(false);
 const historyButtonRef = ref<HTMLButtonElement | null>(null);
 const historyPopoverStyle = ref<CSSProperties>({});
@@ -96,18 +92,6 @@ const aiModelButtonLabel = computed(() =>
 );
 const historyThreads = computed(() => assistant.historyThreads.value.slice(-MAX_HISTORY_MESSAGES).reverse());
 const historyCountLabel = computed(() => `最近 ${historyThreads.value.length} 组`);
-const networkPermissionLabel = computed(() => {
-  switch (agentNetwork.store.networkPermission) {
-    case 'off':
-      return 'Network Off';
-    case 'allowed-this-run':
-      return 'Network Allowed';
-    case 'ask':
-      return 'Network Ask';
-    default:
-      return 'Network Ask';
-  }
-});
 const planStore = computed(() => assistant.agentPlan.store);
 const hasPlannedAgentState = computed(() =>
   planStore.value.hasPlan ||
@@ -257,7 +241,6 @@ const submitLabel = computed(() => {
 
 const openSettings = (): void => {
   settingsDraft.value = { ...assistant.config.value };
-  isNetworkMenuOpen.value = false;
   isHistoryOpen.value = false;
   assistant.isSettingsOpen.value = true;
   assistant.loadProviderProfiles().catch(() => undefined);
@@ -295,13 +278,13 @@ const updateHistoryPopoverPosition = (): void => {
   );
   const top = shouldOpenAbove
     ? Math.max(
-        HISTORY_POPOVER_VIEWPORT_MARGIN,
-        triggerRect.top - HISTORY_POPOVER_TRIGGER_GAP - maxHeight,
-      )
+      HISTORY_POPOVER_VIEWPORT_MARGIN,
+      triggerRect.top - HISTORY_POPOVER_TRIGGER_GAP - maxHeight,
+    )
     : Math.min(
-        triggerRect.bottom + HISTORY_POPOVER_TRIGGER_GAP,
-        viewportHeight - HISTORY_POPOVER_VIEWPORT_MARGIN - maxHeight,
-      );
+      triggerRect.bottom + HISTORY_POPOVER_TRIGGER_GAP,
+      viewportHeight - HISTORY_POPOVER_VIEWPORT_MARGIN - maxHeight,
+    );
 
   historyPopoverStyle.value = {
     top: `${top}px`,
@@ -318,7 +301,6 @@ const handleToggleHistoryPopover = async (): Promise<void> => {
   }
 
   isModeMenuOpen.value = false;
-  isNetworkMenuOpen.value = false;
   updateHistoryPopoverPosition();
   isHistoryOpen.value = true;
   await nextTick();
@@ -339,7 +321,6 @@ const startNewConversation = (): void => {
   }
   isHistoryOpen.value = false;
   isModeMenuOpen.value = false;
-  isNetworkMenuOpen.value = false;
   assistant.startNewConversation();
 };
 
@@ -350,13 +331,11 @@ const openHistoryThread = (threadId: string): void => {
   assistant.switchConversation(threadId);
   isHistoryOpen.value = false;
   isModeMenuOpen.value = false;
-  isNetworkMenuOpen.value = false;
 };
 
 const selectMode = (mode: TAiAssistantViewMode): void => {
   assistant.activeMode.value = mode;
   isModeMenuOpen.value = false;
-  isNetworkMenuOpen.value = false;
 };
 
 const getHistoryTimeLabel = (timestampText: string): string => {
@@ -453,21 +432,6 @@ const buildWebToolResults = (
 
 const setPlanError = (error: unknown, fallback: string): void => {
   planStore.value.errorMessage = toErrorMessage(error, fallback);
-};
-
-const handleSetNetworkPermission = async (
-  permission: TAiAgentNetworkPermission,
-): Promise<void> => {
-  isNetworkPermissionPending.value = true;
-
-  try {
-    await agentNetwork.setNetworkPermission(permission);
-    isNetworkMenuOpen.value = false;
-  } catch (error) {
-    setPlanError(error, '设置 AI Agent 网络权限失败。');
-  } finally {
-    isNetworkPermissionPending.value = false;
-  }
 };
 
 const handleSearchWebSources = async (query: string): Promise<void> => {
@@ -785,7 +749,6 @@ onBeforeUnmount(() => {
 <template>
   <section class="ai-assistant-panel" aria-label="AI 助手面板">
     <header class="ai-panel-header">
-      <span class="ai-status-dot" aria-hidden="true"></span>
       <div class="ai-model-switch">
         <button type="button" class="ai-model-button" :aria-expanded="isModeMenuOpen" aria-haspopup="menu"
           :title="aiModelButtonLabel" aria-label="切换 AI 模式" @click="isModeMenuOpen = !isModeMenuOpen">
@@ -809,76 +772,53 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <div class="ai-network-anchor">
-        <button type="button" class="ai-network-button" :aria-expanded="isNetworkMenuOpen" aria-haspopup="menu"
-          :disabled="isNetworkPermissionPending" @click="isNetworkMenuOpen = !isNetworkMenuOpen">
-          <span class="ai-network-dot" :class="`is-${agentNetwork.store.networkPermission}`" aria-hidden="true"></span>
-          <span>{{ networkPermissionLabel }}</span>
+      <div class="ai-panel-actions">
+        <button type="button" class="ai-icon-button" aria-label="新建对话" @click="startNewConversation">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path d="M12 5v14" />
+            <path d="M5 12h14" />
+            <path d="M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
+          </svg>
         </button>
-        <div v-if="isNetworkMenuOpen" class="ai-network-menu" role="menu" aria-label="AI Agent 网络权限">
-          <button type="button" role="menuitemradio" :aria-checked="agentNetwork.store.networkPermission === 'ask'"
-            :class="{ active: agentNetwork.store.networkPermission === 'ask' }" :disabled="isNetworkPermissionPending"
-            @click="handleSetNetworkPermission('ask')">
-            Ask
-          </button>
-          <button type="button" role="menuitemradio"
-            :aria-checked="agentNetwork.store.networkPermission === 'allowed-this-run'"
-            :class="{ active: agentNetwork.store.networkPermission === 'allowed-this-run' }"
-            :disabled="isNetworkPermissionPending" @click="handleSetNetworkPermission('allowed-this-run')">
-            Allowed this run
-          </button>
-          <button type="button" role="menuitemradio" :aria-checked="agentNetwork.store.networkPermission === 'off'"
-            :class="{ active: agentNetwork.store.networkPermission === 'off' }" :disabled="isNetworkPermissionPending"
-            @click="handleSetNetworkPermission('off')">
-            Off
+        <button type="button" class="ai-icon-button" aria-label="AI 设置" @click="openSettings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path d="M20 7h-7" />
+            <path d="M14 17H4" />
+            <circle cx="17" cy="17" r="3" />
+            <circle cx="7" cy="7" r="3" />
+          </svg>
+        </button>
+        <div class="ai-history-anchor">
+          <button ref="historyButtonRef" type="button" class="ai-icon-button" aria-label="对话记录" aria-haspopup="dialog"
+            :aria-expanded="isHistoryOpen" @click="handleToggleHistoryPopover">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M3 3v5h5" />
+              <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
+              <path d="M12 7v5l4 2" />
+            </svg>
           </button>
         </div>
       </div>
-      <button type="button" class="ai-icon-button" aria-label="新建对话" @click="startNewConversation">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-          <path d="M12 5v14" />
-          <path d="M5 12h14" />
-          <path d="M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
-        </svg>
-      </button>
-      <button type="button" class="ai-icon-button" aria-label="AI 设置" @click="openSettings">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-          <path d="M20 7h-7" />
-          <path d="M14 17H4" />
-          <circle cx="17" cy="17" r="3" />
-          <circle cx="7" cy="7" r="3" />
-        </svg>
-      </button>
-      <div class="ai-history-anchor">
-        <button
-          ref="historyButtonRef"
-          type="button"
-          class="ai-icon-button"
-          aria-label="对话记录"
-          aria-haspopup="dialog"
-          :aria-expanded="isHistoryOpen"
-          @click="handleToggleHistoryPopover"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-            <path d="M3 3v5h5" />
-            <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
-            <path d="M12 7v5l4 2" />
-          </svg>
-        </button>
-      </div>
     </header>
 
-    <AiContextChips :references="assistant.currentReferences.value" />
     <AiChatThread :messages="threadMessages" :is-typing="assistant.isSending.value" :platform-id="aiIconPlatformId"
       :provider-label="aiIconTitle" @message-action="handleMessageAction">
     </AiChatThread>
-    <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
-      <button type="button" class="ai-quick-action" @click="assistant.previewPatchFromLastAnswer">
-        预览为 Patch
-      </button>
-    </div>
     <AiPatchPreview :patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
       @apply="assistant.applyProposedPatch" @close="assistant.proposedPatch.value = null" />
+    <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
+      <span class="ai-patch-entry__line" aria-hidden="true"></span>
+      <button type="button" class="ai-patch-entry__button" @click="assistant.previewPatchFromLastAnswer">
+        <span>预览为 Patch</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <circle cx="6" cy="6" r="2" />
+          <circle cx="18" cy="6" r="2" />
+          <circle cx="18" cy="18" r="2" />
+          <path d="M8 6h4a4 4 0 0 1 4 4v6" />
+        </svg>
+      </button>
+      <span class="ai-patch-entry__line" aria-hidden="true"></span>
+    </div>
     <AiWebSourcesPanel v-if="webSourcesVisible" :sources="webSources.sources.value"
       :activity="planVisible ? null : webSources.activity.value" :error-message="webSources.errorMessage.value"
       :is-searching="webSources.isSearching.value" :network-permission="agentNetwork.store.networkPermission"
@@ -908,19 +848,13 @@ onBeforeUnmount(() => {
 
     <AiProviderSettings v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
       :open="assistant.isSettingsOpen.value" :config="assistant.config.value"
-      :profiles="assistant.providerProfiles.value"
-      :load-profile-detail="assistant.getProviderProfileDetail"
+      :profiles="assistant.providerProfiles.value" :load-profile-detail="assistant.getProviderProfileDetail"
       @close="assistant.isSettingsOpen.value = false" @save="saveSettings" @save-credentials="saveCredentials"
       @test-provider="testProvider" @switch-profile="switchProviderProfile" />
 
     <Teleport to="body">
-      <section
-        v-if="isHistoryOpen"
-        class="ai-history-popover"
-        :style="historyPopoverStyle"
-        role="dialog"
-        aria-label="最近 20 组对话记录"
-      >
+      <section v-if="isHistoryOpen" class="ai-history-popover" :style="historyPopoverStyle" role="dialog"
+        aria-label="最近 20 组对话记录">
         <header class="ai-history-header">
           <div class="ai-history-title-group">
             <strong>对话记录</strong>
@@ -928,12 +862,8 @@ onBeforeUnmount(() => {
           </div>
         </header>
         <div v-if="historyThreads.length" class="ai-history-list">
-          <article
-            v-for="thread in historyThreads"
-            :key="thread.id"
-            class="ai-history-item"
-            :class="{ 'is-active': thread.id === assistant.activeConversationId.value }"
-          >
+          <article v-for="thread in historyThreads" :key="thread.id" class="ai-history-item"
+            :class="{ 'is-active': thread.id === assistant.activeConversationId.value }">
             <button type="button" class="ai-history-button" @click="openHistoryThread(thread.id)">
               <div class="ai-history-meta">
                 <strong class="ai-history-title">{{ thread.title }}</strong>
@@ -994,19 +924,9 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   padding: 0 8px 0 12px;
-  border-bottom: 1px solid var(--shell-divider);
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 500;
-}
-
-.ai-status-dot {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: var(--success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 12%, transparent);
 }
 
 .ai-model-switch {
@@ -1078,92 +998,12 @@ onBeforeUnmount(() => {
   color: var(--text-primary);
 }
 
-.ai-network-anchor {
-  position: relative;
-  flex: 0 0 auto;
-}
-
-.ai-network-button {
+.ai-panel-actions {
   display: inline-flex;
-  height: 26px;
-  max-width: 120px;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid color-mix(in srgb, var(--shell-divider) 74%, transparent);
-  border-radius: 999px;
-  color: var(--text-tertiary);
-  font-size: 11px;
-  line-height: 1;
-  padding: 0 8px;
-}
-
-.ai-network-button:hover {
-  background: var(--surface-soft);
-  color: var(--text-primary);
-}
-
-.ai-network-button:disabled {
-  opacity: 0.58;
-  cursor: wait;
-}
-
-.ai-network-button span:last-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ai-network-dot {
-  width: 6px;
-  height: 6px;
   flex: 0 0 auto;
-  border-radius: 999px;
-  background: var(--text-quaternary);
-}
-
-.ai-network-dot.is-allowed-this-run {
-  background: var(--success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 12%, transparent);
-}
-
-.ai-network-dot.is-off {
-  background: var(--danger);
-}
-
-.ai-network-menu {
-  position: absolute;
-  top: 31px;
-  right: 0;
-  z-index: 6;
-  display: grid;
-  width: 148px;
-  gap: 2px;
-  border: 1px solid color-mix(in srgb, var(--shell-divider) 100%, rgba(255, 255, 255, 0.1));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--panel-bg) 96%, var(--sidebar-bg));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  padding: 5px;
-}
-
-.ai-network-menu button {
-  height: 26px;
-  border-radius: 5px;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  text-align: left;
-  padding: 0 8px;
-}
-
-.ai-network-menu button:hover,
-.ai-network-menu button.active {
-  background: var(--surface-soft);
-  color: var(--text-primary);
-}
-
-.ai-network-menu button:disabled {
-  opacity: 0.58;
-  cursor: wait;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .ai-icon-button {
@@ -1364,10 +1204,20 @@ onBeforeUnmount(() => {
 }
 
 .ai-patch-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 8px 12px 0;
 }
 
-.ai-quick-action,
+.ai-patch-entry__line {
+  height: 1px;
+  flex: 1 1 auto;
+  min-width: 18px;
+  background: color-mix(in srgb, var(--shell-divider) 86%, transparent);
+}
+
+.ai-patch-entry__button,
 .ai-button {
   height: 28px;
   border-radius: 6px;
@@ -1376,20 +1226,39 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 
-.ai-quick-action {
-  border: 1px solid color-mix(in srgb, var(--shell-divider) 88%, transparent);
-  background: color-mix(in srgb, var(--surface-soft) 80%, transparent);
-  color: var(--text-secondary);
+.ai-patch-entry__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
 }
 
-.ai-quick-action:hover {
-  background: var(--surface-soft);
+.ai-patch-entry__button:hover {
   color: var(--text-primary);
+}
+
+.ai-patch-entry__button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-strong) 60%, transparent);
+  outline-offset: 4px;
+}
+
+.ai-patch-entry__button svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .ai-composer-shell {
   flex: 0 0 auto;
-  border-top: 1px solid var(--shell-divider);
   background: color-mix(in srgb, var(--panel-bg) 92%, var(--sidebar-bg));
 }
 

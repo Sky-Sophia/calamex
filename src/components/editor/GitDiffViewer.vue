@@ -10,10 +10,10 @@
 </template>
 
 <script setup lang="ts">
-import { applyMonacoTheme, monaco } from '@/utils/monaco';
 import type { TThemeMode } from '@/types/app';
 import type { IGitDiffPreviewPayload } from '@/types/git';
 import type { IEditorSettings } from '@/types/settings';
+import { applyMonacoTheme, monaco } from '@/utils/monaco';
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 const DEFAULT_DIFF_EDITOR_FONT_FAMILY =
@@ -70,18 +70,19 @@ const resolveRuntimeOptions = (): monaco.editor.IDiffEditorConstructionOptions =
   lineNumbersMinChars: 3,
   minimap: { enabled: props.editorSettings.minimap },
   originalEditable: false,
+  renderOverviewRuler: false,
   overviewRulerBorder: false,
   padding: {
     top: 0,
-    bottom: 24,
+    bottom: 0,
   },
   readOnly: true,
   renderSideBySide: true,
   roundedSelection: false,
   scrollBeyondLastLine: false,
   scrollbar: {
-    verticalScrollbarSize: 10,
-    horizontalScrollbarSize: 10,
+    verticalScrollbarSize: 6,
+    horizontalScrollbarSize: 6,
     useShadows: false,
   },
   useInlineViewWhenSpaceIsLimited: false,

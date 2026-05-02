@@ -5,13 +5,13 @@ import { ref } from 'vue';
 import { useAiAssistant } from '@/composables/useAiAssistant';
 import { useAiAgentStore } from '@/store/aiAgent';
 import { useAiConversationStore } from '@/store/aiConversation';
-import { agentSidecarPlanRequestSchema } from '@/types/agent-sidecar.schema';
 import type {
     IAgentSidecarExecuteRequest,
     IAgentSidecarPlanRequest,
     IAgentSidecarResponsePayload,
     IAgentSidecarStreamEventPayload,
 } from '@/types/agent-sidecar';
+import { agentSidecarPlanRequestSchema } from '@/types/agent-sidecar.schema';
 import type { IAiAgentRun, IAiChatStreamEventPayload, IAiTaskPlanStep } from '@/types/ai';
 import type { IAnalyzeScriptPayload, IEditorDocument } from '@/types/editor';
 import type { IGitRepositoryStatusPayload } from '@/types/git';
@@ -616,6 +616,7 @@ describe('useAiAssistant streaming integration', () => {
         expect(aiServiceMock.cancel).toHaveBeenCalledWith({ streamId: STREAM_ID });
         expect(cancelledMessage?.stream?.status).toBe('cancelled');
         expect(cancelledMessage?.content).toBe(openFence);
+        expect(assistant.errorMessage.value).toBe('');
 
         const contentBeforeLateDelta = cancelledMessage?.content;
 
@@ -624,6 +625,32 @@ describe('useAiAssistant streaming integration', () => {
         await flushMicrotasks();
 
         expect(assistant.messages.value.at(-1)?.content).toBe(contentBeforeLateDelta);
+        expect(assistant.errorMessage.value).toBe('');
+
+        await sendPromise;
+    });
+
+    it('does not surface a cancellation banner when the stream ends as cancelled', async () => {
+        const assistant = createAssistantHarness();
+
+        assistant.activeMode.value = 'chat';
+        assistant.draft.value = '停止后不要弹提示';
+        const sendPromise = assistant.sendMessage();
+
+        await waitForStartedStream(() => assistant.messages.value.at(-1)?.id);
+
+        aiServiceMock.emit({
+            streamId: STREAM_ID,
+            assistantMessageId: ASSISTANT_MESSAGE_ID,
+            kind: 'cancelled',
+            delta: null,
+            message: 'AI 流已被取消',
+            model: MOCK_MODEL,
+        });
+        await flushMicrotasks();
+
+        expect(assistant.errorMessage.value).toBe('');
+        expect(assistant.messages.value.at(-1)?.stream?.status).toBe('cancelled');
 
         await sendPromise;
     });

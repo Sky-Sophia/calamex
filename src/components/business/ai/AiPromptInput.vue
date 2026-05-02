@@ -100,7 +100,6 @@ onMounted(() => {
         <span class="ai-attachment-name">{{ attachment.name }}</span>
         <span v-if="attachment.kind !== 'image' && attachment.detailLabel" class="ai-attachment-detail">{{
           attachment.detailLabel }}</span>
-        <span v-if="attachment.kind !== 'image'" class="ai-attachment-size">{{ attachment.sizeLabel }}</span>
         <button type="button" aria-label="移除附件" title="移除附件" @click="emit('removeFile', attachment.id)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <path d="M18 6 6 18" />
@@ -208,11 +207,6 @@ onMounted(() => {
   color: var(--text-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.ai-attachment-size {
-  flex: 0 0 auto;
-  color: var(--text-quaternary);
 }
 
 .ai-attachment-detail {

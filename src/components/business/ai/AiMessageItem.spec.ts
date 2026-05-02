@@ -188,6 +188,49 @@ describe('AiMessageItem', () => {
     ]);
   });
 
+  it('在用户消息气泡上方显示已发送的附件文件标记', () => {
+    const wrapper = mount(AiMessageItem, {
+      props: {
+        message: createMessage({
+          role: 'user',
+          content: '请帮我检查这个文件',
+          references: [
+            {
+              id: 'attachment:README.md:1:2457',
+              kind: 'search-result',
+              label: '附件 · README.md',
+              path: 'README.md',
+              range: null,
+              contentPreview: 'README content',
+              redacted: false,
+            },
+            {
+              id: 'current-file:README.md',
+              kind: 'current-file',
+              label: 'README.md',
+              path: 'README.md',
+              range: null,
+              contentPreview: 'ignored',
+              redacted: false,
+            },
+          ],
+        }),
+        platformId: 'deepseek',
+        providerLabel: 'DeepSeek',
+      },
+      global: {
+        stubs: {
+          AiMarkdown: { template: '<div class="markdown-stub">请帮我检查这个文件</div>' },
+        },
+      },
+    });
+
+    expect(wrapper.find('.ai-message-attachments').exists()).toBe(true);
+    expect(wrapper.findAll('.ai-message-attachment-chip')).toHaveLength(1);
+    expect(wrapper.text()).toContain('README.md');
+    expect(wrapper.find('.ai-message-attachment-chip svg').exists()).toBe(true);
+  });
+
   it('以时间线样式展示工具调用活动并隐藏临时进度气泡', () => {
     const wrapper = mount(AiMessageItem, {
       props: {

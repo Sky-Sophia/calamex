@@ -49,6 +49,7 @@
     "pinia": "^3.0.1",
     "pinia-plugin-persistedstate": "^4.1.0",
     "reka-ui": "^2.9.6",
+    "shiki": "^4.0.2",
     "stream-markdown": "0.0.15",
     "tailwind-merge": "^3.5.0",
     "tree-sitter-bash": "^0.25.1",
