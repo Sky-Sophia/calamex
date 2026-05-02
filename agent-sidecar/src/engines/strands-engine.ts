@@ -1,14 +1,26 @@
 import {
   Agent,
   type AgentResult,
-  type AgentStreamEvent,
   type MessageData,
 } from '@strands-agents/sdk';
 
+import {
+  createOfficialAcontextConversationManager,
+  createOfficialAcontextInitialAppState,
+  createOfficialAcontextInvocationState,
+  registerOfficialAcontextHooks,
+} from '../context/official-acontext-hook.js';
 import { createDeepSeekModelConfigFromEnv } from '../models/deepseek-model.js';
 import { OpenAiChatCompatModel } from '../models/openai-chat-compat-model.js';
+import {
+  createAcontextSessionResources,
+  registerRollbackCheckpointHooks,
+} from '../rollback/checkpoint-service.js';
+import { InMemorySideEffectLedger } from '../rollback/side-effect-ledger.js';
 import type { TAgentSidecarResponse, TAgentUiEvent, TJsonValue } from '../schemas/events.js';
 import { agentPlanSchema, type TAgentPlan } from '../schemas/plan.js';
+import { AgentStreamEventBus } from '../streaming/stream-event-bus.js';
+import { runAgentStream } from '../streaming/stream-runner.js';
 import { createMcpClientBundle } from '../tools/mcp.js';
 
 export type TAgentMode = 'ask' | 'plan' | 'agent' | 'patch' | 'review';
@@ -109,6 +121,15 @@ const findLastUserMessageIndex = (messages: IAgentMessageInput[]): number => {
   }
 
   return -1;
+};
+
+const findLastUserMessageContent = (input: IStrandsEngineInput): string => {
+  const lastUserMessageIndex = findLastUserMessageIndex(input.messages);
+  const lastUserContent = lastUserMessageIndex >= 0
+    ? input.messages[lastUserMessageIndex]?.content.trim()
+    : '';
+
+  return lastUserContent || input.goal;
 };
 
 const inferModelProviderLabel = (modelId: string): string => {
@@ -272,92 +293,6 @@ const pushUiEvent = (
   options.onEvent?.(event);
 };
 
-const emitUiEvent = (
-  event: TAgentUiEvent,
-  options: IStrandsEngineRunOptions = {},
-): void => {
-  options.onEvent?.(event);
-};
-
-interface IAgentStreamCapture {
-  visibleText: string;
-}
-
-interface ICompletedAgentStream {
-  agentResult: AgentResult;
-  visibleText: string;
-}
-
-const appendSdkTimelineEvent = (
-  event: AgentStreamEvent,
-  events: TAgentUiEvent[],
-  capture: IAgentStreamCapture,
-  options: IStrandsEngineRunOptions = {},
-): void => {
-  if (event.type === 'modelStreamUpdateEvent') {
-    const modelEvent = event.event;
-    if (modelEvent.type !== 'modelContentBlockDeltaEvent') {
-      return;
-    }
-
-    const delta = modelEvent.delta;
-    if (delta.type !== 'textDelta' || delta.text.length === 0) {
-      return;
-    }
-
-    capture.visibleText += delta.text;
-    emitUiEvent({
-      type: 'message_delta',
-      text: capture.visibleText,
-    }, options);
-    return;
-  }
-
-  if (event.type === 'beforeToolCallEvent') {
-    pushUiEvent(events, {
-      type: 'tool_start',
-      toolName: event.toolUse.name,
-      input: event.toolUse.input,
-    }, options);
-    return;
-  }
-
-  if (event.type === 'afterToolCallEvent') {
-    pushUiEvent(events, {
-      type: 'tool_result',
-      toolName: event.toolUse.name,
-      output: toJsonValue(event.result.toJSON()),
-    }, options);
-  }
-};
-
-const runAgentStream = async (
-  agent: Agent,
-  prompt: string,
-  events: TAgentUiEvent[],
-  mode: TAgentMode,
-  options: IStrandsEngineRunOptions = {},
-): Promise<ICompletedAgentStream> => {
-  const stream = mode === 'plan'
-    ? agent.stream(prompt, { structuredOutputSchema: agentPlanSchema })
-    : agent.stream(prompt);
-  const capture: IAgentStreamCapture = {
-    visibleText: '',
-  };
-
-  while (true) {
-    const next = await stream.next();
-    if (next.done) {
-      return {
-        agentResult: next.value,
-        visibleText: capture.visibleText,
-      };
-    }
-
-    appendSdkTimelineEvent(next.value, events, capture, options);
-  }
-};
-
 const parsePlanFromStructuredOutput = (result: AgentResult): TAgentPlan | null => {
   const parsed = agentPlanSchema.safeParse(result.structuredOutput);
   return parsed.success ? parsed.data : null;
@@ -436,6 +371,10 @@ export class StrandsEngine {
     const mode = input.mode || fallbackMode;
     const events: TAgentUiEvent[] = [];
     const modelConfig = createDeepSeekModelConfigFromEnv();
+    const normalizedInput: IStrandsEngineInput = {
+      ...input,
+      mode,
+    };
 
     if (!modelConfig) {
       return createErrorResponse(
@@ -456,22 +395,79 @@ export class StrandsEngine {
         apiKey: modelConfig.apiKey,
         baseUrl: modelConfig.baseUrl,
       });
+      const baseSystemPrompt = buildSystemPrompt(normalizedInput, modelConfig.model);
+      const sessionResources = createAcontextSessionResources({ sessionId });
       const agent = new Agent({
         model,
-        messages: buildHistoryMessages({ ...input, mode }),
-        systemPrompt: buildSystemPrompt({ ...input, mode }, modelConfig.model),
+        messages: buildHistoryMessages(normalizedInput),
+        systemPrompt: baseSystemPrompt,
         tools: mcpBundle.tools,
+        appState: createOfficialAcontextInitialAppState(normalizedInput.goal),
+        conversationManager: createOfficialAcontextConversationManager(mode),
+        sessionManager: sessionResources.sessionManager,
         printer: false,
         toolExecutor: 'sequential',
       });
-
-      const { agentResult, visibleText } = await runAgentStream(
-        agent,
-        buildUserPrompt({ ...input, mode }),
-        events,
+      const streamBus = new AgentStreamEventBus({
+        runId: createSessionId('run'),
+        sessionId,
+        agentId: agent.id,
+      });
+      const cleanupStreamBus = streamBus.onEvent((event) => {
+        pushUiEvent(events, {
+          type: 'agent_event',
+          event,
+        }, options);
+      });
+      const cleanupAcontextHooks = registerOfficialAcontextHooks(agent, {
+        baseSystemPrompt,
+        sessionId,
         mode,
-        options,
-      );
+        taskGoal: normalizedInput.goal,
+        currentUserMessage: findLastUserMessageContent(normalizedInput),
+        streamBus,
+      });
+      const cleanupRollbackHooks = registerRollbackCheckpointHooks({
+        agent,
+        sessionId,
+        storage: sessionResources.storage,
+        sessionManager: sessionResources.sessionManager,
+        sideEffectLedger: new InMemorySideEffectLedger(),
+        streamBus,
+      });
+      const invocationState = createOfficialAcontextInvocationState({
+        sessionId,
+        mode,
+        taskGoal: normalizedInput.goal,
+        currentUserMessage: findLastUserMessageContent(normalizedInput),
+      });
+      const streamOptions = mode === 'plan'
+        ? { structuredOutputSchema: agentPlanSchema, invocationState }
+        : { invocationState };
+
+      const { agentResult, visibleText } = await (async () => {
+        try {
+          return await runAgentStream({
+            agent,
+            prompt: buildUserPrompt(normalizedInput),
+            streamOptions,
+            eventBus: streamBus,
+            emitLegacyEvent: (event) => {
+              if (event.type === 'message_delta') {
+                options.onEvent?.(event);
+                return;
+              }
+
+              pushUiEvent(events, event, options);
+            },
+            toJsonValue,
+          });
+        } finally {
+          cleanupRollbackHooks();
+          cleanupAcontextHooks();
+          cleanupStreamBus();
+        }
+      })();
       const result = visibleText.trim().length > 0
         ? visibleText
         : extractVisibleAgentResultText(agentResult) || 'Agent 已完成。';

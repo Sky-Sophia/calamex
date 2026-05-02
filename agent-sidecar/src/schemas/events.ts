@@ -2,6 +2,11 @@ import { z } from 'zod';
 import type { JSONValue } from '@strands-agents/sdk';
 
 import { agentPlanSchema } from './plan.js';
+import {
+  AGENT_RUNTIME_EVENT_SCHEMA_VERSION,
+  AGENT_RUNTIME_EVENT_TYPES,
+  type TAgentRuntimeEvent,
+} from '../streaming/stream-types.js';
 
 export type TJsonValue = JSONValue;
 
@@ -37,10 +42,30 @@ export const diffFileSchema = z.object({
   })),
 });
 
+export const agentRuntimeEventSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(AGENT_RUNTIME_EVENT_TYPES),
+  runId: z.string().min(1),
+  sessionId: z.string().min(1),
+  agentId: z.string().min(1),
+  timestamp: z.string().min(1),
+  seq: z.number().int().nonnegative(),
+  schemaVersion: z.literal(AGENT_RUNTIME_EVENT_SCHEMA_VERSION),
+  redacted: z.literal(true),
+  visibility: z.enum(['user', 'debug']),
+  level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
+  parentId: z.string().min(1).optional(),
+  spanId: z.string().min(1).optional(),
+}).passthrough();
+
 export const agentUiEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('message_delta'),
     text: z.string(),
+  }),
+  z.object({
+    type: z.literal('agent_event'),
+    event: agentRuntimeEventSchema,
   }),
   z.object({
     type: z.literal('plan_ready'),
@@ -80,5 +105,13 @@ export const agentSidecarResponseSchema = z.object({
   result: z.string().nullable(),
 });
 
-export type TAgentUiEvent = z.infer<typeof agentUiEventSchema>;
-export type TAgentSidecarResponse = z.infer<typeof agentSidecarResponseSchema>;
+type TAgentUiEventFromSchema = z.infer<typeof agentUiEventSchema>;
+
+export type TAgentUiEvent =
+  | Exclude<TAgentUiEventFromSchema, { type: 'agent_event' }>
+  | { type: 'agent_event'; event: TAgentRuntimeEvent };
+
+export type TAgentSidecarResponse =
+  Omit<z.infer<typeof agentSidecarResponseSchema>, 'events'> & {
+    events: TAgentUiEvent[];
+  };

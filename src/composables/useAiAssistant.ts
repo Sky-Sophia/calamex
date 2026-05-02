@@ -12,13 +12,15 @@ import {
   buildGitDiffReference,
   buildSelectionReference,
 } from '@/services/modules/ai-context';
+import { aiEditService } from '@/services/modules/ai-edit';
 import { useAiConversationStore } from '@/store/aiConversation';
 import {
+  extractVisibleAgentRuntimeEvents,
   mapSidecarEventsToToolCalls,
   projectSidecarExecuteResponse,
 } from '@/utils/agent-sidecar-events';
 
-import type { IAgentSidecarMessage, TAgentUiEvent } from '@/types/agent-sidecar';
+import type { IAgentSidecarMessage, TAgentRuntimeEvent, TAgentUiEvent } from '@/types/agent-sidecar';
 import type {
   IAiApplyPatchMetadata,
   IAiChatMessage,
@@ -33,6 +35,7 @@ import type {
   TAiChatMessageActionId,
   TAiToolConfirmationDecision,
 } from '@/types/ai';
+import type { IAiEditOperation, IAiEditTimelineEntry } from '@/types/ai-edit';
 import type {
   IActiveRunSummary,
   IAnalyzeScriptPayload,
@@ -54,6 +57,8 @@ type TAiQuickActionId = 'explain' | 'fix' | 'review';
 type TAiAssistantMode = 'chat' | 'agent' | 'plan';
 
 type TAiAttachmentKind = 'text' | 'image';
+
+type TAiFileRollbackStatus = 'ready' | 'reverting' | 'reverted';
 
 type TAgentExecutionStepStatus =
   | 'pending'
@@ -101,6 +106,14 @@ export interface IAiQuickAction {
   label: string;
 }
 
+export interface IAiFileRollbackPrompt {
+  operationId: string;
+  fileCount: number;
+  status: TAiFileRollbackStatus;
+  updatedAt: string;
+  restoredFileCount?: number;
+}
+
 export interface IUseAiAssistantOptions {
   document: Ref<IEditorDocument>;
   activeRun: Ref<IActiveRunSummary | null>;
@@ -117,6 +130,8 @@ export interface IUseAiAssistantOptions {
 const MAX_CONTEXT_CHARS = 12_000;
 const MAX_TEXT_ATTACHMENT_BYTES = 128 * 1024;
 const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const AI_EDIT_ROLLBACK_TIMELINE_LIMIT = 24;
+const AGENT_RUNTIME_TIMELINE_LIMIT = 32;
 
 const TEXT_ATTACHMENT_PATTERN =
   /^(application\/(json|xml|x-sh|x-shellscript|javascript|typescript)|text\/)/i;
@@ -326,6 +341,17 @@ const mapStreamStatus = (
 const hasMeaningfulAssistantText = (value: string | null | undefined): value is string =>
   typeof value === 'string' && value.trim().length > 0;
 
+const isAiEditOperationEntry = (
+  entry: IAiEditTimelineEntry,
+): entry is IAiEditTimelineEntry & { type: 'operation'; data: IAiEditOperation } =>
+  entry.type === 'operation';
+
+const getOperationAppliedTime = (operation: IAiEditOperation): number => {
+  const timestamp = Date.parse(operation.appliedAt);
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
 // ---------------------------------------------------------------------------
 // Public quick actions
 // ---------------------------------------------------------------------------
@@ -374,6 +400,8 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const currentReferences = ref<IAiContextReference[]>([]);
   const proposedPatch = ref<IAiPatchSet | null>(null);
   const isApplyingPatch = ref(false);
+  const fileRollbackPrompt = ref<IAiFileRollbackPrompt | null>(null);
+  const runtimeTimelineEvents = ref<TAgentRuntimeEvent[]>([]);
   const activeMode = ref<TAiAssistantMode>('agent');
   const agentSteps = ref<IAgentExecutionStep[]>([]);
   const toolDefinitions = ref<IAiToolDefinitionPayload[]>([]);
@@ -552,6 +580,72 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     }
   };
 
+  const operationTouchesChangedPath = (
+    operation: IAiEditOperation,
+    changedFilePaths: readonly string[],
+  ): boolean => {
+    if (changedFilePaths.length === 0) {
+      return false;
+    }
+
+    const operationPaths = [operation.path, operation.newPath].filter((path): path is string =>
+      Boolean(path?.trim())
+    );
+
+    return operationPaths.some((operationPath) =>
+      changedFilePaths.some((changedPath) => areFileSystemPathsEqual(operationPath, changedPath))
+    );
+  };
+
+  const findLatestRollbackableOperation = async (
+    changedFilePaths: readonly string[],
+  ): Promise<IAiEditOperation | null> => {
+    if (changedFilePaths.length === 0) {
+      return null;
+    }
+
+    const timeline = await aiEditService.listTimeline({
+      taskId: activeConversationId.value ?? null,
+      limit: AI_EDIT_ROLLBACK_TIMELINE_LIMIT,
+    });
+    const operations = timeline.entries
+      .filter(isAiEditOperationEntry)
+      .map((entry) => entry.data)
+      .filter((operation) => operationTouchesChangedPath(operation, changedFilePaths))
+      .sort((left, right) => getOperationAppliedTime(right) - getOperationAppliedTime(left));
+
+    return operations[0] ?? null;
+  };
+
+  const updateFileRollbackPrompt = async (
+    changedFilePaths: readonly string[],
+    hasFileMutations: boolean,
+  ): Promise<void> => {
+    if (!hasFileMutations || changedFilePaths.length === 0) {
+      return;
+    }
+
+    try {
+      const operation = await findLatestRollbackableOperation(changedFilePaths);
+
+      if (!operation) {
+        return;
+      }
+
+      fileRollbackPrompt.value = {
+        operationId: operation.id,
+        fileCount: changedFilePaths.length,
+        status: 'ready',
+        updatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      logger.warn({
+        event: 'ai.file_rollback_prompt.failed',
+        err: error,
+      });
+    }
+  };
+
   const mapSidecarToolCallStatusToStepStatus = (
     status: NonNullable<IAiChatMessage['toolCalls']>[number]['status'],
   ): TAgentExecutionStepStatus => {
@@ -609,6 +703,30 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     updateAgentExecutionMessage(assistantMessageId, content, toolCalls, streamStatus);
   };
 
+  const appendRuntimeTimelineEvents = (
+    events: readonly TAgentUiEvent[],
+  ): void => {
+    const visibleEvents = extractVisibleAgentRuntimeEvents(events);
+
+    if (visibleEvents.length === 0) {
+      return;
+    }
+
+    const nextEvents = [...runtimeTimelineEvents.value];
+    const seenIds = new Set(nextEvents.map((event) => event.id));
+
+    for (const event of visibleEvents) {
+      if (seenIds.has(event.id)) {
+        continue;
+      }
+
+      seenIds.add(event.id);
+      nextEvents.push(event);
+    }
+
+    runtimeTimelineEvents.value = nextEvents.slice(-AGENT_RUNTIME_TIMELINE_LIMIT);
+  };
+
   const buildSidecarContextMessage = (
     references: IAiContextReference[],
   ): IAgentSidecarMessage | null => {
@@ -656,6 +774,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     errorMessage.value = '';
     isSending.value = true;
     agentSteps.value = [];
+    runtimeTimelineEvents.value = [];
     agentPlan.store.clearPendingToolConfirmation();
     activeSidecarAgentSession.value = null;
 
@@ -686,6 +805,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         }
 
         liveEvents.push(payload.event);
+        appendRuntimeTimelineEvents([payload.event]);
         applySidecarLiveEventsToAgentMessage(
           assistantMessageId,
           '',
@@ -699,6 +819,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         workspaceRootPath: options.workspaceRootPath.value,
         context: references,
       });
+      appendRuntimeTimelineEvents(payload.events);
       const projection = projectSidecarExecuteResponse(payload);
 
       for (const toolCall of projection.toolCalls) {
@@ -717,6 +838,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       );
 
       await refreshChangedDocumentsAfterSidecarRun(
+        projection.changedFilePaths,
+        projection.hasFileMutations,
+      );
+      await updateFileRollbackPrompt(
         projection.changedFilePaths,
         projection.hasFileMutations,
       );
@@ -797,6 +922,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         }
 
         liveEvents.push(payload.event);
+        appendRuntimeTimelineEvents([payload.event]);
         applySidecarLiveEventsToAgentMessage(
           session.assistantMessageId,
           '',
@@ -808,6 +934,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         requestId: confirmation.id,
         decision,
       });
+      appendRuntimeTimelineEvents(payload.events);
       const projection = projectSidecarExecuteResponse(payload);
 
       updateAgentExecutionMessage(
@@ -818,6 +945,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       );
 
       await refreshChangedDocumentsAfterSidecarRun(
+        projection.changedFilePaths,
+        projection.hasFileMutations,
+      );
+      await updateFileRollbackPrompt(
         projection.changedFilePaths,
         projection.hasFileMutations,
       );
@@ -1630,6 +1761,8 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     currentReferences.value = [];
     proposedPatch.value = null;
     agentSteps.value = [];
+    fileRollbackPrompt.value = null;
+    runtimeTimelineEvents.value = [];
 
     agentPlan.resetPlan();
 
@@ -1703,6 +1836,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       const appliedPaths = result.appliedFiles.map((file) => file.path);
 
       syncPatchedDocument(options.document.value, patch, appliedPaths);
+      await updateFileRollbackPrompt(appliedPaths, appliedPaths.length > 0);
 
       messages.value = [
         ...messages.value,
@@ -1723,6 +1857,46 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       errorMessage.value = toErrorMessage(error, 'Patch 应用失败');
     } finally {
       isApplyingPatch.value = false;
+    }
+  };
+
+  const rollbackLatestFileChange = async (): Promise<void> => {
+    const prompt = fileRollbackPrompt.value;
+
+    if (!prompt || prompt.status !== 'ready') {
+      return;
+    }
+
+    fileRollbackPrompt.value = {
+      ...prompt,
+      status: 'reverting',
+      updatedAt: new Date().toISOString(),
+    };
+
+    try {
+      const result = await aiEditService.undoOperation({
+        operationId: prompt.operationId,
+      });
+
+      await refreshChangedDocumentsAfterSidecarRun(
+        result.restoredFiles,
+        result.restoredFiles.length > 0,
+      );
+
+      fileRollbackPrompt.value = {
+        ...prompt,
+        status: 'reverted',
+        restoredFileCount: result.restoredFiles.length,
+        updatedAt: new Date().toISOString(),
+      };
+      errorMessage.value = '';
+    } catch (error) {
+      fileRollbackPrompt.value = {
+        ...prompt,
+        status: 'ready',
+        updatedAt: new Date().toISOString(),
+      };
+      errorMessage.value = toErrorMessage(error, '回滚 AI 文件修改失败');
     }
   };
 
@@ -1788,6 +1962,8 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     currentReferences,
     proposedPatch,
     isApplyingPatch,
+    fileRollbackPrompt,
+    runtimeTimelineEvents,
     activeMode,
     agentSteps,
     toolDefinitions,
@@ -1815,6 +1991,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     stopCurrentRequest,
     previewPatchFromLastAnswer,
     applyProposedPatch,
+    rollbackLatestFileChange,
     clearConversation,
     startNewConversation,
     switchConversation,

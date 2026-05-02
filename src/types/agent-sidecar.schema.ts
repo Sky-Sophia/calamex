@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import { AGENT_SIDECAR_MODES, type TJsonValue } from '@/types/agent-sidecar';
+import {
+  AGENT_RUNTIME_EVENT_SCHEMA_VERSION,
+  AGENT_RUNTIME_EVENT_TYPES,
+  AGENT_SIDECAR_MODES,
+  type TJsonValue,
+} from '@/types/agent-sidecar';
 import { aiContextReferenceSchema } from '@/types/ai-context.schema';
 
 export const jsonValueSchema: z.ZodType<TJsonValue> = z.lazy(() =>
@@ -96,10 +101,30 @@ export const diffFileSchema = z.object({
   })),
 });
 
+export const agentRuntimeEventSchema = z.object({
+  id: z.string().min(1),
+  type: z.enum(AGENT_RUNTIME_EVENT_TYPES),
+  runId: z.string().min(1),
+  sessionId: z.string().min(1),
+  agentId: z.string().min(1),
+  timestamp: z.string().min(1),
+  seq: z.number().int().nonnegative(),
+  schemaVersion: z.literal(AGENT_RUNTIME_EVENT_SCHEMA_VERSION),
+  redacted: z.literal(true),
+  visibility: z.enum(['user', 'debug']),
+  level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
+  parentId: z.string().min(1).optional(),
+  spanId: z.string().min(1).optional(),
+}).passthrough();
+
 export const agentUiEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('message_delta'),
     text: z.string(),
+  }),
+  z.object({
+    type: z.literal('agent_event'),
+    event: agentRuntimeEventSchema,
   }),
   z.object({
     type: z.literal('plan_ready'),

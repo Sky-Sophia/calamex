@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AiChatThread from '@/components/business/ai/AiChatThread.vue';
+import AiAgentRuntimeTimeline from '@/components/business/ai/AiAgentRuntimeTimeline.vue';
 import AiPatchPreview from '@/components/business/ai/AiPatchPreview.vue';
 import AiPlanModePanel from '@/components/business/ai/AiPlanModePanel.vue';
 import AiPromptInput from '@/components/business/ai/AiPromptInput.vue';
@@ -238,6 +239,25 @@ const submitLabel = computed(() => {
 
   return assistant.sendButtonLabel.value;
 });
+const fileRollbackPrompt = computed(() => assistant.fileRollbackPrompt.value);
+const fileRollbackLabel = computed(() => {
+  const prompt = fileRollbackPrompt.value;
+
+  if (!prompt) {
+    return '';
+  }
+
+  if (prompt.status === 'reverting') {
+    return '正在回滚 AI 文件修改';
+  }
+
+  if (prompt.status === 'reverted') {
+    return '已回滚 AI 最近一次文件修改';
+  }
+
+  return 'AI 已修改文件，可回滚最近一次';
+});
+const isFileRollbackDisabled = computed(() => fileRollbackPrompt.value?.status !== 'ready');
 
 const openSettings = (): void => {
   settingsDraft.value = { ...assistant.config.value };
@@ -804,6 +824,28 @@ onBeforeUnmount(() => {
     <AiChatThread :messages="threadMessages" :is-typing="assistant.isSending.value" :platform-id="aiIconPlatformId"
       :provider-label="aiIconTitle" @message-action="handleMessageAction">
     </AiChatThread>
+    <AiAgentRuntimeTimeline :events="assistant.runtimeTimelineEvents.value" />
+    <div
+      v-if="fileRollbackPrompt"
+      class="ai-file-rollback-entry"
+      :class="`is-${fileRollbackPrompt.status}`"
+    >
+      <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
+      <button
+        type="button"
+        class="ai-file-rollback-entry__button"
+        :disabled="isFileRollbackDisabled"
+        :aria-label="fileRollbackLabel"
+        @click="assistant.rollbackLatestFileChange"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M3 7v5h5" />
+          <path d="M21 17a8 8 0 0 0-13.66-5.66L3 16" />
+        </svg>
+        <span>{{ fileRollbackLabel }}</span>
+      </button>
+      <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
+    </div>
     <AiPatchPreview :patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
       @apply="assistant.applyProposedPatch" @close="assistant.proposedPatch.value = null" />
     <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
@@ -1203,14 +1245,16 @@ onBeforeUnmount(() => {
   color: var(--text-primary);
 }
 
-.ai-patch-entry {
+.ai-patch-entry,
+.ai-file-rollback-entry {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 12px 0;
 }
 
-.ai-patch-entry__line {
+.ai-patch-entry__line,
+.ai-file-rollback-entry__line {
   height: 1px;
   flex: 1 1 auto;
   min-width: 18px;
@@ -1218,6 +1262,7 @@ onBeforeUnmount(() => {
 }
 
 .ai-patch-entry__button,
+.ai-file-rollback-entry__button,
 .ai-button {
   height: 28px;
   border-radius: 6px;
@@ -1226,7 +1271,8 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 
-.ai-patch-entry__button {
+.ai-patch-entry__button,
+.ai-file-rollback-entry__button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1239,22 +1285,34 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.ai-patch-entry__button:hover {
+.ai-patch-entry__button:hover,
+.ai-file-rollback-entry__button:not(:disabled):hover {
   color: var(--text-primary);
 }
 
-.ai-patch-entry__button:focus-visible {
+.ai-patch-entry__button:focus-visible,
+.ai-file-rollback-entry__button:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent-strong) 60%, transparent);
   outline-offset: 4px;
 }
 
-.ai-patch-entry__button svg {
+.ai-patch-entry__button svg,
+.ai-file-rollback-entry__button svg {
   width: 14px;
   height: 14px;
   flex: 0 0 auto;
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.ai-file-rollback-entry__button:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.ai-file-rollback-entry.is-reverted .ai-file-rollback-entry__button {
+  color: color-mix(in srgb, var(--success) 68%, var(--text-tertiary));
 }
 
 .ai-composer-shell {

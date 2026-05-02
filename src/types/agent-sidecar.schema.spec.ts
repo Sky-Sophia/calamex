@@ -15,6 +15,24 @@ describe('agent sidecar event contract', () => {
       sessionId: 'agent-session-complex-1',
       events: [
         {
+          type: 'agent_event',
+          event: {
+            id: 'runtime-event-1',
+            type: 'agent.tool.started',
+            runId: 'run-1',
+            sessionId: 'agent-session-complex-1',
+            agentId: 'strands-agent',
+            timestamp: '2026-05-01T10:00:00.000Z',
+            seq: 0,
+            schemaVersion: 1,
+            redacted: true,
+            visibility: 'user',
+            level: 'info',
+            toolName: 'search_project_files',
+            inputPreview: '{"query":"sidecar"}',
+          },
+        },
+        {
           type: 'message_delta',
           text: '我会先读取当前 AI IPC 合约、Tauri 命令注册和前端模式状态，再决定最小修改路径。',
         },
@@ -109,6 +127,7 @@ describe('agent sidecar event contract', () => {
     const parsedResponse = agentSidecarResponsePayloadSchema.parse(response);
 
     expect(parsedRequest.mode).toBe('agent');
+    expect(parsedResponse.events.some((event) => event.type === 'agent_event')).toBe(true);
     expect(parsedResponse.events.some((event) => event.type === 'approval_required')).toBe(true);
     expect(parsedResponse.events.at(-1)).toMatchObject({
       type: 'done',

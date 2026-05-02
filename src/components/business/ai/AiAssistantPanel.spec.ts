@@ -1,4 +1,5 @@
 import AiAssistantPanel from '@/components/business/ai/AiAssistantPanel.vue';
+import type { TAgentRuntimeEvent } from '@/types/agent-sidecar';
 import type {
     IAiAgentRun,
     IAiAgentStepFinalAnswer,
@@ -75,6 +76,14 @@ const createAssistantMock = (
     const attachedFiles = ref([] as Array<{ id: string; name: string; sizeLabel: string; kind: 'text' | 'image' }>);
     const proposedPatch = ref<IAiPatchSet | null>(null);
     const isApplyingPatch = ref(false);
+    const runtimeTimelineEvents = ref<TAgentRuntimeEvent[]>([]);
+    const fileRollbackPrompt = ref<{
+        operationId: string;
+        fileCount: number;
+        status: 'ready' | 'reverting' | 'reverted';
+        updatedAt: string;
+        restoredFileCount?: number;
+    } | null>(null);
     const agentPlanStore = {
         mode: 'chat' as const,
         activeGoal: '',
@@ -120,6 +129,8 @@ const createAssistantMock = (
         attachedFiles,
         proposedPatch,
         isApplyingPatch,
+        runtimeTimelineEvents,
+        fileRollbackPrompt,
         agentPlan: {
             store: agentPlanStore,
             classifyTask: vi.fn(),
@@ -143,6 +154,7 @@ const createAssistantMock = (
         testProvider: vi.fn().mockResolvedValue('ok'),
         previewPatchFromLastAnswer: vi.fn(),
         applyProposedPatch: vi.fn(),
+        rollbackLatestFileChange: vi.fn(),
         resolveSidecarToolConfirmation: vi.fn(),
         sendMessage: vi.fn(),
         handleMessageAction: vi.fn(),
@@ -325,6 +337,131 @@ describe('AiAssistantPanel', () => {
         await trigger.trigger('click');
 
         expect(assistantMock.previewPatchFromLastAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    it('AI 修改文件后在对话框下方显示低调回滚入口', async () => {
+        const assistantMock = createAssistantMock([]);
+        assistantMock.fileRollbackPrompt.value = {
+            operationId: 'operation-rollback-1',
+            fileCount: 2,
+            status: 'ready',
+            updatedAt: '2026-04-29T00:00:00.000Z',
+        };
+        useAiAssistantMock.mockReturnValue(assistantMock);
+
+        const wrapper = mount(AiAssistantPanel, {
+            props: {
+                document: createDocument(),
+                activeRun: null as IActiveRunSummary | null,
+                analysis: createAnalysis(),
+                selection: null as IEditorSelectionSummary | null,
+                gitStatus: createGitStatus(),
+                workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+            },
+            global: {
+                stubs: {
+                    AiChatThread: { template: '<div data-testid="chat-thread" />' },
+                    AiContextChips: { template: '<div />' },
+                    AiPatchPreview: { template: '<div class="patch-preview-stub" />' },
+                    AiPromptInput: { template: '<div />' },
+                    AiProviderSettings: { template: '<div />' },
+                    AiPlanModePanel: { template: '<div />' },
+                    teleport: true,
+                },
+            },
+        });
+
+        const html = wrapper.html();
+        const rollbackButton = wrapper.get('.ai-file-rollback-entry__button');
+
+        expect(html.indexOf('chat-thread')).toBeLessThan(html.indexOf('ai-file-rollback-entry__button'));
+        expect(html.indexOf('ai-file-rollback-entry__button')).toBeLessThan(html.indexOf('patch-preview-stub'));
+        expect(rollbackButton.text()).toContain('AI 已修改文件，可回滚最近一次');
+        expect(rollbackButton.find('svg').exists()).toBe(true);
+
+        await rollbackButton.trigger('click');
+
+        expect(assistantMock.rollbackLatestFileChange).toHaveBeenCalledTimes(1);
+    });
+
+    it('在对话框下方显示低调 Agent 事件时间线', () => {
+        const assistantMock = createAssistantMock([]);
+        assistantMock.runtimeTimelineEvents.value = [
+            {
+                id: 'runtime-started',
+                type: 'agent.run.started',
+                runId: 'run-1',
+                sessionId: 'session-1',
+                agentId: 'agent-1',
+                timestamp: '2026-05-02T10:00:00.000Z',
+                seq: 0,
+                schemaVersion: 1,
+                redacted: true,
+                visibility: 'user',
+                level: 'info',
+                inputPreview: '检查并修改当前文件',
+            },
+            {
+                id: 'runtime-tool-completed',
+                type: 'agent.tool.completed',
+                runId: 'run-1',
+                sessionId: 'session-1',
+                agentId: 'agent-1',
+                timestamp: '2026-05-02T10:00:01.000Z',
+                seq: 1,
+                schemaVersion: 1,
+                redacted: true,
+                visibility: 'user',
+                level: 'info',
+                toolName: 'edit_file',
+                ok: true,
+                resultPreview: '已更新 src/app.ts',
+            },
+            {
+                id: 'runtime-completed',
+                type: 'agent.run.completed',
+                runId: 'run-1',
+                sessionId: 'session-1',
+                agentId: 'agent-1',
+                timestamp: '2026-05-02T10:00:02.000Z',
+                seq: 2,
+                schemaVersion: 1,
+                redacted: true,
+                visibility: 'user',
+                level: 'info',
+                stopReason: 'end_turn',
+            },
+        ];
+        useAiAssistantMock.mockReturnValue(assistantMock);
+
+        const wrapper = mount(AiAssistantPanel, {
+            props: {
+                document: createDocument(),
+                activeRun: null as IActiveRunSummary | null,
+                analysis: createAnalysis(),
+                selection: null as IEditorSelectionSummary | null,
+                gitStatus: createGitStatus(),
+                workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+            },
+            global: {
+                stubs: {
+                    AiChatThread: { template: '<div data-testid="chat-thread" />' },
+                    AiContextChips: { template: '<div />' },
+                    AiPatchPreview: { template: '<div class="patch-preview-stub" />' },
+                    AiPromptInput: { template: '<div />' },
+                    AiProviderSettings: { template: '<div />' },
+                    AiPlanModePanel: { template: '<div />' },
+                    teleport: true,
+                },
+            },
+        });
+
+        const html = wrapper.html();
+
+        expect(html.indexOf('chat-thread')).toBeLessThan(html.indexOf('ai-runtime-timeline'));
+        expect(wrapper.text()).toContain('1 个步骤已完成');
+        expect(wrapper.text()).toContain('工具完成 edit_file');
+        expect(wrapper.text()).toContain('已更新 src/app.ts');
     });
 
     it('shows plan panel only in plan mode when a plan exists', () => {

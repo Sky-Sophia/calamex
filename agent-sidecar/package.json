@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tsx src/server.ts",
-    "test": "node --import tsx --test src/tools/mcp.spec.ts src/server.spec.ts src/models/openai-chat-compat-model.spec.ts",
+    "test": "node --import tsx --test src/tools/mcp.spec.ts src/server.spec.ts src/models/openai-chat-compat-model.spec.ts src/context/official-acontext.spec.ts src/rollback/rollback.spec.ts src/streaming/streaming.spec.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

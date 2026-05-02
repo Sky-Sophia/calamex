@@ -13,6 +13,7 @@ import type {
 } from '@/types/agent-sidecar';
 import { agentSidecarPlanRequestSchema } from '@/types/agent-sidecar.schema';
 import type { IAiAgentRun, IAiChatStreamEventPayload, IAiTaskPlanStep } from '@/types/ai';
+import type { IAiEditOperation, IAiSnapshot } from '@/types/ai-edit';
 import type { IAnalyzeScriptPayload, IEditorDocument } from '@/types/editor';
 import type { IGitRepositoryStatusPayload } from '@/types/git';
 
@@ -359,6 +360,109 @@ vi.mock('@/services/modules/ai', () => ({
     },
 }));
 
+const createAiEditSnapshot = (id: string, fileRefs: string[] = []): IAiSnapshot => ({
+    id,
+    scope: 'revert',
+    taskId: 'thread-rollback',
+    createdAt: '2026-04-29T00:00:00.000Z',
+    label: id,
+    fileRefs,
+    storageKey: `${id}.json`,
+    sizeBytes: 0,
+});
+
+const createAiEditOperation = (
+    overrides: Partial<IAiEditOperation> = {},
+): IAiEditOperation => ({
+    id: 'operation-rollback-1',
+    taskId: 'thread-rollback',
+    turnId: 'turn-rollback',
+    kind: 'modify',
+    path: 'D:/test/xiaojianc.sh',
+    sourceSnapshotId: 'snapshot-before',
+    beforeHash: 'fnv64:before',
+    afterHash: 'fnv64:after',
+    bytesBefore: 8,
+    bytesAfter: 8,
+    appliedAt: '2026-04-29T00:00:01.000Z',
+    reason: '应用 AI 文件修改',
+    toolCallId: null,
+    ...overrides,
+});
+
+const aiEditServiceMock = vi.hoisted(() => {
+    const listTimeline = vi.fn(async () => ({
+        entries: [],
+    }));
+    const undoOperation = vi.fn(async (payload: { operationId: string }) => ({
+        operationId: payload.operationId,
+        restoredFiles: [],
+        preRevertSnapshot: {
+            id: 'snapshot-pre-revert',
+            scope: 'pre-revert',
+            taskId: 'thread-rollback',
+            createdAt: '2026-04-29T00:00:02.000Z',
+            label: 'snapshot-pre-revert',
+            fileRefs: [],
+            storageKey: 'snapshot-pre-revert.json',
+            sizeBytes: 0,
+        },
+        restoredSnapshot: {
+            id: 'snapshot-restored',
+            scope: 'revert',
+            taskId: 'thread-rollback',
+            createdAt: '2026-04-29T00:00:03.000Z',
+            label: 'snapshot-restored',
+            fileRefs: [],
+            storageKey: 'snapshot-restored.json',
+            sizeBytes: 0,
+        },
+    }));
+
+    return {
+        listTimeline,
+        undoOperation,
+        reset(): void {
+            listTimeline.mockClear();
+            undoOperation.mockClear();
+            listTimeline.mockResolvedValue({
+                entries: [],
+            });
+            undoOperation.mockImplementation(async (payload: { operationId: string }) => ({
+                operationId: payload.operationId,
+                restoredFiles: [],
+                preRevertSnapshot: {
+                    id: 'snapshot-pre-revert',
+                    scope: 'pre-revert',
+                    taskId: 'thread-rollback',
+                    createdAt: '2026-04-29T00:00:02.000Z',
+                    label: 'snapshot-pre-revert',
+                    fileRefs: [],
+                    storageKey: 'snapshot-pre-revert.json',
+                    sizeBytes: 0,
+                },
+                restoredSnapshot: {
+                    id: 'snapshot-restored',
+                    scope: 'revert',
+                    taskId: 'thread-rollback',
+                    createdAt: '2026-04-29T00:00:03.000Z',
+                    label: 'snapshot-restored',
+                    fileRefs: [],
+                    storageKey: 'snapshot-restored.json',
+                    sizeBytes: 0,
+                },
+            }));
+        },
+    };
+});
+
+vi.mock('@/services/modules/ai-edit', () => ({
+    aiEditService: {
+        listTimeline: aiEditServiceMock.listTimeline,
+        undoOperation: aiEditServiceMock.undoOperation,
+    },
+}));
+
 const tauriServiceMock = vi.hoisted(() => {
     const loadScript = vi.fn(async (path: string) => ({
         path,
@@ -548,6 +652,7 @@ describe('useAiAssistant streaming integration', () => {
     beforeEach(() => {
         setActivePinia(createPinia());
         aiServiceMock.reset();
+        aiEditServiceMock.reset();
         tauriServiceMock.reset();
         vi.stubGlobal(
             'requestAnimationFrame',
@@ -1047,13 +1152,35 @@ describe('useAiAssistant streaming integration', () => {
                 sessionId,
                 seq: 1,
                 event: {
+                    type: 'agent_event',
+                    event: {
+                        id: 'runtime-live-tool-start',
+                        type: 'agent.tool.started',
+                        runId: 'run-live-1',
+                        sessionId,
+                        agentId: 'agent-live-1',
+                        timestamp: '2026-05-02T10:00:00.000Z',
+                        seq: 0,
+                        schemaVersion: 1,
+                        redacted: true,
+                        visibility: 'user',
+                        level: 'info',
+                        toolName: 'search_project_files',
+                        inputPreview: '{"query":"实时工具"}',
+                    },
+                },
+            });
+            aiServiceMock.emitSidecar({
+                sessionId,
+                seq: 2,
+                event: {
                     type: 'message_delta',
                     text: '第一段实时回答',
                 },
             });
             aiServiceMock.emitSidecar({
                 sessionId,
-                seq: 2,
+                seq: 3,
                 event: {
                     type: 'message_delta',
                     text: '第一段实时回答，第二段继续到达',
@@ -1102,6 +1229,11 @@ describe('useAiAssistant streaming integration', () => {
         });
         expect(assistant.messages.value[1]?.content).toContain('第二段继续到达');
         expect(assistant.messages.value[1]?.stream?.status).toBe('streaming');
+        expect(assistant.runtimeTimelineEvents.value).toHaveLength(1);
+        expect(assistant.runtimeTimelineEvents.value[0]).toMatchObject({
+            type: 'agent.tool.started',
+            toolName: 'search_project_files',
+        });
 
         releaseSidecar?.();
         await sendPromise;
@@ -1449,6 +1581,93 @@ describe('useAiAssistant streaming integration', () => {
         expect(document.value.charCount).toBe(8);
         expect(assistant.messages.value.at(-1)?.content).toBe('Patch 已应用：D:/test/xiaojianc.sh');
         expect(assistant.proposedPatch.value).toBeNull();
+    });
+
+    it('exposes a rollback prompt after an AED operation is available and can undo it', async () => {
+        const { assistant, document } = createAssistantHarnessContext();
+        const taskId = assistant.activeConversationId.value ?? 'thread-rollback';
+
+        document.value.path = 'D:/test/xiaojianc.sh';
+        document.value.name = 'xiaojianc.sh';
+        document.value.content = 'echo old';
+        document.value.savedContent = 'echo old';
+        document.value.lineCount = 1;
+        document.value.charCount = 8;
+
+        assistant.proposedPatch.value = {
+            summary: '更新脚本输出',
+            files: [
+                {
+                    path: 'D:/test/xiaojianc.sh',
+                    originalHash: 'fnv64:test',
+                    hunks: [
+                        {
+                            oldStart: 1,
+                            oldLines: 1,
+                            newStart: 1,
+                            newLines: 1,
+                            lines: ['-echo old', '+echo new'],
+                        },
+                    ],
+                },
+            ],
+        };
+        aiServiceMock.applyPatch.mockResolvedValueOnce({
+            appliedFiles: [
+                {
+                    path: 'D:/test/xiaojianc.sh',
+                    byteSize: 8,
+                },
+            ],
+        });
+        aiEditServiceMock.listTimeline.mockResolvedValueOnce({
+            entries: [
+                {
+                    type: 'operation',
+                    data: createAiEditOperation({
+                        id: 'operation-rollback-1',
+                        taskId,
+                        path: 'D:/test/xiaojianc.sh',
+                    }),
+                },
+            ],
+        });
+        aiEditServiceMock.undoOperation.mockResolvedValueOnce({
+            operationId: 'operation-rollback-1',
+            restoredFiles: ['D:/test/xiaojianc.sh'],
+            preRevertSnapshot: createAiEditSnapshot('snapshot-pre-revert', ['D:/test/xiaojianc.sh']),
+            restoredSnapshot: createAiEditSnapshot('snapshot-restored', ['D:/test/xiaojianc.sh']),
+        });
+        tauriServiceMock.loadScript.mockResolvedValueOnce({
+            path: 'D:/test/xiaojianc.sh',
+            name: 'xiaojianc.sh',
+            content: 'echo old',
+            encoding: 'utf-8',
+            lineCount: 1,
+            charCount: 8,
+        });
+
+        await assistant.applyProposedPatch();
+
+        expect(assistant.fileRollbackPrompt.value).toMatchObject({
+            operationId: 'operation-rollback-1',
+            fileCount: 1,
+            status: 'ready',
+        });
+
+        await assistant.rollbackLatestFileChange();
+
+        expect(aiEditServiceMock.undoOperation).toHaveBeenCalledWith({
+            operationId: 'operation-rollback-1',
+        });
+        expect(tauriServiceMock.loadScript).toHaveBeenCalledWith('D:/test/xiaojianc.sh');
+        expect(document.value.content).toBe('echo old');
+        expect(document.value.savedContent).toBe('echo old');
+        expect(assistant.fileRollbackPrompt.value).toMatchObject({
+            operationId: 'operation-rollback-1',
+            status: 'reverted',
+            restoredFileCount: 1,
+        });
     });
 
     it('passes Agent run and step metadata when applying a proposed patch', async () => {

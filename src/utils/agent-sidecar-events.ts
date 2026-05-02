@@ -5,6 +5,7 @@ import type {
   IAgentPlan,
   IAgentPlanStep,
   IAgentSidecarResponsePayload,
+  TAgentRuntimeEvent,
   TAgentUiEvent,
   TJsonValue,
 } from '@/types/agent-sidecar';
@@ -256,6 +257,15 @@ const isSidecarFileMutationEvent = (
 
 export const hasSidecarFileMutationEvent = (events: readonly TAgentUiEvent[]): boolean =>
   events.some(isSidecarFileMutationEvent);
+
+export const extractVisibleAgentRuntimeEvents = (
+  events: readonly TAgentUiEvent[],
+): TAgentRuntimeEvent[] =>
+  events
+    .filter((event): event is Extract<TAgentUiEvent, { type: 'agent_event' }> =>
+      event.type === 'agent_event' && event.event.visibility === 'user'
+    )
+    .map((event) => event.event);
 
 export const extractSidecarChangedFilePaths = (
   events: readonly TAgentUiEvent[],

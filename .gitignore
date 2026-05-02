@@ -9,3 +9,5 @@ dist
 src-tauri/target
 target
 *.log
+.strands-sessions
+agent-sidecar/.strands-sessions
