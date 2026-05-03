@@ -24,7 +24,7 @@ const mountActivity = (
   });
 
 describe('AiToolActivityInline', () => {
-  it('把运行态工具调用渲染成对话流里的紧凑时间线行', () => {
+  it('把运行态工具调用渲染成对话流里的紧凑时间线行', async () => {
     const wrapper = mountActivity([
       {
         id: 'tool-call-read',
@@ -38,12 +38,15 @@ describe('AiToolActivityInline', () => {
     expect(wrapper.text()).toContain('查看文件');
     expect(wrapper.text()).toContain('test.sh');
     expect(wrapper.text()).not.toContain('正在读取 test.sh…');
+
+    await wrapper.get('.ai-tool-tool-list .ai-tool-run-summary').trigger('click');
+
     expect(wrapper.text()).toContain('文件：test.sh');
     expect(wrapper.text()).toContain('状态：正在执行');
     expect(wrapper.find('.ai-tool-running-dots').exists()).toBe(false);
   });
 
-  it('优先显示 targetPreview，并把文件行号拆成独立范围标签', () => {
+  it('优先显示 targetPreview，并把文件行号拆成独立范围标签', async () => {
     const wrapper = mountActivity([
       {
         id: 'tool-call-search',
@@ -56,6 +59,9 @@ describe('AiToolActivityInline', () => {
 
     expect(wrapper.text()).toContain('全文搜索');
     expect(wrapper.text()).toContain('src/components/business/ai/AiAssistantPanel.vue');
+
+    await wrapper.get('.ai-tool-tool-list .ai-tool-run-summary').trigger('click');
+
     expect(wrapper.text()).toContain('L120-156');
   });
 
@@ -74,7 +80,34 @@ describe('AiToolActivityInline', () => {
     expect(wrapper.text()).toContain('pnpm exec vitest run AiToolActivityInline.spec.ts');
   });
 
-  it('联网搜索默认隐藏 SDK 工具名，只显示查询和站点等真实上下文', () => {
+  it('工具从运行中变失败时会自动展开详情', async () => {
+    const wrapper = mountActivity([
+      {
+        id: 'tool-call-test',
+        name: 'run_test',
+        status: 'running',
+        summary: 'pnpm exec vitest run AiToolActivityInline.spec.ts',
+      },
+    ]);
+
+    expect(wrapper.get('.ai-tool-phase-items .ai-tool-node-details').attributes('data-state')).toBe('closed');
+
+    await wrapper.setProps({
+      toolCalls: [
+        {
+          id: 'tool-call-test',
+          name: 'run_test',
+          status: 'failed',
+          summary: 'pnpm exec vitest run AiToolActivityInline.spec.ts',
+        },
+      ],
+    });
+
+    expect(wrapper.get('.ai-tool-phase-items .ai-tool-node-details').attributes('data-state')).toBe('open');
+    expect(wrapper.text()).toContain('验证');
+  });
+
+  it('联网搜索默认隐藏 SDK 工具名，只显示查询和站点等真实上下文', async () => {
     const wrapper = mountActivity([
       {
         id: 'tool-call-search',
@@ -91,8 +124,13 @@ describe('AiToolActivityInline', () => {
     ], '联网搜索「今日热点新闻」，站点 example.com');
 
     expect(wrapper.text()).toContain('联网搜索「今日热点新闻」，站点 example.com');
+    expect(wrapper.text()).toContain('网络研究');
     expect(wrapper.text()).toContain('联网搜索');
     expect(wrapper.text()).toContain('今日热点新闻');
+    expect(wrapper.get('.ai-tool-phase-items .ai-tool-run-summary').text()).not.toContain('tavily_search');
+
+    await wrapper.get('.ai-tool-phase-items .ai-tool-run-summary').trigger('click');
+
     expect(wrapper.text()).toContain('站点：example.com');
     expect(wrapper.text()).toContain('平台：Tavily');
     expect(wrapper.text()).not.toContain('tavily_search');
@@ -111,12 +149,12 @@ describe('AiToolActivityInline', () => {
       },
     ]);
 
-    expect(wrapper.get('.ai-tool-run-target').text()).toBe('项目结构');
-    expect(wrapper.get('.ai-tool-run-target').text()).not.toContain('toolResult');
+    expect(wrapper.get('.ai-tool-phase-items .ai-tool-run-target').text()).toBe('项目结构');
+    expect(wrapper.get('.ai-tool-phase-items .ai-tool-run-target').text()).not.toContain('toolResult');
     expect(wrapper.text()).not.toContain('{"toolResult"');
   });
 
-  it('活动文本和工具条目共享同一条向下延伸的时间线', () => {
+  it('活动文本和工具条目共享同一条向下延伸的时间线', async () => {
     const wrapper = mountActivity([
       {
         id: 'tool-call-list',
@@ -151,6 +189,11 @@ describe('AiToolActivityInline', () => {
     expect(rows[0]?.text()).toContain('在 D:/repo/src 搜索「AiToolActivityInline」');
     expect(wrapper.text()).toContain('工具活动 UI');
     expect(wrapper.text()).toContain('在 D:/repo/src 搜索「AiToolActivityInline」');
+
+    const summaries = wrapper.findAll('.ai-tool-tool-list .ai-tool-run-summary');
+    await summaries[0]?.trigger('click');
+    await summaries[1]?.trigger('click');
+
     expect(rows[1]?.text()).toContain('目录：D:/repo/src');
     expect(rows[2]?.text()).toContain('搜索：AiToolActivityInline');
     expect(wrapper.find('.ai-tool-run-overview').exists()).toBe(false);
@@ -173,11 +216,13 @@ describe('AiToolActivityInline', () => {
       },
     ], '联网搜索「伊朗 核设施」');
 
-    expect(wrapper.get('.ai-tool-root-details').attributes()).toHaveProperty('open');
-    expect(wrapper.get('.ai-tool-tool-list .ai-tool-node-details').attributes()).not.toHaveProperty('open');
+    expect(wrapper.get('.ai-tool-root-details').attributes('data-state')).toBe('open');
+    expect(wrapper.get('.ai-tool-tree-root-row').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.get('.ai-tool-phase-details').attributes('data-state')).toBe('open');
+    expect(wrapper.get('.ai-tool-phase-items .ai-tool-node-details').attributes('data-state')).toBe('closed');
   });
 
-  it('优先渲染 AG-UI 风格 Activity 树，并在展开节点里显示真实字段', () => {
+  it('优先渲染 AG-UI 风格 Activity 树，并在点击展开后显示真实字段', async () => {
     const wrapper = mountActivity([], undefined, undefined, [
       {
         id: 'run-root',
@@ -222,12 +267,19 @@ describe('AiToolActivityInline', () => {
       },
     ]);
 
-    expect(wrapper.get('.ai-tool-root-details').attributes()).toHaveProperty('open');
-    expect(wrapper.get('.ai-tool-tool-list .ai-tool-node-details').attributes()).not.toHaveProperty('open');
+    expect(wrapper.get('.ai-tool-root-details').attributes('data-state')).toBe('open');
+    expect(wrapper.get('.ai-tool-tree-root-row').attributes('aria-expanded')).toBe('true');
+    expect(wrapper.get('.ai-tool-phase-details').attributes('data-state')).toBe('open');
+    expect(wrapper.get('.ai-tool-phase-items .ai-tool-node-details').attributes('data-state')).toBe('closed');
     expect(wrapper.text()).toContain('联网搜索「伊朗 核设施」');
     expect(wrapper.text()).toContain('正在核对最近公开信息');
     expect(wrapper.text()).toContain('联网搜索');
     expect(wrapper.text()).toContain('伊朗 核设施 战争 2026年最新');
+    expect(wrapper.text()).not.toContain('平台：Tavily');
+
+    await wrapper.get('.ai-tool-phase-items .ai-tool-run-summary').trigger('click');
+
+    expect(wrapper.get('.ai-tool-phase-items .ai-tool-node-details').attributes('data-state')).toBe('open');
     expect(wrapper.text()).toContain('平台：Tavily');
     expect(wrapper.text()).toContain('查询：伊朗 核设施 战争 2026年最新');
     expect(wrapper.text()).toContain('站点：understandingwar.org');
@@ -293,5 +345,64 @@ describe('AiToolActivityInline', () => {
     expect(wrapper.text()).toContain('正在从 event log 还原活动树');
     expect(wrapper.text()).toContain('文件搜索');
     expect(wrapper.text()).toContain('AgentActivityFeed · src/components');
+  });
+
+  it('会展示 root 下更深层的 activity，不只依赖直接子节点', () => {
+    const wrapper = mountActivity([], undefined, undefined, [
+      {
+        id: 'run-root',
+        runId: 'run-1',
+        kind: 'run',
+        status: 'running',
+        title: '分析活动树深层节点',
+      },
+      {
+        id: 'summary-1',
+        runId: 'run-1',
+        parentId: 'run-root',
+        kind: 'reasoning_summary',
+        status: 'running',
+        title: '先收集上下文，再进入工具执行',
+      },
+      {
+        id: 'tool-1',
+        runId: 'run-1',
+        parentId: 'summary-1',
+        kind: 'search',
+        status: 'running',
+        title: '文件搜索',
+        description: 'EditorContextMenuIcon · src/components/editor',
+        details: [
+          {
+            label: '搜索',
+            value: 'EditorContextMenuIcon',
+            priority: 96,
+          },
+        ],
+      },
+      {
+        id: 'read-1',
+        runId: 'run-1',
+        parentId: 'tool-1',
+        kind: 'read_file',
+        status: 'success',
+        title: '查看文本文件',
+        description: 'src/components/editor/EditorContextMenu.vue',
+        details: [
+          {
+            label: '文件',
+            value: 'src/components/editor/EditorContextMenu.vue',
+            priority: 90,
+          },
+        ],
+      },
+    ]);
+
+    expect(wrapper.text()).toContain('分析活动树深层节点');
+    expect(wrapper.text()).toContain('先收集上下文，再进入工具执行');
+    expect(wrapper.text()).toContain('文件搜索');
+    expect(wrapper.text()).toContain('EditorContextMenuIcon · src/components/editor');
+    expect(wrapper.text()).toContain('查看文本文件');
+    expect(wrapper.text()).toContain('src/components/editor/EditorContextMenu.vue');
   });
 });

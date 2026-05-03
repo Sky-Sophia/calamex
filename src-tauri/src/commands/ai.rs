@@ -116,6 +116,7 @@ pub fn ai_get_config() -> Result<AiConfigPayload, String> {
 #[tauri::command]
 pub fn ai_save_config(payload: AiSaveConfigRequest) -> Result<AiConfigPayload, String> {
     gateway::save_config(
+        payload.role.as_deref(),
         &payload.provider_type,
         payload.selected_model,
         payload.base_url,
@@ -127,7 +128,11 @@ pub fn ai_save_config(payload: AiSaveConfigRequest) -> Result<AiConfigPayload, S
 
 #[tauri::command]
 pub fn ai_save_credentials(payload: AiSaveCredentialsRequest) -> Result<AiConfigPayload, String> {
-    gateway::save_credentials(&payload.provider_type, &payload.api_key)
+    gateway::save_credentials(
+        payload.role.as_deref(),
+        &payload.provider_type,
+        &payload.api_key,
+    )
 }
 
 #[tauri::command]
@@ -135,6 +140,7 @@ pub async fn ai_test_provider_config(
     payload: AiProviderConnectionRequest,
 ) -> Result<AiProviderTestPayload, String> {
     match gateway::test_provider_config(
+        payload.role.as_deref(),
         &payload.provider_type,
         payload.selected_model,
         payload.base_url,
@@ -163,6 +169,7 @@ pub async fn ai_connect_provider(
     payload: AiProviderConnectionRequest,
 ) -> Result<AiProviderConnectionPayload, String> {
     let config = gateway::connect_provider(
+        payload.role.as_deref(),
         &payload.provider_type,
         payload.selected_model,
         payload.base_url,

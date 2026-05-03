@@ -50,6 +50,7 @@ import {
   aiConfigPayloadSchema,
   aiConversationTitlePayloadSchema,
   aiConversationTitleRequestSchema,
+  aiModelRoleSchema,
   aiPatchSetSchema,
   aiProviderProfileDetailPayloadSchema,
   aiProviderProfilePayloadSchema,
@@ -569,6 +570,7 @@ export const tauriContracts = {
   },
   aiSaveConfig: {
     inSchema: z.object({
+      role: aiModelRoleSchema.optional(),
       providerType: aiProviderTypeSchema,
       selectedModel: z.string().nullable(),
       baseUrl: z.string().nullable(),
@@ -580,6 +582,7 @@ export const tauriContracts = {
   },
   aiSaveCredentials: {
     inSchema: z.object({
+      role: aiModelRoleSchema.optional(),
       providerType: aiProviderTypeSchema,
       apiKey: z.string().min(1),
     }),

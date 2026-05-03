@@ -91,10 +91,16 @@
     </template>
 
     <template #right-sidebar>
-      <AiAssistantPanel v-show="isWorkbenchContentVisible" :document="editorStore.document"
-        :active-run="editorStore.activeRunSummary" :analysis="editorStore.activeScriptAnalysis"
-        :selection="editorStore.activeSelectionSummary" :git-status="gitStore.status"
-        :workspace-root-path="editorStore.workspaceRootPath" />
+      <AiAssistantPanel
+        v-show="isWorkbenchContentVisible"
+        :document="editorStore.document"
+        :active-run="editorStore.activeRunSummary"
+        :analysis="editorStore.activeScriptAnalysis"
+        :selection="editorStore.activeSelectionSummary"
+        :git-status="gitStore.status"
+        :workspace-root-path="editorStore.workspaceRootPath"
+        @open-patch-diff="openGitDiffPreviewPayload"
+      />
     </template>
 
     <template #statusbar>
@@ -152,6 +158,7 @@ const {
   openFolder,
   openDocumentByPath,
   openGitDiffPreview,
+  openGitDiffPreviewPayload,
   saveDocument,
   saveDocumentAs,
   requestCloseDocument,

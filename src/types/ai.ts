@@ -3,6 +3,7 @@ import type { IAiContextReference } from '@/types/ai-context';
 
 export type TAiProviderType =
   | 'litellm';
+export type TAiModelRole = 'main' | 'narrator';
 export type TAiStatus = 'idle' | 'generating' | 'streaming' | 'error';
 export type TAiChatRole = 'user' | 'assistant' | 'system' | 'tool';
 export type {
@@ -120,6 +121,16 @@ export interface IAiToolDefinitionPayload {
   requiresConfirmation: boolean;
 }
 
+export interface IAiModelEndpointConfigPayload {
+  providerType: TAiProviderType;
+  selectedModel: string | null;
+  baseUrl: string | null;
+  activeProfileId: string | null;
+  isBaseUrlConfigured: boolean;
+  hasCredentials: boolean;
+  isConfigured: boolean;
+}
+
 export interface IAiConfigPayload {
   providerType: TAiProviderType;
   selectedModel: string | null;
@@ -131,9 +142,11 @@ export interface IAiConfigPayload {
   inlineCompletionEnabled: boolean;
   chatEnabled: boolean;
   agentEnabled: boolean;
+  narrator: IAiModelEndpointConfigPayload;
 }
 
 export interface IAiSaveConfigRequest {
+  role?: TAiModelRole;
   providerType: TAiProviderType;
   selectedModel: string | null;
   baseUrl: string | null;
@@ -143,6 +156,7 @@ export interface IAiSaveConfigRequest {
 }
 
 export interface IAiSaveCredentialsRequest {
+  role?: TAiModelRole;
   providerType: TAiProviderType;
   apiKey: string;
 }
@@ -211,6 +225,7 @@ export interface IAiProviderConnectionPayload {
 
 export interface IAiProviderProfilePayload {
   id: string;
+  role: TAiModelRole;
   name: string;
   providerType: TAiProviderType;
   selectedModel: string | null;
@@ -219,6 +234,7 @@ export interface IAiProviderProfilePayload {
   chatEnabled: boolean;
   agentEnabled: boolean;
   hasCredentials: boolean;
+  isConnected: boolean;
   createdAt: string;
   updatedAt: string;
   lastUsedAt: string | null;

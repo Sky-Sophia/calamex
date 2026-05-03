@@ -3,8 +3,11 @@ use super::errors;
 const SERVICE_NAME: &str = "calamex.ai";
 
 const LITELLM_USER: &str = "litellm";
+const LITELLM_NARRATOR_USER: &str = "litellm:narrator";
 
 const PROVIDER_ACCOUNTS: &[(&str, &str)] = &[("litellm", LITELLM_USER)];
+const PROVIDER_ROLE_ACCOUNTS: &[(&str, &str, &str)] =
+    &[("litellm", "narrator", LITELLM_NARRATOR_USER)];
 
 const LEGACY_PROVIDER_ACCOUNTS: &[&str] = &[
     "openai-compatible",
@@ -19,8 +22,12 @@ const LEGACY_PROVIDER_ACCOUNTS: &[&str] = &[
 pub struct CredentialStore;
 
 impl CredentialStore {
-    pub fn save(provider_type: &str, api_key: &str) -> Result<(), String> {
-        let account = provider_account(provider_type)?;
+    pub fn save_for_role(provider_type: &str, role: &str, api_key: &str) -> Result<(), String> {
+        let account = provider_role_account(provider_type, role)?;
+        Self::save_account(account, api_key)
+    }
+
+    fn save_account(account: &str, api_key: &str) -> Result<(), String> {
         let trimmed_api_key = api_key.trim();
 
         if trimmed_api_key.is_empty() {
@@ -35,7 +42,15 @@ impl CredentialStore {
 
     pub fn get(provider_type: &str) -> Result<String, String> {
         let account = provider_account(provider_type)?;
+        Self::get_account(account)
+    }
 
+    pub fn get_for_role(provider_type: &str, role: &str) -> Result<String, String> {
+        let account = provider_role_account(provider_type, role)?;
+        Self::get_account(account)
+    }
+
+    fn get_account(account: &str) -> Result<String, String> {
         let password = keyring::Entry::new(SERVICE_NAME, account)
             .map_err(|error| errors::error("AI_PROVIDER_UNAVAILABLE", error.to_string()))?
             .get_password()
@@ -56,17 +71,6 @@ impl CredentialStore {
         }
 
         Ok(trimmed.to_string())
-    }
-
-    pub fn delete(provider_type: &str) -> Result<(), String> {
-        let account = provider_account(provider_type)?;
-
-        let entry = keyring::Entry::new(SERVICE_NAME, account)
-            .map_err(|error| errors::error("AI_PROVIDER_UNAVAILABLE", error.to_string()))?;
-
-        let _ = entry.delete_credential();
-
-        Ok(())
     }
 
     pub fn save_profile_secret(profile_id: &str, api_key: &str) -> Result<(), String> {
@@ -131,6 +135,13 @@ impl CredentialStore {
             let _ = entry.delete_credential();
         }
 
+        for (_, _, account) in PROVIDER_ROLE_ACCOUNTS {
+            let entry = keyring::Entry::new(SERVICE_NAME, account)
+                .map_err(|error| errors::error("AI_PROVIDER_UNAVAILABLE", error.to_string()))?;
+
+            let _ = entry.delete_credential();
+        }
+
         for account in LEGACY_PROVIDER_ACCOUNTS {
             let entry = keyring::Entry::new(SERVICE_NAME, account)
                 .map_err(|error| errors::error("AI_PROVIDER_UNAVAILABLE", error.to_string()))?;
@@ -143,6 +154,10 @@ impl CredentialStore {
 
     pub fn has_provider_secret(provider_type: &str) -> bool {
         Self::get(provider_type).is_ok()
+    }
+
+    pub fn has_provider_secret_for_role(provider_type: &str, role: &str) -> bool {
+        Self::get_for_role(provider_type, role).is_ok()
     }
 }
 
@@ -158,6 +173,30 @@ fn provider_account(provider_type: &str) -> Result<&'static str, String> {
             errors::error(
                 "AI_PROVIDER_NOT_CONFIGURED",
                 "当前 Provider 不需要或不支持保存凭证。",
+            )
+        })
+}
+
+fn provider_role_account(provider_type: &str, role: &str) -> Result<&'static str, String> {
+    let normalized_role = role.trim();
+
+    if normalized_role.is_empty() || normalized_role == "main" {
+        return provider_account(provider_type);
+    }
+
+    let normalized_provider_type = provider_type.trim();
+
+    PROVIDER_ROLE_ACCOUNTS
+        .iter()
+        .find_map(|(candidate_provider_type, candidate_role, account)| {
+            (*candidate_provider_type == normalized_provider_type
+                && *candidate_role == normalized_role)
+                .then_some(*account)
+        })
+        .ok_or_else(|| {
+            errors::error(
+                "AI_PROVIDER_NOT_CONFIGURED",
+                "当前 Provider 不支持该模型用途的凭证。",
             )
         })
 }
@@ -181,7 +220,10 @@ fn profile_account(profile_id: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{profile_account, provider_account, LITELLM_USER};
+    use super::{
+        profile_account, provider_account, provider_role_account, LITELLM_NARRATOR_USER,
+        LITELLM_USER,
+    };
 
     #[test]
     fn provider_account_resolves_supported_providers() {
@@ -202,6 +244,18 @@ mod tests {
     #[test]
     fn provider_account_rejects_unknown_provider() {
         assert!(provider_account("unknown-provider").is_err());
+    }
+
+    #[test]
+    fn provider_role_account_keeps_main_and_narrator_separate() {
+        assert_eq!(
+            provider_role_account("litellm", "main").unwrap(),
+            LITELLM_USER
+        );
+        assert_eq!(
+            provider_role_account("litellm", "narrator").unwrap(),
+            LITELLM_NARRATOR_USER
+        );
     }
 
     #[test]

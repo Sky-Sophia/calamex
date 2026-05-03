@@ -1291,18 +1291,24 @@
     </div>
 
     <AiProviderSettings v-model:draft="aiSettingsDraft" v-model:api-key="aiSettingsApiKey" :open="isAiSettingsOpen"
-      :config="aiConfig" @close="isAiSettingsOpen = false" @save="saveAiSettings" @save-credentials="saveAiCredentials"
-      @test-provider="testAiProvider" />
+      :config="aiConfig" :profiles="aiProviderProfiles" :load-profile-detail="loadAiProviderProfileDetail"
+      @close="isAiSettingsOpen = false" @save="saveAiSettings" @save-credentials="saveAiCredentials"
+      @test-provider="testAiProvider" @switch-profile="switchAiProviderProfile" />
   </section>
 </template>
 
 <script setup lang="ts">
 import AiProviderSettings from '@/components/business/ai/AiProviderSettings.vue';
 import { useDialog } from '@/composables/useDialog';
-import { DEFAULT_LITELLM_BASE_URL, DEFAULT_LITELLM_MODEL_ID } from '@/constants/ai-providers';
 import { aiService } from '@/services/modules/ai';
 import { useAppStore } from '@/store/app';
-import type { IAiConfigPayload, IAiProviderSettingsActionFeedback } from '@/types/ai';
+import type {
+  IAiConfigPayload,
+  IAiProviderProfileDetailPayload,
+  IAiProviderProfilePayload,
+  IAiProviderSettingsActionFeedback,
+  TAiModelRole,
+} from '@/types/ai';
 import {
   createSettingsEnvironmentVariable,
   type IAppSettings,
@@ -1310,6 +1316,7 @@ import {
   type TSettingsSectionId,
 } from '@/types/settings';
 import { tryWriteClipboardText } from '@/utils/clipboard';
+import { cloneAiConfigPayload, createDefaultAiConfigPayload } from '@/utils/ai-config';
 import {
   ArrowLeft,
   Bot,
@@ -1590,19 +1597,10 @@ const gitTextFields = [
 
 const appStore = useAppStore();
 const { confirm } = useDialog();
-const aiConfig = ref<IAiConfigPayload>({
-  providerType: 'litellm',
-  selectedModel: DEFAULT_LITELLM_MODEL_ID,
-  baseUrl: DEFAULT_LITELLM_BASE_URL,
-  isBaseUrlConfigured: true,
-  hasCredentials: false,
-  isConfigured: false,
-  inlineCompletionEnabled: false,
-  chatEnabled: true,
-  agentEnabled: false,
-});
-const aiSettingsDraft = ref<IAiConfigPayload>({ ...aiConfig.value });
+const aiConfig = ref<IAiConfigPayload>(createDefaultAiConfigPayload());
+const aiSettingsDraft = ref<IAiConfigPayload>(cloneAiConfigPayload(aiConfig.value));
 const aiSettingsApiKey = ref('');
+const aiProviderProfiles = ref<IAiProviderProfilePayload[]>([]);
 const isAiSettingsOpen = ref(false);
 const searchQuery = ref('');
 const activeSection = ref<TSettingsSectionId>('editor');
@@ -1817,8 +1815,14 @@ const toAiFeedbackErrorMessage = (error: unknown, fallback: string): string =>
 
 const loadAiConfig = async (): Promise<void> => {
   aiConfig.value = await aiService.getConfig();
-  aiSettingsDraft.value = { ...aiConfig.value };
+  aiSettingsDraft.value = cloneAiConfigPayload(aiConfig.value);
+  aiProviderProfiles.value = await aiService.listProviderProfiles();
 };
+
+const loadAiProviderProfileDetail = (
+  profileId: string,
+): Promise<IAiProviderProfileDetailPayload> =>
+  aiService.getProviderProfileDetail({ profileId });
 
 const openAiSettingsDialog = async (): Promise<void> => {
   await loadAiConfig();
@@ -1828,13 +1832,15 @@ const openAiSettingsDialog = async (): Promise<void> => {
 const saveAiSettings = async (
   config: IAiConfigPayload,
   apiKey: string,
+  role: TAiModelRole,
   feedback: IAiProviderSettingsActionFeedback,
 ): Promise<void> => {
   try {
     const result = await aiService.connectProvider({
-      providerType: config.providerType,
-      selectedModel: config.selectedModel,
-      baseUrl: config.baseUrl,
+      role,
+      providerType: role === 'narrator' ? config.narrator.providerType : config.providerType,
+      selectedModel: role === 'narrator' ? config.narrator.selectedModel : config.selectedModel,
+      baseUrl: role === 'narrator' ? config.narrator.baseUrl : config.baseUrl,
       inlineCompletionEnabled: config.inlineCompletionEnabled,
       chatEnabled: config.chatEnabled,
       agentEnabled: config.agentEnabled,
@@ -1842,7 +1848,8 @@ const saveAiSettings = async (
     });
     aiConfig.value = result.config;
     aiSettingsApiKey.value = '';
-    aiSettingsDraft.value = { ...aiConfig.value };
+    aiSettingsDraft.value = cloneAiConfigPayload(aiConfig.value);
+    aiProviderProfiles.value = await aiService.listProviderProfiles();
     emitSaved(result.test.message);
     feedback.onSuccess(result.test.message);
   } catch (error) {
@@ -1852,15 +1859,20 @@ const saveAiSettings = async (
 
 const saveAiCredentials = async (
   apiKey: string,
+  role: TAiModelRole,
   feedback: IAiProviderSettingsActionFeedback,
 ): Promise<void> => {
   try {
     aiConfig.value = await aiService.saveCredentials({
-      providerType: aiSettingsDraft.value.providerType,
+      role,
+      providerType: role === 'narrator'
+        ? aiSettingsDraft.value.narrator.providerType
+        : aiSettingsDraft.value.providerType,
       apiKey,
     });
-    aiSettingsDraft.value = { ...aiConfig.value };
+    aiSettingsDraft.value = cloneAiConfigPayload(aiConfig.value);
     aiSettingsApiKey.value = '';
+    aiProviderProfiles.value = await aiService.listProviderProfiles();
     emitSaved('AI 凭证已保存');
     feedback.onSuccess('API Key 已保存到系统凭证');
   } catch (error) {
@@ -1868,16 +1880,34 @@ const saveAiCredentials = async (
   }
 };
 
+const switchAiProviderProfile = async (
+  profileId: string,
+  feedback: IAiProviderSettingsActionFeedback,
+): Promise<void> => {
+  try {
+    aiConfig.value = await aiService.switchProviderProfile({ profileId });
+    aiSettingsDraft.value = cloneAiConfigPayload(aiConfig.value);
+    aiSettingsApiKey.value = '';
+    aiProviderProfiles.value = await aiService.listProviderProfiles();
+    emitSaved('AI 配置已切换');
+    feedback.onSuccess('AI 配置已切换');
+  } catch (error) {
+    feedback.onError(toAiFeedbackErrorMessage(error, 'AI 配置切换失败'));
+  }
+};
+
 const testAiProvider = async (
   config: IAiConfigPayload,
   apiKey: string,
+  role: TAiModelRole,
   feedback: IAiProviderSettingsActionFeedback,
 ): Promise<void> => {
   try {
     const result = await aiService.testProviderConfig({
-      providerType: config.providerType,
-      selectedModel: config.selectedModel,
-      baseUrl: config.baseUrl,
+      role,
+      providerType: role === 'narrator' ? config.narrator.providerType : config.providerType,
+      selectedModel: role === 'narrator' ? config.narrator.selectedModel : config.selectedModel,
+      baseUrl: role === 'narrator' ? config.narrator.baseUrl : config.baseUrl,
       inlineCompletionEnabled: config.inlineCompletionEnabled,
       chatEnabled: config.chatEnabled,
       agentEnabled: config.agentEnabled,

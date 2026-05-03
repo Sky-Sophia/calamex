@@ -3,7 +3,7 @@ import { computed, ref, type Ref } from 'vue';
 import { useAiAgentPlan } from '@/composables/useAiAgentPlan';
 import { useAiStream } from '@/composables/useAiStream';
 import { useSidecarChangedDocumentRefresh } from '@/composables/useSidecarChangedDocumentRefresh';
-import { DEFAULT_LITELLM_BASE_URL, DEFAULT_LITELLM_MODEL_ID } from '@/constants/ai-providers';
+import { DEFAULT_LITELLM_MODEL_ID } from '@/constants/ai-providers';
 import { aiService } from '@/services/modules/ai';
 import {
   buildActiveRunReference,
@@ -23,6 +23,7 @@ import {
   projectSidecarEventsToActivityState,
   projectSidecarExecuteResponse,
 } from '@/utils/agent-sidecar-events';
+import { createDefaultAiConfigPayload } from '@/utils/ai-config';
 
 import type { IAgentActivity } from '@/types/agent-activity';
 import type { IAgentSidecarMessage, TAgentRuntimeEvent, TAgentUiEvent } from '@/types/agent-sidecar';
@@ -37,6 +38,7 @@ import type {
   IAiProviderProfileDetailPayload,
   IAiProviderProfilePayload,
   IAiToolDefinitionPayload,
+  TAiModelRole,
   TAiChatMessageActionId,
   TAiToolConfirmationDecision,
 } from '@/types/ai';
@@ -412,18 +414,7 @@ export const AI_QUICK_ACTIONS: IAiQuickAction[] = [
 export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const conversationStore = useAiConversationStore();
 
-  const config = ref<IAiConfigPayload>({
-    providerType: 'litellm',
-    selectedModel: DEFAULT_LITELLM_MODEL_ID,
-    baseUrl: DEFAULT_LITELLM_BASE_URL,
-    activeProfileId: null,
-    isBaseUrlConfigured: true,
-    hasCredentials: false,
-    isConfigured: false,
-    inlineCompletionEnabled: false,
-    chatEnabled: true,
-    agentEnabled: false,
-  });
+  const config = ref<IAiConfigPayload>(createDefaultAiConfigPayload());
 
   const messages = computed<IAiChatMessage[]>({
     get: () => conversationStore.activeMessages,
@@ -1315,11 +1306,21 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   ): Promise<IAiProviderProfileDetailPayload> =>
     aiService.getProviderProfileDetail({ profileId });
 
-  const saveConfig = async (nextConfig: IAiConfigPayload): Promise<void> => {
+  const saveConfig = async (
+    nextConfig: IAiConfigPayload,
+    role: TAiModelRole = 'main',
+  ): Promise<void> => {
     config.value = await aiService.saveConfig({
-      providerType: nextConfig.providerType,
-      selectedModel: nextConfig.selectedModel,
-      baseUrl: nextConfig.baseUrl,
+      role,
+      providerType: role === 'narrator'
+        ? nextConfig.narrator.providerType
+        : nextConfig.providerType,
+      selectedModel: role === 'narrator'
+        ? nextConfig.narrator.selectedModel
+        : nextConfig.selectedModel,
+      baseUrl: role === 'narrator'
+        ? nextConfig.narrator.baseUrl
+        : nextConfig.baseUrl,
       inlineCompletionEnabled: nextConfig.inlineCompletionEnabled,
       chatEnabled: nextConfig.chatEnabled,
       agentEnabled: nextConfig.agentEnabled,
@@ -1329,8 +1330,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const saveCredentials = async (
     apiKey: string,
     providerType = config.value.providerType,
+    role: TAiModelRole = 'main',
   ): Promise<void> => {
     config.value = await aiService.saveCredentials({
+      role,
       providerType,
       apiKey,
     });
@@ -1339,10 +1342,18 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const createProviderConnectionRequest = (
     nextConfig: IAiConfigPayload,
     apiKey: string,
+    role: TAiModelRole = 'main',
   ): IAiProviderConnectionRequest => ({
-    providerType: nextConfig.providerType,
-    selectedModel: nextConfig.selectedModel,
-    baseUrl: nextConfig.baseUrl,
+    role,
+    providerType: role === 'narrator'
+      ? nextConfig.narrator.providerType
+      : nextConfig.providerType,
+    selectedModel: role === 'narrator'
+      ? nextConfig.narrator.selectedModel
+      : nextConfig.selectedModel,
+    baseUrl: role === 'narrator'
+      ? nextConfig.narrator.baseUrl
+      : nextConfig.baseUrl,
     inlineCompletionEnabled: nextConfig.inlineCompletionEnabled,
     chatEnabled: nextConfig.chatEnabled,
     agentEnabled: nextConfig.agentEnabled,
@@ -1352,9 +1363,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const testProviderConfig = async (
     nextConfig: IAiConfigPayload,
     apiKey: string,
+    role: TAiModelRole = 'main',
   ): Promise<string> => {
     const result = await aiService.testProviderConfig(
-      createProviderConnectionRequest(nextConfig, apiKey),
+      createProviderConnectionRequest(nextConfig, apiKey, role),
     );
 
     if (!result.ok) {
@@ -1368,9 +1380,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const connectProvider = async (
     nextConfig: IAiConfigPayload,
     apiKey: string,
+    role: TAiModelRole = 'main',
   ): Promise<string> => {
     const result = await aiService.connectProvider(
-      createProviderConnectionRequest(nextConfig, apiKey),
+      createProviderConnectionRequest(nextConfig, apiKey, role),
     );
 
     config.value = result.config;

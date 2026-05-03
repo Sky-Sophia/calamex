@@ -1,5 +1,4 @@
 import { aiService } from '@/services/modules/ai';
-import { DEFAULT_LITELLM_BASE_URL, DEFAULT_LITELLM_MODEL_ID } from '@/constants/ai-providers';
 import type {
   IAiConfigPayload,
   IAiProviderConnectionPayload,
@@ -10,27 +9,11 @@ import type {
   TAiProviderType,
   TAiStatus,
 } from '@/types/ai';
+import { createDefaultAiConfigPayload } from '@/utils/ai-config';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 
-// ---------------------------------------------------------------------------
-// Defaults
-// ---------------------------------------------------------------------------
-
-const DEFAULT_PROVIDER_TYPE: TAiProviderType = 'litellm';
-
-const createDefaultConfig = (): IAiConfigPayload => ({
-  providerType: DEFAULT_PROVIDER_TYPE,
-  selectedModel: DEFAULT_LITELLM_MODEL_ID,
-  baseUrl: DEFAULT_LITELLM_BASE_URL,
-  activeProfileId: null,
-  isBaseUrlConfigured: true,
-  hasCredentials: false,
-  isConfigured: false,
-  inlineCompletionEnabled: false,
-  chatEnabled: true,
-  agentEnabled: false,
-});
+const createDefaultConfig = createDefaultAiConfigPayload;
 
 // ---------------------------------------------------------------------------
 // Store

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import {
   Activity,
+  Bot,
+  Brain,
   CheckCircle2,
   ChevronRight,
   CircleAlert,
@@ -15,8 +17,9 @@ import {
   Terminal,
   XCircle,
 } from 'lucide-vue-next';
+import { CollapsibleContent, CollapsibleRoot, CollapsibleTrigger } from 'reka-ui';
 import type { Component } from 'vue';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
 import type {
   IAgentActivity,
@@ -26,6 +29,27 @@ import type {
 } from '@/types/agent-activity';
 import type { IAiToolCall } from '@/types/ai';
 import { materializeAgentActivities } from '@/utils/agent-activity';
+import {
+  getActionKind,
+  getPhaseKeyForActivity,
+  getPhaseKeyForToolName,
+  getToolDisplayName,
+  type TActivityPhaseKey,
+  type TToolActionKind,
+} from '@/utils/agent-activity-inline-catalog';
+import {
+  formatElapsed,
+  getAggregateDurationLabel,
+  getDetailPreview,
+  getTargetLeafLabel,
+  getTargetSource,
+  isMachinePreview,
+  normalizeText,
+  parseTarget,
+  stripTargetNoise,
+  uniqueStrings,
+} from '@/utils/agent-activity-inline-formatters';
+import { sectionizeToolDetails, type IToolDetailSection } from '@/utils/agent-activity-inline-sections';
 
 const props = defineProps<{
   toolCalls: IAiToolCall[];
@@ -35,21 +59,6 @@ const props = defineProps<{
   activityEvents?: TAgentActivityEvent[];
 }>();
 
-type TToolActionKind =
-  | 'read'
-  | 'fileSearch'
-  | 'symbolSearch'
-  | 'diagnose'
-  | 'patch'
-  | 'applyPatch'
-  | 'execute'
-  | 'verify'
-  | 'git'
-  | 'web'
-  | 'webFetch'
-  | 'tree'
-  | 'unknown';
-
 interface IToolActionMeta {
   verb: string;
   fallbackTarget: string;
@@ -58,11 +67,13 @@ interface IToolActionMeta {
 
 interface IToolStatusMeta {
   label: string;
+  badgeLabel: string;
   detail: string;
   icon: Component;
 }
 
 interface IToolTimelineItem extends IAiToolCall {
+  toolName: string;
   actionLabel: string;
   headline: string;
   statusLabel: string;
@@ -71,103 +82,38 @@ interface IToolTimelineItem extends IAiToolCall {
   leafItems: string[];
   lineRange: string | null;
   toolIcon: Component;
+  durationLabel: string | null;
+  defaultOpen: boolean;
+  phaseKey: TActivityPhaseKey;
+  sections: IToolDetailSection[];
+}
+
+interface IToolPhaseRow {
+  id: string;
+  key: TActivityPhaseKey;
+  title: string;
+  summary: string;
+  icon: Component;
+  status: IAiToolCall['status'];
+  statusLabel: string;
+  durationLabel: string | null;
+  processItems: string[];
+  items: IToolTimelineItem[];
+  defaultOpen: boolean;
 }
 
 interface IToolActivityRow {
   id: string;
   title: string;
   status: IAiToolCall['status'];
+  leadingIcon: Component;
   statusIcon: Component;
+  statusLabel: string;
+  durationLabel: string | null;
   isSpinning: boolean;
 }
 
-const TOOL_ACTION_BY_NAME: Record<string, TToolActionKind> = {
-  read_text_file: 'read',
-  read_media_file: 'read',
-  read_multiple_files: 'read',
-  read_current_file: 'read',
-  read_selected_text: 'read',
-  read_file: 'read',
-  read_project_file: 'read',
-  get_file_info: 'read',
-  list_open_files: 'read',
-  list_project_files: 'tree',
-  list_allowed_directories: 'tree',
-  list_directory: 'tree',
-  list_directory_with_sizes: 'tree',
-  directory_tree: 'tree',
-  get_package_scripts: 'read',
-  get_test_targets: 'read',
-  get_terminal_log: 'read',
-  search_files: 'fileSearch',
-  search_text: 'fileSearch',
-  search_symbols: 'symbolSearch',
-  search_project_files: 'fileSearch',
-  get_diagnostics: 'diagnose',
-  get_git_diff: 'git',
-  git_status: 'git',
-  git_diff_unstaged: 'git',
-  git_diff_staged: 'git',
-  git_log: 'git',
-  git_show: 'git',
-  get_project_tree: 'tree',
-  web_search: 'web',
-  web_fetch: 'webFetch',
-  'tavily-search': 'web',
-  'tavily-extract': 'webFetch',
-  'tavily-map': 'web',
-  'tavily-crawl': 'webFetch',
-  tavily_search: 'web',
-  tavily_extract: 'webFetch',
-  tavily_map: 'web',
-  tavily_crawl: 'webFetch',
-  tavily_research: 'web',
-  propose_patch: 'patch',
-  auto_apply_patch: 'applyPatch',
-  write_file: 'applyPatch',
-  edit_file: 'applyPatch',
-  create_directory: 'applyPatch',
-  move_file: 'applyPatch',
-  delete_file: 'execute',
-  run_test: 'verify',
-  run_command: 'execute',
-  run_shell_command: 'execute',
-  install_package: 'execute',
-  stage_file: 'git',
-  create_commit: 'git',
-  git_commit: 'git',
-};
-
-const TOOL_DISPLAY_BY_NAME: Readonly<Record<string, string>> = {
-  read_text_file: '查看文本文件',
-  read_media_file: '查看媒体文件',
-  read_multiple_files: '查看多个文件',
-  read_current_file: '查看当前文件',
-  read_selected_text: '查看选区',
-  read_file: '查看文件',
-  read_project_file: '查看项目文件',
-  get_file_info: '查看文件信息',
-  list_directory: '查看目录',
-  list_directory_with_sizes: '查看目录大小',
-  directory_tree: '查看目录树',
-  list_allowed_directories: '查看可访问目录',
-  list_project_files: '查看项目文件',
-  search_files: '文件搜索',
-  search_text: '全文搜索',
-  search_project_files: '项目搜索',
-  search_symbols: '符号搜索',
-  web_search: '联网搜索',
-  web_fetch: '读取网页',
-  'tavily-search': '联网搜索',
-  'tavily-extract': '读取网页',
-  'tavily-map': '查看站点地图',
-  'tavily-crawl': '抓取站点',
-  tavily_search: '联网搜索',
-  tavily_extract: '读取网页',
-  tavily_map: '查看站点地图',
-  tavily_crawl: '抓取站点',
-  tavily_research: '联网调研',
-};
+type TActivityOpenState = Record<string, boolean>;
 
 const TOOL_ACTION_META: Record<TToolActionKind, IToolActionMeta> = {
   read: {
@@ -215,6 +161,21 @@ const TOOL_ACTION_META: Record<TToolActionKind, IToolActionMeta> = {
     fallbackTarget: '变更',
     icon: GitBranch,
   },
+  knowledge: {
+    verb: '知识图谱',
+    fallbackTarget: '节点',
+    icon: Brain,
+  },
+  reasoning: {
+    verb: '任务规划',
+    fallbackTarget: '计划',
+    icon: Brain,
+  },
+  time: {
+    verb: '时间工具',
+    fallbackTarget: '时间',
+    icon: Clock3,
+  },
   web: {
     verb: '检索',
     fallbackTarget: '资源',
@@ -240,26 +201,31 @@ const TOOL_ACTION_META: Record<TToolActionKind, IToolActionMeta> = {
 const TOOL_STATUS_META: Record<IAiToolCall['status'], IToolStatusMeta> = {
   pending: {
     label: '等待中',
+    badgeLabel: '等待',
     detail: '等待确认',
     icon: Clock3,
   },
   running: {
     label: '运行中',
+    badgeLabel: '进行中',
     detail: '正在执行',
     icon: LoaderCircle,
   },
   succeeded: {
     label: '已完成',
+    badgeLabel: '完成',
     detail: '结果已返回',
     icon: CheckCircle2,
   },
   failed: {
     label: '失败',
+    badgeLabel: '失败',
     detail: '执行失败',
     icon: CircleAlert,
   },
   denied: {
     label: '已停止',
+    badgeLabel: '已停止',
     detail: '已停止',
     icon: XCircle,
   },
@@ -273,6 +239,59 @@ const ACTIVITY_STATUS_TO_TOOL_STATUS: Record<TAgentActivityStatus, IAiToolCall['
   cancelled: 'denied',
 };
 
+const PHASE_META: Record<TActivityPhaseKey, { title: string; icon: Component; order: number }> = {
+  planning: {
+    title: '任务规划',
+    icon: Brain,
+    order: 0,
+  },
+  safety: {
+    title: '权限与安全',
+    icon: Activity,
+    order: 1,
+  },
+  project_scan: {
+    title: '项目扫描',
+    icon: FolderTree,
+    order: 2,
+  },
+  files_read: {
+    title: '阅读文件',
+    icon: FileText,
+    order: 3,
+  },
+  files_modify: {
+    title: '修改文件',
+    icon: Pencil,
+    order: 4,
+  },
+  knowledge: {
+    title: '知识图谱',
+    icon: Brain,
+    order: 5,
+  },
+  web: {
+    title: '网络研究',
+    icon: Globe,
+    order: 6,
+  },
+  git: {
+    title: 'Git 操作',
+    icon: GitBranch,
+    order: 7,
+  },
+  verify: {
+    title: '验证结果',
+    icon: Terminal,
+    order: 8,
+  },
+  summary: {
+    title: '总结',
+    icon: CheckCircle2,
+    order: 9,
+  },
+};
+
 const ACTIVITY_KIND_ICON: Record<IAgentActivity['kind'], Component> = {
   run: Activity,
   search: Search,
@@ -284,192 +303,114 @@ const ACTIVITY_KIND_ICON: Record<IAgentActivity['kind'], Component> = {
   llm: Activity,
   error: CircleAlert,
 };
+const getFactStatusIcon = (
+  status: IAiToolCall['status'],
+  isActive = false,
+): Component => {
+  if (status === 'running' && isActive) {
+    return LoaderCircle;
+  }
 
-const STATUS_PREFIX_PATTERN =
-  /^(?:正在|已|等待|调用失败|已拒绝|Agent\s*)\s*(?:读取|搜索|加载|使用|应用|生成|验证|执行|运行|检索|分析|暂存|提交|调用|完成)?\s*[:：]?\s*/u;
-
-const GENERIC_TARGET_PREFIX_PATTERN =
-  /^(?:当前文件|当前选区|项目内容|文件名|符号|诊断|Git\s*变更|终端日志|网页|Patch|测试|命令|Git\s*暂存|Git\s*提交|文件|打开文件|package scripts|测试目标|工作区)\s*[:：]?\s*/iu;
-
-const GENERIC_TARGET_VALUES = new Set([
-  '文件',
-  '项目',
-  '项目结构',
-  '工作区',
-  '资源',
-  '网页',
-  '任务',
-  '命令',
-  '测试',
-  '变更',
-]);
-
-const getActionKind = (toolName: string): TToolActionKind =>
-  TOOL_ACTION_BY_NAME[toolName] ?? 'unknown';
-
-const normalizeText = (value: string): string =>
-  value
-    .replace(/…$/u, '')
-    .replace(/\s+/gu, ' ')
-    .trim();
-
-const stripTargetNoise = (value: string): string => {
-  const withoutStatus = normalizeText(value).replace(STATUS_PREFIX_PATTERN, '').trim();
-  const withoutGenericPrefix = withoutStatus.replace(GENERIC_TARGET_PREFIX_PATTERN, '').trim();
-
-  return withoutGenericPrefix || withoutStatus;
+  return TOOL_STATUS_META[status].icon;
 };
 
-const isUrlLike = (value: string): boolean => /^https?:\/\//iu.test(value);
-
-const isFileLikeTarget = (value: string): boolean =>
-  /[\\/]/u.test(value) || /\.[a-z0-9]{1,12}(?::|#L|\s*$)/iu.test(value);
-
-const formatLineRange = (start: string, end: string | undefined): string =>
-  end && end !== start ? `L${start}-${end}` : `L${start}`;
-
-const parseTarget = (value: string): { target: string; lineRange: string | null } => {
-  const target = normalizeText(value);
-
-  if (!target || isUrlLike(target)) {
-    return {
-      target,
-      lineRange: null,
-    };
+const getFactTopicIcon = (value: string): Component => {
+  if (/计划|规划|步骤|阶段/u.test(value)) {
+    return Brain;
   }
 
-  const hashLineMatch = target.match(/^(.+?)#L(\d+)(?:-L?(\d+))?$/u);
-  if (hashLineMatch?.[1] && hashLineMatch[2] && isFileLikeTarget(hashLineMatch[1])) {
-    return {
-      target: hashLineMatch[1].trim(),
-      lineRange: formatLineRange(hashLineMatch[2], hashLineMatch[3]),
-    };
+  if (/搜索|检索|查询|命中/u.test(value)) {
+    return Search;
   }
 
-  const colonLineMatch = target.match(/^(.+):(\d+)(?:-(\d+))?$/u);
-  if (colonLineMatch?.[1] && colonLineMatch[2] && isFileLikeTarget(colonLineMatch[1])) {
-    return {
-      target: colonLineMatch[1].trim(),
-      lineRange: formatLineRange(colonLineMatch[2], colonLineMatch[3]),
-    };
+  if (/目录|项目结构|工作区/u.test(value)) {
+    return FolderTree;
   }
 
-  return {
-    target,
-    lineRange: null,
+  if (/文件|路径|位置|读取|打开/u.test(value)) {
+    return FileText;
+  }
+
+  if (/网页|联网|站点|URL|网址/u.test(value)) {
+    return Globe;
+  }
+
+  if (/命令|终端|测试|验证/u.test(value)) {
+    return Terminal;
+  }
+
+  if (/Git|提交|暂存/u.test(value)) {
+    return GitBranch;
+  }
+
+  return Activity;
+};
+
+const phaseOpenState = ref<TActivityOpenState>({});
+const itemOpenState = ref<TActivityOpenState>({});
+
+const shouldAutoOpenPhase = (phase: IToolPhaseRow): boolean =>
+  phase.defaultOpen || phase.status === 'running' || phase.status === 'failed';
+
+const shouldAutoOpenItem = (item: IToolTimelineItem): boolean =>
+  item.defaultOpen || item.status === 'failed';
+
+const resolveNodeOpen = <TNode extends { id: string }>(
+  openState: TActivityOpenState,
+  node: TNode,
+  getFallback: (target: TNode) => boolean,
+): boolean => openState[node.id] ?? getFallback(node);
+
+const isPhaseOpen = (phase: IToolPhaseRow): boolean =>
+  resolveNodeOpen(phaseOpenState.value, phase, shouldAutoOpenPhase);
+
+const isItemOpen = (item: IToolTimelineItem): boolean =>
+  resolveNodeOpen(itemOpenState.value, item, shouldAutoOpenItem);
+
+const updatePhaseOpen = (phaseId: string, open: boolean): void => {
+  phaseOpenState.value = {
+    ...phaseOpenState.value,
+    [phaseId]: open,
   };
 };
 
-const MACHINE_PREVIEW_PATTERN =
-  /(?:^\s*(?:\{|\[|\[object\s+Object\])|"?toolResult"?\s*:|"?content"?\s*:\s*\[|"?result"?\s*:\s*(?:\{|\[))/iu;
-
-const isMachinePreview = (value: string): boolean =>
-  MACHINE_PREVIEW_PATTERN.test(normalizeText(value));
-
-const getTargetSource = (toolCall: IAiToolCall, fallbackTarget: string): string => {
-  const targetPreview = toolCall.targetPreview?.trim();
-
-  if (targetPreview && !isMachinePreview(targetPreview)) {
-    return targetPreview;
-  }
-
-  const summaryTarget = stripTargetNoise(toolCall.summary);
-  if (
-    summaryTarget &&
-    !isMachinePreview(summaryTarget) &&
-    (isFileLikeTarget(summaryTarget) || isUrlLike(summaryTarget))
-  ) {
-    return summaryTarget;
-  }
-
-  return fallbackTarget;
+const updateItemOpen = (itemId: string, open: boolean): void => {
+  itemOpenState.value = {
+    ...itemOpenState.value,
+    [itemId]: open,
+  };
 };
 
-const getDetailPreview = (
-  summary: string,
-  target: string,
-  statusDetail: string,
-): string | null => {
-  const preview = normalizeText(summary);
-  const strippedPreview = stripTargetNoise(preview);
-  const normalizedTarget = normalizeText(target);
-
-  if (
-    !preview ||
-    strippedPreview === normalizedTarget ||
-    preview === statusDetail ||
-    isMachinePreview(preview)
-  ) {
-    return null;
+const buildPhaseSummary = (
+  phaseKey: TActivityPhaseKey,
+  processValues: readonly string[],
+  timelineItems: readonly IToolTimelineItem[],
+): string => {
+  if (!timelineItems.length && processValues.length === 1) {
+    return processValues[0] ?? '';
   }
 
-  return strippedPreview || preview;
-};
-
-const getActionLabel = (toolName: string, actionMeta: IToolActionMeta): string =>
-  TOOL_DISPLAY_BY_NAME[toolName] ?? actionMeta.verb;
-
-const isGenericTarget = (target: string, fallbackTarget: string): boolean =>
-  target === fallbackTarget || GENERIC_TARGET_VALUES.has(target);
-
-const hasLeafLabel = (items: readonly string[], label: string): boolean =>
-  items.some((item) => item.startsWith(`${label}：`));
-
-const getTargetLeafLabel = (
-  actionKind: TToolActionKind,
-  target: string,
-  fallbackTarget: string,
-  existingDetails: readonly string[],
-): string | null => {
-  if (!target || isGenericTarget(target, fallbackTarget) || isMachinePreview(target)) {
-    return null;
+  if (timelineItems.length === 1 && !processValues.length) {
+    return timelineItems[0]?.headline ?? '';
   }
 
-  if (actionKind === 'read' && !hasLeafLabel(existingDetails, '文件')) {
-    return `文件：${target}`;
+  if (phaseKey === 'planning' && processValues.length) {
+    return `${processValues.length} 条可见摘要`;
   }
 
-  if (actionKind === 'tree' && !hasLeafLabel(existingDetails, '目录')) {
-    return `目录：${target}`;
+  const totalCount = processValues.length + timelineItems.length;
+  const failureCount = timelineItems.filter((item) => item.status === 'failed').length;
+  const runningCount = timelineItems.filter((item) => item.status === 'running').length;
+
+  if (failureCount > 0) {
+    return `${totalCount} 个节点，${failureCount} 个异常`;
   }
 
-  if (
-    (actionKind === 'fileSearch' || actionKind === 'symbolSearch') &&
-    !hasLeafLabel(existingDetails, '范围')
-  ) {
-    return `范围：${target}`;
+  if (runningCount > 0) {
+    return `${totalCount} 个节点，${runningCount} 个进行中`;
   }
 
-  if ((actionKind === 'web' || actionKind === 'webFetch') && !hasLeafLabel(existingDetails, '查询')) {
-    return `目标：${target}`;
-  }
-
-  return `目标：${target}`;
-};
-
-const formatElapsed = (elapsedMs: number | undefined): string | null => {
-  if (elapsedMs === undefined) {
-    return null;
-  }
-
-  if (elapsedMs < 1000) {
-    return `${elapsedMs}ms`;
-  }
-
-  return `${Math.max(1, Math.round(elapsedMs / 1000))}s`;
-};
-
-const uniqueStrings = (values: readonly string[]): string[] => {
-  const seen = new Set<string>();
-  return values.filter((value) => {
-    const normalized = value.trim();
-    if (!normalized || seen.has(normalized)) {
-      return false;
-    }
-
-    seen.add(normalized);
-    return true;
-  });
+  return `${totalCount} 个节点`;
 };
 
 const buildTimelineItem = (toolCall: IAiToolCall): IToolTimelineItem => {
@@ -479,7 +420,7 @@ const buildTimelineItem = (toolCall: IAiToolCall): IToolTimelineItem => {
   const parsedTarget = parseTarget(stripTargetNoise(getTargetSource(toolCall, actionMeta.fallbackTarget)));
   const target = parsedTarget.target || actionMeta.fallbackTarget;
   const elapsed = formatElapsed(toolCall.elapsedMs);
-  const actionLabel = getActionLabel(toolCall.name, actionMeta);
+  const actionLabel = getToolDisplayName(toolCall.name, actionMeta.verb);
   const headline = `${actionLabel} · ${target}`;
   const preview = getDetailPreview(toolCall.summary, target, statusMeta.detail);
   const detailItems = uniqueStrings(toolCall.detailItems ?? [])
@@ -497,17 +438,32 @@ const buildTimelineItem = (toolCall: IAiToolCall): IToolTimelineItem => {
     ...detailItems,
     ...metaItems,
   ]).slice(0, 7);
+  const phaseKey = getPhaseKeyForToolName(toolCall.name);
 
   return {
     ...toolCall,
+    toolName: toolCall.name,
     actionLabel,
     headline,
-    statusLabel: statusMeta.label,
+    statusLabel: statusMeta.badgeLabel,
     target,
     preview,
     leafItems,
     lineRange,
     toolIcon: actionMeta.icon,
+    durationLabel: elapsed,
+    defaultOpen: false,
+    phaseKey,
+    sections: sectionizeToolDetails({
+      toolLabel: actionLabel,
+      status: toolCall.status,
+      statusDetail: statusMeta.detail,
+      target,
+      lineRange,
+      durationLabel: elapsed,
+      preview,
+      leafItems,
+    }),
   };
 };
 
@@ -543,22 +499,42 @@ const buildTimelineItemFromActivity = (activity: IAgentActivity): IToolTimelineI
   const fallbackTarget = activity.kind === 'search' ? '检索' : '任务';
   const displayTarget = target || fallbackTarget;
   const preview = activity.outputSummary ?? activity.error?.message ?? null;
+  const leafItems = buildActivityLeafItems(activity);
+  const toolName = activity.tool?.name ?? activity.kind;
+  const phaseKey = getPhaseKeyForActivity(activity);
 
   return {
     id: activity.id,
-    name: activity.tool?.name ?? activity.kind,
+    name: toolName,
     status,
     summary: activity.outputSummary ?? activity.description ?? activity.title,
     targetPreview: displayTarget,
     elapsedMs: activity.durationMs,
+    toolName,
     actionLabel: activity.title,
     headline: target ? `${activity.title} · ${target}` : activity.title,
     statusLabel: TOOL_STATUS_META[status].label,
     target: displayTarget,
     preview,
-    leafItems: buildActivityLeafItems(activity),
+    leafItems,
     lineRange: null,
     toolIcon: ACTIVITY_KIND_ICON[activity.kind],
+    durationLabel: formatElapsed(activity.durationMs),
+    defaultOpen: false,
+    phaseKey,
+    sections: sectionizeToolDetails({
+      toolLabel: activity.title,
+      status,
+      statusDetail: TOOL_STATUS_META[status].detail,
+      target: displayTarget,
+      lineRange: null,
+      durationLabel: formatElapsed(activity.durationMs),
+      preview,
+      leafItems,
+      inputSummary: activity.inputSummary ?? activity.description ?? null,
+      outputSummary: activity.outputSummary ?? null,
+      errorMessage: activity.error?.message ?? null,
+    }),
   };
 };
 
@@ -578,19 +554,54 @@ const activityRoot = computed(() =>
   resolvedActivities.value.find((activity) => !activity.parentId) ?? null,
 );
 
-const activityChildren = computed(() => {
+const activityDescendants = computed(() => {
   const root = activityRoot.value;
 
   if (!root) {
     return [];
   }
 
-  return resolvedActivities.value.filter((activity) => activity.parentId === root.id);
+  const childrenByParentId = new Map<string, IAgentActivity[]>();
+
+  for (const activity of resolvedActivities.value) {
+    if (!activity.parentId) {
+      continue;
+    }
+
+    const siblings = childrenByParentId.get(activity.parentId);
+    if (siblings) {
+      siblings.push(activity);
+      continue;
+    }
+
+    childrenByParentId.set(activity.parentId, [activity]);
+  }
+
+  const descendants: IAgentActivity[] = [];
+  const visited = new Set<string>();
+
+  const appendDescendants = (parentId: string): void => {
+    const children = childrenByParentId.get(parentId) ?? [];
+
+    for (const child of children) {
+      if (visited.has(child.id)) {
+        continue;
+      }
+
+      visited.add(child.id);
+      descendants.push(child);
+      appendDescendants(child.id);
+    }
+  };
+
+  appendDescendants(root.id);
+
+  return descendants;
 });
 
 const items = computed(() => {
   if (activityRoot.value) {
-    return activityChildren.value
+    return activityDescendants.value
       .filter((activity) => activity.kind !== 'reasoning_summary' && activity.kind !== 'llm')
       .map(buildTimelineItemFromActivity);
   }
@@ -601,7 +612,7 @@ const items = computed(() => {
 const processItems = computed(() => {
   if (activityRoot.value) {
     return uniqueStrings(
-      activityChildren.value
+      activityDescendants.value
         .filter((activity) => activity.kind === 'reasoning_summary' || activity.kind === 'llm')
         .map((activity) => activity.description ?? activity.title),
     ).slice(-3);
@@ -613,6 +624,59 @@ const processItems = computed(() => {
     .filter((item) => !isMachinePreview(item))
     .filter((item) => normalizeText(item) !== activityTitle)
     .slice(-2);
+});
+
+const overallStatus = computed<IAiToolCall['status']>(() => {
+  if (activityRoot.value) {
+    return ACTIVITY_STATUS_TO_TOOL_STATUS[activityRoot.value.status];
+  }
+
+  return items.value.length ? getGroupStatus(items.value) : 'running';
+});
+
+const phases = computed<IToolPhaseRow[]>(() => {
+  const groups = new Map<TActivityPhaseKey, { processItems: string[]; items: IToolTimelineItem[] }>();
+
+  if (processItems.value.length) {
+    groups.set('planning', {
+      processItems: processItems.value,
+      items: [],
+    });
+  }
+
+  for (const item of items.value) {
+    const existing = groups.get(item.phaseKey);
+    if (existing) {
+      existing.items.push(item);
+      continue;
+    }
+
+    groups.set(item.phaseKey, {
+      processItems: [],
+      items: [item],
+    });
+  }
+
+  return [...groups.entries()]
+    .sort((left, right) => PHASE_META[left[0]].order - PHASE_META[right[0]].order)
+    .map(([phaseKey, group]) => {
+      const phaseStatus = group.items.length ? getGroupStatus(group.items) : overallStatus.value;
+      const phaseMeta = PHASE_META[phaseKey];
+
+      return {
+        id: `${activityRow.value?.id ?? 'run'}:${phaseKey}`,
+        key: phaseKey,
+        title: phaseMeta.title,
+        summary: buildPhaseSummary(phaseKey, group.processItems, group.items),
+        icon: phaseMeta.icon,
+        status: phaseStatus,
+        statusLabel: TOOL_STATUS_META[phaseStatus].badgeLabel,
+        durationLabel: getAggregateDurationLabel(group.items.map((item) => item.elapsedMs)),
+        processItems: group.processItems,
+        items: group.items,
+        defaultOpen: true,
+      };
+    });
 });
 
 const getPrimaryItem = (timelineItems: readonly IToolTimelineItem[]): IToolTimelineItem | null => {
@@ -654,30 +718,39 @@ const activityRow = computed<IToolActivityRow | null>(() => {
   if (root) {
     const status = ACTIVITY_STATUS_TO_TOOL_STATUS[root.status];
     const statusMeta = TOOL_STATUS_META[status];
+    const durationLabel = formatElapsed(root.durationMs)
+      ?? getAggregateDurationLabel(activityDescendants.value.map((activity) => activity.durationMs));
 
     return {
       id: root.id,
       title: root.title,
       status,
+      leadingIcon: Bot,
       statusIcon: statusMeta.icon,
+      statusLabel: statusMeta.badgeLabel,
+      durationLabel,
       isSpinning: status === 'running',
     };
   }
 
   const trimmedActivity = props.activityText?.trim();
-  if (!trimmedActivity && !items.value.length) {
+  if (!trimmedActivity && !items.value.length && !processItems.value.length) {
     return null;
   }
 
   const primaryItem = getPrimaryItem(items.value);
-  const status = getGroupStatus(items.value);
+  const status = overallStatus.value;
   const statusMeta = TOOL_STATUS_META[status];
+  const durationLabel = getAggregateDurationLabel(items.value.map((item) => item.elapsedMs));
 
   return {
     id: 'current-activity',
     title: trimmedActivity || primaryItem?.headline || statusMeta.detail,
     status,
+    leadingIcon: Bot,
     statusIcon: statusMeta.icon,
+    statusLabel: statusMeta.badgeLabel,
+    durationLabel,
     isSpinning: status === 'running',
   };
 });
@@ -689,46 +762,127 @@ const activityRow = computed<IToolActivityRow | null>(() => {
     <ol class="ai-tool-tree">
       <li class="ai-tool-tree-node ai-tool-run-item ai-tool-run-current" :class="`is-${activityRow.status}`"
         aria-live="polite">
-        <details class="ai-tool-node-details ai-tool-root-details" open>
-          <summary class="ai-tool-tree-row ai-tool-tree-root-row">
-            <span class="ai-tool-run-status-node">
-              <component :is="activityRow.statusIcon" class="ai-tool-status-icon"
-                :class="{ 'is-spinning': activityRow.isSpinning }" />
-            </span>
-            <span class="ai-tool-run-title" :title="activityRow.title">{{ activityRow.title }}</span>
-            <ChevronRight class="ai-tool-run-chevron" aria-hidden="true" />
-          </summary>
+        <CollapsibleRoot class="ai-tool-node-details ai-tool-root-details" :default-open="true">
+          <CollapsibleTrigger as-child>
+            <button type="button" class="ai-tool-tree-row ai-tool-tree-root-row">
+              <span class="ai-tool-run-status-node">
+                <component :is="activityRow.leadingIcon" class="ai-tool-node-icon" />
+              </span>
+              <span class="ai-tool-row-copy">
+                <span class="ai-tool-run-title" :title="activityRow.title">{{ activityRow.title }}</span>
+              </span>
+              <span v-if="activityRow.status !== 'succeeded' || activityRow.durationLabel" class="ai-tool-row-meta">
+                <span v-if="activityRow.status !== 'succeeded'" class="ai-tool-status-text"
+                  :class="`is-${activityRow.status}`">{{ activityRow.statusLabel }}</span>
+                <span v-if="activityRow.durationLabel" class="ai-tool-duration-pill">{{ activityRow.durationLabel
+                }}</span>
+              </span>
+              <span class="ai-tool-chevron-shell" aria-hidden="true">
+                <ChevronRight class="ai-tool-run-chevron" />
+              </span>
+            </button>
+          </CollapsibleTrigger>
 
-          <ol v-if="processItems.length || items.length" class="ai-tool-subtree ai-tool-tool-list">
-            <li v-for="process in processItems" :key="`process:${process}`"
-              class="ai-tool-tree-node ai-tool-detail-node ai-tool-process-node">
-              <span class="ai-tool-leaf-dot" aria-hidden="true" />
-              <span class="ai-tool-run-fact" :title="process">{{ process }}</span>
-            </li>
-            <li v-for="item in items" :key="item.id" class="ai-tool-tree-node ai-tool-run-item"
-              :class="`is-${item.status}`">
-              <details class="ai-tool-node-details">
-                <summary class="ai-tool-tree-row ai-tool-run-summary">
-                  <span class="ai-tool-run-dot" aria-hidden="true" />
-                  <span class="ai-tool-run-main">
-                    <component :is="item.toolIcon" class="ai-tool-kind-icon" aria-hidden="true" />
-                    <span class="ai-tool-run-action">{{ item.actionLabel }}</span>
-                    <span class="ai-tool-run-target" :title="item.target">{{ item.target }}</span>
+          <CollapsibleContent v-if="phases.length" force-mount as-child>
+            <div class="ai-tool-collapsible-content">
+              <div class="ai-tool-collapsible-shell">
+                <TransitionGroup name="ai-tool-list-motion" tag="ol"
+                  class="ai-tool-subtree ai-tool-tool-list ai-tool-phase-list">
+      <li v-for="phase in phases" :key="phase.id" class="ai-tool-tree-node ai-tool-phase-node"
+        :class="`is-${phase.status}`">
+        <CollapsibleRoot class="ai-tool-node-details ai-tool-phase-details" :open="isPhaseOpen(phase)"
+          @update:open="(open) => updatePhaseOpen(phase.id, open)">
+          <CollapsibleTrigger as-child>
+            <button type="button" class="ai-tool-tree-row ai-tool-phase-summary">
+              <span class="ai-tool-run-status-node is-branch">
+                <component :is="phase.icon" class="ai-tool-node-icon" />
+              </span>
+              <span class="ai-tool-run-main ai-tool-phase-main">
+                <span class="ai-tool-run-heading-line ai-tool-phase-heading-line">
+                  <span class="ai-tool-run-action ai-tool-phase-title">{{ phase.title }}</span>
+                  <span class="ai-tool-phase-summary-text" :title="phase.summary">{{ phase.summary }}</span>
+                </span>
+              </span>
+              <span v-if="phase.status !== 'succeeded' || phase.durationLabel" class="ai-tool-row-meta">
+                <span v-if="phase.status !== 'succeeded'" class="ai-tool-status-text" :class="`is-${phase.status}`">{{
+                  phase.statusLabel }}</span>
+                <span v-if="phase.durationLabel" class="ai-tool-duration-pill">{{ phase.durationLabel }}</span>
+              </span>
+              <span class="ai-tool-chevron-shell" aria-hidden="true">
+                <ChevronRight class="ai-tool-run-chevron" />
+              </span>
+            </button>
+          </CollapsibleTrigger>
+
+          <CollapsibleContent v-if="phase.processItems.length || phase.items.length" as-child>
+            <ol class="ai-tool-subtree ai-tool-phase-items ai-tool-collapsible-content">
+              <li v-for="process in phase.processItems" :key="`${phase.id}:process:${process}`"
+                class="ai-tool-tree-node ai-tool-detail-node ai-tool-process-node">
+                <span class="ai-tool-fact-rail" aria-hidden="true">
+                  <span class="ai-tool-fact-status" :class="`is-${phase.status}`">
+                    <component
+                      :is="getFactStatusIcon(phase.status, phase.status === 'running' && process === phase.processItems.at(-1))"
+                      class="ai-tool-fact-status-icon"
+                      :class="{ 'is-spinning': phase.status === 'running' && process === phase.processItems.at(-1) }" />
                   </span>
-                  <span class="ai-tool-run-status">{{ item.statusLabel }}</span>
-                  <ChevronRight class="ai-tool-run-chevron" aria-hidden="true" />
-                </summary>
-                <ol class="ai-tool-subtree ai-tool-detail-list">
-                  <li v-for="leaf in item.leafItems" :key="`${item.id}:leaf:${leaf}`"
-                    class="ai-tool-tree-node ai-tool-detail-node">
-                    <span class="ai-tool-leaf-dot" aria-hidden="true" />
-                    <span class="ai-tool-run-fact" :title="leaf">{{ leaf }}</span>
-                  </li>
-                </ol>
-              </details>
-            </li>
-          </ol>
-        </details>
+                  <span class="ai-tool-fact-topic">
+                    <component :is="getFactTopicIcon(process)" class="ai-tool-fact-topic-icon" />
+                  </span>
+                </span>
+                <span class="ai-tool-run-fact" :title="process">{{ process }}</span>
+              </li>
+
+              <li v-for="item in phase.items" :key="item.id" class="ai-tool-tree-node ai-tool-run-item"
+                :class="`is-${item.status}`">
+                <CollapsibleRoot class="ai-tool-node-details" :open="isItemOpen(item)"
+                  @update:open="(open) => updateItemOpen(item.id, open)">
+                  <CollapsibleTrigger as-child>
+                    <button type="button" class="ai-tool-tree-row ai-tool-run-summary">
+                      <span class="ai-tool-run-status-node is-branch">
+                        <component :is="item.toolIcon" class="ai-tool-node-icon" />
+                      </span>
+                      <span class="ai-tool-run-main">
+                        <span class="ai-tool-run-heading-line">
+                          <span class="ai-tool-run-action">{{ item.actionLabel }}</span>
+                          <span class="ai-tool-run-target" :title="item.target">{{ item.target }}</span>
+                        </span>
+                      </span>
+                      <span v-if="item.status !== 'succeeded' || item.durationLabel" class="ai-tool-row-meta">
+                        <span v-if="item.status !== 'succeeded'" class="ai-tool-status-text"
+                          :class="`is-${item.status}`">{{ item.statusLabel }}</span>
+                        <span v-if="item.durationLabel" class="ai-tool-duration-pill">{{ item.durationLabel }}</span>
+                      </span>
+                      <span class="ai-tool-chevron-shell" aria-hidden="true">
+                        <ChevronRight class="ai-tool-run-chevron" />
+                      </span>
+                    </button>
+                  </CollapsibleTrigger>
+
+                  <CollapsibleContent v-if="item.sections.length" as-child>
+                    <div class="ai-tool-collapsible-content ai-tool-detail-card">
+                      <section v-for="section in item.sections" :key="`${item.id}:section:${section.title}`"
+                        class="ai-tool-detail-section" :class="section.tone ? `is-${section.tone}` : ''">
+                        <h4 class="ai-tool-detail-heading">{{ section.title }}</h4>
+                        <ol class="ai-tool-detail-points">
+                          <li v-for="detail in section.items" :key="`${item.id}:detail:${section.title}:${detail}`"
+                            class="ai-tool-detail-point" :title="detail">
+                            {{ detail }}
+                          </li>
+                        </ol>
+                      </section>
+                    </div>
+                  </CollapsibleContent>
+                </CollapsibleRoot>
+              </li>
+            </ol>
+          </CollapsibleContent>
+        </CollapsibleRoot>
+      </li>
+      </TransitionGroup>
+      </div>
+      </div>
+      </CollapsibleContent>
+      </CollapsibleRoot>
       </li>
     </ol>
   </section>
@@ -736,7 +890,7 @@ const activityRow = computed<IToolActivityRow | null>(() => {
 
 <style scoped>
 .ai-tool-run-timeline {
-  width: min(100%, 640px);
+  width: min(100%, 760px);
   color: var(--text-tertiary);
   font-size: 13px;
   line-height: 20px;
@@ -744,37 +898,45 @@ const activityRow = computed<IToolActivityRow | null>(() => {
 
 .ai-tool-run-status-node {
   display: inline-flex;
-  width: 20px;
+  width: 24px;
+  min-width: 24px;
   height: 20px;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
-  background: var(--surface-panel);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--shell-divider) 78%, transparent);
 }
 
-.ai-tool-status-icon {
-  width: 13px;
-  height: 13px;
-  color: var(--text-quaternary);
+.ai-tool-run-status-node.is-branch {
+  width: 24px;
+  min-width: 24px;
+  height: 20px;
+}
+
+.ai-tool-node-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--text-secondary);
   stroke-width: 2;
 }
 
-.ai-tool-status-icon.is-spinning {
+.ai-tool-fact-status-icon {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2;
+}
+
+.ai-tool-fact-status-icon.is-spinning {
   animation: ai-tool-status-spin 900ms linear infinite;
   color: var(--text-secondary);
 }
 
 .ai-tool-run-title {
   min-width: 0;
-  overflow: hidden;
   color: inherit;
   font-size: 14px;
-  font-weight: 520;
+  font-weight: 560;
   line-height: 22px;
-  text-overflow: ellipsis;
   unicode-bidi: plaintext;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .ai-tool-tree,
@@ -791,10 +953,10 @@ const activityRow = computed<IToolActivityRow | null>(() => {
 }
 
 .ai-tool-subtree {
-  gap: 3px;
-  margin: 5px 0 0 10px;
-  border-left: 1px solid color-mix(in srgb, var(--shell-divider) 72%, transparent);
-  padding: 3px 0 5px 16px;
+  gap: 2px;
+  margin: 6px 0 0 17px;
+  border-left: 1px solid color-mix(in srgb, var(--shell-divider) 68%, transparent);
+  padding: 2px 0 4px 18px;
 }
 
 .ai-tool-tree-node {
@@ -803,16 +965,15 @@ const activityRow = computed<IToolActivityRow | null>(() => {
 }
 
 .ai-tool-run-item {
-  padding: 6px 0;
-  animation: ai-tool-row-enter 180ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  padding: 4px 0;
 }
 
 .ai-tool-subtree>.ai-tool-tree-node::before {
   position: absolute;
-  top: 16px;
-  left: -16px;
-  width: 12px;
-  border-top: 1px solid color-mix(in srgb, var(--shell-divider) 72%, transparent);
+  top: 18px;
+  left: -18px;
+  width: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--shell-divider) 68%, transparent);
   content: '';
 }
 
@@ -824,49 +985,114 @@ const activityRow = computed<IToolActivityRow | null>(() => {
   display: grid;
   min-width: 0;
   align-items: center;
-  column-gap: 7px;
+  column-gap: 8px;
+  width: 100%;
 }
 
 .ai-tool-tree-root-row {
-  grid-template-columns: 20px minmax(0, 1fr) 14px;
-  min-height: 30px;
+  grid-template-columns: 24px minmax(0, 1fr) auto 14px;
+  min-height: 34px;
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   list-style: none;
+  padding: 3px 0;
   transition:
     background-color 140ms cubic-bezier(0.23, 1, 0.32, 1),
     color 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-.ai-tool-tree-root-row::-webkit-details-marker,
-.ai-tool-run-summary::-webkit-details-marker {
-  display: none;
+.ai-tool-node-details {
+  display: block;
+  min-width: 0;
 }
 
-.ai-tool-run-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--text-quaternary);
+.ai-tool-tree-root-row,
+.ai-tool-phase-summary,
+.ai-tool-run-summary {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  appearance: none;
 }
 
-.ai-tool-leaf-dot {
-  width: 3px;
-  height: 3px;
-  margin-top: 8px;
+.ai-tool-chevron-shell {
+  display: inline-flex;
+  width: 14px;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+}
+
+.ai-tool-row-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.ai-tool-row-meta {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  justify-self: end;
+}
+
+.ai-tool-duration-pill {
+  display: inline-flex;
+  align-items: center;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--text-quaternary) 72%, transparent);
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.ai-tool-duration-pill {
+  color: var(--text-quaternary);
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--surface-panel) 54%, transparent);
+}
+
+.ai-tool-status-text {
+  color: var(--text-quaternary);
+  font-size: 11px;
+  font-weight: 520;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.ai-tool-status-text.is-running {
+  color: var(--text-secondary);
+}
+
+.ai-tool-status-text.is-failed,
+.ai-tool-status-text.is-denied {
+  color: color-mix(in srgb, var(--danger) 84%, var(--text-secondary));
 }
 
 .ai-tool-run-summary {
-  grid-template-columns: 9px minmax(0, 1fr) auto 14px;
-  min-height: 28px;
-  gap: 7px;
+  grid-template-columns: 24px minmax(0, 1fr) auto 14px;
+  min-height: 30px;
+  gap: 8px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   list-style: none;
-  padding: 1px 2px 1px 0;
+  padding: 2px 0;
+  transition:
+    background-color 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    color 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.ai-tool-phase-summary {
+  grid-template-columns: 24px minmax(0, 1fr) auto 14px;
+  min-height: 30px;
+  gap: 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  list-style: none;
+  padding: 2px 0;
   transition:
     background-color 140ms cubic-bezier(0.23, 1, 0.32, 1),
     color 140ms cubic-bezier(0.23, 1, 0.32, 1);
@@ -875,9 +1101,30 @@ const activityRow = computed<IToolActivityRow | null>(() => {
 .ai-tool-run-main {
   display: grid;
   min-width: 0;
-  grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+.ai-tool-phase-main {
   align-items: center;
+}
+
+.ai-tool-run-heading-line {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
   gap: 7px;
+  flex-wrap: wrap;
+}
+
+.ai-tool-phase-heading-line {
+  align-items: center;
+}
+
+.ai-tool-phase-title {
+  font-weight: 560;
+}
+
+.ai-tool-phase-summary-text {
+  max-width: 100%;
 }
 
 .ai-tool-kind-icon {
@@ -888,15 +1135,15 @@ const activityRow = computed<IToolActivityRow | null>(() => {
 }
 
 .ai-tool-run-action {
-  color: var(--text-secondary);
-  font-weight: 520;
+  color: var(--text-primary);
+  font-weight: 540;
   white-space: nowrap;
 }
 
 .ai-tool-run-target {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-tertiary);
+  color: color-mix(in srgb, var(--text-secondary) 84%, var(--text-tertiary));
   text-overflow: ellipsis;
   unicode-bidi: plaintext;
   white-space: nowrap;
@@ -912,8 +1159,7 @@ const activityRow = computed<IToolActivityRow | null>(() => {
 .ai-tool-run-fact {
   max-width: 100%;
   overflow: hidden;
-  border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: 12px;
   line-height: 19px;
   text-overflow: ellipsis;
@@ -925,53 +1171,108 @@ const activityRow = computed<IToolActivityRow | null>(() => {
   margin-top: 4px;
 }
 
+.ai-tool-detail-card {
+  display: grid;
+  gap: 10px;
+  margin: 6px 0 0 11px;
+  border-left: 1px solid color-mix(in srgb, var(--shell-divider) 68%, transparent);
+  padding: 6px 0 4px 21px;
+}
+
+.ai-tool-detail-section {
+  display: grid;
+  gap: 4px;
+}
+
+.ai-tool-detail-section.is-warning .ai-tool-detail-heading,
+.ai-tool-detail-section.is-warning .ai-tool-detail-point {
+  color: color-mix(in srgb, var(--warning) 84%, var(--text-secondary));
+}
+
+.ai-tool-detail-section.is-danger .ai-tool-detail-heading,
+.ai-tool-detail-section.is-danger .ai-tool-detail-point {
+  color: color-mix(in srgb, var(--danger) 84%, var(--text-secondary));
+}
+
+.ai-tool-detail-heading {
+  margin: 0;
+  color: var(--text-quaternary);
+  font-size: 11px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+  line-height: 16px;
+}
+
+.ai-tool-detail-points {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-tool-detail-point {
+  position: relative;
+  min-width: 0;
+  padding-left: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 19px;
+  unicode-bidi: plaintext;
+  word-break: break-word;
+}
+
+.ai-tool-detail-point::before {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-quaternary) 72%, transparent);
+  content: '';
+}
+
 .ai-tool-detail-node {
   display: grid;
   min-width: 0;
-  grid-template-columns: 7px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr);
   column-gap: 8px;
   padding: 2px 0;
 }
 
+.ai-tool-process-node {
+  align-items: center;
+}
+
+.ai-tool-fact-rail {
+  display: inline-flex;
+  width: 24px;
+  min-width: 24px;
+  align-items: center;
+  gap: 4px;
+}
+
+.ai-tool-fact-status,
+.ai-tool-fact-topic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-tool-fact-status {
+  color: var(--text-quaternary);
+}
+
+.ai-tool-fact-topic-icon {
+  width: 12px;
+  height: 12px;
+  color: color-mix(in srgb, var(--text-quaternary) 78%, transparent);
+  stroke-width: 2;
+}
+
 .ai-tool-run-timeline.is-running .ai-tool-tree-root-row {
   color: var(--text-primary);
-}
-
-.ai-tool-run-timeline.is-succeeded .ai-tool-status-icon,
-.ai-tool-run-current.is-succeeded .ai-tool-status-icon {
-  color: var(--success);
-}
-
-.ai-tool-run-item.is-succeeded .ai-tool-run-dot {
-  background: var(--success);
-}
-
-.ai-tool-run-timeline.is-failed .ai-tool-status-icon,
-.ai-tool-run-current.is-failed .ai-tool-status-icon {
-  color: var(--danger);
-}
-
-.ai-tool-run-item.is-failed .ai-tool-run-dot {
-  background: var(--danger);
-}
-
-.ai-tool-run-item.is-failed .ai-tool-run-status {
-  color: var(--danger);
-}
-
-.ai-tool-run-item.is-running .ai-tool-run-dot {
-  background: var(--text-secondary);
-}
-
-.ai-tool-run-current.is-running .ai-tool-run-status-node {
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--shell-divider) 78%, transparent),
-    0 0 0 4px color-mix(in srgb, var(--accent-strong) 8%, transparent);
-}
-
-.ai-tool-run-current.is-denied .ai-tool-status-icon,
-.ai-tool-run-current.is-pending .ai-tool-status-icon {
-  color: var(--text-quaternary);
 }
 
 .ai-tool-run-chevron {
@@ -982,20 +1283,57 @@ const activityRow = computed<IToolActivityRow | null>(() => {
   transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-.ai-tool-node-details[open]>.ai-tool-tree-row .ai-tool-run-chevron {
+.ai-tool-node-details[data-state='open']>.ai-tool-tree-row .ai-tool-run-chevron {
   transform: rotate(90deg);
+}
+
+.ai-tool-root-details>.ai-tool-collapsible-content {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows 180ms cubic-bezier(0.23, 1, 0.32, 1),
+    opacity 120ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.ai-tool-root-details>.ai-tool-collapsible-content[data-state='closed'] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ai-tool-collapsible-shell {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ai-tool-list-motion-enter-active {
+  transition:
+    transform 180ms cubic-bezier(0.23, 1, 0.32, 1),
+    opacity 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.ai-tool-list-motion-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.ai-tool-list-motion-move {
+  transition: transform 180ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 @media (hover: hover) and (pointer: fine) {
 
   .ai-tool-tree-root-row:hover,
+  .ai-tool-phase-summary:hover,
   .ai-tool-run-summary:hover {
-    background: color-mix(in srgb, var(--surface-hover) 48%, transparent);
+    background: color-mix(in srgb, var(--surface-hover) 42%, transparent);
     color: var(--text-primary);
   }
 }
 
 .ai-tool-tree-root-row:focus-visible,
+.ai-tool-phase-summary:focus-visible,
 .ai-tool-run-summary:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent-strong) 46%, transparent);
   outline-offset: 2px;
@@ -1007,25 +1345,20 @@ const activityRow = computed<IToolActivityRow | null>(() => {
   }
 }
 
-@keyframes ai-tool-row-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-3px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
 
-  .ai-tool-status-icon.is-spinning,
-  .ai-tool-run-item,
-  .ai-tool-run-chevron {
+  .ai-tool-fact-status-icon.is-spinning,
+  .ai-tool-run-chevron,
+  .ai-tool-root-details>.ai-tool-collapsible-content,
+  .ai-tool-list-motion-enter-active,
+  .ai-tool-list-motion-move {
     animation: none;
     transition: none;
+  }
+
+  .ai-tool-list-motion-enter-from {
+    opacity: 1;
+    transform: none;
   }
 }
 </style>

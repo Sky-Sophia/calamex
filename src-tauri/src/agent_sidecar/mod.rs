@@ -188,7 +188,10 @@ fn emit_sidecar_stream_event(
     }
 }
 
-fn decode_sidecar_stream_line(line: &str, endpoint: &str) -> Result<AgentSidecarStreamFrame, String> {
+fn decode_sidecar_stream_line(
+    line: &str,
+    endpoint: &str,
+) -> Result<AgentSidecarStreamFrame, String> {
     serde_json::from_str::<AgentSidecarStreamFrame>(line).map_err(|error| {
         format!("AGENT_SIDECAR_CONTRACT_ERROR: sidecar 流式响应无法解析({endpoint})：{error}")
     })
@@ -370,9 +373,7 @@ fn find_listening_pids_for_port(port: u16) -> Result<Vec<u32>, String> {
     let output = Command::new("netstat")
         .args(["-ano", "-p", "tcp"])
         .output()
-        .map_err(|error| {
-            format!("AGENT_SIDECAR_UNAVAILABLE: 查询旧 sidecar 进程失败：{error}")
-        })?;
+        .map_err(|error| format!("AGENT_SIDECAR_UNAVAILABLE: 查询旧 sidecar 进程失败：{error}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(parse_netstat_listening_pids(&stdout, port))
@@ -750,8 +751,7 @@ pub async fn resolve_approval(
 mod tests {
     use super::{
         build_sidecar_url, is_default_local_sidecar_url, normalize_base_url,
-        parse_netstat_listening_pids,
-        strip_litellm_model_provider_prefix, DEFAULT_SIDECAR_URL,
+        parse_netstat_listening_pids, strip_litellm_model_provider_prefix, DEFAULT_SIDECAR_URL,
     };
 
     #[test]

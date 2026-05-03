@@ -1,15 +1,26 @@
 <script setup lang="ts">
-import type { IAiPatchSet } from '@/types/ai';
+import { computed } from 'vue';
 
-defineProps<{
+import AiDiffHunkViewer from '@/components/business/ai/AiDiffHunkViewer.vue';
+import type { IAiPatchSet } from '@/types/ai';
+import type { IGitDiffPreviewPayload } from '@/types/git';
+import { buildAiPatchPreviewFiles, type IAiPatchPreviewFile } from '@/utils/ai-patch-preview';
+
+const props = defineProps<{
   patch: IAiPatchSet | null;
   isApplying?: boolean;
+  workspaceRootPath?: string | null;
 }>();
 
 const emit = defineEmits<{
   apply: [];
   close: [];
+  'open-diff': [payload: IGitDiffPreviewPayload];
 }>();
+
+const previewFiles = computed<IAiPatchPreviewFile[]>(() =>
+  props.patch ? buildAiPatchPreviewFiles(props.patch, props.workspaceRootPath) : [],
+);
 </script>
 
 <template>
@@ -19,20 +30,40 @@ const emit = defineEmits<{
         <div class="ai-patch-title">Patch Preview</div>
         <p>{{ patch.summary }}</p>
       </div>
-      <button type="button" class="ai-patch-close" aria-label="关闭 Patch 预览" @click="emit('close')">
+      <button
+        type="button"
+        class="ai-patch-close"
+        aria-label="关闭 Patch 预览"
+        @click="emit('close')"
+      >
         ×
       </button>
     </div>
-    <div v-for="file in patch.files" :key="file.path" class="ai-patch-file">
+    <div v-for="file in previewFiles" :key="file.path" class="ai-patch-file">
       <div class="ai-patch-file-meta">
-        <span>{{ file.path }}</span>
-        <em>{{ file.hunks.length }} hunks</em>
+        <span :title="file.displayPath">{{ file.displayPath }}</span>
+        <div class="ai-patch-file-actions">
+          <em>{{ file.hunks.length }} hunks</em>
+          <button
+            type="button"
+            class="ai-patch-file-diff-button"
+            :title="`在独立 Diff 面板打开 ${file.displayPath}`"
+            @click="emit('open-diff', file.gitDiffPreview)"
+          >
+            打开 Diff 面板
+          </button>
+        </div>
       </div>
-      <pre v-for="hunk in file.hunks" :key="`${file.path}-${hunk.oldStart}-${hunk.newStart}`"><code>{{ hunk.lines.join('\n') }}</code></pre>
+      <AiDiffHunkViewer v-for="hunk in file.hunks" :key="hunk.id" :hunk="hunk" />
     </div>
     <div class="ai-patch-actions">
       <button type="button" class="ai-button is-ghost" @click="emit('close')">暂不应用</button>
-      <button type="button" class="ai-button is-primary" :disabled="isApplying" @click="emit('apply')">
+      <button
+        type="button"
+        class="ai-button is-primary"
+        :disabled="isApplying"
+        @click="emit('apply')"
+      >
         {{ isApplying ? '应用中…' : '确认应用' }}
       </button>
     </div>
@@ -100,17 +131,28 @@ const emit = defineEmits<{
   white-space: nowrap;
 }
 
-.ai-patch-file pre {
-  max-height: 180px;
-  overflow: auto;
-  margin: 0;
-  border: 1px solid color-mix(in srgb, var(--shell-divider) 78%, transparent);
+.ai-patch-file-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-patch-file-diff-button {
+  height: 24px;
+  border: 1px solid color-mix(in srgb, var(--shell-divider) 86%, transparent);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--panel-bg) 86%, transparent);
-  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--panel-bg) 76%, transparent);
+  color: var(--text-tertiary);
   font-size: 11px;
-  line-height: 1.55;
-  padding: 8px;
+  line-height: 1;
+  padding: 0 8px;
+}
+
+.ai-patch-file-diff-button:hover,
+.ai-patch-file-diff-button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-strong) 42%, var(--shell-divider));
+  color: var(--text-primary);
 }
 
 .ai-button {

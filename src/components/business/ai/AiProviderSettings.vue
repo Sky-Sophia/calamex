@@ -12,11 +12,17 @@ import {
 } from '@/constants/ai-providers';
 import type {
     IAiConfigPayload,
+    IAiModelEndpointConfigPayload,
     IAiProviderProfileDetailPayload,
     IAiProviderProfilePayload,
     IAiProviderSettingsActionFeedback,
+    TAiModelRole,
 } from '@/types/ai';
 import type { TAiEditAuthLevel } from '@/types/ai-edit';
+import {
+    getAiModelEndpointConfig,
+    patchAiModelEndpointConfig,
+} from '@/utils/ai-config';
 import { tryWriteClipboardText } from '@/utils/clipboard';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
@@ -55,9 +61,23 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     close: [];
-    save: [config: IAiConfigPayload, apiKey: string, feedback: IAiProviderSettingsActionFeedback];
-    saveCredentials: [apiKey: string, feedback: IAiProviderSettingsActionFeedback];
-    testProvider: [config: IAiConfigPayload, apiKey: string, feedback: IAiProviderSettingsActionFeedback];
+    save: [
+        config: IAiConfigPayload,
+        apiKey: string,
+        role: TAiModelRole,
+        feedback: IAiProviderSettingsActionFeedback,
+    ];
+    saveCredentials: [
+        apiKey: string,
+        role: TAiModelRole,
+        feedback: IAiProviderSettingsActionFeedback,
+    ];
+    testProvider: [
+        config: IAiConfigPayload,
+        apiKey: string,
+        role: TAiModelRole,
+        feedback: IAiProviderSettingsActionFeedback,
+    ];
     switchProfile: [profileId: string, feedback: IAiProviderSettingsActionFeedback];
 }>();
 
@@ -72,6 +92,11 @@ const isSaving = ref(false);
 const isPlatformOpen = ref(false);
 const isModelOpen = ref(false);
 const settingsView = ref<'form' | 'profiles' | 'detail'>('form');
+const activeModelRole = ref<TAiModelRole>('main');
+const apiKeyDrafts = ref<Record<TAiModelRole, string>>({
+    main: '',
+    narrator: '',
+});
 const streamEnabled = ref(true);
 const advancedDraft = ref<IAiAdvancedDraft>(createDefaultAdvancedDraft());
 const profileDetail = ref<IAiProviderProfileDetailPayload | null>(null);
@@ -90,7 +115,30 @@ const platformOptions = computed<IPlatformSelectOption[]>(() =>
     })),
 );
 
-const activePreset = computed(() => findAiProviderPreset(nextConfig.value.providerType));
+const modelRoleOptions: Array<{
+    value: TAiModelRole;
+    label: string;
+    description: string;
+}> = [
+    {
+        value: 'main',
+        label: '主力模型',
+        description: '负责对话、Agent 执行、代码修改和验证。',
+    },
+    {
+        value: 'narrator',
+        label: '小模型',
+        description: '只负责活动区旁白，不调用工具、不影响主力模型。',
+    },
+];
+
+const activeRoleConfig = computed<IAiModelEndpointConfigPayload>(() =>
+    getAiModelEndpointConfig(nextConfig.value, activeModelRole.value),
+);
+const savedActiveRoleConfig = computed<IAiModelEndpointConfigPayload>(() =>
+    getAiModelEndpointConfig(props.config, activeModelRole.value),
+);
+const activePreset = computed(() => findAiProviderPreset(activeRoleConfig.value.providerType));
 const activeServicePlatform = computed(() =>
     findAiServicePlatformPreset(activeServicePlatformId.value),
 );
@@ -108,7 +156,7 @@ const selectedPlatformLabel = computed(() => {
 });
 
 const selectedModelLabel = computed(() => {
-    const currentModel = nextConfig.value.selectedModel?.trim();
+    const currentModel = activeRoleConfig.value.selectedModel?.trim();
     const matched = modelOptions.value.find((item) => item.value === currentModel);
     if (matched) {
         return matched.label;
@@ -117,7 +165,9 @@ const selectedModelLabel = computed(() => {
 });
 
 const hasSavedCredentialsForProvider = computed(
-    () => props.config.providerType === nextConfig.value.providerType && props.config.hasCredentials,
+    () =>
+        savedActiveRoleConfig.value.providerType === activeRoleConfig.value.providerType
+        && savedActiveRoleConfig.value.hasCredentials,
 );
 
 const requiresApiKey = computed(
@@ -174,7 +224,6 @@ const sortedProfiles = computed(() =>
         return rightTime - leftTime;
     }),
 );
-const activeProfileId = computed(() => props.config.activeProfileId);
 const hasProfiles = computed(() => sortedProfiles.value.length > 0);
 const settingsTitle = computed(() => {
     switch (settingsView.value) {
@@ -193,7 +242,9 @@ const settingsSubtitle = computed(() => {
         case 'detail':
             return '只读查看，API Key 仅本地显示';
         default:
-            return '连接成功后会自动保存为配置记录';
+            return activeModelRole.value === 'main'
+                ? '连接成功后会自动保存为配置记录'
+                : '用于 Agent 自然语言叙事，与主力模型隔离保存';
     }
 });
 const autoApplyUpdatedAtLabel = computed(() => {
@@ -221,9 +272,13 @@ const autoApplyToneClass = computed(() => {
 });
 
 const ensureLiteLlmConnectionDefaults = (): void => {
-    nextConfig.value.providerType = 'litellm';
-    if (!nextConfig.value.baseUrl?.trim()) {
-        nextConfig.value.baseUrl = DEFAULT_LITELLM_BASE_URL;
+    patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
+        providerType: 'litellm',
+    });
+    if (!activeRoleConfig.value.baseUrl?.trim()) {
+        patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
+            baseUrl: DEFAULT_LITELLM_BASE_URL,
+        });
     }
 };
 
@@ -231,8 +286,10 @@ const syncDraftWithServicePlatform = (platformId: TAiServicePlatformId): void =>
     const platform = findAiServicePlatformPreset(platformId);
     activeServicePlatformId.value = platform.id;
     ensureLiteLlmConnectionDefaults();
-    if (!isAiServicePlatformModel(platform.id, nextConfig.value.selectedModel)) {
-        nextConfig.value.selectedModel = platform.defaultModel;
+    if (!isAiServicePlatformModel(platform.id, activeRoleConfig.value.selectedModel)) {
+        patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
+            selectedModel: platform.defaultModel,
+        });
     }
 };
 
@@ -325,6 +382,10 @@ const resetEphemeralState = (): void => {
     isTesting.value = false;
     isSaving.value = false;
     streamEnabled.value = true;
+    apiKeyDrafts.value = {
+        main: activeModelRole.value === 'main' ? apiKey.value : '',
+        narrator: activeModelRole.value === 'narrator' ? apiKey.value : '',
+    };
     advancedDraft.value = createDefaultAdvancedDraft();
 };
 
@@ -364,9 +425,32 @@ const updatePlatform = (platformId: TAiServicePlatformId): void => {
     closeDropdowns();
 };
 
-const updateModel = (model: string): void => {
-    nextConfig.value.selectedModel = model;
+const updateModelRole = (role: TAiModelRole): void => {
+    if (activeModelRole.value === role) {
+        return;
+    }
+
     closeDropdowns();
+    apiKeyDrafts.value[activeModelRole.value] = apiKey.value;
+    activeModelRole.value = role;
+    apiKey.value = apiKeyDrafts.value[role];
+    const platform = findAiServicePlatformByModel(activeRoleConfig.value.selectedModel);
+    syncDraftWithServicePlatform(platform.id);
+    hideStatus();
+};
+
+const updateModel = (model: string): void => {
+    patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
+        selectedModel: model,
+    });
+    closeDropdowns();
+};
+
+const updateBaseUrl = (event: Event): void => {
+    const target = event.target as HTMLInputElement;
+    patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
+        baseUrl: target.value,
+    });
 };
 
 const updateAutoApplyLevel = async (level: TAiEditAuthLevel): Promise<void> => {
@@ -400,7 +484,7 @@ const createSwitchFeedback = (profile: IAiProviderProfilePayload): IAiProviderSe
 });
 
 const switchProfile = (profile: IAiProviderProfilePayload): void => {
-    if (profile.id === activeProfileId.value || isSaving.value) {
+    if (profile.isConnected || isSaving.value) {
         return;
     }
 
@@ -426,6 +510,8 @@ const createActionFeedback = (
         }
         showStatus(message ?? successMessage, 'success');
         if (action === 'save') {
+            apiKeyDrafts.value[activeModelRole.value] = '';
+            apiKey.value = '';
             window.setTimeout(() => {
                 emit('close');
             }, 1200);
@@ -446,11 +532,11 @@ const validateForm = (): boolean => {
         showStatus('请输入 API Key', 'error');
         return false;
     }
-    if (!nextConfig.value.baseUrl?.trim()) {
+    if (!activeRoleConfig.value.baseUrl?.trim()) {
         showStatus('请填写 Base URL', 'error');
         return false;
     }
-    if (!nextConfig.value.selectedModel?.trim()) {
+    if (!activeRoleConfig.value.selectedModel?.trim()) {
         showStatus('请选择模型', 'error');
         return false;
     }
@@ -468,6 +554,7 @@ const testConnection = (): void => {
         'testProvider',
         nextConfig.value,
         apiKey.value.trim(),
+        activeModelRole.value,
         createActionFeedback('test', `连接成功 · 模型：${selectedModelLabel.value}`),
     );
 };
@@ -479,7 +566,13 @@ const saveConfig = (): void => {
     }
     isSaving.value = true;
     showStatus('正在连接…', 'info', false);
-    emit('save', nextConfig.value, apiKey.value.trim(), createActionFeedback('save', '连接成功'));
+    emit(
+        'save',
+        nextConfig.value,
+        apiKey.value.trim(),
+        activeModelRole.value,
+        createActionFeedback('save', '连接成功'),
+    );
 };
 
 const getProfilePlatformLabel = (profile: IAiProviderProfilePayload): string =>
@@ -501,6 +594,32 @@ const getProfileModelLabel = (profile: IAiProviderProfilePayload): string => {
 
 const getProfileEndpointLabel = (profile: IAiProviderProfilePayload): string =>
     profile.baseUrl?.trim() || DEFAULT_LITELLM_BASE_URL;
+
+const getProfileRoleLabel = (profile: IAiProviderProfilePayload): string =>
+    profile.role === 'narrator' ? '小模型' : '主力模型';
+
+const getProfileRoleToneClass = (profile: IAiProviderProfilePayload): string =>
+    profile.role === 'narrator' ? 'is-narrator' : 'is-main';
+
+const getProfileConnectionLabel = (profile: IAiProviderProfilePayload): string => {
+    if (profile.isConnected) {
+        return '已连接';
+    }
+    if (!profile.hasCredentials) {
+        return '缺少 API Key';
+    }
+    return '未连接';
+};
+
+const getProfileConnectionToneClass = (profile: IAiProviderProfilePayload): string => {
+    if (profile.isConnected) {
+        return 'is-connected';
+    }
+    if (!profile.hasCredentials) {
+        return 'is-missing';
+    }
+    return 'is-disconnected';
+};
 
 const getProfileTimeLabel = (profile: IAiProviderProfilePayload): string => {
     const timestamp = Date.parse(profile.lastUsedAt ?? profile.updatedAt);
@@ -550,7 +669,7 @@ const maskedDetailApiKey = computed(() => {
 });
 
 watch(
-    () => nextConfig.value.providerType,
+    () => activeRoleConfig.value.providerType,
     () => {
         ensureLiteLlmConnectionDefaults();
     },
@@ -558,15 +677,25 @@ watch(
 );
 
 watch(
-    () => nextConfig.value.selectedModel,
+    () => activeRoleConfig.value.selectedModel,
     (selectedModel) => {
         const platform = findAiServicePlatformByModel(selectedModel);
         activeServicePlatformId.value = platform.id;
         if (!isAiServicePlatformModel(platform.id, selectedModel)) {
-            nextConfig.value.selectedModel = platform.defaultModel;
+            patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
+                selectedModel: platform.defaultModel,
+            });
         }
     },
     { immediate: true },
+);
+
+watch(
+    () => activeModelRole.value,
+    () => {
+        const platform = findAiServicePlatformByModel(activeRoleConfig.value.selectedModel);
+        activeServicePlatformId.value = platform.id;
+    },
 );
 
 watch(
@@ -581,7 +710,7 @@ watch(
         settingsView.value = 'form';
         profileDetail.value = null;
         isApiKeyVisible.value = false;
-        syncDraftWithServicePlatform(findAiServicePlatformByModel(nextConfig.value.selectedModel).id);
+        syncDraftWithServicePlatform(findAiServicePlatformByModel(activeRoleConfig.value.selectedModel).id);
         void autoApply.loadAuthState().catch(() => undefined);
     },
     { immediate: true },
@@ -646,6 +775,20 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div v-if="settingsView === 'form'" class="modal-body">
+                    <section class="model-role-section" aria-label="模型用途">
+                        <button
+                            v-for="option in modelRoleOptions"
+                            :key="option.value"
+                            type="button"
+                            class="model-role-card"
+                            :class="{ 'is-selected': option.value === activeModelRole }"
+                            @click="updateModelRole(option.value)"
+                        >
+                            <span class="model-role-card__label">{{ option.label }}</span>
+                            <span class="model-role-card__description">{{ option.description }}</span>
+                        </button>
+                    </section>
+
                     <div class="form-row">
                         <div class="form-item">
                             <label class="form-label">AI 服务平台</label>
@@ -694,7 +837,7 @@ onBeforeUnmount(() => {
                                 </button>
                                 <div class="lr-select-menu" role="listbox" @click.stop>
                                     <div v-for="option in modelOptions" :key="option.value" class="lr-option"
-                                        :class="{ selected: option.value === nextConfig.selectedModel }" role="option"
+                                        :class="{ selected: option.value === activeRoleConfig.selectedModel }" role="option"
                                         @click="updateModel(option.value)">
                                         <span class="lr-option-main">{{ option.label }}</span>
                                     </div>
@@ -723,7 +866,8 @@ onBeforeUnmount(() => {
 
                     <div class="form-item">
                         <label class="form-label">API Base URL</label>
-                        <input v-model="nextConfig.baseUrl" class="form-input"
+                        <input :value="activeRoleConfig.baseUrl ?? ''" class="form-input"
+                            @input="updateBaseUrl"
                             :readonly="!activePreset.isEndpointEditable" :placeholder="activePreset.baseUrl ?? ''" />
                     </div>
 
@@ -768,7 +912,7 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
 
-                    <section class="aed-section" aria-label="AED 授权设置">
+                    <section v-if="activeModelRole === 'main'" class="aed-section" aria-label="AED 授权设置">
                         <div class="aed-section__header">
                             <div>
                                 <span class="aed-section__eyebrow">Agent Edit</span>
@@ -796,6 +940,10 @@ onBeforeUnmount(() => {
                             <span>最近变更：{{ autoApplyUpdatedAtLabel }}</span>
                         </div>
                     </section>
+                    <section v-else class="narrator-note" aria-label="小模型说明">
+                        <strong>小模型只服务 Agent 旁白</strong>
+                        <span>这里保存的模型、Base URL 和 API Key 与主力模型隔离；后续 Narrator Agent 只会接收压缩事实摘要，不接触完整文件和工具 JSON。</span>
+                    </section>
                 </div>
 
                 <div v-else-if="settingsView === 'profiles'" class="modal-body profile-switcher">
@@ -804,7 +952,7 @@ onBeforeUnmount(() => {
                             v-for="profile in sortedProfiles"
                             :key="profile.id"
                             class="profile-card"
-                            :class="{ 'is-active': profile.id === activeProfileId }"
+                            :class="{ 'is-active': profile.isConnected }"
                         >
                             <span class="profile-drag" aria-hidden="true">
                                 <span></span>
@@ -820,7 +968,12 @@ onBeforeUnmount(() => {
                             <div class="profile-main">
                                 <div class="profile-title-row">
                                     <strong>{{ profile.name }}</strong>
-                                    <span v-if="profile.id === activeProfileId" class="profile-active-badge">当前</span>
+                                    <span class="profile-role-badge" :class="getProfileRoleToneClass(profile)">
+                                        {{ getProfileRoleLabel(profile) }}
+                                    </span>
+                                    <span class="profile-connection-badge" :class="getProfileConnectionToneClass(profile)">
+                                        {{ getProfileConnectionLabel(profile) }}
+                                    </span>
                                 </div>
                                 <span class="profile-url">{{ getProfileEndpointLabel(profile) }}</span>
                                 <dl class="profile-details">
@@ -866,9 +1019,9 @@ onBeforeUnmount(() => {
                                 <button
                                     type="button"
                                     class="profile-action-button"
-                                    :disabled="profile.id === activeProfileId || isSaving"
-                                    title="快速切换"
-                                    aria-label="快速切换"
+                                    :disabled="profile.isConnected || isSaving"
+                                    :title="profile.isConnected ? '已连接' : '快速切换'"
+                                    :aria-label="profile.isConnected ? '已连接' : '快速切换'"
                                     @click="switchProfile(profile)"
                                 >
                                     <svg
@@ -913,6 +1066,22 @@ onBeforeUnmount(() => {
                         </div>
 
                         <dl class="profile-readonly-list">
+                            <div>
+                                <dt>用途</dt>
+                                <dd>
+                                    <span class="profile-role-badge" :class="getProfileRoleToneClass(detailProfile)">
+                                        {{ getProfileRoleLabel(detailProfile) }}
+                                    </span>
+                                </dd>
+                            </div>
+                            <div>
+                                <dt>连接状态</dt>
+                                <dd>
+                                    <span class="profile-connection-badge" :class="getProfileConnectionToneClass(detailProfile)">
+                                        {{ getProfileConnectionLabel(detailProfile) }}
+                                    </span>
+                                </dd>
+                            </div>
                             <div>
                                 <dt>API Base URL</dt>
                                 <dd>{{ getProfileEndpointLabel(detailProfile) }}</dd>
@@ -1133,6 +1302,11 @@ onBeforeUnmount(() => {
     color: var(--fg-primary);
 }
 
+.profile-icon-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+}
+
 .profile-icon-action:active {
     transform: scale(0.97);
 }
@@ -1226,6 +1400,64 @@ input[type='number'] {
 .form-row .form-item {
     flex: 1;
     margin-bottom: 14px;
+}
+
+.model-role-section {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.model-role-card {
+    min-height: 66px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--r-md);
+    background: var(--bg-input);
+    color: var(--fg-secondary);
+    text-align: left;
+    cursor: pointer;
+    transition:
+        border-color 0.12s var(--ease),
+        background 0.12s var(--ease),
+        color 0.12s var(--ease),
+        transform 0.12s var(--ease);
+}
+
+.model-role-card:hover {
+    border-color: var(--border);
+    background: var(--bg-input-hover);
+    color: var(--fg-primary);
+}
+
+.model-role-card:active {
+    transform: scale(0.985);
+}
+
+.model-role-card.is-selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--fg-primary);
+    box-shadow: 0 0 0 1px var(--accent-ring);
+}
+
+.model-role-card__label,
+.model-role-card__description {
+    display: block;
+}
+
+.model-role-card__label {
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+}
+
+.model-role-card__description {
+    margin-top: 4px;
+    color: var(--fg-muted);
+    font-size: 11px;
+    line-height: 15px;
 }
 
 .lr-select {
@@ -1576,6 +1808,29 @@ input[type='number'] {
     color: var(--fg-tertiary);
 }
 
+.narrator-note {
+    display: grid;
+    gap: 6px;
+    margin-top: 4px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    background: var(--bg-input);
+    padding: 14px;
+}
+
+.narrator-note strong {
+    color: var(--fg-primary);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.narrator-note span {
+    color: var(--fg-secondary);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
 .profile-switcher {
     min-height: 320px;
 }
@@ -1657,16 +1912,45 @@ input[type='number'] {
     white-space: nowrap;
 }
 
-.profile-active-badge {
+.profile-role-badge,
+.profile-connection-badge {
     flex: 0 0 auto;
-    border: 1px solid var(--accent-ring);
     border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--fg-primary);
+    border: 1px solid var(--border);
+    background: var(--bg-active);
+    color: var(--fg-secondary);
     font-size: 10px;
     font-weight: 600;
     line-height: 16px;
     padding: 0 7px;
+}
+
+.profile-role-badge.is-main {
+    border-color: var(--accent-ring);
+    background: var(--accent-soft);
+    color: var(--fg-primary);
+}
+
+.profile-role-badge.is-narrator {
+    border-color: color-mix(in srgb, var(--success) 44%, transparent);
+    background: color-mix(in srgb, var(--success) 14%, transparent);
+    color: var(--fg-primary);
+}
+
+.profile-connection-badge.is-connected {
+    border-color: color-mix(in srgb, var(--success) 44%, transparent);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    color: var(--fg-primary);
+}
+
+.profile-connection-badge.is-disconnected {
+    color: var(--fg-tertiary);
+}
+
+.profile-connection-badge.is-missing {
+    border-color: color-mix(in srgb, var(--danger) 42%, transparent);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    color: var(--fg-primary);
 }
 
 .profile-url {

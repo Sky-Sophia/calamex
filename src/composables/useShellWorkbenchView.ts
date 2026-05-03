@@ -134,6 +134,44 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   const clampAiPanelWidth = (value: number): number =>
     Math.min(AI_PANEL_MAX_WIDTH, Math.max(AI_PANEL_MIN_WIDTH, Math.round(value)));
 
+  const clampTerminalPanelHeight = (value: number): number =>
+    Math.max(140, Math.round(value));
+
+  watch(
+    () => workbench.appStore.aiPanelWidth,
+    (nextWidth) => {
+      const clampedWidth = clampAiPanelWidth(nextWidth);
+      if (clampedWidth !== aiPanelWidth.value) {
+        aiPanelWidth.value = clampedWidth;
+      }
+
+      if (clampedWidth !== nextWidth) {
+        workbench.appStore.setAiPanelWidth(clampedWidth);
+      }
+    },
+    { immediate: true },
+  );
+
+  watch(
+    () => workbench.appStore.terminalPanelHeight,
+    (nextHeight) => {
+      const clampedHeight = clampTerminalPanelHeight(nextHeight);
+
+      if (clampedHeight !== terminalHeight.value && !isTerminalMaximized.value) {
+        terminalHeight.value = clampedHeight;
+      }
+
+      if (clampedHeight !== terminalHeightBeforeMaximize.value) {
+        terminalHeightBeforeMaximize.value = clampedHeight;
+      }
+
+      if (clampedHeight !== nextHeight) {
+        workbench.appStore.setTerminalPanelHeight(clampedHeight);
+      }
+    },
+    { immediate: true },
+  );
+
   const resolveAdjacentDocumentId = (
     currentDocumentId: string,
     direction: 'back' | 'forward',
@@ -354,14 +392,18 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   };
 
   const handleTerminalHeightChange = (value: number): void => {
-    terminalHeight.value = value;
+    const nextHeight = clampTerminalPanelHeight(value);
+    terminalHeight.value = nextHeight;
     if (!isTerminalMaximized.value) {
-      terminalHeightBeforeMaximize.value = value;
+      terminalHeightBeforeMaximize.value = nextHeight;
     }
+    workbench.appStore.setTerminalPanelHeight(nextHeight);
   };
 
   const handleAiPanelWidthChange = (value: number): void => {
-    aiPanelWidth.value = clampAiPanelWidth(value);
+    const nextWidth = clampAiPanelWidth(value);
+    aiPanelWidth.value = nextWidth;
+    workbench.appStore.setAiPanelWidth(nextWidth);
   };
 
   const toggleTerminalMaximize = (): void => {

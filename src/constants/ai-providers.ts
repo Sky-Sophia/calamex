@@ -7,6 +7,7 @@ export type TAiServicePlatformId =
   | 'gemini'
   | 'moonshot'
   | 'dashscope'
+  | 'zhipu'
   | 'ollama';
 
 export interface IAiServicePlatformModel {
@@ -190,6 +191,25 @@ export const AI_SERVICE_PLATFORM_PRESETS = [
       {
         id: 'dashscope/qwen3.6-flash',
         label: 'Qwen3.6-flash',
+      },
+    ],
+  },
+  {
+    id: 'zhipu',
+    label: '智谱 GLM',
+    defaultModel: 'zhipu/glm-4-flash',
+    models: [
+      {
+        id: 'zhipu/glm-4-flash',
+        label: 'GLM-4-Flash',
+      },
+      {
+        id: 'zhipu/glm-4-plus',
+        label: 'GLM-4-Plus',
+      },
+      {
+        id: 'zhipu/glm-4-air',
+        label: 'GLM-4-Air',
       },
     ],
   },

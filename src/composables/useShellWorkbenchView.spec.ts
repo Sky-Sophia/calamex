@@ -8,6 +8,9 @@ const {
     restoreSessionMock,
     appendLogMock,
     saveDocumentMock,
+    setAiPanelWidthMock,
+    setTerminalPanelHeightMock,
+    appStoreState,
     waitForDesktopRuntimeMock,
     shortcutState,
 } =
@@ -16,6 +19,16 @@ const {
         restoreSessionMock: vi.fn(),
         appendLogMock: vi.fn(),
         saveDocumentMock: vi.fn(),
+        setAiPanelWidthMock: vi.fn((value: number) => {
+            appStoreState.aiPanelWidth = value;
+        }),
+        setTerminalPanelHeightMock: vi.fn((value: number) => {
+            appStoreState.terminalPanelHeight = value;
+        }),
+        appStoreState: {
+            aiPanelWidth: 450,
+            terminalPanelHeight: 236,
+        },
         waitForDesktopRuntimeMock: vi.fn(),
         shortcutState: {
             canSave: false,
@@ -31,6 +44,14 @@ vi.mock('@/composables/useWorkbench', () => ({
                 editor: {},
                 terminal: {},
             },
+            get aiPanelWidth() {
+                return appStoreState.aiPanelWidth;
+            },
+            get terminalPanelHeight() {
+                return appStoreState.terminalPanelHeight;
+            },
+            setAiPanelWidth: setAiPanelWidthMock,
+            setTerminalPanelHeight: setTerminalPanelHeightMock,
         },
         editorStore: {
             hasActiveDocument: false,
@@ -137,14 +158,22 @@ const TestHost = defineComponent({
         const {
             editorViewportRef,
             handleSelectSidebarView,
+            handleAiPanelWidthChange,
+            handleTerminalHeightChange,
             isSidebarVisible,
             activeSidebarView,
+            aiPanelWidth,
+            terminalHeight,
         } = useShellWorkbenchView(props.onReady);
         return {
             editorViewportRef,
             handleSelectSidebarView,
+            handleAiPanelWidthChange,
+            handleTerminalHeightChange,
             isSidebarVisible,
             activeSidebarView,
+            aiPanelWidth,
+            terminalHeight,
         };
     },
     template: '<div ref="editorViewportRef"></div>',
@@ -158,6 +187,10 @@ describe('useShellWorkbenchView', () => {
         appendLogMock.mockReset();
         saveDocumentMock.mockReset();
         waitForDesktopRuntimeMock.mockReset();
+        setAiPanelWidthMock.mockClear();
+        setTerminalPanelHeightMock.mockClear();
+        appStoreState.aiPanelWidth = 450;
+        appStoreState.terminalPanelHeight = 236;
         shortcutState.canSave = false;
         shortcutState.isDesktopRuntime = true;
 
@@ -280,6 +313,44 @@ describe('useShellWorkbenchView', () => {
 
         await wrapper.vm.handleSelectSidebarView('source-control');
         expect(wrapper.vm.isSidebarVisible).toBe(false);
+
+        wrapper.unmount();
+    });
+
+    it('会恢复上次 AI 面板宽度，并在拖拽后写回 store', async () => {
+        appStoreState.aiPanelWidth = 512;
+
+        const wrapper = mount(TestHost, {
+            props: { onReady: vi.fn() },
+        });
+        await flushPromises();
+
+        expect(wrapper.vm.aiPanelWidth).toBe(512);
+
+        wrapper.vm.handleAiPanelWidthChange(531);
+
+        expect(wrapper.vm.aiPanelWidth).toBe(531);
+        expect(setAiPanelWidthMock).toHaveBeenLastCalledWith(531);
+        expect(appStoreState.aiPanelWidth).toBe(531);
+
+        wrapper.unmount();
+    });
+
+    it('会恢复上次终端高度，并在拖拽后写回 store', async () => {
+        appStoreState.terminalPanelHeight = 318;
+
+        const wrapper = mount(TestHost, {
+            props: { onReady: vi.fn() },
+        });
+        await flushPromises();
+
+        expect(wrapper.vm.terminalHeight).toBe(318);
+
+        wrapper.vm.handleTerminalHeightChange(344);
+
+        expect(wrapper.vm.terminalHeight).toBe(344);
+        expect(setTerminalPanelHeightMock).toHaveBeenLastCalledWith(344);
+        expect(appStoreState.terminalPanelHeight).toBe(344);
 
         wrapper.unmount();
     });

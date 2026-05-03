@@ -501,6 +501,8 @@ pub struct AiCancelRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSaveConfigRequest {
+    #[serde(default)]
+    pub(crate) role: Option<String>,
     pub(crate) provider_type: String,
     pub(crate) selected_model: Option<String>,
     pub(crate) base_url: Option<String>,
@@ -514,6 +516,8 @@ pub struct AiSaveConfigRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSaveCredentialsRequest {
+    #[serde(default)]
+    pub(crate) role: Option<String>,
     pub(crate) provider_type: String,
     pub(crate) api_key: SecretString,
 }
@@ -525,6 +529,8 @@ pub struct AiSaveCredentialsRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProviderConnectionRequest {
+    #[serde(default)]
+    pub(crate) role: Option<String>,
     pub(crate) provider_type: String,
     pub(crate) selected_model: Option<String>,
     pub(crate) base_url: Option<String>,
@@ -553,12 +559,26 @@ pub struct AiConfigPayload {
     pub(crate) inline_completion_enabled: bool,
     pub(crate) chat_enabled: bool,
     pub(crate) agent_enabled: bool,
+    pub(crate) narrator: AiModelEndpointConfigPayload,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiModelEndpointConfigPayload {
+    pub(crate) provider_type: String,
+    pub(crate) selected_model: Option<String>,
+    pub(crate) base_url: Option<String>,
+    pub(crate) active_profile_id: Option<String>,
+    pub(crate) is_base_url_configured: bool,
+    pub(crate) has_credentials: bool,
+    pub(crate) is_configured: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProviderProfilePayload {
     pub(crate) id: String,
+    pub(crate) role: String,
     pub(crate) name: String,
     pub(crate) provider_type: String,
     pub(crate) selected_model: Option<String>,
@@ -567,6 +587,7 @@ pub struct AiProviderProfilePayload {
     pub(crate) chat_enabled: bool,
     pub(crate) agent_enabled: bool,
     pub(crate) has_credentials: bool,
+    pub(crate) is_connected: bool,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
     pub(crate) last_used_at: Option<String>,

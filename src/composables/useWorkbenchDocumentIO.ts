@@ -379,6 +379,28 @@ export const useWorkbenchDocumentIO = ({
     }
   };
 
+  const openGitDiffPreviewPayload = (preview: IGitDiffPreviewPayload): void => {
+    const existing = editorStore.documents.find(
+      (item) =>
+        item.kind === 'git-diff' &&
+        item.gitDiffPreview !== undefined &&
+        isSameGitDiffPreview(item.gitDiffPreview, preview),
+    );
+
+    if (!existing && !ensureCanOpenNewTab()) {
+      return;
+    }
+
+    const { reusedExisting } = editorStore.openGitDiffDocument(preview);
+    const detail = buildLogDetail(
+      reusedExisting ? '切换到 Git Diff' : '已打开 Git Diff',
+      `${preview.relativePath} · Patch`,
+    );
+
+    editorStore.appendLog(preview.isEmpty ? 'info' : 'success', '查看 Patch Diff', detail);
+    notifier.success(preview.isEmpty ? '没有可显示的 Diff' : `已打开 Diff ${preview.relativePath}`);
+  };
+
   return {
     createNewDocument,
     restoreSession,
@@ -386,5 +408,6 @@ export const useWorkbenchDocumentIO = ({
     openFolder,
     openDocumentByPath,
     openGitDiffPreview,
+    openGitDiffPreviewPayload,
   };
 };

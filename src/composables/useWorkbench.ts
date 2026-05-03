@@ -139,7 +139,7 @@ export const useWorkbench = () => {
     editorStore,
   });
 
-  const { createNewDocument, restoreSession, openDocument, openFolder, openDocumentByPath, openGitDiffPreview } =
+  const { createNewDocument, restoreSession, openDocument, openFolder, openDocumentByPath, openGitDiffPreview, openGitDiffPreviewPayload } =
     useWorkbenchDocumentIO({
       editorStore,
       notifier,
@@ -224,6 +224,7 @@ export const useWorkbench = () => {
     openFolder,
     openDocumentByPath,
     openGitDiffPreview,
+    openGitDiffPreviewPayload,
     formatDocumentWithShfmt,
     formatWorkspaceFileByPath,
     saveDocument,

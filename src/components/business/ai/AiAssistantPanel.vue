@@ -25,16 +25,18 @@ import type {
   IAiToolActivityInline,
   IAiToolCall,
   IAiWebSourceEntry,
+  TAiModelRole,
   TAiChatMessageActionId,
   TAiToolConfirmationDecision,
 } from '@/types/ai';
+import { cloneAiConfigPayload } from '@/utils/ai-config';
 import type {
   IActiveRunSummary,
   IAnalyzeScriptPayload,
   IEditorDocument,
   IEditorSelectionSummary,
 } from '@/types/editor';
-import type { IGitRepositoryStatusPayload } from '@/types/git';
+import type { IGitDiffPreviewPayload, IGitRepositoryStatusPayload } from '@/types/git';
 import { toErrorMessage } from '@/utils/error';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, type CSSProperties } from 'vue';
 
@@ -55,6 +57,10 @@ const props = defineProps<{
   workspaceRootPath: string | null;
 }>();
 
+const emit = defineEmits<{
+  'open-patch-diff': [payload: IGitDiffPreviewPayload];
+}>();
+
 const documentRef = computed(() => props.document);
 const activeRunRef = computed(() => props.activeRun);
 const analysisRef = computed(() => props.analysis);
@@ -73,7 +79,7 @@ const agentRun = useAiAgentRun();
 const agentNetwork = useAiAgentNetwork();
 const agentStream = useAiAgentStream();
 const webSources = useAiWebSources();
-const settingsDraft = ref<IAiConfigPayload>({ ...assistant.config.value });
+const settingsDraft = ref<IAiConfigPayload>(cloneAiConfigPayload(assistant.config.value));
 const settingsApiKey = ref('');
 const isAgentRunActionPending = ref(false);
 const isModeMenuOpen = ref(false);
@@ -260,7 +266,7 @@ const fileRollbackLabel = computed(() => {
 const isFileRollbackDisabled = computed(() => fileRollbackPrompt.value?.status !== 'ready');
 
 const openSettings = (): void => {
-  settingsDraft.value = { ...assistant.config.value };
+  settingsDraft.value = cloneAiConfigPayload(assistant.config.value);
   isHistoryOpen.value = false;
   assistant.isSettingsOpen.value = true;
   assistant.loadProviderProfiles().catch(() => undefined);
@@ -687,12 +693,13 @@ const handleResolveToolConfirmation = async (
 const saveSettings = async (
   config: IAiConfigPayload,
   apiKey: string,
+  role: TAiModelRole,
   feedback: IAiProviderSettingsActionFeedback,
 ): Promise<void> => {
   try {
-    const message = await assistant.connectProvider(config, apiKey);
+    const message = await assistant.connectProvider(config, apiKey, role);
     settingsApiKey.value = '';
-    settingsDraft.value = { ...assistant.config.value };
+    settingsDraft.value = cloneAiConfigPayload(assistant.config.value);
     feedback.onSuccess(message);
   } catch (error) {
     feedback.onError(toErrorMessage(error, 'AI 连接失败'));
@@ -706,7 +713,7 @@ const switchProviderProfile = async (
   try {
     await assistant.switchProviderProfile(profileId);
     settingsApiKey.value = '';
-    settingsDraft.value = { ...assistant.config.value };
+    settingsDraft.value = cloneAiConfigPayload(assistant.config.value);
     feedback.onSuccess('AI 配置已切换');
   } catch (error) {
     feedback.onError(toErrorMessage(error, 'AI 配置切换失败'));
@@ -715,12 +722,16 @@ const switchProviderProfile = async (
 
 const saveCredentials = async (
   apiKey: string,
+  role: TAiModelRole,
   feedback: IAiProviderSettingsActionFeedback,
 ): Promise<void> => {
   try {
-    await assistant.saveCredentials(apiKey, settingsDraft.value.providerType);
+    const providerType = role === 'narrator'
+      ? settingsDraft.value.narrator.providerType
+      : settingsDraft.value.providerType;
+    await assistant.saveCredentials(apiKey, providerType, role);
     settingsApiKey.value = '';
-    settingsDraft.value = { ...assistant.config.value };
+    settingsDraft.value = cloneAiConfigPayload(assistant.config.value);
     feedback.onSuccess('API Key 已保存到系统凭证');
   } catch (error) {
     feedback.onError(toErrorMessage(error, 'API Key 保存失败'));
@@ -730,10 +741,11 @@ const saveCredentials = async (
 const testProvider = async (
   config: IAiConfigPayload,
   apiKey: string,
+  role: TAiModelRole,
   feedback: IAiProviderSettingsActionFeedback,
 ): Promise<void> => {
   try {
-    feedback.onSuccess(await assistant.testProviderConfig(config, apiKey));
+    feedback.onSuccess(await assistant.testProviderConfig(config, apiKey, role));
   } catch (error) {
     feedback.onError(toErrorMessage(error, '连接测试失败'));
   }
@@ -748,7 +760,7 @@ const handleMessageAction = async (
 
 onMounted(() => {
   assistant.loadConfig().then(() => {
-    settingsDraft.value = { ...assistant.config.value };
+    settingsDraft.value = cloneAiConfigPayload(assistant.config.value);
   }).catch(() => undefined);
   assistant.loadTools().catch(() => undefined);
   assistant.loadProviderProfiles().catch(() => undefined);
@@ -846,8 +858,14 @@ onBeforeUnmount(() => {
       </button>
       <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
     </div>
-    <AiPatchPreview :patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
-      @apply="assistant.applyProposedPatch" @close="assistant.proposedPatch.value = null" />
+    <AiPatchPreview
+      :patch="assistant.proposedPatch.value"
+      :is-applying="assistant.isApplyingPatch.value"
+      :workspace-root-path="workspaceRootPath"
+      @apply="assistant.applyProposedPatch"
+      @close="assistant.proposedPatch.value = null"
+      @open-diff="emit('open-patch-diff', $event)"
+    />
     <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
       <span class="ai-patch-entry__line" aria-hidden="true"></span>
       <button type="button" class="ai-patch-entry__button" @click="assistant.previewPatchFromLastAnswer">

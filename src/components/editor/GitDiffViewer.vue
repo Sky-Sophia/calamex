@@ -19,6 +19,41 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 const DEFAULT_DIFF_EDITOR_FONT_FAMILY =
   "Berkeley Mono, JetBrains Mono, Consolas, 'Courier New', monospace";
 
+const MONACO_LANGUAGE_BY_EXTENSION: Record<string, string> = {
+  bash: 'shell',
+  c: 'c',
+  cc: 'cpp',
+  cjs: 'javascript',
+  cpp: 'cpp',
+  css: 'css',
+  cts: 'typescript',
+  cxx: 'cpp',
+  h: 'c',
+  hpp: 'cpp',
+  html: 'html',
+  java: 'java',
+  js: 'javascript',
+  json: 'json',
+  jsonc: 'json',
+  jsx: 'javascript',
+  ksh: 'shell',
+  less: 'less',
+  md: 'markdown',
+  mjs: 'javascript',
+  mts: 'typescript',
+  py: 'python',
+  rs: 'rust',
+  scss: 'scss',
+  sh: 'shell',
+  sql: 'sql',
+  ts: 'typescript',
+  tsx: 'typescript',
+  vue: 'html',
+  xml: 'xml',
+  yaml: 'yaml',
+  yml: 'yaml',
+};
+
 const props = defineProps<{
   preview: IGitDiffPreviewPayload;
   theme: TThemeMode;
@@ -49,10 +84,16 @@ const resolveLineHeight = (
 const resolveLineNumbers = (enabled: boolean): 'off' | 'on' => (enabled ? 'on' : 'off');
 
 const resolveLanguage = (path: string): string => {
-  const lowerPath = path.toLowerCase();
-  return lowerPath.endsWith('.sh') || lowerPath.endsWith('.bash') || lowerPath.endsWith('.ksh')
-    ? 'shell'
-    : 'plaintext';
+  const lowerPath = path.toLowerCase().split(/[?#]/)[0] ?? '';
+  const fileName = lowerPath.split('/').at(-1) ?? '';
+
+  if (fileName === 'dockerfile' || fileName.endsWith('.dockerfile')) {
+    return 'dockerfile';
+  }
+
+  const extension = fileName.includes('.') ? fileName.split('.').at(-1) : undefined;
+
+  return extension ? (MONACO_LANGUAGE_BY_EXTENSION[extension] ?? 'plaintext') : 'plaintext';
 };
 
 const resolveRuntimeOptions = (): monaco.editor.IDiffEditorConstructionOptions => ({

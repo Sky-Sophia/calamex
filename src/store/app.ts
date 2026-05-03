@@ -41,6 +41,10 @@ const RANGE_PRESERVED_TERMINAL_COUNT = [1, 20] as const satisfies TNumberRange;
 const RANGE_SHFMT_INDENT_SIZE = [2, 8] as const satisfies TNumberRange;
 const RANGE_RULER_COLUMN = [60, 240] as const satisfies TNumberRange;
 const RANGE_SSH_CONNECT_TIMEOUT_S = [3, 60] as const satisfies TNumberRange;
+const RANGE_AI_PANEL_WIDTH = [350, 550] as const satisfies TNumberRange;
+const DEFAULT_AI_PANEL_WIDTH = 450;
+const RANGE_TERMINAL_PANEL_HEIGHT = [140, 2000] as const satisfies TNumberRange;
+const DEFAULT_TERMINAL_PANEL_HEIGHT = 236;
 
 const MAX_COMPLETION_TRIGGERS = 12;
 const MAX_IGNORED_RULES = 16;
@@ -99,6 +103,8 @@ const resolveEffectiveTheme = (
 /** persist 钩子里只关心 settings 字段,投影出局部形状以避开 pinia 通用 Store 类型缺字段的问题。 */
 interface IAppStorePersistShape {
   settings: IAppSettings;
+  aiPanelWidth?: number;
+  terminalPanelHeight?: number;
 }
 
 /**
@@ -219,6 +225,8 @@ export const useAppStore = defineStore(
     // 初始值:由 pinia-plugin-persistedstate 在 hydrate 阶段从 localStorage 恢复;
     // 此处使用默认值,afterHydrate 钩子会完成 normalize。
     const settings = ref<IAppSettings>(createDefaultAppSettings());
+    const aiPanelWidth = ref(DEFAULT_AI_PANEL_WIDTH);
+    const terminalPanelHeight = ref(DEFAULT_TERMINAL_PANEL_HEIGHT);
     const systemTheme = ref<TThemeMode>(resolveSystemTheme());
 
     const themePreference = computed(() => settings.value.appearance.themePreference);
@@ -259,6 +267,14 @@ export const useAppStore = defineStore(
       settings.value = normalizeSettings(nextSettings);
     };
 
+    const setAiPanelWidth = (value: number): void => {
+      aiPanelWidth.value = clampNumber(value, RANGE_AI_PANEL_WIDTH);
+    };
+
+    const setTerminalPanelHeight = (value: number): void => {
+      terminalPanelHeight.value = clampNumber(value, RANGE_TERMINAL_PANEL_HEIGHT);
+    };
+
     // 用泛型把 section 收紧到具体字面量 key,两侧都成为 IAppSettings[K],
     // 避免 union key 索引赋值时 TS 取交集导致 ts(2322) "不能分配"。
     const resetSettingsSection = <K extends TAppSettingsSectionKey>(section: K): void => {
@@ -267,6 +283,8 @@ export const useAppStore = defineStore(
 
     return {
       settings,
+      aiPanelWidth,
+      terminalPanelHeight,
       systemTheme,
       themePreference,
       theme,
@@ -276,20 +294,28 @@ export const useAppStore = defineStore(
       applyTheme,
       toggleTheme,
       replaceSettings,
+      setAiPanelWidth,
+      setTerminalPanelHeight,
       resetSettingsSection,
     };
   },
   {
     persist: {
       key: APP_STORE_KEY,
-      // 只持久化用户设置,排除派生状态(systemTheme 来自系统,不需持久化)
-      pick: ['settings'],
+      // 只持久化用户设置与工作台布局偏好,排除派生状态(systemTheme 来自系统,不需持久化)
+      pick: ['settings', 'aiPanelWidth', 'terminalPanelHeight'],
       // hydrate 完成后 normalize 确保存储数据合法
       afterHydrate(ctx) {
         // ctx.store 是 pinia 通用 Store<...> 类型,缺少 settings 字段;
         // 必须经过 unknown 中转(否则 ts(2352) "不能充分重叠")。
         const store = ctx.store as unknown as IAppStorePersistShape;
         store.settings = normalizeSettings(store.settings);
+        store.aiPanelWidth = typeof store.aiPanelWidth === 'number'
+          ? clampNumber(store.aiPanelWidth, RANGE_AI_PANEL_WIDTH)
+          : DEFAULT_AI_PANEL_WIDTH;
+        store.terminalPanelHeight = typeof store.terminalPanelHeight === 'number'
+          ? clampNumber(store.terminalPanelHeight, RANGE_TERMINAL_PANEL_HEIGHT)
+          : DEFAULT_TERMINAL_PANEL_HEIGHT;
       },
     },
   },

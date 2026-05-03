@@ -71,6 +71,7 @@ import {
 export const aiProviderTypeSchema = z.enum([
   'litellm',
 ]);
+export const aiModelRoleSchema = z.enum(['main', 'narrator']);
 
 export const aiChatMessageActionSchema = z.object({
   id: z.enum(['allow-agent-execution']),
@@ -110,6 +111,16 @@ export const aiChatMessageSchema = z.object({
   }).optional(),
 });
 
+export const aiModelEndpointConfigPayloadSchema = z.object({
+  providerType: aiProviderTypeSchema,
+  selectedModel: z.string().nullable(),
+  baseUrl: z.string().nullable(),
+  activeProfileId: z.string().nullable().default(null),
+  isBaseUrlConfigured: z.boolean(),
+  hasCredentials: z.boolean(),
+  isConfigured: z.boolean(),
+});
+
 export const aiConfigPayloadSchema = z.object({
   providerType: aiProviderTypeSchema,
   selectedModel: z.string().nullable(),
@@ -121,10 +132,12 @@ export const aiConfigPayloadSchema = z.object({
   inlineCompletionEnabled: z.boolean(),
   chatEnabled: z.boolean(),
   agentEnabled: z.boolean(),
+  narrator: aiModelEndpointConfigPayloadSchema,
 });
 
 export const aiProviderProfilePayloadSchema = z.object({
   id: z.string().min(1),
+  role: aiModelRoleSchema.default('main'),
   name: z.string().min(1),
   providerType: aiProviderTypeSchema,
   selectedModel: z.string().nullable(),
@@ -133,6 +146,7 @@ export const aiProviderProfilePayloadSchema = z.object({
   chatEnabled: z.boolean(),
   agentEnabled: z.boolean(),
   hasCredentials: z.boolean(),
+  isConnected: z.boolean().default(false),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
   lastUsedAt: z.string().min(1).nullable(),
@@ -202,11 +216,13 @@ export const aiToolDefinitionPayloadSchema = z.union([
 ]);
 
 export const aiSaveCredentialsRequestSchema = z.object({
+  role: aiModelRoleSchema.optional(),
   providerType: aiProviderTypeSchema,
   apiKey: z.string().min(1),
 });
 
 export const aiProviderConnectionRequestSchema = z.object({
+  role: aiModelRoleSchema.optional(),
   providerType: aiProviderTypeSchema,
   selectedModel: z.string().nullable(),
   baseUrl: z.string().nullable(),
@@ -316,4 +332,3 @@ export {
   aiWebSourceEntryStatusSchema,
   aiWebSourceTypeSchema
 };
-

@@ -2,6 +2,7 @@ import {
   aiChatPayloadSchema,
   aiChatRequestSchema,
   aiConfigPayloadSchema,
+  aiProviderProfilePayloadSchema,
   aiProviderTypeSchema,
   aiToolDefinitionPayloadSchema,
 } from '@/types/ai.schema';
@@ -31,12 +32,22 @@ describe('AI schema', () => {
       providerType: 'litellm',
       selectedModel: 'openai/gpt-5.5',
       baseUrl: 'http://127.0.0.1:4000/v1',
+      activeProfileId: null,
       isBaseUrlConfigured: true,
       hasCredentials: false,
       isConfigured: true,
       inlineCompletionEnabled: false,
       chatEnabled: true,
       agentEnabled: false,
+      narrator: {
+        providerType: 'litellm',
+        selectedModel: 'zhipu/glm-4-flash',
+        baseUrl: 'http://127.0.0.1:4000/v1',
+        activeProfileId: null,
+        isBaseUrlConfigured: true,
+        hasCredentials: false,
+        isConfigured: false,
+      },
     });
 
     expect(parsed.providerType).toBe('litellm');
@@ -59,18 +70,50 @@ describe('AI schema', () => {
         providerType: 'unknown',
         selectedModel: null,
         baseUrl: null,
+        activeProfileId: null,
         isBaseUrlConfigured: false,
         hasCredentials: false,
         isConfigured: false,
         inlineCompletionEnabled: false,
         chatEnabled: false,
         agentEnabled: false,
+        narrator: {
+          providerType: 'litellm',
+          selectedModel: 'zhipu/glm-4-flash',
+          baseUrl: 'http://127.0.0.1:4000/v1',
+          activeProfileId: null,
+          isBaseUrlConfigured: true,
+          hasCredentials: false,
+          isConfigured: false,
+        },
       }),
     ).toThrow();
   });
 
   it('允许 LiteLLM Provider 类型', () => {
     expect(aiProviderTypeSchema.parse('litellm')).toBe('litellm');
+  });
+
+  it('配置记录包含模型用途和真实连接状态字段', () => {
+    const parsed = aiProviderProfilePayloadSchema.parse({
+      id: 'profile-narrator',
+      role: 'narrator',
+      name: '旁白 GLM',
+      providerType: 'litellm',
+      selectedModel: 'zhipu/glm-4-flash',
+      baseUrl: 'http://127.0.0.1:4000/v1',
+      inlineCompletionEnabled: false,
+      chatEnabled: false,
+      agentEnabled: false,
+      hasCredentials: true,
+      isConnected: true,
+      createdAt: '2026-05-03T00:00:00.000Z',
+      updatedAt: '2026-05-03T00:00:00.000Z',
+      lastUsedAt: null,
+    });
+
+    expect(parsed.role).toBe('narrator');
+    expect(parsed.isConnected).toBe(true);
   });
 
   it('校验 chat 响应消息', () => {

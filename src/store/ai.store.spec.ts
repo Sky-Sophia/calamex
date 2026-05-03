@@ -2,6 +2,7 @@ import { aiService } from '@/services/modules/ai';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAiStore } from './ai';
+import { createDefaultAiModelEndpointConfig } from '@/utils/ai-config';
 
 const tauriServiceMock = vi.hoisted(() => ({
   aiGetConfig: vi.fn(),
@@ -58,12 +59,14 @@ describe('AI service and store', () => {
       providerType: 'litellm',
       selectedModel: 'openai/gpt-5.5',
       baseUrl: 'http://127.0.0.1:4000/v1',
+      activeProfileId: null,
       isBaseUrlConfigured: true,
       hasCredentials: false,
       isConfigured: true,
       inlineCompletionEnabled: false,
       chatEnabled: true,
       agentEnabled: false,
+      narrator: createDefaultAiModelEndpointConfig('zhipu/glm-4-flash'),
     });
 
     const store = useAiStore();
@@ -79,12 +82,14 @@ describe('AI service and store', () => {
         providerType: 'litellm',
         selectedModel: 'openai/gpt-5.5',
         baseUrl: 'http://127.0.0.1:4000/v1',
+        activeProfileId: null,
         isBaseUrlConfigured: true,
         hasCredentials: true,
         isConfigured: true,
         inlineCompletionEnabled: true,
         chatEnabled: true,
         agentEnabled: false,
+        narrator: createDefaultAiModelEndpointConfig('zhipu/glm-4-flash'),
       },
       test: {
         ok: true,

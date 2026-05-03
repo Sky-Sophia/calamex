@@ -18,6 +18,7 @@ import type {
     IEditorSelectionSummary,
 } from '@/types/editor';
 import type { IGitRepositoryStatusPayload } from '@/types/git';
+import { createDefaultAiModelEndpointConfig } from '@/utils/ai-config';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -59,6 +60,8 @@ const createAssistantMock = (
         inlineCompletionEnabled: false,
         chatEnabled: true,
         agentEnabled: false,
+        activeProfileId: null,
+        narrator: createDefaultAiModelEndpointConfig('zhipu/glm-4-flash'),
     });
 
     const messages = ref<IAiChatMessage[]>(messagesList);
