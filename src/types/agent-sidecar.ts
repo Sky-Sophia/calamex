@@ -67,6 +67,7 @@ export const AGENT_RUNTIME_EVENT_SCHEMA_VERSION = 1 as const;
 export const AGENT_RUNTIME_EVENT_TYPES = [
   'agent.run.started',
   'agent.text.delta',
+  'agent.reasoning.delta',
   'agent.model.started',
   'agent.model.completed',
   'agent.tool.started',
@@ -120,6 +121,11 @@ export interface IAgentRunStartedEvent extends IAgentRuntimeEventBase {
 
 export interface IAgentTextDeltaEvent extends IAgentRuntimeEventBase {
   type: 'agent.text.delta';
+  text: string;
+}
+
+export interface IAgentReasoningDeltaEvent extends IAgentRuntimeEventBase {
+  type: 'agent.reasoning.delta';
   text: string;
 }
 
@@ -187,9 +193,9 @@ export interface IAgentCheckpointEvent extends IAgentRuntimeEventBase {
 
 export interface IAgentRollbackEvent extends IAgentRuntimeEventBase {
   type:
-    | 'rollback.restore.started'
-    | 'rollback.restore.completed'
-    | 'rollback.restore.failed';
+  | 'rollback.restore.started'
+  | 'rollback.restore.completed'
+  | 'rollback.restore.failed';
   snapshotId?: string;
   savedAsLatest?: boolean;
   message?: string;
@@ -230,6 +236,7 @@ export interface IAgentDebugEvent extends IAgentRuntimeEventBase {
 export type TAgentRuntimeEvent =
   | IAgentRunStartedEvent
   | IAgentTextDeltaEvent
+  | IAgentReasoningDeltaEvent
   | IAgentModelStartedEvent
   | IAgentModelCompletedEvent
   | IAgentToolStartedEvent

@@ -51,6 +51,26 @@ const previewUnknown = (value: unknown, limit = PREVIEW_CHAR_LIMIT): string =>
 const getEventType = (event: unknown): string =>
   getStringValue(event, 'type') ?? 'unknown';
 
+const extractModelReasoningDelta = (event: unknown): string | null => {
+  if (getEventType(event) !== 'modelStreamUpdateEvent') {
+    return null;
+  }
+
+  const modelEvent = getRecordValue(event, 'event');
+  if (getStringValue(modelEvent, 'type') !== 'modelContentBlockDeltaEvent') {
+    return null;
+  }
+
+  const delta = getRecordValue(modelEvent, 'delta');
+  const deltaType = getStringValue(delta, 'type');
+  if (deltaType !== 'reasoningContentDelta' && deltaType !== 'reasoningText') {
+    return null;
+  }
+
+  const text = getStringValue(delta, 'text') ?? '';
+  return text.length > 0 ? text : null;
+};
+
 export const extractModelTextDelta = (event: unknown): string | null => {
   if (getEventType(event) !== 'modelStreamUpdateEvent') {
     return null;
@@ -135,6 +155,16 @@ export const normalizeStrandsStreamEvent = (
     }
 
     case 'modelStreamUpdateEvent': {
+      const reasoningText = extractModelReasoningDelta(event);
+      if (reasoningText) {
+        return [{
+          type: 'agent.reasoning.delta',
+          visibility: 'user',
+          level: 'info',
+          text: redactForStream(reasoningText),
+        }];
+      }
+
       const text = extractModelTextDelta(event);
 
       return text

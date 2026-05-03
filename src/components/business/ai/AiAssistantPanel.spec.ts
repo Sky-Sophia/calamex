@@ -462,8 +462,7 @@ describe('AiAssistantPanel', () => {
         const html = wrapper.html();
 
         expect(html.indexOf('chat-thread')).toBeLessThan(html.indexOf('ai-runtime-timeline'));
-        expect(wrapper.text()).toContain('1 个步骤已完成');
-        expect(wrapper.text()).toContain('工具完成 edit_file');
+        expect(wrapper.text()).toContain('完成调用 edit_file');
         expect(wrapper.text()).toContain('已更新 src/app.ts');
     });
 

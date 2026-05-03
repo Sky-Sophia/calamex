@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AiAgentRuntimeTimeline from '@/components/business/ai/AiAgentRuntimeTimeline.vue';
 import AiChatThread from '@/components/business/ai/AiChatThread.vue';
 import AiPatchPreview from '@/components/business/ai/AiPatchPreview.vue';
 import AiPlanModePanel from '@/components/business/ai/AiPlanModePanel.vue';
@@ -829,6 +830,7 @@ onBeforeUnmount(() => {
     <AiChatThread :messages="threadMessages" :is-typing="assistant.isSending.value" :platform-id="aiIconPlatformId"
       :provider-label="aiIconTitle" @message-action="handleMessageAction">
     </AiChatThread>
+    <AiAgentRuntimeTimeline :events="assistant.runtimeTimelineEvents.value" />
     <div v-if="fileRollbackPrompt" class="ai-file-rollback-entry" :class="`is-${fileRollbackPrompt.status}`">
       <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
       <button type="button" class="ai-file-rollback-entry__button" :disabled="isFileRollbackDisabled"

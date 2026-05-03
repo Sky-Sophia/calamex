@@ -6,7 +6,7 @@ import { normalizeStrandsStreamEvent } from './stream-normalizer.js';
 import { redactForStream } from './stream-redaction.js';
 
 describe('streaming event layer', () => {
-  it('normalizes model text delta without forwarding reasoning payloads', () => {
+  it('normalizes model text and reasoning delta events', () => {
     const drafts = normalizeStrandsStreamEvent({
       type: 'modelStreamUpdateEvent',
       event: {
@@ -33,7 +33,12 @@ describe('streaming event layer', () => {
           text: 'hidden reasoning',
         },
       },
-    }), []);
+    }), [{
+      type: 'agent.reasoning.delta',
+      visibility: 'user',
+      level: 'info',
+      text: 'hidden reasoning',
+    }]);
   });
 
   it('normalizes tool lifecycle events with redacted previews', () => {
