@@ -83,6 +83,7 @@ interface ICommandCatalogContext {
 let runtimePromise: Promise<Language> | null = null;
 let providerRegistered = false;
 let commandCatalogRootEntriesPromise: Promise<IShellCompletionEntry[]> | null = null;
+let lastProviderErrorMessage: string | null = null;
 
 const getPrimarySpecName = (entry: { names: string[] }): string => entry.names[0] ?? '';
 
@@ -272,14 +273,29 @@ const KEYWORD_ENTRY_MAP = new Map(
 const ensureTreeSitterLanguage = async (): Promise<Language> => {
     if (!runtimePromise) {
         runtimePromise = (async () => {
-            await Parser.init({
-                locateFile: () => treeSitterWasmUrl,
-            });
-            return Language.load(bashLanguageWasmUrl);
+            try {
+                await Parser.init({
+                    locateFile: () => treeSitterWasmUrl,
+                });
+                return await Language.load(bashLanguageWasmUrl);
+            } catch (error) {
+                runtimePromise = null;
+                throw error;
+            }
         })();
     }
 
     return runtimePromise;
+};
+
+const reportShellCompletionProviderError = (error: unknown): void => {
+    const nextMessage = error instanceof Error ? error.message : String(error);
+    if (lastProviderErrorMessage === nextMessage) {
+        return;
+    }
+
+    lastProviderErrorMessage = nextMessage;
+    console.error('Shell completion provider failed', error);
 };
 
 const getUtf8ByteLength = (value: string): number => textEncoder.encode(value).byteLength;
@@ -1098,47 +1114,53 @@ export const registerShellCompletionProvider = (monaco: typeof MonacoEditor): vo
     monaco.languages.registerCompletionItemProvider(SHELL_LANGUAGE_ID, {
         triggerCharacters: ['$', '{', '-', '='],
         provideCompletionItems: async (model, position, _context, token) => {
-            const source = model.getValue();
-            const lineContent = model.getLineContent(position.lineNumber);
-            const linePrefix = lineContent.slice(0, position.column - 1);
-            const lineSuffix = lineContent.slice(position.column - 1);
-            const cursorCharOffset = model.getOffsetAt(position);
-            const cursorByteOffset = getUtf8ByteLength(source.slice(0, cursorCharOffset));
-            const point = {
-                row: Math.max(0, position.lineNumber - 1),
-                column: getUtf8ByteLength(linePrefix),
-            };
-            const parsedDocument = await parseShellDocument(source);
-
-            if (token.isCancellationRequested) {
-                parsedDocument.tree?.delete();
-                parsedDocument.parser.delete();
-                return { suggestions: [] };
-            }
-
             try {
-                if (!parsedDocument.tree) {
+                const source = model.getValue();
+                const lineContent = model.getLineContent(position.lineNumber);
+                const linePrefix = lineContent.slice(0, position.column - 1);
+                const lineSuffix = lineContent.slice(position.column - 1);
+                const cursorCharOffset = model.getOffsetAt(position);
+                const cursorByteOffset = getUtf8ByteLength(source.slice(0, cursorCharOffset));
+                const point = {
+                    row: Math.max(0, position.lineNumber - 1),
+                    column: getUtf8ByteLength(linePrefix),
+                };
+                const parsedDocument = await parseShellDocument(source);
+
+                if (token.isCancellationRequested) {
+                    parsedDocument.tree?.delete();
+                    parsedDocument.parser.delete();
                     return { suggestions: [] };
                 }
 
-                const completionContext = resolveCompletionContext(
-                    parsedDocument.tree,
-                    cursorByteOffset,
-                    linePrefix,
-                    lineSuffix,
-                    point,
-                );
-                const entries = await buildCompletionEntries(
-                    parsedDocument.language,
-                    completionContext,
-                );
+                try {
+                    if (!parsedDocument.tree) {
+                        return { suggestions: [] };
+                    }
 
-                return {
-                    suggestions: toMonacoSuggestions(monaco, position, completionContext, entries),
-                };
-            } finally {
-                parsedDocument.tree?.delete();
-                parsedDocument.parser.delete();
+                    const completionContext = resolveCompletionContext(
+                        parsedDocument.tree,
+                        cursorByteOffset,
+                        linePrefix,
+                        lineSuffix,
+                        point,
+                    );
+                    const entries = await buildCompletionEntries(
+                        parsedDocument.language,
+                        completionContext,
+                    );
+                    lastProviderErrorMessage = null;
+
+                    return {
+                        suggestions: toMonacoSuggestions(monaco, position, completionContext, entries),
+                    };
+                } finally {
+                    parsedDocument.tree?.delete();
+                    parsedDocument.parser.delete();
+                }
+            } catch (error) {
+                reportShellCompletionProviderError(error);
+                return { suggestions: [] };
             }
         },
     });

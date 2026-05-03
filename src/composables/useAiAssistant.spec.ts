@@ -1304,12 +1304,8 @@ describe('useAiAssistant streaming integration', () => {
         expect(assistant.messages.value[1]?.stream?.activityNotes).toBeUndefined();
     });
 
-    it('streams narrator note incrementally when an edit batch completes', async () => {
+    it('raw strands event 模式下编辑完成时不会再启动 narrator', async () => {
         const { assistant } = createAssistantHarnessContext({ narratorConfigured: true });
-
-        aiServiceMock.narrateActivityStream.mockImplementationOnce(async (payload) =>
-            createNarratorStreamPayload(payload),
-        );
         aiServiceMock.sidecarExecute.mockResolvedValueOnce({
             sessionId: 'sidecar-narrator-edit-session',
             events: [
@@ -1335,67 +1331,13 @@ describe('useAiAssistant streaming integration', () => {
         assistant.draft.value = '修复 app.ts';
 
         await assistant.sendMessage();
-        await waitForCondition(() => aiServiceMock.narrateActivityStream.mock.calls.length === 1);
-
-        const [request] = aiServiceMock.narrateActivityStream.mock.calls[0] ?? [];
-        if (!request) {
-            throw new Error('expected narrator stream request');
-        }
-
-        aiServiceMock.emitNarrator(createNarratorStreamEvent(request, {
-            kind: 'delta',
-            delta: 'app.ts 已经改完',
-            text: null,
-            tone: null,
-            shouldShow: null,
-            confidence: null,
-        }));
-        await waitForCondition(() => Boolean(
-            assistant.messages.value[1]?.stream?.activityNotes?.some((note) =>
-                note.source === 'narrator' && note.status === 'streaming'
-            ),
-        ));
-
-        expect(assistant.messages.value[1]?.stream?.activityNotes).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                source: 'narrator',
-                trigger: 'edit_done',
-                status: 'streaming',
-                text: 'app.ts 已经改完',
-            }),
-        ]));
-
-        aiServiceMock.emitNarrator(createNarratorStreamEvent(request, {
-            trigger: 'edit_done',
-            tone: 'decision',
-            text: 'app.ts 已经改完，下一步准备验证。',
-        }));
         await flushMicrotasks();
 
-        expect(aiServiceMock.narrateActivityStream).toHaveBeenCalledTimes(1);
-        expect(aiServiceMock.narrateActivityStream).toHaveBeenLastCalledWith(expect.objectContaining({
-            facts: expect.objectContaining({
-                trigger: 'edit_done',
-                changedFiles: expect.arrayContaining([
-                    expect.objectContaining({
-                        path: 'src/app.ts',
-                    }),
-                ]),
-            }),
-        }));
-        expect(assistant.messages.value[1]?.stream?.activityNotes).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                source: 'narrator',
-                trigger: 'edit_done',
-                tone: 'decision',
-                status: 'completed',
-                text: 'app.ts 已经改完，下一步准备验证。',
-                factsHash: expect.stringMatching(/^facts:/u),
-            }),
-        ]));
+        expect(aiServiceMock.narrateActivityStream).toHaveBeenCalledTimes(0);
+        expect(assistant.messages.value[1]?.stream?.activityNotes).toBeUndefined();
     });
 
-    it('deduplicates narrator requests when live and completed activity resolve to the same facts hash', async () => {
+    it('raw strands event 模式下重复编辑事件也不会创建 narrator 请求', async () => {
         const { assistant } = createAssistantHarnessContext({ narratorConfigured: true });
 
         aiServiceMock.sidecarExecute.mockImplementationOnce(async (payload: IAgentSidecarExecuteRequest) => {
@@ -1430,18 +1372,12 @@ describe('useAiAssistant streaming integration', () => {
         await assistant.sendMessage();
         await flushMicrotasks();
 
-        expect(aiServiceMock.narrateActivityStream).toHaveBeenCalledTimes(1);
-        expect(
-            assistant.messages.value[1]?.stream?.activityNotes?.filter((note) => note.source === 'narrator'),
-        ).toHaveLength(1);
+        expect(aiServiceMock.narrateActivityStream).toHaveBeenCalledTimes(0);
+        expect(assistant.messages.value[1]?.stream?.activityNotes).toBeUndefined();
     });
 
-    it('drops narrator responses whose turnId no longer matches the active turn', async () => {
+    it('raw strands event 模式下不会监听 narrator turn 结果', async () => {
         const { assistant } = createAssistantHarnessContext({ narratorConfigured: true });
-
-        aiServiceMock.narrateActivityStream.mockImplementationOnce(async (payload) =>
-            createNarratorStreamPayload(payload),
-        );
         aiServiceMock.sidecarExecute.mockResolvedValueOnce({
             sessionId: 'sidecar-narrator-turn-session',
             events: [
@@ -1466,28 +1402,14 @@ describe('useAiAssistant streaming integration', () => {
         assistant.draft.value = '修复 app.ts';
 
         await assistant.sendMessage();
-        await waitForCondition(() => aiServiceMock.narrateActivityStream.mock.calls.length === 1);
-
-        const [request] = aiServiceMock.narrateActivityStream.mock.calls[0] ?? [];
-        if (!request) {
-            throw new Error('expected narrator stream request');
-        }
-
-        aiServiceMock.emitNarrator(createNarratorStreamEvent(request, {
-            turnId: 'turn-stale-other',
-            text: '这条结果已经过期。',
-        }));
         await flushMicrotasks();
 
+        expect(aiServiceMock.narrateActivityStream).toHaveBeenCalledTimes(0);
         expect(assistant.messages.value[1]?.stream?.activityNotes).toBeUndefined();
     });
 
-    it('keeps only the newest narrator sequence for the same trigger', async () => {
+    it('raw strands event 模式下连续序列更新不会创建 narrator 序列', async () => {
         const { assistant } = createAssistantHarnessContext({ narratorConfigured: true });
-
-        aiServiceMock.narrateActivityStream
-            .mockImplementationOnce(async (payload) => createNarratorStreamPayload(payload, { streamId: 'narrator-seq-1' }))
-            .mockImplementationOnce(async (payload) => createNarratorStreamPayload(payload, { streamId: 'narrator-seq-2' }));
         aiServiceMock.sidecarExecute.mockImplementationOnce(async (payload: IAgentSidecarExecuteRequest) => {
             const sessionId = payload.sessionId ?? 'sidecar-narrator-sequence-session';
 
@@ -1545,45 +1467,13 @@ describe('useAiAssistant streaming integration', () => {
         assistant.draft.value = '连续修改两个文件';
 
         await assistant.sendMessage();
-        await waitForCondition(() => aiServiceMock.narrateActivityStream.mock.calls.length === 2);
-
-        const [firstRequest] = aiServiceMock.narrateActivityStream.mock.calls[0] ?? [];
-        const [secondRequest] = aiServiceMock.narrateActivityStream.mock.calls[1] ?? [];
-        if (!firstRequest || !secondRequest) {
-            throw new Error('expected narrator stream requests');
-        }
-
-        aiServiceMock.emitNarrator(createNarratorStreamEvent(firstRequest, {
-            kind: 'delta',
-            streamId: 'narrator-seq-1',
-            delta: '第一次修改已经完成',
-            text: null,
-            tone: null,
-            shouldShow: null,
-            confidence: null,
-        }));
         await flushMicrotasks();
 
-        aiServiceMock.emitNarrator(createNarratorStreamEvent(secondRequest, {
-            streamId: 'narrator-seq-2',
-            text: '第二次修改已经完成。',
-        }));
-        await flushMicrotasks();
-
-        aiServiceMock.emitNarrator(createNarratorStreamEvent(firstRequest, {
-            streamId: 'narrator-seq-1',
-            text: '第一次修改已经完成。',
-        }));
-        await flushMicrotasks();
-
-        const narratorNotes = assistant.messages.value[1]?.stream?.activityNotes?.filter(
-            (note) => note.source === 'narrator',
-        ) ?? [];
-
-        expect(narratorNotes.map((note) => note.text)).toEqual(['第二次修改已经完成。']);
+        expect(aiServiceMock.narrateActivityStream).toHaveBeenCalledTimes(0);
+        expect(assistant.messages.value[1]?.stream?.activityNotes).toBeUndefined();
     });
 
-    it('sends compressed narrator facts without leaking raw tool payloads', async () => {
+    it('raw strands event 模式下不会再发送 narrator facts', async () => {
         const { assistant } = createAssistantHarnessContext({ narratorConfigured: true });
 
         aiServiceMock.sidecarExecute.mockResolvedValueOnce({
@@ -1619,23 +1509,10 @@ describe('useAiAssistant streaming integration', () => {
         assistant.draft.value = '修复 unsafe.ts';
 
         await assistant.sendMessage();
-        await waitForCondition(() => aiServiceMock.narrateActivityStream.mock.calls.length === 1);
+        await flushMicrotasks();
 
-        const [request] = aiServiceMock.narrateActivityStream.mock.calls[0] ?? [];
-        if (!request) {
-            throw new Error('expected narrator stream request');
-        }
-
-        const serializedFacts = JSON.stringify(request.facts);
-
-        expect(serializedFacts).not.toContain('const secret = 1;');
-        expect(serializedFacts).not.toContain('should-not-leak-stdout');
-        expect(serializedFacts).not.toContain('should-not-leak-json');
-        expect(request.facts.changedFiles).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                path: 'src/unsafe.ts',
-            }),
-        ]));
+        expect(aiServiceMock.narrateActivityStream).toHaveBeenCalledTimes(0);
+        expect(assistant.messages.value[1]?.stream?.activityNotes).toBeUndefined();
     });
 
     it('sidecar 首个事件到达前就显示上下文相关的运行状态', async () => {
@@ -1673,7 +1550,7 @@ describe('useAiAssistant streaming integration', () => {
             content: '',
             stream: {
                 status: 'streaming',
-                activityText: '今天有什么新闻',
+                activityText: '正在加载',
             },
         });
 
@@ -1682,7 +1559,7 @@ describe('useAiAssistant streaming integration', () => {
 
         expect(assistant.messages.value[1]?.content).toBe('已整理今日热点新闻。');
         expect(assistant.messages.value[1]?.stream?.status).toBe('completed');
-        expect(assistant.messages.value[1]?.stream?.activityText).toBe('今天有什么新闻');
+        expect(assistant.messages.value[1]?.stream?.activityText).toBe('正在加载');
     });
 
     it('streams sidecar tool activity into the assistant message before the final response resolves', async () => {
@@ -1782,7 +1659,7 @@ describe('useAiAssistant streaming integration', () => {
         });
         expect(assistant.messages.value[1]?.content).toContain('第二段继续到达');
         expect(assistant.messages.value[1]?.stream?.status).toBe('streaming');
-        expect(assistant.messages.value[1]?.stream?.activityText).toBe('在 工作区 搜索「实时工具」');
+        expect(assistant.messages.value[1]?.stream?.activityText).toBe('正在搜索「实时工具」，范围 工作区');
         expect(assistant.messages.value[1]?.stream?.activityTrail).toBeUndefined();
         expect(assistant.runtimeTimelineEvents.value).toHaveLength(1);
         expect(assistant.runtimeTimelineEvents.value[0]).toMatchObject({
@@ -1865,18 +1742,20 @@ describe('useAiAssistant streaming integration', () => {
 
         const sendPromise = assistant.sendMessage();
         for (let attempt = 0; attempt < 8; attempt += 1) {
-            if (assistant.messages.value[1]?.stream?.activityTrail?.length) {
+            if (assistant.runtimeTimelineEvents.value.length > 0) {
                 break;
             }
             await Promise.resolve();
         }
-
         const activityTrail = assistant.messages.value[1]?.stream?.activityTrail ?? [];
 
-        expect(activityTrail).toEqual(expect.arrayContaining([
-            '查询：淘宝网 最新商品 2026 · 站点：taobao.com · 路径：D:/repo/src/搜索🙂.vue',
+        expect(activityTrail).toEqual([]);
+        expect(assistant.runtimeTimelineEvents.value).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'agent.run.started',
+                inputPreview: '{"query":"淘宝网 最新商品 2026","site":"taobao.com","path":"D:/repo/src/搜索🙂.vue"}',
+            }),
         ]));
-        expect(activityTrail.join('\n')).not.toContain('{"query"');
 
         sidecarGate.resolve(undefined);
         await sendPromise;

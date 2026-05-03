@@ -1,7 +1,7 @@
 import { AppError } from '@/types/app-error';
 import { invoke } from '@tauri-apps/api/core';
-import { z } from 'zod';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { defineIpc, tauriService } from './tauri';
 import { zTauriVoid } from './tauri.contracts';
 
@@ -208,6 +208,42 @@ describe('tauriService', () => {
     }
 
     expect(caughtError).toBeInstanceOf(AppError);
+  });
+
+  it('agentSidecarResolveApproval 复用 sidecar 长任务超时预算', async () => {
+    vi.useFakeTimers();
+    invokeMock.mockImplementation(() => new Promise(() => undefined));
+
+    try {
+      const promise = tauriService.agentSidecarResolveApproval({
+        requestId: 'approval-request-1',
+        decision: 'allow-once',
+      });
+
+      let settled = false;
+      void promise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(149_998);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(promise).rejects.toMatchObject({
+        code: 'ipc.timeout',
+        scope: 'ipc',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('aiPlanTask accepts Rust plan payload with null optional fields', async () => {

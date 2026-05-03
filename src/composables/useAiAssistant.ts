@@ -170,6 +170,7 @@ const AI_EDIT_ROLLBACK_TIMELINE_LIMIT = 24;
 const AGENT_RUNTIME_TIMELINE_LIMIT = 32;
 const AGENT_ACTIVITY_TRAIL_LIMIT = 6;
 const AGENT_ACTIVITY_PREVIEW_CHARS = 96;
+const ENABLE_ACTIVITY_NARRATOR = false;
 
 const TEXT_ATTACHMENT_PATTERN =
   /^(application\/(json|xml|x-sh|x-shellscript|javascript|typescript)|text\/)/i;
@@ -847,7 +848,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     events: readonly TAgentUiEvent[];
     toolCalls: readonly NonNullable<IAiChatMessage['toolCalls']>[number][];
   }): void => {
-    if (!config.value.narrator.isConfigured) {
+    if (!ENABLE_ACTIVITY_NARRATOR || !config.value.narrator.isConfigured) {
       return;
     }
 

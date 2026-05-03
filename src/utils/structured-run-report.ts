@@ -1,6 +1,10 @@
 import type { IRunLogEntry, IRunResult, TExecutorKind } from '@/types/editor';
 import { formatTime } from '@/utils/date';
-import { getPathBaseName, getRelativeFileSystemPath } from '@/utils/path';
+import {
+  formatFileSystemTextForDisplay,
+  getPathBaseName,
+  getRelativeFileSystemPath,
+} from '@/utils/path';
 import {
   TERMINAL_RUN_LOG_TITLES,
   isTerminalRunCompletedLog,
@@ -177,7 +181,7 @@ const resolveDetailTone = (value: string): TInsightDetailTone => {
 
 const buildDetailLines = (lines: string[]): IStructuredRunDetailLine[] =>
   lines
-    .map((line) => line.trim())
+    .map((line) => formatFileSystemTextForDisplay(line).trim())
     .filter(Boolean)
     .slice(-8)
     .map((line) => ({

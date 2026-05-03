@@ -4,14 +4,18 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { McpClient } from '@strands-agents/sdk';
 
 export interface IMcpServerConfig {
   name: string;
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-  cwd: string | null;
+  transportType: 'stdio' | 'http';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string | null;
+  url?: string;
+  headers?: Record<string, string>;
 }
 
 export interface IMcpClientBundle {
@@ -39,6 +43,8 @@ const PROJECT_ROOT = resolve(SIDECAR_ROOT, '..');
 const NODE_BIN_DIRECTORY = join(SIDECAR_ROOT, 'node_modules', '.bin');
 const DEFAULT_MEMORY_FILE_PATH = join(homedir(), '.xiaojianc', 'mcp-memory.jsonl');
 const DEFAULT_LOCAL_TIMEZONE = 'Asia/Shanghai';
+const DEFAULT_GITHUB_MCP_URL = 'https://api.githubcopilot.com/mcp/';
+const PROBE_MCP_NPX_SPEC = '@probelabs/probe@0.6.0-rc315';
 const MCP_LIST_TOOLS_TIMEOUT_MS = 10_000;
 const MCP_STDERR_SUMMARY_LIMIT = 1_000;
 
@@ -93,6 +99,9 @@ const normalizeAbsoluteExecutablePath = (value: string | null): string | null =>
   const normalized = resolve(value);
   return existsSync(normalized) ? normalized : null;
 };
+
+const resolveNpxCommand = (platform: NodeJS.Platform): string =>
+  platform === 'win32' ? 'npx.cmd' : 'npx';
 
 const resolveWindowsUvxCommand = (
   env: Record<string, string | undefined>,
@@ -177,8 +186,34 @@ const nodeServerConfig = (
 
   return {
     name,
+    transportType: 'stdio',
     command,
     args,
+    env,
+    cwd: workspaceRoot,
+  };
+};
+
+const uvxServerConfig = (
+  name: string,
+  uvxCommand: string | null,
+  uvxPackageSpec: string,
+  args: string[],
+  workspaceRoot: string,
+  errors: string[],
+  missingUvxError: string,
+  env: Record<string, string> = {},
+): IMcpServerConfig | null => {
+  if (!uvxCommand) {
+    errors.push(missingUvxError);
+    return null;
+  }
+
+  return {
+    name,
+    transportType: 'stdio',
+    command: uvxCommand,
+    args: [uvxPackageSpec, ...args],
     env,
     cwd: workspaceRoot,
   };
@@ -228,20 +263,34 @@ const createMcpClient = (
   safeBaseEnv: Record<string, string>,
 ): { client: McpClient; stderrText: () => string } => {
   let stderrBuffer = '';
-  const transport = new StdioClientTransport({
-    command: config.command,
-    args: config.args,
-    env: {
-      ...safeBaseEnv,
-      ...config.env,
-    },
-    ...(config.cwd ? { cwd: config.cwd } : {}),
-    stderr: 'pipe',
-  });
+  let transport: StreamableHTTPClientTransport | StdioClientTransport;
 
-  transport.stderr?.on('data', (chunk: Buffer) => {
-    stderrBuffer += chunk.toString('utf8');
-  });
+  if (config.transportType === 'http') {
+    transport = new StreamableHTTPClientTransport(new URL(config.url ?? DEFAULT_GITHUB_MCP_URL), {
+      ...(config.headers ? {
+        requestInit: {
+          headers: config.headers,
+        },
+      } : {}),
+    });
+  } else {
+    const stdioTransport = new StdioClientTransport({
+      command: config.command ?? '',
+      args: config.args ?? [],
+      env: {
+        ...safeBaseEnv,
+        ...(config.env ?? {}),
+      },
+      ...(config.cwd ? { cwd: config.cwd } : {}),
+      stderr: 'pipe',
+    });
+
+    stdioTransport.stderr?.on('data', (chunk: Buffer) => {
+      stderrBuffer += chunk.toString('utf8');
+    });
+
+    transport = stdioTransport;
+  }
 
   return {
     client: new McpClient({
@@ -263,9 +312,13 @@ export const loadMcpServerConfigs = (
   const errors: string[] = [];
   const configs: IMcpServerConfig[] = [];
   const uvxCommand = resolveWindowsUvxCommand(env, platform);
+  const npxCommand = resolveNpxCommand(platform);
   const gitExecutable = resolveWindowsGitExecutable(env, platform);
   const memoryFilePath = resolve(trimToNull(env.AGENT_MCP_MEMORY_FILE_PATH) ?? DEFAULT_MEMORY_FILE_PATH);
   const localTimezone = trimToNull(env.AGENT_MCP_LOCAL_TIMEZONE) ?? DEFAULT_LOCAL_TIMEZONE;
+  const githubMcpPat = trimToNull(env.GITHUB_MCP_PAT);
+  const githubMcpUrl = trimToNull(env.GITHUB_MCP_URL) ?? DEFAULT_GITHUB_MCP_URL;
+  const sqliteDbPath = trimToNull(env.SQLITE_DB_PATH);
 
   const filesystem = nodeServerConfig(
     'filesystem',
@@ -282,6 +335,7 @@ export const loadMcpServerConfigs = (
   if (uvxCommand && gitExecutable) {
     configs.push({
       name: 'git',
+      transportType: 'stdio',
       command: uvxCommand,
       args: ['mcp-server-git==2026.1.14', '--repository', workspaceRoot],
       env: {
@@ -294,6 +348,27 @@ export const loadMcpServerConfigs = (
   } else {
     errors.push('未找到 Windows uvx.exe 绝对路径，已跳过 Git MCP。请设置 AGENT_MCP_UVX_PATH。');
   }
+
+  const playwright = nodeServerConfig(
+    'playwright',
+    'playwright-mcp',
+    ['--headless'],
+    workspaceRoot,
+    platform,
+    errors,
+  );
+  if (playwright) {
+    configs.push(playwright);
+  }
+
+  configs.push({
+    name: 'probe',
+    transportType: 'stdio',
+    command: npxCommand,
+    args: ['-y', PROBE_MCP_NPX_SPEC, 'mcp'],
+    env: {},
+    cwd: workspaceRoot,
+  });
 
   if (ensureParentDirectory(memoryFilePath, errors)) {
     const memory = nodeServerConfig(
@@ -325,15 +400,92 @@ export const loadMcpServerConfigs = (
   }
 
   if (uvxCommand) {
-    configs.push({
-      name: 'time',
-      command: uvxCommand,
-      args: ['mcp-server-time==2026.1.26', `--local-timezone=${localTimezone}`],
-      env: {},
-      cwd: workspaceRoot,
-    });
+    const time = uvxServerConfig(
+      'time',
+      uvxCommand,
+      'mcp-server-time==2026.1.26',
+      [`--local-timezone=${localTimezone}`],
+      workspaceRoot,
+      errors,
+      '未找到 Windows uvx.exe 绝对路径，已跳过 Time MCP。请设置 AGENT_MCP_UVX_PATH。',
+    );
+    if (time) {
+      configs.push(time);
+    }
   } else {
     errors.push('未找到 Windows uvx.exe 绝对路径，已跳过 Time MCP。请设置 AGENT_MCP_UVX_PATH。');
+  }
+
+  if (githubMcpPat) {
+    configs.push({
+      name: 'github',
+      transportType: 'http',
+      url: githubMcpUrl,
+      headers: {
+        Authorization: `Bearer ${githubMcpPat}`,
+      },
+    });
+  } else {
+    errors.push('GITHUB_MCP_PAT 未配置，已跳过 github-mcp-server。');
+  }
+
+  const context7 = nodeServerConfig(
+    'context7',
+    'context7-mcp',
+    [],
+    workspaceRoot,
+    platform,
+    errors,
+  );
+  if (context7) {
+    configs.push(context7);
+  }
+
+  const logoscope = nodeServerConfig(
+    'logoscope',
+    'logoscope',
+    ['mcp'],
+    workspaceRoot,
+    platform,
+    errors,
+  );
+  if (logoscope) {
+    configs.push(logoscope);
+  }
+
+  const hooksMcp = uvxServerConfig(
+    'hooks-mcp',
+    uvxCommand,
+    'hooks-mcp==0.2.4',
+    ['--working-directory', workspaceRoot],
+    workspaceRoot,
+    errors,
+    '未找到 Windows uvx.exe 绝对路径，已跳过 hooks-mcp。请设置 AGENT_MCP_UVX_PATH。',
+  );
+  if (hooksMcp) {
+    configs.push(hooksMcp);
+  }
+
+  if (sqliteDbPath) {
+    const sqlite = uvxServerConfig(
+      'sqlite-mcp',
+      uvxCommand,
+      'sqlite-mcp==0.1.0',
+      [],
+      workspaceRoot,
+      errors,
+      '未找到 Windows uvx.exe 绝对路径，已跳过 sqlite-mcp。请设置 AGENT_MCP_UVX_PATH。',
+      {
+        SQLITE_DB_PATH: resolve(sqliteDbPath),
+        SQLITE_READ_ONLY: trimToNull(env.SQLITE_READ_ONLY) ?? 'true',
+        SQLITE_TIMEOUT: trimToNull(env.SQLITE_TIMEOUT) ?? '30',
+      },
+    );
+    if (sqlite) {
+      configs.push(sqlite);
+    }
+  } else {
+    errors.push('SQLITE_DB_PATH 未配置，已跳过 sqlite-mcp。');
   }
 
   const tavilyApiKey = trimToNull(env.TAVILY_API_KEY);

@@ -35,7 +35,7 @@ import type { IAiCodeActionRequest, IAiCodeActionResult } from '@/types/ai';
 import type { TThemeMode } from '@/types/app';
 import type { IAnalyzeScriptPayload, IEditorSelectionSummary, TScriptDiagnosticSeverity } from '@/types/editor';
 import type { IEditorSettings } from '@/types/settings';
-import { applyMonacoTheme, monaco } from '@/utils/monaco';
+import { applyMonacoTheme, ensureMonacoSuggestContribution, monaco } from '@/utils/monaco';
 import {
   SHELL_WINDOW_RESIZE_END_EVENT,
   SHELL_WINDOW_RESIZE_SETTLED_EVENT,
@@ -549,8 +549,16 @@ const applyEditorSettings = (): void => {
   scheduleEditorLayout();
 };
 
-const createEditor = (): void => {
+const createEditor = async (): Promise<void> => {
   if (!containerRef.value) {
+    return;
+  }
+
+  await ensureMonacoSuggestContribution().catch((error) => {
+    console.error('Monaco suggest contribution preload failed', error);
+  });
+
+  if (!containerRef.value || editorInstance) {
     return;
   }
 
@@ -715,7 +723,7 @@ watch(
 );
 
 onMounted(() => {
-  createEditor();
+  void createEditor();
   window.addEventListener(SHELL_WINDOW_RESIZE_START_EVENT, handleShellWindowResizeStart);
   window.addEventListener(SHELL_WINDOW_RESIZE_END_EVENT, handleShellWindowResizeEnd);
   window.addEventListener(SHELL_WINDOW_RESIZE_SETTLED_EVENT, handleShellWindowResizeSettled);

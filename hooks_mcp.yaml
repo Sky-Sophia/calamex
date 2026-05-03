@@ -1,0 +1,38 @@
+server_name: 'MyDesktopAppHooks'
+server_description: '仓库级测试、类型检查、构建与守卫脚本 MCP 工具'
+
+actions:
+  - name: 'typecheck_root'
+    description: '运行根工作区类型检查'
+    command: 'pnpm typecheck'
+    timeout: 900
+
+  - name: 'lint_root'
+    description: '运行根工作区 ESLint'
+    command: 'pnpm lint'
+    timeout: 900
+
+  - name: 'test_root'
+    description: '运行根工作区测试'
+    command: 'pnpm test'
+    timeout: 1800
+
+  - name: 'build_root'
+    description: '运行根工作区构建'
+    command: 'pnpm build'
+    timeout: 1800
+
+  - name: 'guards_all'
+    description: '执行仓库全部静态守卫脚本'
+    command: 'pnpm tsx scripts/run-all-guards.ts'
+    timeout: 900
+
+  - name: 'typecheck_sidecar'
+    description: '运行 agent-sidecar 类型检查'
+    command: 'pnpm --dir agent-sidecar typecheck'
+    timeout: 900
+
+  - name: 'test_sidecar'
+    description: '运行 agent-sidecar 单测'
+    command: 'pnpm --dir agent-sidecar test'
+    timeout: 1800

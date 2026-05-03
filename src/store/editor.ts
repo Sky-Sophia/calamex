@@ -1,3 +1,5 @@
+import { tauriSessionStorage } from '@/store/plugins/tauriSessionStorage';
+import type { IAiDiffEditorPreview } from '@/types/ai-patch';
 import type {
   IActiveRunSummary,
   IAnalyzeScriptPayload,
@@ -13,11 +15,9 @@ import type {
   TLogLevel,
   TRunLogScope,
 } from '@/types/editor';
-import type { IAiDiffEditorPreview } from '@/types/ai-patch';
 import type { IGitDiffPreviewPayload } from '@/types/git';
 import type { TSessionSnapshot } from '@/types/session';
-import { tauriSessionStorage } from '@/store/plugins/tauriSessionStorage';
-import { normalizeFileSystemPath } from '@/utils/path';
+import { formatFileSystemTextForDisplay, normalizeFileSystemPath } from '@/utils/path';
 import { DEFAULT_EXECUTOR, DEFAULT_SCRIPT } from '@/utils/templates';
 import { defineStore } from 'pinia';
 import { computed, ref, watch } from 'vue';
@@ -507,26 +507,26 @@ export const useEditorStore = defineStore('editor', () => {
     const existingDocument = documents.value.find(
       (item) => item.kind === 'git-diff' && item.gitDiffPreview?.id === preview.id,
     );
-      if (existingDocument) {
-        existingDocument.gitDiffPreview = preview;
-        existingDocument.name = preview.title;
-        existingDocument.content = preview.modifiedContent;
-        existingDocument.savedContent = preview.modifiedContent;
-        syncDocumentState(existingDocument);
-        setActiveDocument(existingDocument.id);
-        touchSessionSnapshot();
+    if (existingDocument) {
+      existingDocument.gitDiffPreview = preview;
+      existingDocument.name = preview.title;
+      existingDocument.content = preview.modifiedContent;
+      existingDocument.savedContent = preview.modifiedContent;
+      syncDocumentState(existingDocument);
+      setActiveDocument(existingDocument.id);
+      touchSessionSnapshot();
       return { document: existingDocument, reusedExisting: true };
     }
 
     const nextDocument = createDocument(documents.value, {
       id: preview.id,
-        path: `git-diff://${encodeURIComponent(preview.id)}`,
-        name: preview.title,
-        kind: 'git-diff',
-        content: preview.modifiedContent,
-        savedContent: preview.modifiedContent,
-        gitDiffPreview: preview,
-      });
+      path: `git-diff://${encodeURIComponent(preview.id)}`,
+      name: preview.title,
+      kind: 'git-diff',
+      content: preview.modifiedContent,
+      savedContent: preview.modifiedContent,
+      gitDiffPreview: preview,
+    });
     documents.value.push(nextDocument);
     setActiveDocument(nextDocument.id);
     syncSessionOpenTabs();
@@ -667,7 +667,7 @@ export const useEditorStore = defineStore('editor', () => {
       id: createLogId(),
       level,
       title,
-      detail,
+      detail: formatFileSystemTextForDisplay(detail),
       createdAt: new Date().toISOString(),
       scope: options.scope,
       runId: options.runId,

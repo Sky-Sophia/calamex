@@ -46,6 +46,20 @@ describe('editor store session state', () => {
     expect(store.hasRunArtifacts).toBe(true);
   });
 
+  it('appendLog 会清洗 Windows 扩展路径前缀，避免运行日志展示异常路径', () => {
+    const store = useEditorStore();
+
+    const entry = store.appendLog(
+      'error',
+      'shfmt 格式化失败',
+      String.raw`\\?\D:\test\test.sh:782:39: reached EOF without closing quote '\''`,
+    );
+
+    expect(entry.detail).toBe(
+      String.raw`D:\test\test.sh:782:39: reached EOF without closing quote '\''`,
+    );
+  });
+
   it('打开 Git Diff 预览会复用同一个只读标签且不写入会话标签', () => {
     const store = useEditorStore();
 

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import AiChatThread from '@/components/business/ai/AiChatThread.vue';
-import AiAgentRuntimeTimeline from '@/components/business/ai/AiAgentRuntimeTimeline.vue';
 import AiPatchPreview from '@/components/business/ai/AiPatchPreview.vue';
 import AiPlanModePanel from '@/components/business/ai/AiPlanModePanel.vue';
 import AiPromptInput from '@/components/business/ai/AiPromptInput.vue';
@@ -25,11 +24,10 @@ import type {
   IAiToolActivityInline,
   IAiToolCall,
   IAiWebSourceEntry,
-  TAiModelRole,
   TAiChatMessageActionId,
+  TAiModelRole,
   TAiToolConfirmationDecision,
 } from '@/types/ai';
-import { cloneAiConfigPayload } from '@/utils/ai-config';
 import type {
   IActiveRunSummary,
   IAnalyzeScriptPayload,
@@ -37,7 +35,9 @@ import type {
   IEditorSelectionSummary,
 } from '@/types/editor';
 import type { IGitDiffPreviewPayload, IGitRepositoryStatusPayload } from '@/types/git';
+import { cloneAiConfigPayload } from '@/utils/ai-config';
 import { toErrorMessage } from '@/utils/error';
+import { SquarePen } from 'lucide-vue-next';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, type CSSProperties } from 'vue';
 
 const MAX_HISTORY_MESSAGES = 20;
@@ -91,11 +91,8 @@ const currentServicePlatform = computed(() =>
 );
 const aiIconPlatformId = computed(() => currentServicePlatform.value.id);
 const aiIconTitle = computed(() => currentServicePlatform.value.label);
-const aiCurrentModelLabel = computed(() =>
-  assistant.config.value.selectedModel?.trim() || 'AI Assistant',
-);
 const aiModelButtonLabel = computed(() =>
-  `${aiIconTitle.value} · ${aiCurrentModelLabel.value}`,
+  `${aiIconTitle.value} · ${assistant.config.value.selectedModel?.trim() || 'AI Assistant'}`,
 );
 const historyThreads = computed(() => assistant.historyThreads.value.slice(-MAX_HISTORY_MESSAGES).reverse());
 const historyCountLabel = computed(() => `最近 ${historyThreads.value.length} 组`);
@@ -806,11 +803,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="ai-panel-actions">
         <button type="button" class="ai-icon-button" aria-label="新建对话" @click="startNewConversation">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-            <path d="M12 5v14" />
-            <path d="M5 12h14" />
-            <path d="M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" />
-          </svg>
+          <SquarePen aria-hidden="true" />
         </button>
         <button type="button" class="ai-icon-button" aria-label="AI 设置" @click="openSettings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
@@ -836,20 +829,10 @@ onBeforeUnmount(() => {
     <AiChatThread :messages="threadMessages" :is-typing="assistant.isSending.value" :platform-id="aiIconPlatformId"
       :provider-label="aiIconTitle" @message-action="handleMessageAction">
     </AiChatThread>
-    <AiAgentRuntimeTimeline :events="assistant.runtimeTimelineEvents.value" />
-    <div
-      v-if="fileRollbackPrompt"
-      class="ai-file-rollback-entry"
-      :class="`is-${fileRollbackPrompt.status}`"
-    >
+    <div v-if="fileRollbackPrompt" class="ai-file-rollback-entry" :class="`is-${fileRollbackPrompt.status}`">
       <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
-      <button
-        type="button"
-        class="ai-file-rollback-entry__button"
-        :disabled="isFileRollbackDisabled"
-        :aria-label="fileRollbackLabel"
-        @click="assistant.rollbackLatestFileChange"
-      >
+      <button type="button" class="ai-file-rollback-entry__button" :disabled="isFileRollbackDisabled"
+        :aria-label="fileRollbackLabel" @click="assistant.rollbackLatestFileChange">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
           <path d="M3 7v5h5" />
           <path d="M21 17a8 8 0 0 0-13.66-5.66L3 16" />
@@ -858,14 +841,9 @@ onBeforeUnmount(() => {
       </button>
       <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
     </div>
-    <AiPatchPreview
-      :patch="assistant.proposedPatch.value"
-      :is-applying="assistant.isApplyingPatch.value"
-      :workspace-root-path="workspaceRootPath"
-      @apply="assistant.applyProposedPatch"
-      @close="assistant.proposedPatch.value = null"
-      @open-diff="emit('open-patch-diff', $event)"
-    />
+    <AiPatchPreview :patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
+      :workspace-root-path="workspaceRootPath" @apply="assistant.applyProposedPatch"
+      @close="assistant.proposedPatch.value = null" @open-diff="emit('open-patch-diff', $event)" />
     <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
       <span class="ai-patch-entry__line" aria-hidden="true"></span>
       <button type="button" class="ai-patch-entry__button" @click="assistant.previewPatchFromLastAnswer">
@@ -901,9 +879,10 @@ onBeforeUnmount(() => {
       </div>
       <AiPromptInput v-model="assistant.draft.value" :disabled="assistant.isSending.value"
         :error-message="assistant.errorMessage.value" :submit-label="submitLabel"
+        :active-mode="assistant.activeMode.value" :provider-label="aiIconTitle"
         :attachments="assistant.attachedFiles.value" :has-attachments="assistant.attachedFiles.value.length > 0"
         @submit="assistant.sendMessage" @stop="assistant.stopCurrentRequest" @file-selected="assistant.attachFile"
-        @remove-file="assistant.removeAttachedFile" />
+        @remove-file="assistant.removeAttachedFile" @select-mode="selectMode" />
     </div>
 
     <AiProviderSettings v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
@@ -1356,7 +1335,7 @@ onBeforeUnmount(() => {
 }
 
 .ai-composer-shell :deep(.ai-composer) {
-  padding: 8px 10px 10px;
+  padding: 0 10px 10px;
 }
 
 .ai-dialog-backdrop {

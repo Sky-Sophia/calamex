@@ -1,21 +1,60 @@
 import AiPromptInput from '@/components/business/ai/AiPromptInput.vue';
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
-import { nextTick } from 'vue';
+import { defineComponent, nextTick } from 'vue';
+
+interface IAiPromptInputTestAttachment {
+    id: string;
+    name: string;
+    sizeLabel: string;
+    kind: 'text' | 'image';
+    detailLabel?: string;
+}
+
+interface IAiPromptInputTestProps {
+    modelValue: string;
+    disabled: boolean;
+    errorMessage: string;
+    submitLabel: string;
+    activeMode: 'chat' | 'agent' | 'plan';
+    providerLabel: string;
+    attachments: IAiPromptInputTestAttachment[];
+    hasAttachments: boolean;
+    'onUpdate:modelValue': (value: string) => void;
+}
+
+const mountPromptInput = (overrides: Partial<IAiPromptInputTestProps> = {}) => mount(AiPromptInput, {
+    props: {
+        modelValue: '',
+        disabled: false,
+        errorMessage: '',
+        submitLabel: '发送',
+        activeMode: 'agent',
+        providerLabel: 'DeepSeek',
+        attachments: [],
+        hasAttachments: false,
+        'onUpdate:modelValue': () => undefined,
+        ...overrides,
+    },
+    global: {
+        stubs: {
+            AppDropdownMenu: defineComponent({
+                name: 'AppDropdownMenuStub',
+                props: {
+                    items: {
+                        type: Array,
+                        default: () => [],
+                    },
+                },
+                template: '<div class="app-dropdown-menu-stub"><slot name="trigger" :open="false" /></div>',
+            }),
+        },
+    },
+});
 
 describe('AiPromptInput', () => {
     it('emits pasted image files as attachments', async () => {
-        const wrapper = mount(AiPromptInput, {
-            props: {
-                modelValue: '',
-                disabled: false,
-                errorMessage: '',
-                submitLabel: '发送',
-                attachments: [],
-                hasAttachments: false,
-                'onUpdate:modelValue': () => undefined,
-            },
-        });
+        const wrapper = mountPromptInput();
 
         const file = new File(['image-bytes'], 'pasted-image.png', { type: 'image/png' });
         const event = new Event('paste', { bubbles: true, cancelable: true });
@@ -40,24 +79,17 @@ describe('AiPromptInput', () => {
     });
 
     it('hides image metadata inside attachment chips', () => {
-        const wrapper = mount(AiPromptInput, {
-            props: {
-                modelValue: '',
-                disabled: false,
-                errorMessage: '',
-                submitLabel: '发送',
-                attachments: [
-                    {
-                        id: 'image-1',
-                        name: 'pasted-image.png',
-                        kind: 'image',
-                        sizeLabel: '4.5 KB',
-                        detailLabel: '665 × 329',
-                    },
-                ],
-                hasAttachments: true,
-                'onUpdate:modelValue': () => undefined,
-            },
+        const wrapper = mountPromptInput({
+            attachments: [
+                {
+                    id: 'image-1',
+                    name: 'pasted-image.png',
+                    kind: 'image',
+                    sizeLabel: '4.5 KB',
+                    detailLabel: '665 × 329',
+                },
+            ],
+            hasAttachments: true,
         });
 
         expect(wrapper.text()).toContain('pasted-image.png');
@@ -66,26 +98,59 @@ describe('AiPromptInput', () => {
     });
 
     it('hides file size labels for text attachments', () => {
-        const wrapper = mount(AiPromptInput, {
-            props: {
-                modelValue: '',
-                disabled: false,
-                errorMessage: '',
-                submitLabel: '发送',
-                attachments: [
-                    {
-                        id: 'file-1',
-                        name: 'README.md',
-                        kind: 'text',
-                        sizeLabel: '2.4 KB',
-                    },
-                ],
-                hasAttachments: true,
-                'onUpdate:modelValue': () => undefined,
-            },
+        const wrapper = mountPromptInput({
+            attachments: [
+                {
+                    id: 'file-1',
+                    name: 'README.md',
+                    kind: 'text',
+                    sizeLabel: '2.4 KB',
+                },
+            ],
+            hasAttachments: true,
         });
 
         expect(wrapper.text()).toContain('README.md');
         expect(wrapper.text()).not.toContain('2.4 KB');
+    });
+
+    it('keeps a fixed composer height without writing textarea inline height', async () => {
+        const wrapper = mountPromptInput({
+            modelValue: '初始化内容',
+        });
+
+        const textarea = wrapper.get('textarea');
+        const element = textarea.element as HTMLTextAreaElement;
+
+        expect(wrapper.get('.ai-composer-surface').exists()).toBe(true);
+        expect(element.style.height).toBe('');
+
+        await textarea.setValue('第一行\n第二行\n第三行\n第四行');
+
+        expect(element.style.height).toBe('');
+    });
+
+    it('does not render the icon-related or description copy in the composer shell', () => {
+        const wrapper = mountPromptInput();
+
+        expect(wrapper.text()).not.toContain('附件');
+        expect(wrapper.text()).not.toContain('Auto Apply');
+        expect(wrapper.text()).not.toContain('deepseek/deepseek-v4-pro');
+        expect(wrapper.text()).not.toContain('直接对话与问答');
+        expect(wrapper.text()).not.toContain('执行工具链与改动');
+        expect(wrapper.find('.ai-mode-button-icon').exists()).toBe(false);
+        expect(wrapper.text()).toContain('Agent');
+    });
+
+    it('assigns icons to chat agent plan menu items', () => {
+        const wrapper = mountPromptInput();
+        const dropdown = wrapper.findComponent({ name: 'AppDropdownMenuStub' });
+        const items = dropdown.props('items') as Array<{ key: string; icon?: string }>;
+
+        expect(items).toEqual(expect.arrayContaining([
+            expect.objectContaining({ key: 'chat', icon: 'message' }),
+            expect.objectContaining({ key: 'agent', icon: 'sparkles' }),
+            expect.objectContaining({ key: 'plan', icon: 'list' }),
+        ]));
     });
 });

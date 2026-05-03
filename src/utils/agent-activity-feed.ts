@@ -697,12 +697,14 @@ const injectActivityNotes = (
     entries: readonly TActivityFeedEntry[],
     activityNotes: readonly IActivityNote[],
 ): TActivityFeedEntry[] => {
-    if (!activityNotes.length) {
+    const visibleActivityNotes = activityNotes.filter((activityNote) => activityNote.source !== 'narrator');
+
+    if (!visibleActivityNotes.length) {
         return [...entries];
     }
 
     const nextEntries = [...entries];
-    const sortedNotes = [...activityNotes]
+    const sortedNotes = [...visibleActivityNotes]
         .sort((left, right) => left.createdAt - right.createdAt)
         .map((activityNote) => createFeedNote({
             id: activityNote.id,
@@ -715,7 +717,7 @@ const injectActivityNotes = (
         .filter((note): note is IActivityFeedNote => Boolean(note));
 
     for (const note of sortedNotes) {
-        const relatedActionIds = activityNotes.find((item) => item.id === note.id)?.relatedActionIds ?? [];
+        const relatedActionIds = visibleActivityNotes.find((item) => item.id === note.id)?.relatedActionIds ?? [];
         const duplicateIndex = nextEntries.findIndex((entry) =>
             entry.kind === 'note' && normalizeText(entry.note.text) === note.text
         );

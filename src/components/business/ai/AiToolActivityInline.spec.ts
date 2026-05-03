@@ -168,7 +168,7 @@ describe('AiToolActivityInline', () => {
     expect(wrapper.text()).not.toContain('tavily_search');
   });
 
-  it('独立渲染 narrator activityNotes，而不是混回旧的 activityTrail', () => {
+  it('忽略 narrator activityNotes，只保留非 narrator 的活动说明', () => {
     const wrapper = mountActivity(
       [],
       undefined,
@@ -194,13 +194,8 @@ describe('AiToolActivityInline', () => {
 
     expect(notes).toEqual([
       '先读取 app.ts，再决定是否修改。',
-      'app.ts 已经改完，下一步准备验证。',
     ]);
-    expect(wrapper.findAll('.ai-tool-note-kicker')).toHaveLength(0);
-    expect(wrapper.findAll('.ai-tool-note-text').at(1)?.classes()).toEqual(expect.arrayContaining([
-      'is-source-narrator',
-      'is-trigger-edit_done',
-    ]));
+    expect(wrapper.text()).not.toContain('app.ts 已经改完，下一步准备验证。');
   });
 
   it('把活动树投成 note/group/row，并允许说明文字穿插在操作组之间', () => {

@@ -23,8 +23,6 @@
         {{ statusMessage }}
       </span>
 
-      <AiAutoApplyBadge />
-
       <span v-if="hasActiveDocument && documentKind === 'image'" class="statusbar-segment statusbar-segment-passive">
         图片预览
       </span>
@@ -129,7 +127,6 @@
 </template>
 
 <script setup lang="ts">
-import AiAutoApplyBadge from '@/components/business/ai/AiAutoApplyBadge.vue';
 import AppDropdownMenu from '@/components/common/AppDropdownMenu.vue';
 import { useIntegratedTerminalStatus } from '@/composables/useIntegratedTerminal';
 import type {

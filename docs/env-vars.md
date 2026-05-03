@@ -9,7 +9,16 @@
 
 | 变量名 | 类型 | 默认值 | 环境 | 描述 | 登记人 |
 |---|---|---|---|---|---|
-| （当前暂无 VITE_* 环境变量）| - | - | - | - | - |
+| AGENT_MCP_UVX_PATH | string | 自动探测 | dev/staging/prod | Windows 下 uvx.exe 绝对路径，供 `git/time/hooks/sqlite` MCP 启动 | Copilot |
+| AGENT_MCP_GIT_EXECUTABLE_PATH | string | 自动探测 | dev/staging/prod | Windows 下 git.exe 绝对路径，供 Git MCP 绑定 `GIT_PYTHON_GIT_EXECUTABLE` | Copilot |
+| AGENT_MCP_MEMORY_FILE_PATH | string | `%USERPROFILE%/.xiaojianc/mcp-memory.jsonl` | dev/staging/prod | memory MCP 持久化文件路径 | Copilot |
+| AGENT_MCP_LOCAL_TIMEZONE | string | Asia/Shanghai | dev/staging/prod | time MCP 本地时区参数 | Copilot |
+| GITHUB_MCP_PAT | string(secret) | - | dev/staging/prod | GitHub MCP Server 访问令牌（Bearer） | Copilot |
+| GITHUB_MCP_URL | string | https://api.githubcopilot.com/mcp/ | dev/staging/prod | GitHub MCP Server Streamable HTTP 地址 | Copilot |
+| SQLITE_DB_PATH | string | - | dev/staging/prod | sqlite-mcp 连接的本地数据库绝对/相对路径 | Copilot |
+| SQLITE_READ_ONLY | string(boolean) | true | dev/staging/prod | sqlite-mcp 只读模式开关 | Copilot |
+| SQLITE_TIMEOUT | string(number) | 30 | dev/staging/prod | sqlite-mcp 查询超时秒数 | Copilot |
+| TAVILY_API_KEY | string(secret) | - | dev/staging/prod | Tavily MCP 的 API Key | Copilot |
 
 ---
 

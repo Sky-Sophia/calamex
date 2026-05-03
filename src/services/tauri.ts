@@ -82,6 +82,7 @@ type TIpcFactoryOptions<TInSchema extends z.ZodTypeAny, TOutSchema extends z.Zod
 >;
 
 const TAURI_IPC_DEFAULT_TIMEOUT_MS = 10_000;
+const AGENT_SIDECAR_TASK_TIMEOUT_MS = 180_000;
 const LOG_PAYLOAD_SUMMARY_LIMIT = 320;
 const textEncoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
 
@@ -569,28 +570,40 @@ const agentSidecarChatIpc = definePayloadIpc(
   'agent_sidecar_chat',
   '通过 Node sidecar 执行 Agent Ask',
   tauriContracts.agentSidecarChat,
-  { audit: 'sensitive', timeoutMs: 180_000, measureInput: measureAiChatInput },
+  {
+    audit: 'sensitive',
+    timeoutMs: AGENT_SIDECAR_TASK_TIMEOUT_MS,
+    measureInput: measureAiChatInput,
+  },
 );
 
 const agentSidecarPlanIpc = definePayloadIpc(
   'agent_sidecar_plan',
   '通过 Node sidecar 生成 Agent 计划',
   tauriContracts.agentSidecarPlan,
-  { audit: 'sensitive', timeoutMs: 180_000, measureInput: measureAiChatInput },
+  {
+    audit: 'sensitive',
+    timeoutMs: AGENT_SIDECAR_TASK_TIMEOUT_MS,
+    measureInput: measureAiChatInput,
+  },
 );
 
 const agentSidecarExecuteIpc = definePayloadIpc(
   'agent_sidecar_execute',
   '通过 Node sidecar 执行 Agent 任务',
   tauriContracts.agentSidecarExecute,
-  { audit: 'sensitive', timeoutMs: 180_000, measureInput: measureAiChatInput },
+  {
+    audit: 'sensitive',
+    timeoutMs: AGENT_SIDECAR_TASK_TIMEOUT_MS,
+    measureInput: measureAiChatInput,
+  },
 );
 
 const agentSidecarResolveApprovalIpc = definePayloadIpc(
   'agent_sidecar_resolve_approval',
   '处理 Agent sidecar 工具审批',
   tauriContracts.agentSidecarResolveApproval,
-  { audit: 'sensitive', timeoutMs: 30_000 },
+  { audit: 'sensitive', timeoutMs: AGENT_SIDECAR_TASK_TIMEOUT_MS },
 );
 
 const analyzeScriptIpc = definePayloadIpc(

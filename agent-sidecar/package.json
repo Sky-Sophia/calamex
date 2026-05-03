@@ -13,6 +13,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@playwright/mcp": "0.0.73",
+    "@probelabs/logoscope": "0.2.14",
+    "@upstash/context7-mcp": "2.2.3",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@modelcontextprotocol/server-filesystem": "2026.1.14",
     "@modelcontextprotocol/server-memory": "2026.1.26",

@@ -6,6 +6,8 @@ export interface INormalizeFileSystemPathOptions {
 
 const WINDOWS_PATH_PATTERN = /^[a-zA-Z]:\//;
 const UNC_PATH_PATTERN = /^\/\//;
+const WINDOWS_DISPLAY_PATH_PATTERN = /^(?:[a-zA-Z]:[\\/]|[\\/]{2}[^\\/])/;
+const ABSOLUTE_POSIX_PATH_PATTERN = /^\//;
 const WINDOWS_DRIVE_ROOT_PATTERN = /^[a-zA-Z]:\/$/;
 const UNC_SHARE_ROOT_PATTERN = /^\/\/[^/]+\/[^/]+\/?$/;
 const WINDOWS_VERBATIM_UNC_PREFIX = '\\\\?\\UNC\\';
@@ -46,6 +48,9 @@ const collapseDuplicateSeparators = (value: string): string => {
 const isWindowsStylePath = (value: string): boolean =>
   WINDOWS_PATH_PATTERN.test(value) || UNC_PATH_PATTERN.test(value);
 
+const isAbsoluteDisplayPath = (value: string): boolean =>
+  WINDOWS_DISPLAY_PATH_PATTERN.test(value) || ABSOLUTE_POSIX_PATH_PATTERN.test(value);
+
 const trimTrailingSeparator = (value: string): string => {
   if (!value || value === '/' || WINDOWS_DRIVE_ROOT_PATTERN.test(value) || UNC_SHARE_ROOT_PATTERN.test(value)) {
     return value;
@@ -78,6 +83,56 @@ export const normalizeFileSystemPath = (
   }
 
   return normalized;
+};
+
+export const formatFileSystemPathForDisplay = (value: string | null | undefined): string => {
+  if (!value) {
+    return '';
+  }
+
+  let formatted = stripWindowsVerbatimPrefix(value);
+  formatted = stripWindowsVerbatimPrefix(formatted.replace(/\\/g, '/'));
+
+  if (isWindowsStylePath(formatted)) {
+    return collapseDuplicateSeparators(formatted).replace(/\//g, '\\');
+  }
+
+  return collapseDuplicateSeparators(formatted);
+};
+
+export const formatFileSystemTextForDisplay = (value: string | null | undefined): string => {
+  if (!value) {
+    return '';
+  }
+
+  return value
+    .replace(/\\\\\?\\UNC\\/gi, '\\\\')
+    .replace(/\\\\\?\\/g, '')
+    .replace(/\/\/\?\/UNC\//gi, '//')
+    .replace(/\/\/\?\//g, '');
+};
+
+export const joinDisplayedPath = (
+  prefix: string | null | undefined,
+  leaf: string | null | undefined,
+): string => {
+  const formattedPrefix = formatFileSystemPathForDisplay(prefix).trim();
+  const formattedLeaf = formatFileSystemPathForDisplay(leaf).trim().replace(/^[\\/]+/g, '');
+
+  if (!formattedPrefix) {
+    return formattedLeaf;
+  }
+
+  if (!formattedLeaf) {
+    return formattedPrefix;
+  }
+
+  if (isAbsoluteDisplayPath(formattedPrefix)) {
+    const separator = WINDOWS_DISPLAY_PATH_PATTERN.test(formattedPrefix) ? '\\' : '/';
+    return `${formattedPrefix.replace(/[\\/]+$/g, '')}${separator}${formattedLeaf}`;
+  }
+
+  return `${formattedPrefix} / ${formattedLeaf}`;
 };
 
 export const areFileSystemPathsEqual = (

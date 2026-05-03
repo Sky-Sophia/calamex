@@ -15,14 +15,15 @@ import {
 import 'monaco-editor/esm/vs/editor/contrib/clipboard/browser/clipboard';
 import 'monaco-editor/esm/vs/editor/contrib/comment/browser/comment';
 import 'monaco-editor/esm/vs/editor/contrib/find/browser/findController';
+import 'monaco-editor/esm/vs/editor/contrib/suggest/browser/suggestController.js';
 // 走顶层包入口拿类型,避开 monaco-editor exports map 不开放 editor.api 子路径的问题。
 import type * as MonacoApi from 'monaco-editor';
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import 'monaco-editor/esm/vs/editor/standalone/browser/quickAccess/standaloneCommandsQuickAccess';
 import 'monaco-editor/esm/vs/editor/standalone/browser/quickAccess/standaloneGotoLineQuickAccess';
 import {
-  create as createStandaloneEditor,
   createDiffEditor as createStandaloneDiffEditor,
+  create as createStandaloneEditor,
   createModel as createStandaloneModel,
   defineTheme as defineStandaloneTheme,
   setModelMarkers as setStandaloneModelMarkers,
@@ -50,6 +51,7 @@ const SHELL_LANGUAGE_ALIASES = ['Shell', 'sh'];
 
 const READY_FLAG_KEY = '__SH_EDITOR_MONACO_READY__' as const;
 const SHELL_READY_FLAG_KEY = '__SH_EDITOR_MONACO_SHELL_READY__' as const;
+let suggestContributionPromise: Promise<void> | null = null;
 
 // ---------------------------------------------------------------------------
 // Monaco facade
@@ -162,4 +164,19 @@ const applyMonacoTheme = (theme: TThemeMode): void => {
   monaco.editor.setTheme(resolveMonacoThemeName(theme));
 };
 
-export { applyMonacoTheme, monaco };
+const ensureMonacoSuggestContribution = async (): Promise<void> => {
+  if (!suggestContributionPromise) {
+    suggestContributionPromise = import(
+      'monaco-editor/esm/vs/editor/contrib/suggest/browser/suggestController.js'
+    )
+      .then(() => undefined)
+      .catch((error) => {
+        suggestContributionPromise = null;
+        throw error;
+      });
+  }
+
+  return suggestContributionPromise;
+};
+
+export { applyMonacoTheme, ensureMonacoSuggestContribution, monaco };
