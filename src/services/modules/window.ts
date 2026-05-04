@@ -10,10 +10,7 @@ export const SetWindowBackgroundInput = z.object({
   a: z.number().int().min(0).max(255).default(255),
 });
 
-const StartupTransitionInput = z.void();
 const SetWindowBackgroundOutput = zTauriVoid;
-const BeginStartupTransitionOutput = zTauriVoid;
-const FinalizeStartupTransitionOutput = zTauriVoid;
 
 export type TSetWindowBackgroundInput = z.infer<typeof SetWindowBackgroundInput>;
 export type TSetWindowBackgroundRequest = z.input<typeof SetWindowBackgroundInput>;
@@ -30,36 +27,3 @@ export const setWindowBackground = (input: TSetWindowBackgroundRequest): Promise
     idempotent: true,
     mapArgs: (payload, { traceId }) => ({ input: payload, traceId }),
   });
-
-/**
- * Hides the standalone welcome window first, then reveals the main window with the
- * startup bridge still mounted in the DOM so the user never sees both windows together.
- */
-export const beginStartupTransition = (): Promise<void> =>
-  ipc(
-    'begin_startup_transition',
-    undefined,
-    StartupTransitionInput,
-    BeginStartupTransitionOutput,
-    {
-      timeoutMs: 1_000,
-      guardHint: 'begin startup transition',
-      idempotent: true,
-    },
-  );
-
-/**
- * Destroys the hidden welcome window after the startup bridge fade has finished.
- */
-export const finalizeStartupTransition = (): Promise<void> =>
-  ipc(
-    'finalize_startup_transition',
-    undefined,
-    StartupTransitionInput,
-    FinalizeStartupTransitionOutput,
-    {
-      timeoutMs: 1_000,
-      guardHint: 'finalize startup transition',
-      idempotent: true,
-    },
-  );

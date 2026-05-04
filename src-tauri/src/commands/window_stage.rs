@@ -1,11 +1,8 @@
 use tauri::{AppHandle, LogicalSize, Manager, Size, WebviewWindow};
 
 const MAIN_WINDOW_LABEL: &str = "main";
-const WELCOME_WINDOW_LABEL: &str = "welcome";
 const MAIN_WINDOW_MIN_WIDTH: f64 = 1220.0;
 const MAIN_WINDOW_MIN_HEIGHT: f64 = 760.0;
-const WELCOME_WINDOW_WIDTH: f64 = 1024.0;
-const WELCOME_WINDOW_HEIGHT: f64 = 680.0;
 
 fn resolve_window(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
     app.get_webview_window(label)
@@ -32,35 +29,6 @@ fn show_main_window(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-fn show_welcome_window(window: &WebviewWindow) -> Result<(), String> {
-    window
-        .set_resizable(false)
-        .map_err(|error| format!("failed to lock welcome window resizable state: {error}"))?;
-    window
-        .set_size(Size::Logical(LogicalSize::new(
-            WELCOME_WINDOW_WIDTH,
-            WELCOME_WINDOW_HEIGHT,
-        )))
-        .map_err(|error| format!("failed to set welcome window size: {error}"))?;
-    window
-        .set_min_size(Some(Size::Logical(LogicalSize::new(
-            WELCOME_WINDOW_WIDTH,
-            WELCOME_WINDOW_HEIGHT,
-        ))))
-        .map_err(|error| format!("failed to set welcome window min size: {error}"))?;
-    window
-        .set_max_size(Some(Size::Logical(LogicalSize::new(
-            WELCOME_WINDOW_WIDTH,
-            WELCOME_WINDOW_HEIGHT,
-        ))))
-        .map_err(|error| format!("failed to set welcome window max size: {error}"))?;
-    window
-        .show()
-        .map_err(|error| format!("failed to show welcome window: {error}"))?;
-
-    Ok(())
-}
-
 #[tauri::command]
 pub fn apply_window_stage(app: AppHandle, stage: String) -> Result<(), String> {
     match stage.as_str() {
@@ -69,45 +37,6 @@ pub fn apply_window_stage(app: AppHandle, stage: String) -> Result<(), String> {
             show_main_window(&window)?;
             Ok(())
         }
-        "welcome" => {
-            let window = resolve_window(&app, WELCOME_WINDOW_LABEL)?;
-            show_welcome_window(&window)?;
-            Ok(())
-        }
         _ => Err(format!("unsupported window stage: {stage}")),
     }
-}
-
-#[tauri::command]
-pub fn begin_startup_transition(app: AppHandle) -> Result<(), String> {
-    let main_window = resolve_window(&app, MAIN_WINDOW_LABEL)?;
-    let welcome_window = app.get_webview_window(WELCOME_WINDOW_LABEL);
-
-    if let Some(welcome_window) = &welcome_window {
-        welcome_window
-            .hide()
-            .map_err(|error| format!("failed to hide welcome window: {error}"))?;
-    }
-
-    if let Err(error) = show_main_window(&main_window) {
-        if let Some(welcome_window) = &welcome_window {
-            let _ = welcome_window.show();
-            let _ = welcome_window.set_focus();
-        }
-
-        return Err(error);
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn finalize_startup_transition(app: AppHandle) -> Result<(), String> {
-    if let Some(welcome_window) = app.get_webview_window(WELCOME_WINDOW_LABEL) {
-        let _ = welcome_window.hide();
-        // Windows 上关闭隐藏 welcome 窗口偶发阻塞；这里不把关闭当作启动收尾的同步前置条件。
-        let _ = welcome_window.close();
-    }
-
-    Ok(())
 }

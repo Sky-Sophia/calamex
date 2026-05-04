@@ -1,62 +1,64 @@
 <!doctype html>
 <html lang="zh-CN" class="dark" data-theme="dark">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
-    <title>Calamex</title>
-    <style>
-      /* R-18.9.4 exception scoped by R-W.4.2.2 */
-      html,
-      body,
-      #app {
-        min-height: 100vh;
-        margin: 0;
-        background-color: #08090a;
-        color: #f7f8f8;
-        font-family: 'Inter', 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>Calamex</title>
+  <style>
+    /* R-18.9.4 exception scoped by R-W.4.2.2 */
+    html,
+    body,
+    #app {
+      min-height: 100vh;
+      margin: 0;
+      background-color: #1a1b1e;
+      color: #f7f8f8;
+      font-family: 'Inter', 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+    }
+
+    body {
+      overflow: hidden;
+    }
+  </style>
+  <script>
+    // R-W.4.6.3: /welcome ???? dark
+    (function () {
+      var hash = window.location.hash || '';
+      var path = window.location.pathname || '';
+      if (!hash || hash.indexOf('/welcome') !== -1 || path.indexOf('/welcome') !== -1) {
+        document.documentElement.dataset.theme = 'dark';
+        document.documentElement.classList.add('dark');
+        document.documentElement.classList.remove('light');
+        return;
       }
 
-      body {
-        overflow: hidden;
-      }
-    </style>
-    <script>
-      // R-W.4.6.3: /welcome ???? dark
-      (function () {
-        var hash = window.location.hash || '';
-        var path = window.location.pathname || '';
-        if (!hash || hash.indexOf('/welcome') !== -1 || path.indexOf('/welcome') !== -1) {
-          document.documentElement.dataset.theme = 'dark';
-          document.documentElement.classList.add('dark');
-          document.documentElement.classList.remove('light');
+      try {
+        var saved = localStorage.getItem('ide.theme');
+        if (saved === 'dark' || saved === 'light') {
+          document.documentElement.dataset.theme = saved;
+          document.documentElement.classList.toggle('dark', saved === 'dark');
+          document.documentElement.classList.toggle('light', saved === 'light');
           return;
         }
 
-        try {
-          var saved = localStorage.getItem('ide.theme');
-          if (saved === 'dark' || saved === 'light') {
-            document.documentElement.dataset.theme = saved;
-            document.documentElement.classList.toggle('dark', saved === 'dark');
-            document.documentElement.classList.toggle('light', saved === 'light');
-            return;
-          }
+        var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.dataset.theme = systemDark ? 'dark' : 'light';
+        document.documentElement.classList.toggle('dark', systemDark);
+        document.documentElement.classList.toggle('light', !systemDark);
+      } catch (_) {
+        document.documentElement.dataset.theme = 'dark';
+        document.documentElement.classList.add('dark');
+        document.documentElement.classList.remove('light');
+      }
+    })();
+  </script>
+</head>
 
-          var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          document.documentElement.dataset.theme = systemDark ? 'dark' : 'light';
-          document.documentElement.classList.toggle('dark', systemDark);
-          document.documentElement.classList.toggle('light', !systemDark);
-        } catch (_) {
-          document.documentElement.dataset.theme = 'dark';
-          document.documentElement.classList.add('dark');
-          document.documentElement.classList.remove('light');
-        }
-      })();
-    </script>
-  </head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
 
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
 </html>

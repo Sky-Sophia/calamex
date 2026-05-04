@@ -12,7 +12,7 @@ export const useTheme = () => {
 
   const syncNativeWindowBackground = async (): Promise<void> => {
     try {
-      const { r, g, b, a } = readCssVarAsRgba('--app-bg');
+      const { r, g, b, a } = readCssVarAsRgba('--window-underlay-bg');
       const nextKey = `${r}:${g}:${b}:${a}`;
       if (nextKey === lastNativeBackground) {
         return;
