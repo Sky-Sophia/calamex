@@ -442,6 +442,85 @@ const getOperationAppliedTime = (operation: IAiEditOperation): number => {
   return Number.isFinite(timestamp) ? timestamp : 0;
 };
 
+
+interface ILatestSidecarLiveEvents {
+  errorEvent: Extract<TAgentUiEvent, { type: 'error' }> | null;
+  doneEvent: Extract<TAgentUiEvent, { type: 'done' }> | null;
+  messageEvent: Extract<TAgentUiEvent, { type: 'message_delta' }> | null;
+  finalMessageEvent: Extract<TAgentUiEvent, { type: 'message_delta' }> | null;
+}
+
+const getLatestSidecarLiveEvents = (
+  events: readonly TAgentUiEvent[],
+): ILatestSidecarLiveEvents => {
+  const latest: ILatestSidecarLiveEvents = {
+    errorEvent: null,
+    doneEvent: null,
+    messageEvent: null,
+    finalMessageEvent: null,
+  };
+
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+
+    if (!event) {
+      continue;
+    }
+
+    if (!latest.errorEvent && event.type === 'error') {
+      latest.errorEvent = event;
+    }
+
+    if (!latest.doneEvent && event.type === 'done') {
+      latest.doneEvent = event;
+    }
+
+    if (event.type === 'message_delta') {
+      if (!latest.messageEvent) {
+        latest.messageEvent = event;
+      }
+
+      if (!latest.finalMessageEvent && event.phase === 'final') {
+        latest.finalMessageEvent = event;
+      }
+    }
+
+    if (
+      latest.errorEvent
+      && latest.doneEvent
+      && latest.messageEvent
+      && latest.finalMessageEvent
+    ) {
+      break;
+    }
+  }
+
+  return latest;
+};
+
+const processedRuntimeEventCountsByEvents = new WeakMap<readonly TAgentUiEvent[], number>();
+
+const extractNewVisibleRuntimeEvents = (
+  events: readonly TAgentUiEvent[],
+): TAgentRuntimeEvent[] | undefined => {
+  if (events.length === 0) {
+    return undefined;
+  }
+
+  const previousCount = processedRuntimeEventCountsByEvents.get(events) ?? 0;
+  const startIndex = Math.min(previousCount, events.length);
+
+  processedRuntimeEventCountsByEvents.set(events, events.length);
+
+  if (startIndex >= events.length) {
+    return undefined;
+  }
+
+  const visibleEvents = extractVisibleAgentRuntimeEvents(events.slice(startIndex));
+
+  return visibleEvents.length ? visibleEvents : undefined;
+};
+
 // ---------------------------------------------------------------------------
 // Public quick actions
 // ---------------------------------------------------------------------------
@@ -581,14 +660,28 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     messageId: string,
     updater: (message: IAiChatMessage) => IAiChatMessage,
   ): IAiChatMessage[] => {
-    const nextMessages = messages.value.map((message) => (
-      message.id === messageId ? updater(message) : message
-    ));
+    const currentMessages = messages.value;
+    const messageIndex = currentMessages.findIndex((message) => message.id === messageId);
+
+    if (messageIndex < 0) {
+      return currentMessages;
+    }
+
+    const currentMessage = currentMessages[messageIndex]!;
+    const nextMessage = updater(currentMessage);
+
+    if (nextMessage === currentMessage) {
+      return currentMessages;
+    }
+
+    const nextMessages = currentMessages.slice();
+    nextMessages[messageIndex] = nextMessage;
 
     messages.value = nextMessages;
 
     return nextMessages;
   };
+
 
   const mergeActivityNotes = (
     currentNotes: readonly IActivityNote[] | undefined,
@@ -717,24 +810,29 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     title: string,
     status: TAgentExecutionStepStatus,
   ): void => {
-    const existing = agentSteps.value.find((step) => step.id === stepId);
+    const currentSteps = agentSteps.value;
+    const stepIndex = currentSteps.findIndex((step) => step.id === stepId);
 
-    if (existing) {
-      agentSteps.value = agentSteps.value.map((step) => (
-        step.id === stepId
-          ? {
-            ...step,
-            title,
-            status,
-          }
-          : step
-      ));
+    if (stepIndex >= 0) {
+      const currentStep = currentSteps[stepIndex]!;
 
+      if (currentStep.title === title && currentStep.status === status) {
+        return;
+      }
+
+      const nextSteps = currentSteps.slice();
+      nextSteps[stepIndex] = {
+        ...currentStep,
+        title,
+        status,
+      };
+
+      agentSteps.value = nextSteps;
       return;
     }
 
     agentSteps.value = [
-      ...agentSteps.value,
+      ...currentSteps,
       {
         id: stepId,
         title,
@@ -742,6 +840,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       },
     ];
   };
+
 
   const updateAgentExecutionMessage = (
     messageId: string,
@@ -1222,26 +1321,12 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     events: readonly TAgentUiEvent[],
   ): void => {
     const currentMessage = messages.value.find((message) => message.id === assistantMessageId);
-    const errorEvent = [...events]
-      .reverse()
-      .find((event): event is Extract<TAgentUiEvent, { type: 'error' }> =>
-        event.type === 'error'
-      );
-    const doneEvent = [...events]
-      .reverse()
-      .find((event): event is Extract<TAgentUiEvent, { type: 'done' }> =>
-        event.type === 'done'
-      );
-    const messageEvent = [...events]
-      .reverse()
-      .find((event): event is Extract<TAgentUiEvent, { type: 'message_delta' }> =>
-        event.type === 'message_delta'
-      );
-    const finalMessageEvent = [...events]
-      .reverse()
-      .find((event): event is Extract<TAgentUiEvent, { type: 'message_delta' }> =>
-        event.type === 'message_delta' && event.phase === 'final'
-      );
+    const {
+      errorEvent,
+      doneEvent,
+      messageEvent,
+      finalMessageEvent,
+    } = getLatestSidecarLiveEvents(events);
     const doneResult = hasMeaningfulAssistantText(doneEvent?.result) ? doneEvent.result : null;
     const currentVisibleContent = hasMeaningfulAssistantText(currentMessage?.content)
       ? currentMessage?.content
@@ -1287,7 +1372,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       undefined,
       activityProjection.activities,
       activityProjection.activityEvents,
-      extractVisibleAgentRuntimeEvents(events),
+      extractNewVisibleRuntimeEvents(events),
       finalAnswerStarted,
     );
 
@@ -1300,6 +1385,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       toolCalls: activityProjection.toolCalls,
     });
   };
+
 
   const appendRuntimeTimelineEvents = (
     events: readonly TAgentUiEvent[],

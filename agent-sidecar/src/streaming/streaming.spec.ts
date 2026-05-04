@@ -1,6 +1,6 @@
+import { AgentResult, Message, TextBlock } from '@strands-agents/sdk';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { AgentResult, Message, TextBlock } from '@strands-agents/sdk';
 
 import type { TAgentUiEvent, TJsonValue } from '../schemas/events.js';
 import { AgentStreamEventBus } from './stream-event-bus.js';
@@ -229,5 +229,58 @@ describe('streaming event layer', () => {
       },
     ]);
     assert.equal(result.visibleText, '最终回答第一段。');
+  });
+
+  it('flushes the final visible text on completion when no tool call occurred', async () => {
+    const emittedEvents: TAgentUiEvent[] = [];
+    const runtimeEvents = new AgentStreamEventBus({
+      runId: 'run-plain',
+      sessionId: 'session-plain',
+      agentId: 'agent-plain',
+      now: () => '2026-05-02T00:00:00.000Z',
+    });
+    const agent = {
+      async *stream() {
+        yield {
+          type: 'modelStreamUpdateEvent',
+          event: {
+            type: 'modelContentBlockDeltaEvent',
+            delta: {
+              type: 'textDelta',
+              text: '直接回答。',
+            },
+          },
+        };
+
+        return new AgentResult({
+          stopReason: 'endTurn',
+          lastMessage: new Message({
+            role: 'assistant',
+            content: [
+              new TextBlock('直接回答。'),
+            ],
+          }),
+          invocationState: {},
+        });
+      },
+    };
+
+    const result = await runAgentStream({
+      agent,
+      prompt: '直接回答',
+      streamOptions: {},
+      eventBus: runtimeEvents,
+      emitLegacyEvent: (event) => {
+        emittedEvents.push(event);
+      },
+      toJsonValue: (value): TJsonValue => JSON.parse(JSON.stringify(value)) as TJsonValue,
+    });
+
+    assert.deepEqual(emittedEvents.filter((event) => event.type === 'message_delta'), [{
+      type: 'message_delta',
+      text: '直接回答。',
+      phase: 'final',
+    }]);
+    assert.equal(result.visibleText, '直接回答。');
   });
 });
