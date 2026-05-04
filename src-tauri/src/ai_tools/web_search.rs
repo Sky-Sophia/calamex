@@ -6,8 +6,8 @@ use serde_json::Value;
 
 use crate::ai::audit::{self, AiAuditEventKind};
 use crate::ai::errors;
+use crate::ai::network_permission;
 use crate::ai::redaction::redact_text;
-use crate::ai_agent::runtime;
 use crate::commands::contracts::{AiWebSearchInput, AiWebSearchPayload, AiWebSearchResultPayload};
 
 const MAX_WEB_SEARCH_RESULTS: usize = 8;
@@ -28,7 +28,7 @@ async fn search_with_permission(
     validate_search_input(&input)?;
 
     if require_runtime_permission {
-        if let Err(error) = runtime::ensure_network_allowed() {
+        if let Err(error) = network_permission::ensure_network_allowed() {
             audit::emit(AiAuditEventKind::AgentWebSearchDenied);
             return Err(error);
         }

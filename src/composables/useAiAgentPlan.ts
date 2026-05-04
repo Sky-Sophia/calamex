@@ -157,12 +157,7 @@ export const useAiAgentPlan = () => {
     store.errorMessage = '';
 
     try {
-      const payload = await aiService.approvePlan({
-        goal: store.activeGoal,
-        steps: store.steps,
-      });
-
-      store.approvedAt = payload.approvedAt;
+      store.approvedAt = new Date().toISOString();
       store.mode = 'agent';
     } catch (error) {
       store.errorMessage = toErrorMessage(error, '批准计划失败。');

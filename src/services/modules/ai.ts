@@ -9,19 +9,9 @@ import type {
   IAgentSidecarStreamEventPayload,
 } from '@/types/agent-sidecar';
 import type {
-  IAiAgentApprovePlanPayload,
-  IAiAgentApprovePlanRequest,
   IAiAgentClassifyTaskPayload,
   IAiAgentClassifyTaskRequest,
-  IAiAgentListRunsPayload,
   IAiAgentNetworkPermissionPayload,
-  IAiAgentPlanPayload,
-  IAiAgentPlanRequest,
-  IAiAgentResolveToolConfirmationRequest,
-  IAiAgentRunIdRequest,
-  IAiAgentRunPayload,
-  IAiAgentRunPlanRequest,
-  IAiAgentRunStepRequest,
   IAiAgentSetNetworkPermissionRequest,
   IAiApplyPatchPayload,
   IAiApplyPatchRequest,
@@ -59,7 +49,6 @@ import type {
   IAiWebFetchPayload,
   IAiWebSearchInput,
   IAiWebSearchPayload,
-  TAiAgentStreamEvent,
 } from '@/types/ai';
 import type {
   IAiEditGetDiffPayload,
@@ -149,9 +138,6 @@ export const aiService = {
   ): Promise<() => void> {
     return tauriService.onAiNarratorStream(handler);
   },
-  onAgentStream(handler: (payload: TAiAgentStreamEvent) => void): Promise<() => void> {
-    return tauriService.onAiAgentStream(handler);
-  },
   inlineComplete(payload: IAiInlineCompletionRequest): Promise<IAiInlineCompletionResult> {
     return tauriService.aiInlineComplete(payload);
   },
@@ -161,42 +147,10 @@ export const aiService = {
   classifyTask(payload: IAiAgentClassifyTaskRequest): Promise<IAiAgentClassifyTaskPayload> {
     return tauriService.aiAgentClassifyTask(payload);
   },
-  planTask(payload: IAiAgentPlanRequest): Promise<IAiAgentPlanPayload> {
-    return tauriService.aiPlanTask(payload);
-  },
-  approvePlan(payload: IAiAgentApprovePlanRequest): Promise<IAiAgentApprovePlanPayload> {
-    return tauriService.aiAgentApprovePlan(payload);
-  },
-  runPlan(payload: IAiAgentRunPlanRequest): Promise<IAiAgentRunPayload> {
-    return tauriService.aiAgentRunPlan(payload);
-  },
-  runStep(payload: IAiAgentRunStepRequest): Promise<IAiAgentRunPayload> {
-    return tauriService.aiAgentRunStep(payload);
-  },
-  pauseRun(payload: IAiAgentRunIdRequest): Promise<IAiAgentRunPayload> {
-    return tauriService.aiAgentPause(payload);
-  },
-  resumeRun(payload: IAiAgentRunIdRequest): Promise<IAiAgentRunPayload> {
-    return tauriService.aiAgentResume(payload);
-  },
-  cancelRun(payload: IAiAgentRunIdRequest): Promise<IAiAgentRunPayload> {
-    return tauriService.aiAgentCancel(payload);
-  },
-  getRun(payload: IAiAgentRunIdRequest): Promise<IAiAgentRunPayload> {
-    return tauriService.aiAgentGetRun(payload);
-  },
-  listRuns(): Promise<IAiAgentListRunsPayload> {
-    return tauriService.aiAgentListRuns();
-  },
   setNetworkPermission(
     payload: IAiAgentSetNetworkPermissionRequest,
   ): Promise<IAiAgentNetworkPermissionPayload> {
     return tauriService.aiAgentSetNetworkPermission(payload);
-  },
-  resolveToolConfirmation(
-    payload: IAiAgentResolveToolConfirmationRequest,
-  ): Promise<IAiAgentRunPayload> {
-    return tauriService.aiAgentResolveToolConfirmation(payload);
   },
   webSearch(payload: IAiWebSearchInput): Promise<IAiWebSearchPayload> {
     return tauriService.aiWebSearch(payload);

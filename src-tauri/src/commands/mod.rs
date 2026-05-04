@@ -19,17 +19,15 @@ pub use agent_sidecar::{
     agent_sidecar_resolve_approval,
 };
 pub use ai::{
-    ai_agent_approve_plan, ai_agent_cancel, ai_agent_classify_task, ai_agent_get_run,
-    ai_agent_list_runs, ai_agent_pause, ai_agent_resolve_tool_confirmation, ai_agent_resume,
-    ai_agent_run_plan, ai_agent_run_step, ai_agent_set_network_permission, ai_apply_patch,
-    ai_build_index, ai_cancel, ai_chat, ai_chat_stream, ai_clear_credentials, ai_code_action,
-    ai_connect_provider, ai_edit_create_snapshot, ai_edit_get_auth_level, ai_edit_get_diff,
-    ai_edit_list_timeline, ai_edit_restore_snapshot, ai_edit_revert_file, ai_edit_revert_hunk,
-    ai_edit_revert_task, ai_edit_set_auth_level, ai_edit_undo_operation,
-    ai_generate_conversation_title, ai_get_config, ai_get_provider_profile_detail,
-    ai_inline_complete, ai_list_provider_profiles, ai_list_tools, ai_plan_task, ai_propose_patch,
-    ai_query_index, ai_save_config, ai_save_credentials, ai_switch_provider_profile,
-    ai_test_provider, ai_test_provider_config, ai_web_fetch, ai_web_search,
+    ai_agent_classify_task, ai_agent_set_network_permission, ai_apply_patch, ai_build_index,
+    ai_cancel, ai_chat, ai_chat_stream, ai_clear_credentials, ai_code_action, ai_connect_provider,
+    ai_edit_create_snapshot, ai_edit_get_auth_level, ai_edit_get_diff, ai_edit_list_timeline,
+    ai_edit_restore_snapshot, ai_edit_revert_file, ai_edit_revert_hunk, ai_edit_revert_task,
+    ai_edit_set_auth_level, ai_edit_undo_operation, ai_generate_conversation_title,
+    ai_get_config, ai_get_provider_profile_detail, ai_inline_complete, ai_list_provider_profiles,
+    ai_list_tools, ai_propose_patch, ai_query_index, ai_save_config, ai_save_credentials,
+    ai_switch_provider_profile, ai_test_provider, ai_test_provider_config, ai_web_fetch,
+    ai_web_search,
     ai_narrate_activity, ai_narrate_activity_stream,
 };
 pub use contracts::{

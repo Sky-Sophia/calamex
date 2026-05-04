@@ -8,19 +8,9 @@ import type {
   IAgentSidecarStreamEventPayload,
 } from './agent-sidecar';
 import type {
-  IAiAgentApprovePlanPayload,
-  IAiAgentApprovePlanRequest,
   IAiAgentClassifyTaskPayload,
   IAiAgentClassifyTaskRequest,
-  IAiAgentListRunsPayload,
   IAiAgentNetworkPermissionPayload,
-  IAiAgentPlanPayload,
-  IAiAgentPlanRequest,
-  IAiAgentResolveToolConfirmationRequest,
-  IAiAgentRunIdRequest,
-  IAiAgentRunPayload,
-  IAiAgentRunPlanRequest,
-  IAiAgentRunStepRequest,
   IAiAgentSetNetworkPermissionRequest,
   IAiApplyPatchPayload,
   IAiApplyPatchRequest,
@@ -58,7 +48,6 @@ import type {
   IAiWebFetchPayload,
   IAiWebSearchInput,
   IAiWebSearchPayload,
-  TAiAgentStreamEvent,
 } from './ai';
 import type {
   IAiEditAuthState,
@@ -301,27 +290,14 @@ export interface ITauriService {
   onAiNarratorStream(
     handler: (payload: IAiNarratorStreamEventPayload) => void,
   ): Promise<() => void>;
-  onAiAgentStream(handler: (payload: TAiAgentStreamEvent) => void): Promise<() => void>;
   aiInlineComplete(payload: IAiInlineCompletionRequest): Promise<IAiInlineCompletionResult>;
   aiCodeAction(payload: IAiCodeActionRequest): Promise<IAiCodeActionResult>;
   aiAgentClassifyTask(payload: IAiAgentClassifyTaskRequest): Promise<IAiAgentClassifyTaskPayload>;
-  aiPlanTask(payload: IAiAgentPlanRequest): Promise<IAiAgentPlanPayload>;
-  aiAgentApprovePlan(payload: IAiAgentApprovePlanRequest): Promise<IAiAgentApprovePlanPayload>;
-  aiAgentRunPlan(payload: IAiAgentRunPlanRequest): Promise<IAiAgentRunPayload>;
-  aiAgentRunStep(payload: IAiAgentRunStepRequest): Promise<IAiAgentRunPayload>;
-  aiAgentPause(payload: IAiAgentRunIdRequest): Promise<IAiAgentRunPayload>;
-  aiAgentResume(payload: IAiAgentRunIdRequest): Promise<IAiAgentRunPayload>;
-  aiAgentCancel(payload: IAiAgentRunIdRequest): Promise<IAiAgentRunPayload>;
-  aiAgentGetRun(payload: IAiAgentRunIdRequest): Promise<IAiAgentRunPayload>;
-  aiAgentListRuns(): Promise<IAiAgentListRunsPayload>;
   aiWebSearch(payload: IAiWebSearchInput): Promise<IAiWebSearchPayload>;
   aiWebFetch(payload: IAiWebFetchInput): Promise<IAiWebFetchPayload>;
   aiAgentSetNetworkPermission(
     payload: IAiAgentSetNetworkPermissionRequest,
   ): Promise<IAiAgentNetworkPermissionPayload>;
-  aiAgentResolveToolConfirmation(
-    payload: IAiAgentResolveToolConfirmationRequest,
-  ): Promise<IAiAgentRunPayload>;
   aiBuildIndex(payload: IAiBuildIndexRequest): Promise<IAiBuildIndexPayload>;
   aiQueryIndex(payload: IAiQueryIndexRequest): Promise<IAiQueryIndexPayload>;
   aiProposePatch(payload: IAiProposePatchRequest): Promise<IAiProposePatchPayload>;

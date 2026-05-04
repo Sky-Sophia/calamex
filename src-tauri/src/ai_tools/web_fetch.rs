@@ -8,7 +8,7 @@ use reqwest::header::{ACCEPT, ACCEPT_ENCODING};
 
 use crate::ai::audit::{self, AiAuditEventKind};
 use crate::ai::errors;
-use crate::ai_agent::runtime;
+use crate::ai::network_permission;
 use crate::commands::contracts::{AiWebFetchInput, AiWebFetchPayload, AiWebFetchResultPayload};
 
 const MAX_WEB_FETCH_BYTES: usize = 512 * 1024;
@@ -35,7 +35,7 @@ async fn fetch_with_permission(
 ) -> Result<AiWebFetchPayload, String> {
     let url = validate_fetch_url(&input.url)?;
     if require_runtime_permission {
-        if let Err(error) = runtime::ensure_network_allowed() {
+        if let Err(error) = network_permission::ensure_network_allowed() {
             audit::emit(AiAuditEventKind::AgentWebFetchFailed);
             return Err(error);
         }

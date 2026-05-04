@@ -27,19 +27,9 @@ import {
   aiEditUndoOperationRequestSchema,
 } from '@/types/ai-edit.schema';
 import {
-  aiAgentApprovePlanPayloadSchema,
-  aiAgentApprovePlanRequestSchema,
   aiAgentClassifyTaskPayloadSchema,
   aiAgentClassifyTaskRequestSchema,
-  aiAgentListRunsPayloadSchema,
   aiAgentNetworkPermissionPayloadSchema,
-  aiAgentPlanPayloadSchema,
-  aiAgentPlanRequestSchema,
-  aiAgentResolveToolConfirmationRequestSchema,
-  aiAgentRunIdRequestSchema,
-  aiAgentRunPayloadSchema,
-  aiAgentRunPlanRequestSchema,
-  aiAgentRunStepRequestSchema,
   aiAgentSetNetworkPermissionRequestSchema,
   aiApplyPatchMetadataSchema,
   aiChatPayloadSchema,
@@ -65,7 +55,7 @@ import {
   aiWebFetchInputSchema,
   aiWebFetchPayloadSchema,
   aiWebSearchInputSchema,
-  aiWebSearchPayloadSchema,
+  aiWebSearchPayloadSchema
 } from '@/types/ai.schema';
 import { z } from 'zod';
 
@@ -792,49 +782,9 @@ export const tauriContracts = {
     inSchema: aiAgentClassifyTaskRequestSchema,
     outSchema: aiAgentClassifyTaskPayloadSchema,
   },
-  aiPlanTask: {
-    inSchema: aiAgentPlanRequestSchema,
-    outSchema: aiAgentPlanPayloadSchema,
-  },
-  aiAgentApprovePlan: {
-    inSchema: aiAgentApprovePlanRequestSchema,
-    outSchema: aiAgentApprovePlanPayloadSchema,
-  },
-  aiAgentRunPlan: {
-    inSchema: aiAgentRunPlanRequestSchema,
-    outSchema: aiAgentRunPayloadSchema,
-  },
-  aiAgentRunStep: {
-    inSchema: aiAgentRunStepRequestSchema,
-    outSchema: aiAgentRunPayloadSchema,
-  },
-  aiAgentPause: {
-    inSchema: aiAgentRunIdRequestSchema,
-    outSchema: aiAgentRunPayloadSchema,
-  },
-  aiAgentResume: {
-    inSchema: aiAgentRunIdRequestSchema,
-    outSchema: aiAgentRunPayloadSchema,
-  },
-  aiAgentCancel: {
-    inSchema: aiAgentRunIdRequestSchema,
-    outSchema: aiAgentRunPayloadSchema,
-  },
-  aiAgentGetRun: {
-    inSchema: aiAgentRunIdRequestSchema,
-    outSchema: aiAgentRunPayloadSchema,
-  },
-  aiAgentListRuns: {
-    inSchema: z.void(),
-    outSchema: aiAgentListRunsPayloadSchema,
-  },
   aiAgentSetNetworkPermission: {
     inSchema: aiAgentSetNetworkPermissionRequestSchema,
     outSchema: aiAgentNetworkPermissionPayloadSchema,
-  },
-  aiAgentResolveToolConfirmation: {
-    inSchema: aiAgentResolveToolConfirmationRequestSchema,
-    outSchema: aiAgentRunPayloadSchema,
   },
   aiWebSearch: {
     inSchema: aiWebSearchInputSchema,

@@ -2,6 +2,7 @@
 pub mod credential;
 pub mod errors;
 pub mod gateway;
+pub mod network_permission;
 pub mod openai_compatible;
 pub mod provider;
 pub mod redaction;

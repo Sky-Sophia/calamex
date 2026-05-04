@@ -304,20 +304,10 @@ pub async fn code_action(payload: AiCodeActionRequest) -> Result<AiCodeActionPay
     })
 }
 
-pub async fn plan_task(payload: AiAgentPlanRequest) -> Result<AiAgentPlanPayload, String> {
-    AgentPlanner::create_plan(payload)
-}
-
 pub async fn classify_task(
     payload: AiAgentClassifyTaskRequest,
 ) -> Result<AiAgentClassifyTaskPayload, String> {
     AgentPlanner::classify_task(payload)
-}
-
-pub async fn approve_plan(
-    payload: AiAgentApprovePlanRequest,
-) -> Result<AiAgentApprovePlanPayload, String> {
-    AgentPlanner::approve_plan(payload)
 }
 
 fn collect_messages(

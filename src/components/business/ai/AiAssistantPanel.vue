@@ -9,7 +9,6 @@ import AiToolConfirmationCard from '@/components/business/ai/AiToolConfirmationC
 import AiWebSourcesPanel from '@/components/business/ai/AiWebSourcesPanel.vue';
 import { useAiAgentNetwork } from '@/composables/useAiAgentNetwork';
 import { useAiAgentRun } from '@/composables/useAiAgentRun';
-import { useAiAgentStream } from '@/composables/useAiAgentStream';
 import { useAiAssistant } from '@/composables/useAiAssistant';
 import { useAiWebSources } from '@/composables/useAiWebSources';
 import { findAiServicePlatformByModel } from '@/constants/ai-providers';
@@ -77,7 +76,6 @@ const assistant = useAiAssistant({
 });
 const agentRun = useAiAgentRun();
 const agentNetwork = useAiAgentNetwork();
-const agentStream = useAiAgentStream();
 const webSources = useAiWebSources();
 const settingsDraft = ref<IAiConfigPayload>(cloneAiConfigPayload(assistant.config.value));
 const settingsApiKey = ref('');
@@ -684,24 +682,7 @@ const handleResolveToolConfirmation = async (
     return;
   }
 
-  const resolvedRun = await withAgentRunAction(
-    (runId) => agentRun.resolveToolConfirmation(runId, confirmation.id, decision),
-    '处理工具确认失败。',
-  );
-
-  if (decision === 'stop' || !resolvedRun) {
-    return;
-  }
-
-  const run = await withAgentRunAction(
-    (runId) => agentRun.runStep(runId),
-    '继续执行 Agent step 失败。',
-  );
-  const nextRunningStep = findRunningStep(run);
-
-  if (nextRunningStep) {
-    await runWebToolsForStep(nextRunningStep);
-  }
+  planStore.value.errorMessage = 'Legacy Agent 工具确认链已移除，请使用官方 sidecar 审批链。';
 };
 
 const saveSettings = async (
@@ -778,7 +759,6 @@ onMounted(() => {
   }).catch(() => undefined);
   assistant.loadTools().catch(() => undefined);
   assistant.loadProviderProfiles().catch(() => undefined);
-  agentStream.start().catch(() => undefined);
 
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', handleHistoryViewportChange);

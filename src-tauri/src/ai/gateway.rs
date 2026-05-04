@@ -7,9 +7,8 @@ use super::redaction::redact_text;
 use super::stream_manager;
 use crate::ai_agent::planner::AgentPlanner;
 use crate::commands::contracts::{
-    AiAgentApprovePlanPayload, AiAgentApprovePlanRequest, AiAgentClassifyTaskPayload,
-    AiAgentClassifyTaskRequest, AiAgentPlanPayload, AiAgentPlanRequest, AiChatRequest,
-    AiCodeActionPayload, AiCodeActionRequest, AiConfigPayload, AiContextReferencePayload,
+    AiAgentClassifyTaskPayload, AiAgentClassifyTaskRequest, AiChatRequest, AiCodeActionPayload,
+    AiCodeActionRequest, AiConfigPayload, AiContextReferencePayload,
     AiConversationTitlePayload, AiConversationTitleRequest, AiInlineCompletionRangePayload,
     AiInlineCompletionRequest, AiInlineCompletionResult, AiModelEndpointConfigPayload,
     AiNarratorFactsPayload, AiNarratorRequest, AiNarratorResponsePayload,
@@ -38,8 +37,7 @@ pub use config::{
 };
 pub use connection::{connect_provider, test_provider, test_provider_config};
 pub use conversation::{
-    approve_plan, chat, chat_stream, classify_task, code_action, generate_conversation_title,
-    inline_complete, plan_task,
+    chat, chat_stream, classify_task, code_action, generate_conversation_title, inline_complete,
 };
 pub use narrator::{narrate_activity, narrate_activity_stream};
 

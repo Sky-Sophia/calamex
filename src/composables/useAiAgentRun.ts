@@ -8,8 +8,7 @@ import {
 } from '@/utils/agent-sidecar-events';
 import { toErrorMessage } from '@/utils/error';
 
-import type { IAgentSidecarMessage } from '@/types/agent-sidecar';
-import type { TAgentUiEvent } from '@/types/agent-sidecar';
+import type { IAgentSidecarMessage, TAgentUiEvent } from '@/types/agent-sidecar';
 import type {
   IAiAgentRun,
   IAiAgentStepFinalAnswer,
@@ -38,6 +37,15 @@ interface ISidecarStepLoopSession {
 }
 
 const SIDECAR_STEP_CONFIRMATION_PREFIX = 'sidecar-step-tool-confirmation:';
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
+const createSidecarRunId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `sidecar-plan:${crypto.randomUUID()}`;
+  }
+
+  return `sidecar-plan:${Date.now()}`;
+};
 
 const createSidecarStepSessionId = (runId: string, stepId: string): string =>
   `sidecar-step:${runId}:${stepId}:${Date.now()}`;
@@ -134,6 +142,21 @@ const toStepFinalAnswer = (
   createdAt,
 });
 
+const isTerminalRunStatus = (status: IAiAgentRun['status']): boolean =>
+  TERMINAL_RUN_STATUSES.has(status);
+
+const clearStepActivityFlags = (steps: IAiTaskPlanStep[]): IAiTaskPlanStep[] =>
+  steps.map((step) => ({
+    ...step,
+    isActive: false,
+  }));
+
+const cloneStepsForRun = (steps: IAiTaskPlanStep[]): IAiTaskPlanStep[] =>
+  clearStepActivityFlags(steps).map((step) => ({
+    ...step,
+    status: step.status === 'done' ? 'done' : 'pending',
+  }));
+
 export const useAiAgentRun = () => {
   const store = useAiAgentStore();
   const { refreshSidecarChangedDocuments } = useSidecarChangedDocumentRefresh();
@@ -144,6 +167,29 @@ export const useAiAgentRun = () => {
     store.mode = 'agent';
     store.errorMessage = '';
     return run;
+  };
+
+  const getRunOrThrow = (runId: string): IAiAgentRun => {
+    const run = store.runs.find((item) => item.id === runId) ?? null;
+
+    if (!run) {
+      throw new Error('当前没有可执行的 Agent run。');
+    }
+
+    return run;
+  };
+
+  const updateRun = (
+    runId: string,
+    updater: (run: IAiAgentRun) => IAiAgentRun,
+  ): IAiAgentRun => applyRunPayload(updater(getRunOrThrow(runId)));
+
+  const clearRunSessions = (runId: string): void => {
+    for (const [confirmationId, session] of sidecarStepLoopSessions.entries()) {
+      if (session.runId === runId) {
+        sidecarStepLoopSessions.delete(confirmationId);
+      }
+    }
   };
 
   const appendSidecarToolState = (
@@ -211,42 +257,103 @@ export const useAiAgentRun = () => {
   const runPlan = async (
     goal: string,
     steps: IAiTaskPlanStep[],
-    context: IAiContextReference[] = [],
+    _context: IAiContextReference[] = [],
   ): Promise<IAiAgentRun> => {
     try {
-      const payload = await aiService.runPlan({ goal, steps, context });
-      return applyRunPayload(payload.run);
+      const now = new Date().toISOString();
+      const run: IAiAgentRun = {
+        id: createSidecarRunId(),
+        goal,
+        status: 'running-plan',
+        steps: cloneStepsForRun(steps),
+        currentStepId: null,
+        createdAt: now,
+        updatedAt: now,
+        startedAt: now,
+        completedAt: null,
+        errorMessage: null,
+      };
+      clearRunSessions(run.id);
+      store.clearPendingToolConfirmation();
+      return applyRunPayload(run);
     } catch (error) {
       store.errorMessage = toErrorMessage(error, '启动 Agent run 失败。');
       throw error;
     }
   };
 
-  const runStep = async (
-    runId: string,
-    stepId?: string,
-  ): Promise<IAiAgentRun> => {
-    try {
-      const payload = await aiService.runStep({ runId, stepId });
-      return applyRunPayload(payload.run);
-    } catch (error) {
-      store.errorMessage = toErrorMessage(error, '执行 Agent step 失败。');
-      throw error;
+  const findNextStep = (run: IAiAgentRun, stepId?: string): IAiTaskPlanStep | null => {
+    if (stepId) {
+      return run.steps.find((step) => step.id === stepId) ?? null;
     }
+
+    return findRunningStep(run)
+      ?? run.steps.find((step) => step.status === 'pending')
+      ?? null;
   };
 
-  const completeStepWithoutLegacyTools = async (
-    runId: string,
-    stepId: string,
-  ): Promise<IAiAgentRun> => {
-    const completedPayload = await aiService.runStep({
-      runId,
-      stepId,
-      skipToolExecution: true,
+  const markStepRunning = (runId: string, stepId?: string): IAiAgentRun =>
+    updateRun(runId, (run) => {
+      const targetStep = findNextStep(run, stepId);
+
+      if (!targetStep) {
+        throw new Error('当前没有可执行的 Agent step。');
+      }
+
+      const now = new Date().toISOString();
+      return {
+        ...run,
+        status: 'running-step',
+        currentStepId: targetStep.id,
+        updatedAt: now,
+        errorMessage: null,
+        steps: run.steps.map((step) => ({
+          ...step,
+          status: step.id === targetStep.id ? 'running' : step.status,
+          isActive: step.id === targetStep.id,
+        })),
+      };
     });
 
-    return applyRunPayload(completedPayload.run);
-  };
+  const finishRunWithStepStatus = (
+    runId: string,
+    stepId: string,
+    stepStatus: IAiTaskPlanStep['status'],
+    runStatus?: IAiAgentRun['status'],
+    errorMessage: string | null = null,
+  ): IAiAgentRun =>
+    updateRun(runId, (run) => {
+      const now = new Date().toISOString();
+      const nextSteps = clearStepActivityFlags(run.steps).map((step) => (
+        step.id === stepId
+          ? {
+            ...step,
+            status: stepStatus,
+          }
+          : step
+      ));
+      const hasRemainingPendingSteps = nextSteps.some((step) => step.status === 'pending');
+      const nextRunStatus = runStatus
+        ?? (!hasRemainingPendingSteps ? 'completed' : 'running-plan');
+
+      return {
+        ...run,
+        status: nextRunStatus,
+        currentStepId: null,
+        updatedAt: now,
+        completedAt: isTerminalRunStatus(nextRunStatus) ? now : null,
+        errorMessage,
+        steps: nextSteps,
+      };
+    });
+
+  const setRunWaitingForConfirmation = (runId: string): IAiAgentRun =>
+    updateRun(runId, (run) => ({
+      ...run,
+      status: 'waiting-for-tool-confirmation',
+      updatedAt: new Date().toISOString(),
+      errorMessage: null,
+    }));
 
   const executeSidecarStepLoop = async (
     session: ISidecarStepLoopSession,
@@ -261,6 +368,7 @@ export const useAiAgentRun = () => {
       liveEvents.push(payload.event);
       appendSidecarLiveToolActivities(session.runId, session.stepId, liveEvents);
     });
+
     let payload: Awaited<ReturnType<typeof aiService.sidecarExecute>>;
 
     try {
@@ -274,8 +382,8 @@ export const useAiAgentRun = () => {
     } finally {
       unlistenSidecarStream();
     }
-    const projection = projectSidecarExecuteResponse(payload);
 
+    const projection = projectSidecarExecuteResponse(payload);
     appendSidecarToolState(session.runId, session.stepId, projection.toolCalls);
     await refreshChangedDocumentsAfterSidecarRun(projection, session.workspaceRootPath);
 
@@ -296,25 +404,22 @@ export const useAiAgentRun = () => {
         runId: session.runId,
         stepId: session.stepId,
       });
-
-      const activeRun = store.activeRun;
-      if (!activeRun) {
-        throw new Error('Sidecar step loop 已暂停，但当前 Agent run 不存在。');
-      }
-      return activeRun;
+      return setRunWaitingForConfirmation(session.runId);
     }
 
     if (projection.errorMessage) {
       store.errorMessage = projection.errorMessage;
-      const activeRun = store.activeRun;
-      if (!activeRun) {
-        throw new Error(projection.errorMessage);
-      }
-      return activeRun;
+      return finishRunWithStepStatus(
+        session.runId,
+        session.stepId,
+        'failed',
+        'failed',
+        projection.errorMessage,
+      );
     }
 
-    const finalContent = projection.assistantContent;
-    if (finalContent.trim()) {
+    const finalContent = projection.assistantContent.trim();
+    if (finalContent) {
       const createdAt = new Date().toISOString();
       store.appendStepFinalAnswer(
         toStepFinalAnswer(
@@ -327,7 +432,19 @@ export const useAiAgentRun = () => {
       );
     }
 
-    return completeStepWithoutLegacyTools(session.runId, session.stepId);
+    return finishRunWithStepStatus(session.runId, session.stepId, 'done');
+  };
+
+  const runStep = async (
+    runId: string,
+    stepId?: string,
+  ): Promise<IAiAgentRun> => {
+    try {
+      return markStepRunning(runId, stepId);
+    } catch (error) {
+      store.errorMessage = toErrorMessage(error, '执行 Agent step 失败。');
+      throw error;
+    }
   };
 
   const runStepWithSidecar = async (
@@ -339,8 +456,7 @@ export const useAiAgentRun = () => {
       let step = findRunningStep(run);
 
       if (!step) {
-        const startedPayload = await aiService.runStep({ runId });
-        run = applyRunPayload(startedPayload.run);
+        run = await runStep(runId);
         step = findRunningStep(run);
       }
 
@@ -363,7 +479,6 @@ export const useAiAgentRun = () => {
       throw error;
     }
   };
-
   const hasSidecarStepToolConfirmation = (confirmationId: string): boolean =>
     sidecarStepLoopSessions.has(confirmationId);
 
@@ -380,10 +495,6 @@ export const useAiAgentRun = () => {
     sidecarStepLoopSessions.delete(confirmationId);
     store.clearPendingToolConfirmation(confirmationId);
 
-    if (decision === 'stop') {
-      return cancelRun(session.runId);
-    }
-
     const sidecarSessionId = session.sessionId ?? createSidecarStepSessionId(session.runId, session.stepId);
     const liveEvents: TAgentUiEvent[] = [];
     const unlistenSidecarStream = await aiService.onSidecarStream((payload) => {
@@ -394,6 +505,7 @@ export const useAiAgentRun = () => {
       liveEvents.push(payload.event);
       appendSidecarLiveToolActivities(session.runId, session.stepId, liveEvents);
     });
+
     let payload: Awaited<ReturnType<typeof aiService.sidecarResolveApproval>>;
 
     try {
@@ -405,13 +517,33 @@ export const useAiAgentRun = () => {
     } finally {
       unlistenSidecarStream();
     }
-    const projection = projectSidecarExecuteResponse(payload);
 
+    const projection = projectSidecarExecuteResponse(payload);
     appendSidecarToolState(session.runId, session.stepId, projection.toolCalls);
     await refreshChangedDocumentsAfterSidecarRun(projection, session.workspaceRootPath);
 
-    const finalContent = projection.assistantContent;
-    if (finalContent.trim()) {
+    if (projection.pendingConfirmation) {
+      const nextConfirmationId = createSidecarStepConfirmationId(
+        session,
+        projection.pendingConfirmation.id,
+      );
+
+      sidecarStepLoopSessions.set(nextConfirmationId, {
+        ...session,
+        sessionId: payload.sessionId,
+        pendingRequestId: projection.pendingConfirmation.id,
+      });
+      store.setPendingToolConfirmation({
+        ...projection.pendingConfirmation,
+        id: nextConfirmationId,
+        runId: session.runId,
+        stepId: session.stepId,
+      });
+      return setRunWaitingForConfirmation(session.runId);
+    }
+
+    const finalContent = projection.assistantContent.trim();
+    if (finalContent) {
       const createdAt = new Date().toISOString();
       store.appendStepFinalAnswer(
         toStepFinalAnswer(
@@ -424,45 +556,42 @@ export const useAiAgentRun = () => {
       );
     }
 
-    if (projection.pendingConfirmation) {
-      const nextConfirmationId = createSidecarStepConfirmationId(
-        session,
-        projection.pendingConfirmation.id,
-      );
-      sidecarStepLoopSessions.set(nextConfirmationId, {
-        ...session,
-        sessionId: payload.sessionId,
-        pendingRequestId: projection.pendingConfirmation.id,
-      });
-      store.setPendingToolConfirmation({
-        ...projection.pendingConfirmation,
-        id: nextConfirmationId,
-        runId: session.runId,
-        stepId: session.stepId,
-      });
-      const activeRun = store.activeRun;
-      if (!activeRun) {
-        throw new Error('Sidecar step loop 已继续等待确认，但当前 Agent run 不存在。');
-      }
-      return activeRun;
-    }
-
     if (projection.errorMessage) {
       store.errorMessage = projection.errorMessage;
-      const activeRun = store.activeRun;
-      if (!activeRun) {
-        throw new Error(projection.errorMessage);
-      }
-      return activeRun;
+      return finishRunWithStepStatus(
+        session.runId,
+        session.stepId,
+        decision === 'stop' ? 'cancelled' : 'failed',
+        decision === 'stop' ? 'cancelled' : 'failed',
+        projection.errorMessage,
+      );
     }
 
-    return completeStepWithoutLegacyTools(session.runId, session.stepId);
+    if (decision === 'stop') {
+      return finishRunWithStepStatus(
+        session.runId,
+        session.stepId,
+        'cancelled',
+        'cancelled',
+      );
+    }
+
+    return finishRunWithStepStatus(session.runId, session.stepId, 'done');
   };
 
   const pauseRun = async (runId: string): Promise<IAiAgentRun> => {
     try {
-      const payload = await aiService.pauseRun({ runId });
-      return applyRunPayload(payload.run);
+      return updateRun(runId, (run) => {
+        if (isTerminalRunStatus(run.status)) {
+          return run;
+        }
+
+        return {
+          ...run,
+          status: 'paused',
+          updatedAt: new Date().toISOString(),
+        };
+      });
     } catch (error) {
       store.errorMessage = toErrorMessage(error, '暂停 Agent run 失败。');
       throw error;
@@ -471,8 +600,11 @@ export const useAiAgentRun = () => {
 
   const resumeRun = async (runId: string): Promise<IAiAgentRun> => {
     try {
-      const payload = await aiService.resumeRun({ runId });
-      return applyRunPayload(payload.run);
+      return updateRun(runId, (run) => ({
+        ...run,
+        status: run.status === 'paused' ? 'running-plan' : run.status,
+        updatedAt: new Date().toISOString(),
+      }));
     } catch (error) {
       store.errorMessage = toErrorMessage(error, '继续 Agent run 失败。');
       throw error;
@@ -480,9 +612,35 @@ export const useAiAgentRun = () => {
   };
 
   const cancelRun = async (runId: string): Promise<IAiAgentRun> => {
+    const confirmation = store.pendingToolConfirmation;
+    if (confirmation?.runId === runId && hasSidecarStepToolConfirmation(confirmation.id)) {
+      return resolveSidecarStepToolConfirmation(confirmation.id, 'stop');
+    }
+
     try {
-      const payload = await aiService.cancelRun({ runId });
-      return applyRunPayload(payload.run);
+      clearRunSessions(runId);
+      store.clearPendingToolConfirmation();
+      return updateRun(runId, (run) => {
+        const now = new Date().toISOString();
+        const nextSteps = clearStepActivityFlags(run.steps).map((step) => (
+          step.id === run.currentStepId && step.status !== 'done'
+            ? {
+              ...step,
+              status: 'cancelled',
+            }
+            : step
+        ));
+
+        return {
+          ...run,
+          status: 'cancelled',
+          currentStepId: null,
+          updatedAt: now,
+          completedAt: now,
+          errorMessage: null,
+          steps: nextSteps,
+        };
+      });
     } catch (error) {
       store.errorMessage = toErrorMessage(error, '取消 Agent run 失败。');
       throw error;
@@ -490,34 +648,20 @@ export const useAiAgentRun = () => {
   };
 
   const resolveToolConfirmation = async (
-    runId: string,
+    _runId: string,
     confirmationId: string,
     decision: TAiToolConfirmationDecision,
   ): Promise<IAiAgentRun> => {
-    try {
-      const payload = await aiService.resolveToolConfirmation({
-        runId,
-        confirmationId,
-        decision,
-      });
-      store.clearPendingToolConfirmation(confirmationId);
-      return applyRunPayload(payload.run);
-    } catch (error) {
-      store.errorMessage = toErrorMessage(error, '处理工具确认失败。');
-      throw error;
+    if (hasSidecarStepToolConfirmation(confirmationId)) {
+      return resolveSidecarStepToolConfirmation(confirmationId, decision);
     }
+
+    throw new Error('Legacy Agent 工具确认链已移除，请使用官方 sidecar 审批链。');
   };
 
-  const refreshRun = async (runId: string): Promise<IAiAgentRun> => {
-    const payload = await aiService.getRun({ runId });
-    return applyRunPayload(payload.run);
-  };
+  const refreshRun = async (runId: string): Promise<IAiAgentRun> => getRunOrThrow(runId);
 
-  const loadRuns = async (): Promise<IAiAgentRun[]> => {
-    const payload = await aiService.listRuns();
-    store.setRuns(payload.runs);
-    return payload.runs;
-  };
+  const loadRuns = async (): Promise<IAiAgentRun[]> => store.runs;
 
   return {
     store,
