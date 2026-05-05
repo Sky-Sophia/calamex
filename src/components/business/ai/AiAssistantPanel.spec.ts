@@ -80,6 +80,15 @@ const createAssistantMock = (
     const proposedPatch = ref<IAiPatchSet | null>(null);
     const isApplyingPatch = ref(false);
     const runtimeTimelineEvents = ref<TAgentRuntimeEvent[]>([]);
+    const conversationCheckpoints = ref<Array<{
+        id: string;
+        messageId: string;
+        runId: string;
+        snapshotId: string;
+        sessionId: string;
+        createdAt: string;
+    }>>([]);
+    const restoringCheckpointId = ref<string | null>(null);
     const fileRollbackPrompt = ref<{
         operationId: string;
         fileCount: number;
@@ -133,6 +142,8 @@ const createAssistantMock = (
         proposedPatch,
         isApplyingPatch,
         runtimeTimelineEvents,
+        conversationCheckpoints,
+        restoringCheckpointId,
         fileRollbackPrompt,
         agentPlan: {
             store: agentPlanStore,
@@ -158,6 +169,7 @@ const createAssistantMock = (
         previewPatchFromLastAnswer: vi.fn(),
         applyProposedPatch: vi.fn(),
         rollbackLatestFileChange: vi.fn(),
+        restoreConversationCheckpoint: vi.fn().mockResolvedValue(undefined),
         resolveSidecarToolConfirmation: vi.fn(),
         sendMessage: vi.fn(),
         handleMessageAction: vi.fn(),
@@ -306,6 +318,66 @@ describe('AiAssistantPanel', () => {
         expect(wrapper.find('.ai-model-button').exists()).toBe(false);
         expect(wrapper.find('.ai-mode-menu').exists()).toBe(false);
         expect(wrapper.findAll('.ai-panel-actions .ai-icon-button')).toHaveLength(3);
+    });
+
+    it('在带 checkpoint 的消息后渲染恢复入口并触发 restore', async () => {
+        const messages = [createMessage(1), createMessage(2), createMessage(3)];
+        const assistantMock = createAssistantMock(messages);
+        assistantMock.conversationCheckpoints.value = [{
+            id: 'checkpoint-1',
+            messageId: 'message-2',
+            runId: 'run-1',
+            snapshotId: 'snapshot-1',
+            sessionId: 'session-1',
+            createdAt: '2026-04-28T10:02:00.000Z',
+        }];
+        useAiAssistantMock.mockReturnValue(assistantMock);
+
+        const wrapper = mount(AiAssistantPanel, {
+            props: {
+                document: createDocument(),
+                activeRun: null as IActiveRunSummary | null,
+                analysis: createAnalysis(),
+                selection: null as IEditorSelectionSummary | null,
+                gitStatus: createGitStatus(),
+                workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+            },
+            global: {
+                stubs: {
+                    AiChatThread: {
+                        props: ['messages'],
+                        template: `
+                          <div class="thread-stub">
+                            <div v-for="message in messages" :key="message.id" class="thread-stub__message">
+                              <slot name="after-message" :message="message" />
+                            </div>
+                          </div>
+                        `,
+                    },
+                    Checkpoint: { template: '<div class="checkpoint-stub"><slot /></div>' },
+                    CheckpointTrigger: {
+                        props: ['disabled', 'tooltip'],
+                        emits: ['click'],
+                        template: '<button class="checkpoint-trigger-stub" :disabled="disabled" :title="tooltip" @click="$emit(\'click\')"><slot /></button>',
+                    },
+                    CheckpointIcon: { template: '<span class="checkpoint-icon-stub" />' },
+                    Loader: { template: '<span class="loader-stub" />' },
+                    AiPatchPreview: { template: '<div />' },
+                    AiPromptInput: { template: '<div />' },
+                    AiProviderSettings: { template: '<div />' },
+                    AiPlanModePanel: { template: '<div />' },
+                    AiWebSourcesPanel: { template: '<div />' },
+                    AiToolConfirmationCard: { template: '<div />' },
+                    teleport: true,
+                },
+            },
+        });
+
+        expect(wrapper.find('.checkpoint-trigger-stub').text()).toContain('恢复到');
+
+        await wrapper.find('.checkpoint-trigger-stub').trigger('click');
+
+        expect(assistantMock.restoreConversationCheckpoint).toHaveBeenCalledWith('checkpoint-1');
     });
 
     it('将预览 Patch 入口放在预览面板下方并保留点击动作', async () => {

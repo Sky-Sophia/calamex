@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   agentSidecarChatRequestSchema,
+  agentSidecarCheckpointRestoreRequestSchema,
   agentSidecarExecuteRequestSchema,
   agentSidecarHealthPayloadSchema,
   agentSidecarPlanRequestSchema,
@@ -10,7 +11,7 @@ import {
 
 describe('agent sidecar event contract', () => {
   it('validates a complex full-process Agent timeline with question, tools, approval and final answer', () => {
-    const userQuestion = '把 AI 面板迁移为 Tauri -> Node sidecar -> Strands -> DeepSeek，并修复工具调用失败。';
+    const userQuestion = '把 AI 面板迁移为 Tauri -> Node sidecar -> Mastra，并修复工具调用失败。';
     const response = {
       sessionId: 'agent-session-complex-1',
       events: [
@@ -21,7 +22,7 @@ describe('agent sidecar event contract', () => {
             type: 'agent.tool.started',
             runId: 'run-1',
             sessionId: 'agent-session-complex-1',
-            agentId: 'strands-agent',
+            agentId: 'mastra-agent',
             timestamp: '2026-05-01T10:00:00.000Z',
             seq: 0,
             schemaVersion: 1,
@@ -85,7 +86,7 @@ describe('agent sidecar event contract', () => {
               {
                 id: 'step-2',
                 title: '接入 Node sidecar 边界',
-                goal: '新增 AgentEngine 抽象、Strands adapter、DeepSeek 配置和 Rust IPC 代理。',
+                goal: '新增 AgentEngine 抽象、Mastra runtime、模型配置和 Rust IPC 代理。',
                 status: 'done',
                 tools: ['write_file'],
                 riskLevel: 'medium',
@@ -155,7 +156,7 @@ describe('agent sidecar event contract', () => {
     const parsed = agentSidecarHealthPayloadSchema.parse({
       ok: true,
       status: 'ready',
-      engine: 'strands',
+      engine: 'mastra',
       version: '0.1.0',
       mcp: {
         configuredServers: 1,
@@ -214,5 +215,19 @@ describe('agent sidecar event contract', () => {
         context: [],
       }).goal,
     ).toBe('run');
+  });
+
+  it('accepts rollback restore requests with nested durable step paths', () => {
+    const parsed = agentSidecarCheckpointRestoreRequestSchema.parse({
+      runId: 'run-1',
+      snapshotId: 'snapshot-1',
+      step: ['durable-agentic-execution', 'durable-llm-execution'],
+    });
+
+    expect(parsed).toEqual({
+      runId: 'run-1',
+      snapshotId: 'snapshot-1',
+      step: ['durable-agentic-execution', 'durable-llm-execution'],
+    });
   });
 });

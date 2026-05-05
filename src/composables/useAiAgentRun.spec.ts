@@ -96,7 +96,7 @@ describe('useAiAgentRun', () => {
         expect(store.steps[0]?.status).toBe('running');
     });
 
-    it('通过 Strands sidecar 执行复杂任务 step 并完成步骤', async () => {
+    it('通过 Mastra sidecar 执行复杂任务 step 并完成步骤', async () => {
         aiServiceMock.sidecarExecute.mockResolvedValueOnce({
             sessionId: 'sidecar-step-session-1',
             events: [

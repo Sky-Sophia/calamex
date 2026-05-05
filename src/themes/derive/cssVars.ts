@@ -137,5 +137,9 @@ export function emitCssVars(roles: IRoles, tokens: IComponentTokens): void {
     set('--r-surface-editor-gutter', roles.surface.editorGutter);
     set('--r-surface-overlay', roles.surface.overlay);
     set('--r-accent-default', roles.accent.default);
+    set('--r-accent-strong', roles.accent.strong);
+    set('--r-accent-muted', roles.accent.muted);
+    set('--r-accent-soft', roles.accent.soft);
+    set('--r-accent-statusbar', roles.accent.statusbar);
     set('--r-text-primary', roles.text.primary);
 }

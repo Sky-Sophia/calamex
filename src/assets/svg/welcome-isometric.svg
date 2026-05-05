@@ -52,7 +52,7 @@
         <animate attributeName="stroke-opacity" values="0;.55;0" dur="3s" repeatCount="indefinite"/>
       </ellipse>
     </g>
-    <circle cx="0" cy="-160" r="2.4" fill="#5E6AD2">
+    <circle cx="0" cy="-160" r="2.4" fill="#0969DA">
       <animate attributeName="opacity" values=".55;1;.55" dur="3s" repeatCount="indefinite"/>
     </circle>
     <g stroke="rgba(255,255,255,.38)" stroke-width=".6" fill="none" stroke-dasharray="1.5 2.5">

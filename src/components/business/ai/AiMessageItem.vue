@@ -1,8 +1,4 @@
 <script setup lang="ts">
-import AiAgentRuntimeTimeline from '@/components/business/ai/AiAgentRuntimeTimeline.vue';
-import AiMarkdown from '@/components/business/ai/AiMarkdown.vue';
-import AiProviderIcon from '@/components/business/ai/AiProviderIcon.vue';
-import AiToolActivityInline from '@/components/business/ai/AiToolActivityInline.vue';
 import { Loader } from '@/components/ai-elements/loader';
 import {
   Message,
@@ -11,6 +7,9 @@ import {
   MessageContent,
   MessageToolbar,
 } from '@/components/ai-elements/message';
+import AiAgentRuntimeTimeline from '@/components/business/ai/AiAgentRuntimeTimeline.vue';
+import AiMarkdown from '@/components/business/ai/AiMarkdown.vue';
+import AiToolActivityInline from '@/components/business/ai/AiToolActivityInline.vue';
 import { useMessage } from '@/composables/useMessage';
 import type { TAiServicePlatformId } from '@/constants/ai-providers';
 import type { IAiChatMessage, IAiContextReference, TAiChatMessageActionId } from '@/types/ai';
@@ -239,88 +238,42 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Message
-    v-if="shouldRenderMessage"
-    :from="message.role"
-    class="ai-message"
-    :class="[`is-${message.role}`, { 'is-inline-loading': shouldShowInlineLoader }]"
-  >
-    <AiProviderIcon
-      v-if="message.role !== 'user'"
-      class="ai-logo"
-      :platform-id="platformId"
-      :title="providerLabel"
-    />
+  <Message v-if="shouldRenderMessage" :from="message.role" class="ai-message"
+    :class="[`is-${message.role}`, { 'is-inline-loading': shouldShowInlineLoader }]">
     <div class="ai-message-main">
-      <div
-        v-if="shouldShowInlineLoader"
-        class="ai-message-status-line"
-        role="status"
-        aria-live="polite"
-      >
+      <div v-if="shouldShowInlineLoader" class="ai-message-status-line" role="status" aria-live="polite">
         <Loader class="ai-message-status-icon" :size="13" />
         <span>{{ inlineLoaderLabel }}</span>
       </div>
-      <AiAgentRuntimeTimeline
-        v-if="shouldShowRuntimeTimeline"
-        :events="message.stream?.runtimeEvents ?? []"
-        :is-streaming="message.stream?.status === 'streaming'"
-      />
-      <AiToolActivityInline
-        v-if="shouldShowActivityTimeline"
-        :tool-calls="message.toolCalls ?? []"
-        :activity-text="message.stream?.activityText"
-        :activity-trail="message.stream?.activityTrail"
-        :activity-notes="message.stream?.activityNotes"
-        :activities="message.stream?.activities"
-        :activity-events="message.stream?.activityEvents"
-      />
-      <div
-        v-if="userAttachmentReferences.length"
-        class="ai-message-attachments"
-        aria-label="已发送附件"
-      >
-        <span
-          v-for="reference in userAttachmentReferences"
-          :key="reference.id"
-          class="ai-message-attachment-chip"
-        >
+      <AiAgentRuntimeTimeline v-if="shouldShowRuntimeTimeline" :events="message.stream?.runtimeEvents ?? []"
+        :is-streaming="message.stream?.status === 'streaming'" />
+      <AiToolActivityInline v-if="shouldShowActivityTimeline" :tool-calls="message.toolCalls ?? []"
+        :activity-text="message.stream?.activityText" :activity-trail="message.stream?.activityTrail"
+        :activity-notes="message.stream?.activityNotes" :activities="message.stream?.activities"
+        :activity-events="message.stream?.activityEvents" />
+      <div v-if="userAttachmentReferences.length" class="ai-message-attachments" aria-label="已发送附件">
+        <span v-for="reference in userAttachmentReferences" :key="reference.id" class="ai-message-attachment-chip">
           <ImageIcon v-if="reference.kind === 'image-attachment'" aria-hidden="true" />
           <FileText v-else aria-hidden="true" />
           <span>{{ resolveAttachmentLabel(reference) }}</span>
         </span>
       </div>
-      <MessageContent v-if="shouldShowMessageBubble" class="ai-message-bubble">
-        <AiMarkdown
-          :message-id="message.id"
-          :content="message.content"
-          :stream-status="message.stream?.status"
-        />
+      <MessageContent v-if="shouldShowMessageBubble" class="ai-message-bubble"
+        :class="{ 'is-assistant-flat': message.role !== 'user' }">
+        <AiMarkdown :message-id="message.id" :content="message.content" :stream-status="message.stream?.status" />
       </MessageContent>
       <MessageActions v-if="hasMessageActions" class="ai-message-options" aria-label="AI 选项">
-        <MessageAction
-          v-for="action in message.actions"
-          :key="`${message.id}:${action.id}`"
-          class="ai-message-option-button"
-          :disabled="action.disabled"
-          :label="action.label"
-          size="sm"
-          :tooltip="action.label"
-          variant="outline"
-          @click.stop="emit('messageAction', message.id, action.id)"
-        >
+        <MessageAction v-for="action in message.actions" :key="`${message.id}:${action.id}`"
+          class="ai-message-option-button" :disabled="action.disabled" :label="action.label" size="sm"
+          :tooltip="action.label" variant="outline" @click.stop="emit('messageAction', message.id, action.id)">
           {{ action.label }}
         </MessageAction>
       </MessageActions>
       <MessageToolbar v-if="canCopyContent" class="ai-message-toolbar">
         <MessageActions class="ai-message-actions">
-          <MessageAction
-            class="ai-message-copy-button"
-            :class="{ 'is-copied': isCopied }"
-            :label="isCopied ? '已复制对话内容' : '复制对话内容'"
-            :tooltip="isCopied ? '已复制' : '复制对话内容'"
-            @click.stop="copyMessageContent"
-          >
+          <MessageAction class="ai-message-copy-button" :class="{ 'is-copied': isCopied }"
+            :label="isCopied ? '已复制对话内容' : '复制对话内容'" :tooltip="isCopied ? '已复制' : '复制对话内容'"
+            @click.stop="copyMessageContent">
             <Check v-if="isCopied" aria-hidden="true" />
             <Copy v-else aria-hidden="true" />
           </MessageAction>
@@ -332,38 +285,45 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .ai-message {
+  box-sizing: border-box;
   display: flex;
   align-items: flex-start;
   gap: 8px;
 }
 
+.ai-message.is-assistant {
+  width: 100%;
+  max-width: 100%;
+}
+
 .ai-message.is-user {
   justify-content: flex-end;
+  padding-inline: 12px;
 }
 
 .ai-message.is-inline-loading {
   align-items: center;
 }
 
-.ai-logo {
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  margin-top: 1px;
-}
-
-.ai-message.is-inline-loading .ai-logo {
-  margin-top: 0;
-}
-
 .ai-message-main {
+  box-sizing: border-box;
   min-width: 0;
+}
+
+.ai-message.is-user .ai-message-main {
   max-width: calc(100% - 50px);
 }
 
-.ai-message-main > .ai-tool-activity-inline + .ai-message-bubble,
-.ai-message-main > .ai-runtime-timeline + .ai-message-bubble,
-.ai-message-main > .ai-message-status-line + .ai-message-bubble {
+.ai-message.is-assistant .ai-message-main {
+  width: 100%;
+  max-width: none;
+  overflow-x: hidden;
+  padding-inline: 30px;
+}
+
+.ai-message-main>.ai-tool-activity-inline+.ai-message-bubble,
+.ai-message-main>.ai-runtime-timeline+.ai-message-bubble,
+.ai-message-main>.ai-message-status-line+.ai-message-bubble {
   margin-top: 6px;
 }
 
@@ -410,17 +370,24 @@ onBeforeUnmount(() => {
 }
 
 .ai-message-bubble {
-  border-radius: 8px;
-  padding: 9px 11px;
-  background: color-mix(in srgb, var(--surface-soft) 78%, transparent);
+  min-width: 0;
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 20px;
+  overflow: hidden;
   overflow-wrap: anywhere;
 }
 
-.ai-message:not(.is-user) .ai-message-bubble {
-  border-top-left-radius: 4px;
+.ai-message.is-assistant .ai-message-bubble {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.ai-message.is-assistant .ai-message-bubble.is-assistant-flat {
+  color: var(--text-secondary);
 }
 
 .ai-message-status-line {
@@ -443,9 +410,11 @@ onBeforeUnmount(() => {
 }
 
 .ai-message.is-user .ai-message-bubble {
+  border-radius: 8px;
   border-top-right-radius: 4px;
   background: var(--accent-strong);
   color: var(--accent-foreground, white);
+  padding: 9px 11px;
 }
 
 .ai-message.is-user .ai-message-attachment-chip {

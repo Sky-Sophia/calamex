@@ -16,7 +16,7 @@ const CREATE_NO_WINDOW_FLAG: u32 = 0x0800_0000;
 
 pub use agent_sidecar::{
     agent_sidecar_chat, agent_sidecar_execute, agent_sidecar_health, agent_sidecar_plan,
-    agent_sidecar_resolve_approval,
+    agent_sidecar_resolve_approval, agent_sidecar_restore_checkpoint,
 };
 pub use ai::{
     ai_agent_classify_task, ai_agent_set_network_permission, ai_apply_patch, ai_build_index,

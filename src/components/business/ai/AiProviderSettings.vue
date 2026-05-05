@@ -1039,10 +1039,10 @@ v-else-if="statusTone === 'error'" viewBox="0 0 24 24" fill="none" stroke="curre
     --fg-tertiary: #8a8f98;
     --fg-muted: #6c6f7b;
 
-    --accent: #5e6ad2;
-    --accent-hover: #6e79da;
-    --accent-soft: rgba(94, 106, 210, 0.12);
-    --accent-ring: rgba(94, 106, 210, 0.32);
+    --accent: var(--accent-strong);
+    --accent-hover: color-mix(in srgb, var(--accent-strong) 88%, white);
+    --accent-soft: color-mix(in srgb, var(--accent-strong) 12%, transparent);
+    --accent-ring: color-mix(in srgb, var(--accent-strong) 32%, transparent);
     --selection-soft: color-mix(in srgb, var(--accent) 6%, var(--bg-input));
     --selection-soft-hover: color-mix(in srgb, var(--accent) 8%, var(--bg-input-hover));
     --selection-border: color-mix(in srgb, var(--accent) 20%, var(--border));

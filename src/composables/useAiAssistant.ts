@@ -33,7 +33,12 @@ import {
 import { createDefaultAiConfigPayload } from '@/utils/ai-config';
 
 import type { IAgentActivity } from '@/types/agent-activity';
-import type { IAgentSidecarMessage, TAgentRuntimeEvent, TAgentUiEvent } from '@/types/agent-sidecar';
+import type {
+  IAgentCheckpointEvent,
+  IAgentSidecarMessage,
+  TAgentRuntimeEvent,
+  TAgentUiEvent,
+} from '@/types/agent-sidecar';
 import type {
   IActivityNote,
   IAiApplyPatchMetadata,
@@ -47,7 +52,6 @@ import type {
   IAiProviderProfilePayload,
   IAiToolDefinitionPayload,
   TActivityNoteTrigger,
-  TAiChatMessageActionId,
   TAiModelRole,
   TAiToolConfirmationDecision
 } from '@/types/ai';
@@ -149,6 +153,15 @@ export interface IAiFileRollbackPrompt {
   restoredFileCount?: number;
 }
 
+export interface IAiConversationCheckpoint {
+  id: string;
+  messageId: string;
+  runId: string;
+  snapshotId: string;
+  sessionId: string;
+  createdAt: string;
+}
+
 export interface IUseAiAssistantOptions {
   document: Ref<IEditorDocument>;
   activeRun: Ref<IActiveRunSummary | null>;
@@ -195,8 +208,10 @@ const MSG_CALL_FAILED = 'AI 调用失败';
 // Pure helpers
 // ---------------------------------------------------------------------------
 
-const createMessageId = (role: IAiChatMessage['role']): string =>
-  `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const createScopedId = (prefix: string): string =>
+  `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const createMessageId = (role: IAiChatMessage['role']): string => createScopedId(role);
 
 const buildInitialAgentActivityText = (): string =>
   '正在加载';
@@ -249,6 +264,57 @@ const mergeRuntimeEvents = (
   }
 
   return nextEvents.length ? nextEvents : undefined;
+};
+
+const isCheckpointCreatedRuntimeEvent = (
+  event: TAgentRuntimeEvent,
+): event is IAgentCheckpointEvent =>
+  event.type === 'rollback.checkpoint.created';
+
+const buildConversationCheckpoints = (
+  currentMessages: readonly IAiChatMessage[],
+): IAiConversationCheckpoint[] => {
+  const checkpoints: IAiConversationCheckpoint[] = [];
+
+  currentMessages.forEach((message, messageIndex) => {
+    if (message.role !== 'assistant' || messageIndex >= currentMessages.length - 1) {
+      return;
+    }
+
+    const runtimeEvents = message.stream?.runtimeEvents ?? [];
+
+    for (let eventIndex = runtimeEvents.length - 1; eventIndex >= 0; eventIndex -= 1) {
+      const event = runtimeEvents[eventIndex];
+
+      if (!event || !isCheckpointCreatedRuntimeEvent(event)) {
+        continue;
+      }
+
+      checkpoints.push({
+        id: event.id,
+        messageId: message.id,
+        runId: event.runId,
+        snapshotId: event.snapshotId?.trim() || event.runId,
+        sessionId: event.sessionId,
+        createdAt: event.timestamp,
+      });
+      break;
+    }
+  });
+
+  return checkpoints;
+};
+
+const collectConversationRuntimeEvents = (
+  currentMessages: readonly IAiChatMessage[],
+): TAgentRuntimeEvent[] => {
+  let collectedEvents: TAgentRuntimeEvent[] | undefined;
+
+  for (const message of currentMessages) {
+    collectedEvents = mergeRuntimeEvents(collectedEvents, message.stream?.runtimeEvents);
+  }
+
+  return collectedEvents ?? [];
 };
 
 const normalizePatchDisplayPath = (path: string): string => {
@@ -639,6 +705,9 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
 
   const historyThreads = computed(() => unref(conversationStore.historyThreads));
   const activeConversationId = computed(() => unref(conversationStore.activeThreadId));
+  const conversationCheckpoints = computed<IAiConversationCheckpoint[]>(() =>
+    buildConversationCheckpoints(messages.value),
+  );
 
   const draft = ref('');
   const isSending = ref(false);
@@ -655,6 +724,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const toolDefinitions = shallowRef<IAiToolDefinitionPayload[]>([]);
   const providerProfiles = shallowRef<IAiProviderProfilePayload[]>([]);
   const attachedFiles = shallowRef<IAiAttachedFile[]>([]);
+  const restoringCheckpointId = ref<string | null>(null);
   const activeAbortController = ref<AbortController | null>(null);
   const activeStreamId = ref<string | null>(null);
   const activeAgentMessageId = ref<string | null>(null);
@@ -792,6 +862,40 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     messages.value = nextMessages;
 
     return nextMessages;
+  };
+
+  const appendRuntimeEventsToMessage = (
+    messageId: string,
+    incomingRuntimeEvents: readonly TAgentRuntimeEvent[] | undefined,
+  ): void => {
+    if (!incomingRuntimeEvents?.length) {
+      return;
+    }
+
+    replaceMessageById(messageId, (message) => {
+      const nextRuntimeEvents = mergeRuntimeEvents(
+        message.stream?.runtimeEvents,
+        incomingRuntimeEvents,
+      );
+
+      if (!nextRuntimeEvents?.length) {
+        return message;
+      }
+
+      return {
+        ...message,
+        stream: {
+          status: message.stream?.status ?? 'completed',
+          ...(message.stream?.activityText ? { activityText: message.stream.activityText } : {}),
+          ...(message.stream?.activityTrail?.length ? { activityTrail: message.stream.activityTrail } : {}),
+          ...(message.stream?.activityNotes?.length ? { activityNotes: message.stream.activityNotes } : {}),
+          ...(message.stream?.activities?.length ? { activities: message.stream.activities } : {}),
+          ...(message.stream?.activityEvents?.length ? { activityEvents: message.stream.activityEvents } : {}),
+          runtimeEvents: nextRuntimeEvents,
+          ...(message.stream?.finalAnswerStarted ? { finalAnswerStarted: true } : {}),
+        },
+      };
+    });
   };
 
 
@@ -2489,14 +2593,91 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   // sendMessage / planAgentTask
   // -----------------------------------------------------------------------
 
-  const handleMessageAction = async (
-    _messageId: string,
-    _actionId: TAiChatMessageActionId,
-  ): Promise<void> => {
-    void _messageId;
-    void _actionId;
+  const restoreConversationCheckpoint = async (checkpointId: string): Promise<void> => {
+    if (isSending.value || restoringCheckpointId.value) {
+      return;
+    }
 
-    return Promise.resolve();
+    const checkpoint = conversationCheckpoints.value.find((item) => item.id === checkpointId);
+
+    if (!checkpoint) {
+      errorMessage.value = '未找到可恢复的 checkpoint。';
+      return;
+    }
+
+    const targetMessageIndex = findMessageIndexById(messages.value, checkpoint.messageId);
+
+    if (targetMessageIndex < 0) {
+      errorMessage.value = '未找到 checkpoint 对应的对话消息。';
+      return;
+    }
+
+    const restoreSessionId = createScopedId('sidecar-restore');
+    const liveEventBuffer = createSidecarLiveEventBuffer((_events, freshEvents) => {
+      const visibleRuntimeEvents = extractVisibleAgentRuntimeEvents(freshEvents);
+
+      if (!visibleRuntimeEvents.length) {
+        return;
+      }
+
+      appendRuntimeEventsToMessage(checkpoint.messageId, visibleRuntimeEvents);
+      appendVisibleRuntimeTimelineEvents(visibleRuntimeEvents);
+    });
+    let unlistenSidecarStream: (() => void) | null = null;
+
+    restoringCheckpointId.value = checkpointId;
+    errorMessage.value = '';
+
+    try {
+      unlistenSidecarStream = await aiService.onSidecarStream((payload) => {
+        if (payload.sessionId !== restoreSessionId) {
+          return;
+        }
+
+        liveEventBuffer.push(payload.event);
+      });
+
+      const payload = await aiService.sidecarRestoreCheckpoint({
+        sessionId: restoreSessionId,
+        runId: checkpoint.runId,
+        snapshotId: checkpoint.snapshotId,
+      });
+
+      liveEventBuffer.flush();
+      unlistenSidecarStream?.();
+      unlistenSidecarStream = null;
+
+      const visibleRuntimeEvents = extractVisibleAgentRuntimeEvents(payload.events);
+
+      if (visibleRuntimeEvents.length) {
+        appendRuntimeEventsToMessage(checkpoint.messageId, visibleRuntimeEvents);
+        appendRuntimeTimelineEvents(payload.events);
+      }
+
+      const restoreErrorEvent = payload.events.find((event) => event.type === 'error');
+
+      if (restoreErrorEvent?.type === 'error') {
+        throw new Error(restoreErrorEvent.message);
+      }
+
+      const nextMessages = messages.value.slice(0, targetMessageIndex + 1);
+      messages.value = nextMessages;
+      runtimeTimelineEvents.value = collectConversationRuntimeEvents(nextMessages);
+      proposedPatch.value = null;
+      fileRollbackPrompt.value = null;
+      agentSteps.value = [];
+      activeSidecarAgentSession.value = null;
+      activeAgentMessageId.value = null;
+      agentPlan.resetPlan();
+      agentPlan.store.clearPendingToolConfirmation();
+      errorMessage.value = '';
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error, '恢复回滚检查点失败');
+    } finally {
+      liveEventBuffer.dispose();
+      unlistenSidecarStream?.();
+      restoringCheckpointId.value = null;
+    }
   };
 
   const sendMessage = async (): Promise<void> => {
@@ -2862,6 +3043,8 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     isApplyingPatch,
     fileRollbackPrompt,
     runtimeTimelineEvents,
+    conversationCheckpoints,
+    restoringCheckpointId,
     activeMode,
     agentSteps,
     toolDefinitions,
@@ -2885,11 +3068,11 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     removeAttachedFile,
     resolveSidecarToolConfirmation,
     sendMessage,
-    handleMessageAction,
     stopCurrentRequest,
     previewPatchFromLastAnswer,
     applyProposedPatch,
     rollbackLatestFileChange,
+    restoreConversationCheckpoint,
     clearConversation,
     startNewConversation,
     switchConversation,

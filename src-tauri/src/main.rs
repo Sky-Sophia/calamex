@@ -16,7 +16,8 @@ mod terminal;
 use ai_edit::AiEditState;
 use commands::{
     agent_sidecar_chat, agent_sidecar_execute, agent_sidecar_health, agent_sidecar_plan,
-    agent_sidecar_resolve_approval, ai_agent_classify_task, ai_agent_set_network_permission,
+    agent_sidecar_resolve_approval, agent_sidecar_restore_checkpoint,
+    ai_agent_classify_task, ai_agent_set_network_permission,
     ai_apply_patch, ai_build_index, ai_cancel, ai_chat, ai_chat_stream, ai_clear_credentials,
     ai_code_action, ai_connect_provider, ai_edit_create_snapshot, ai_edit_get_auth_level,
     ai_edit_get_diff, ai_edit_list_timeline, ai_edit_restore_snapshot, ai_edit_revert_file,
@@ -251,6 +252,7 @@ fn main() {
             agent_sidecar_plan,
             agent_sidecar_execute,
             agent_sidecar_resolve_approval,
+            agent_sidecar_restore_checkpoint,
             test_ssh_connection,
             list_ssh_config_hosts,
             list_ssh_directory,

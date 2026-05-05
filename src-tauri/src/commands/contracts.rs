@@ -1335,6 +1335,25 @@ pub struct AgentSidecarApprovalResolveRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AgentSidecarRollbackStepPath {
+    Single(String),
+    Nested(Vec<String>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSidecarCheckpointRestoreRequest {
+    #[serde(skip_serializing_if = "is_blank_optional_string")]
+    pub(crate) session_id: Option<String>,
+    pub(crate) run_id: String,
+    #[serde(skip_serializing_if = "is_blank_optional_string")]
+    pub(crate) snapshot_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) step: Option<AgentSidecarRollbackStepPath>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarMcpHealthPayload {
     pub(crate) configured_servers: u32,
@@ -1366,7 +1385,10 @@ mod agent_sidecar_contract_tests {
     use serde::Serialize;
     use serde_json::{Map, Value};
 
-    use super::{AgentSidecarChatRequest, AgentSidecarExecuteRequest, AgentSidecarMessagePayload};
+    use super::{
+        AgentSidecarChatRequest, AgentSidecarCheckpointRestoreRequest,
+        AgentSidecarExecuteRequest, AgentSidecarMessagePayload, AgentSidecarRollbackStepPath,
+    };
 
     fn sidecar_message() -> AgentSidecarMessagePayload {
         AgentSidecarMessagePayload {
@@ -1446,6 +1468,54 @@ mod agent_sidecar_contract_tests {
             Some(&Value::String(
                 "D:/com.xiaojianc/my_desktop_app".to_string()
             ))
+        );
+    }
+
+    #[test]
+    fn restore_checkpoint_request_omits_absent_optional_fields() {
+        let request = AgentSidecarCheckpointRestoreRequest {
+            session_id: None,
+            run_id: "run-1".to_string(),
+            snapshot_id: None,
+            step: None,
+        };
+
+        let object = serialize_object(&request);
+
+        assert!(!object.contains_key("sessionId"));
+        assert!(!object.contains_key("snapshotId"));
+        assert!(!object.contains_key("step"));
+        assert_eq!(object.get("runId"), Some(&Value::String("run-1".to_string())));
+    }
+
+    #[test]
+    fn restore_checkpoint_request_serializes_nested_step_path() {
+        let request = AgentSidecarCheckpointRestoreRequest {
+            session_id: Some("sidecar-rollback-1".to_string()),
+            run_id: "run-1".to_string(),
+            snapshot_id: Some("snapshot-1".to_string()),
+            step: Some(AgentSidecarRollbackStepPath::Nested(vec![
+                "durable-agentic-execution".to_string(),
+                "durable-llm-execution".to_string(),
+            ])),
+        };
+
+        let object = serialize_object(&request);
+
+        assert_eq!(
+            object.get("sessionId"),
+            Some(&Value::String("sidecar-rollback-1".to_string()))
+        );
+        assert_eq!(
+            object.get("snapshotId"),
+            Some(&Value::String("snapshot-1".to_string()))
+        );
+        assert_eq!(
+            object.get("step"),
+            Some(&Value::Array(vec![
+                Value::String("durable-agentic-execution".to_string()),
+                Value::String("durable-llm-execution".to_string()),
+            ]))
         );
     }
 }

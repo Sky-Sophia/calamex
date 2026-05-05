@@ -13,7 +13,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@mastra/core": "1.31.0",
+    "@mastra/core": "1.32.0",
+    "@mastra/libsql": "1.10.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@modelcontextprotocol/server-filesystem": "2026.1.14",
     "@modelcontextprotocol/server-memory": "2026.1.26",

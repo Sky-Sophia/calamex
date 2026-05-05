@@ -21,11 +21,11 @@ import { describe, expect, it } from 'vitest';
 
 const ACCENT_STYLE_MAP = {
     indigo: {
-        accent: '#5e6ad2',
-        accentStrong: '#6f7cff',
-        accentMuted: 'rgba(94, 106, 210, 0.16)',
-        accentSoft: 'rgba(94, 106, 210, 0.35)',
-        statusbarAccent: '#4c6fff',
+        accent: 'var(--r-accent-default)',
+        accentStrong: 'var(--r-accent-strong)',
+        accentMuted: 'var(--r-accent-muted)',
+        accentSoft: 'var(--r-accent-soft)',
+        statusbarAccent: 'var(--r-accent-statusbar)',
     },
     violet: {
         accent: '#7c3aed',
@@ -90,15 +90,15 @@ const lightTerminalTheme = buildTerminalTheme(light);
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('buildComponentTokens / dark', () => {
-    it('Woodsmoke 层级：深色主题使用 DESIGN.md 指定的核心表面色', () => {
-        expect(dark.surface.app).toBe('#08090a');
-        expect(dark.surface.sidebar).toBe('#1c1c1f');
-        expect(dark.surface.panelDepth).toBe('#222326');
-        expect(dark.surface.overlayDepth).toBe('#2b2c30');
-        expect(dark.surface.overlay).toBe('#35363a');
-        expect(dark.surface.editor).toBe('#1a1b1e');
-        expect(dark.surface.activity).toBe('#1c1c1f');
-        expect(dark.surface.editorGutter).toBe('#1a1b1e');
+    it('Primer dark 层级：深色主题使用官方核心表面色', () => {
+        expect(dark.surface.app).toBe('#0d1117');
+        expect(dark.surface.sidebar).toBe('#151b23');
+        expect(dark.surface.panelDepth).toBe('#212830');
+        expect(dark.surface.overlayDepth).toBe('#262c36');
+        expect(dark.surface.overlay).toBe('#212830');
+        expect(dark.surface.editor).toBe('#0d1117');
+        expect(dark.surface.activity).toBe('#010409');
+        expect(dark.surface.editorGutter).toBe('#0d1117');
     });
 
     it('布局令牌：app 背景等于 dark.surface.app', () => {
@@ -248,16 +248,16 @@ describe('用户偏好覆盖常量 / accent', () => {
         expect(Object.keys(ACCENT_STYLE_MAP)).toHaveLength(6);
     });
 
-    it('indigo accent 默认值为 #5e6ad2', () => {
-        expect(ACCENT_STYLE_MAP.indigo.accent).toBe('#5e6ad2');
+    it('indigo accent 默认值跟随当前 Primer 主题 accent', () => {
+        expect(ACCENT_STYLE_MAP.indigo.accent).toBe('var(--r-accent-default)');
     });
 
-    it('indigo accentStrong 为 #6f7cff', () => {
-        expect(ACCENT_STYLE_MAP.indigo.accentStrong).toBe('#6f7cff');
+    it('indigo accentStrong 跟随当前 Primer 主题强调色', () => {
+        expect(ACCENT_STYLE_MAP.indigo.accentStrong).toBe('var(--r-accent-strong)');
     });
 
-    it('indigo statusbarAccent 为 #4c6fff', () => {
-        expect(ACCENT_STYLE_MAP.indigo.statusbarAccent).toBe('#4c6fff');
+    it('indigo statusbarAccent 跟随当前 Primer 主题状态栏强调色', () => {
+        expect(ACCENT_STYLE_MAP.indigo.statusbarAccent).toBe('var(--r-accent-statusbar)');
     });
 
     it('每种 accent 都含 accent / accentStrong / accentMuted / accentSoft / statusbarAccent 字段', () => {

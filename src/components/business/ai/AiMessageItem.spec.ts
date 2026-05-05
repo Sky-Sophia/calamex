@@ -515,6 +515,27 @@ describe('AiMessageItem', () => {
     expect(successMock).toHaveBeenCalledWith('已复制对话内容');
   });
 
+  it('助手消息不再渲染聊天区头像，并以内联内容形式平铺展示', () => {
+    const wrapper = mount(AiMessageItem, {
+      props: {
+        message: createMessage({
+          content: '直接把回答铺在对话界面里。',
+        }),
+        platformId: 'deepseek',
+        providerLabel: 'DeepSeek',
+      },
+      global: {
+        stubs: {
+          AiMarkdown: { template: '<div class="markdown-stub">直接把回答铺在对话界面里。</div>' },
+        },
+      },
+    });
+
+    expect(wrapper.find('.ai-logo').exists()).toBe(false);
+    expect(wrapper.find('.ai-message-bubble').classes()).toContain('is-assistant-flat');
+    expect(wrapper.find('.markdown-stub').exists()).toBe(true);
+  });
+
   it('复制流式代码块时直接保留当前 Markdown 内容', async () => {
     const content = '可以这样写：\n\n```bash\necho hello';
     const wrapper = mount(AiMessageItem, {

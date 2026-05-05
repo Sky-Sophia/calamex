@@ -1,11 +1,17 @@
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { Agent, type ToolsInput } from '@mastra/core/agent';
+import { createDurableAgent, DurableStepIds } from '@mastra/core/agent/durable';
 import type { OpenAICompatibleConfig } from '@mastra/core/llm';
+import { Mastra } from '@mastra/core/mastra';
 import { toStandardSchema } from '@mastra/core/schema';
 import type {
     TextDeltaPayload,
     ToolCallPayload,
 } from '@mastra/core/stream';
 import { createTool } from '@mastra/core/tools';
+import { LibSQLStore } from '@mastra/libsql';
 
 import {
     createDeepSeekModelConfigFromEnv,
@@ -13,6 +19,11 @@ import {
 } from '../models/deepseek-model.js';
 import type { TJsonValue } from '../schemas/events.js';
 import { agentPlanSchema, type TAgentPlan } from '../schemas/plan.js';
+import {
+    createAgentRuntimeEvent,
+    type IAgentRuntimeEventContext,
+    type TAgentRuntimeEventDraft,
+} from '../streaming/stream-types.js';
 import { createMastraMcpClientBundle } from '../tools/mcp.js';
 import { buildSystemPrompt } from './agent-runtime-helpers.js';
 import type {
@@ -24,7 +35,20 @@ import type {
     IAgentMessageInput,
     IAgentRuntimeInput,
     IApprovalResolutionInput,
+    ICheckpointRestoreInput,
+    TRollbackStepPath,
 } from './runtime-input.js';
+
+const DEFAULT_MASTRA_STORAGE_DIRECTORY = '.agent-sidecar';
+const DEFAULT_MASTRA_STORAGE_URL = `file:./${DEFAULT_MASTRA_STORAGE_DIRECTORY}/mastra.db`;
+const DEFAULT_EXECUTION_AGENT_ID = 'calamex-agent-sidecar';
+const DEFAULT_EXECUTION_AGENT_NAME = 'Calamex Agent Sidecar';
+const DEFAULT_ROLLBACK_STEP: TRollbackStepPath = [
+    DurableStepIds.AGENTIC_EXECUTION,
+    DurableStepIds.LLM_EXECUTION,
+];
+
+type TMastraRequestContext = Record<string, unknown>;
 
 type TMastraChatMessage = {
     role: 'user' | 'assistant';
@@ -33,6 +57,8 @@ type TMastraChatMessage = {
 
 interface IMastraAgentStreamLike {
     fullStream: AsyncIterable<unknown>;
+    runId?: string;
+    cleanup?: () => void;
 }
 
 interface IMastraApprovalOptions {
@@ -46,6 +72,7 @@ interface IMastraGenerateOptions {
     runId?: string;
     maxSteps?: number;
     toolChoice?: 'auto' | 'none';
+    requestContext?: TMastraRequestContext;
     structuredOutput?: {
         schema: unknown;
     };
@@ -67,6 +94,40 @@ interface IMastraAgentLike {
     ): Promise<IMastraGenerateResultLike>;
     approveToolCall?: (options: IMastraApprovalOptions) => Promise<IMastraAgentStreamLike>;
     declineToolCall?: (options: IMastraApprovalOptions) => Promise<IMastraAgentStreamLike>;
+}
+
+interface IMastraWorkflowRunLike {
+    timeTravel(options: {
+        step: TRollbackStepPath;
+        requestContext?: TMastraRequestContext;
+        resumeData?: unknown;
+    }): Promise<unknown>;
+}
+
+interface IMastraWorkflowLike {
+    id: string;
+    createRun(options?: { runId?: string }): Promise<IMastraWorkflowRunLike>;
+}
+
+interface IMastraExecutionHandle {
+    agent: IMastraAgentLike;
+    workflow: IMastraWorkflowLike;
+}
+
+interface IMastraWorkflowSnapshotLike {
+    requestContext?: unknown;
+    status?: string;
+}
+
+interface IMastraWorkflowStoreLike {
+    loadWorkflowSnapshot(options: {
+        workflowName: string;
+        runId: string;
+    }): Promise<IMastraWorkflowSnapshotLike | null>;
+}
+
+interface IMastraStorageLike {
+    getStore(domain: 'workflows'): Promise<IMastraWorkflowStoreLike | null | undefined>;
 }
 
 interface IMastraAgentConfig {
@@ -92,10 +153,17 @@ interface IMastraMcpBundle {
 
 interface IMastraRuntimeDeps {
     createAgent?: (config: IMastraAgentConfig) => IMastraAgentLike;
+    createExecutionHandle?: (config: IMastraAgentConfig) => Promise<IMastraExecutionHandle>;
+    createStorage?: () => IMastraStorageLike;
+    loadExecutionSnapshot?: (
+        workflowName: string,
+        runId: string,
+    ) => Promise<IMastraWorkflowSnapshotLike | null>;
     readModelConfig?: () => IDeepSeekModelConfig | null;
     createMcpClientBundle?: (
         options?: { workspaceRootPath?: string | null },
     ) => Promise<IMastraMcpBundle>;
+    now?: () => string;
 }
 
 interface IMastraPendingApproval {
@@ -111,6 +179,26 @@ interface IMastraTextStreamSummary {
     releaseResources: boolean;
     streamErrorMessage: string | null;
     visibleText: string;
+}
+
+interface IMastraDurableAgentLike {
+    stream(
+        messages: TMastraChatMessage[],
+        options?: IMastraGenerateOptions,
+    ): Promise<{
+        fullStream: ReadableStream<unknown>;
+        runId: string;
+        cleanup: () => void;
+    }>;
+    resume(
+        runId: string,
+        resumeData: unknown,
+    ): Promise<{
+        fullStream: ReadableStream<unknown>;
+        runId: string;
+        cleanup: () => void;
+    }>;
+    getWorkflow(): IMastraWorkflowLike;
 }
 
 const createSessionId = (prefix: string): string =>
@@ -129,6 +217,15 @@ const toRecord = (value: unknown): Record<string, unknown> | null => (
         ? value as Record<string, unknown>
         : null
 );
+
+const toNonEmptyString = (value: unknown): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+};
 
 const toJsonValue = (value: unknown): TJsonValue => {
     if (
@@ -161,6 +258,57 @@ const pushUiEvent = (
 ): void => {
     events.push(event);
     options.onEvent?.(event);
+};
+
+const createRuntimeEventFactory = (
+    context: IAgentRuntimeEventContext,
+): ((draft: TAgentRuntimeEventDraft) => TAgentRuntimeOutputEvent) => {
+    let seq = 0;
+
+    return (draft) => ({
+        type: 'agent_event',
+        event: createAgentRuntimeEvent(context, seq++, draft),
+    });
+};
+
+const createExecutionRequestContext = (
+    input: IAgentRuntimeInput,
+    systemPrompt: string,
+): TMastraRequestContext => ({
+    mode: input.mode,
+    goal: input.goal,
+    systemPrompt,
+    workspaceRootPath: input.workspaceRootPath ?? null,
+    context: input.context ?? [],
+});
+
+const resolveSystemPromptFromSnapshot = (
+    snapshot: IMastraWorkflowSnapshotLike,
+): string | null => toNonEmptyString(toRecord(snapshot.requestContext)?.systemPrompt);
+
+const resolveWorkspaceRootPathFromSnapshot = (
+    snapshot: IMastraWorkflowSnapshotLike,
+): string | undefined => {
+    const value = toNonEmptyString(toRecord(snapshot.requestContext)?.workspaceRootPath);
+    return value ?? undefined;
+};
+
+const extractRestoreResultText = (result: unknown): string | null => {
+    const topLevel = toRecord(result);
+    const nestedResult = toRecord(topLevel?.result);
+    const output = toRecord(nestedResult?.output) ?? toRecord(topLevel?.output);
+    return toNonEmptyString(output?.text);
+};
+
+const resolveMastraStorageUrl = (env: NodeJS.ProcessEnv = process.env): string => {
+    const configured = toNonEmptyString(env.AGENT_SIDECAR_LIBSQL_URL);
+
+    if (configured) {
+        return configured;
+    }
+
+    mkdirSync(join(process.cwd(), DEFAULT_MASTRA_STORAGE_DIRECTORY), { recursive: true });
+    return DEFAULT_MASTRA_STORAGE_URL;
 };
 
 const createMastraModelConfig = (
@@ -196,6 +344,74 @@ const defaultCreateAgent = (config: IMastraAgentConfig): IMastraAgentLike => {
         generate: async (messages, options) => bridge.generate(messages, options),
         ...(approveToolCall ? { approveToolCall } : {}),
         ...(declineToolCall ? { declineToolCall } : {}),
+    };
+};
+
+const defaultCreateStorage = (): IMastraStorageLike => new LibSQLStore({
+    id: 'agent-sidecar-storage',
+    url: resolveMastraStorageUrl(),
+});
+
+const defaultCreateExecutionHandle = async (
+    config: IMastraAgentConfig,
+    storage: IMastraStorageLike,
+): Promise<IMastraExecutionHandle> => {
+    const baseAgent = new Agent({
+        id: config.id,
+        name: config.name,
+        instructions: config.instructions,
+        model: config.model,
+        ...(config.tools ? { tools: config.tools } : {}),
+    });
+    const durableAgent = createDurableAgent({ agent: baseAgent });
+    const mastra = new Mastra({
+        agents: {
+            [config.id]: durableAgent,
+        },
+        ...(config.tools ? { tools: config.tools as never } : {}),
+        storage: storage as never,
+    });
+    const registeredAgent = mastra.getAgentById(baseAgent.id) as unknown as IMastraDurableAgentLike;
+
+    return {
+        agent: {
+            stream: async (messages, options) => {
+                const streamResult = await registeredAgent.stream(messages, {
+                    ...(options?.runId ? { runId: options.runId } : {}),
+                    ...(options?.maxSteps ? { maxSteps: options.maxSteps } : {}),
+                    ...(options?.toolChoice ? { toolChoice: options.toolChoice } : {}),
+                    ...(options?.requestContext ? { requestContext: options.requestContext } : {}),
+                });
+
+                return {
+                    fullStream: streamResult.fullStream as unknown as AsyncIterable<unknown>,
+                    runId: streamResult.runId,
+                    cleanup: streamResult.cleanup,
+                };
+            },
+            generate: async () => {
+                throw new Error('Durable execution handle does not support generate().');
+            },
+            approveToolCall: async ({ runId }) => {
+                const streamResult = await registeredAgent.resume(runId, { approved: true });
+
+                return {
+                    fullStream: streamResult.fullStream as unknown as AsyncIterable<unknown>,
+                    runId: streamResult.runId,
+                    cleanup: streamResult.cleanup,
+                };
+            },
+            declineToolCall: async ({ runId }) => {
+                const streamResult = await registeredAgent.resume(runId, { approved: false });
+
+                return {
+                    fullStream: streamResult.fullStream as unknown as AsyncIterable<unknown>,
+                    runId: streamResult.runId,
+                    cleanup: streamResult.cleanup,
+                };
+            },
+        },
+        workflow: registeredAgent.getWorkflow(),
     };
 };
 
@@ -521,11 +737,22 @@ const createErrorResponse = (
 export class MastraRuntime {
     private readonly createAgent: (config: IMastraAgentConfig) => IMastraAgentLike;
 
+    private readonly createExecutionHandle: (config: IMastraAgentConfig) => Promise<IMastraExecutionHandle>;
+
+    private readonly loadExecutionSnapshot: (
+        workflowName: string,
+        runId: string,
+    ) => Promise<IMastraWorkflowSnapshotLike | null>;
+
     private readonly readModelConfig: () => IDeepSeekModelConfig | null;
 
     private readonly createMcpClientBundle: (
         options?: { workspaceRootPath?: string | null },
     ) => Promise<IMastraMcpBundle>;
+
+    private readonly now: (() => string) | undefined;
+
+    private readonly storage: IMastraStorageLike;
 
     private readonly pendingApprovals = new Map<string, IMastraPendingApproval>();
 
@@ -533,8 +760,17 @@ export class MastraRuntime {
 
     constructor(deps: IMastraRuntimeDeps = {}) {
         this.createAgent = deps.createAgent ?? defaultCreateAgent;
+        this.storage = deps.createStorage ? deps.createStorage() : defaultCreateStorage();
+        this.createExecutionHandle = deps.createExecutionHandle
+            ?? ((config) => defaultCreateExecutionHandle(config, this.storage));
+        this.loadExecutionSnapshot = deps.loadExecutionSnapshot
+            ?? (async (workflowName, runId) => {
+                const workflowStore = await this.storage.getStore('workflows');
+                return workflowStore?.loadWorkflowSnapshot({ workflowName, runId }) ?? null;
+            });
         this.readModelConfig = deps.readModelConfig ?? createDeepSeekModelConfigFromEnv;
         this.createMcpClientBundle = deps.createMcpClientBundle ?? createMastraMcpClientBundle;
+        this.now = deps.now;
     }
 
     private registerPendingApproval(
@@ -892,7 +1128,137 @@ export class MastraRuntime {
         input: IAgentRuntimeInput,
         options: IAgentRuntimeRunOptions = {},
     ): Promise<IAgentRuntimeResponse> {
-        return this.runTextMode(input, 'agent', 'mastra-execute', options);
+        const normalizedInput: IAgentRuntimeInput = {
+            ...input,
+            mode: 'agent',
+        };
+        const sessionId = normalizedInput.sessionId ?? createSessionId('mastra-execute');
+        const events: TAgentRuntimeOutputEvent[] = [];
+        const modelConfig = this.readModelConfig();
+
+        if (!modelConfig) {
+            return createErrorResponse(
+                sessionId,
+                'DeepSeek 未配置：请在 Node sidecar 环境设置 DEEPSEEK_API_KEY。',
+                events,
+                options,
+            );
+        }
+
+        const {
+            bundle: mcpBundle,
+            tools: mastraTools,
+            hasTools,
+        } = await loadMastraMcpTools(this.createMcpClientBundle, normalizedInput.workspaceRootPath);
+        const requestedRunId = options.context?.requestId ?? createSessionId('mastra-run');
+        const createRequestedRunEvent = createRuntimeEventFactory({
+            runId: requestedRunId,
+            sessionId,
+            agentId: DEFAULT_EXECUTION_AGENT_ID,
+            ...(this.now ? { now: this.now } : {}),
+        });
+        const systemPrompt = buildSystemPrompt(normalizedInput, modelConfig.model);
+        let shouldDisconnectBundle = true;
+        let streamCleanup: (() => void) | undefined;
+
+        try {
+            const executionHandle = await this.createExecutionHandle({
+                id: DEFAULT_EXECUTION_AGENT_ID,
+                name: DEFAULT_EXECUTION_AGENT_NAME,
+                instructions: systemPrompt,
+                model: createMastraModelConfig(modelConfig),
+                ...(hasTools ? { tools: mastraTools } : {}),
+            });
+            const toolChoice: IMastraGenerateOptions['toolChoice'] = hasTools ? 'auto' : 'none';
+            const stream = await executionHandle.agent.stream(
+                buildMastraMessages(normalizedInput),
+                {
+                    maxSteps: hasTools ? 10 : 1,
+                    toolChoice,
+                    runId: requestedRunId,
+                    requestContext: createExecutionRequestContext(normalizedInput, systemPrompt),
+                },
+            );
+            streamCleanup = stream.cleanup;
+            const checkpointRunId = stream.runId ?? requestedRunId;
+            const createCheckpointEvent = checkpointRunId === requestedRunId
+                ? createRequestedRunEvent
+                : createRuntimeEventFactory({
+                    runId: checkpointRunId,
+                    sessionId,
+                    agentId: DEFAULT_EXECUTION_AGENT_ID,
+                    ...(this.now ? { now: this.now } : {}),
+                });
+
+            pushUiEvent(events, createCheckpointEvent({
+                type: 'rollback.checkpoint.created',
+                visibility: 'user',
+                level: 'info',
+                snapshotId: checkpointRunId,
+            }), options);
+
+            const streamSummary = await this.consumeTextStream(
+                executionHandle.agent,
+                mcpBundle,
+                sessionId,
+                stream,
+                events,
+                options,
+            );
+            shouldDisconnectBundle = streamSummary.releaseResources;
+
+            if (streamSummary.streamErrorMessage) {
+                return createErrorResponse(
+                    sessionId,
+                    `Mastra Agent 执行失败：${streamSummary.streamErrorMessage}`,
+                    events,
+                    options,
+                );
+            }
+
+            if (streamSummary.pendingApproval) {
+                return {
+                    sessionId,
+                    events,
+                    result: null,
+                };
+            }
+
+            const result = streamSummary.visibleText.trim().length > 0
+                ? streamSummary.visibleText
+                : 'Agent 已完成。';
+
+            pushUiEvent(events, {
+                type: 'done',
+                result,
+            }, options);
+
+            return {
+                sessionId,
+                events,
+                result,
+            };
+        } catch (error) {
+            pushUiEvent(events, createRequestedRunEvent({
+                type: 'rollback.checkpoint.failed',
+                visibility: 'user',
+                level: 'error',
+                snapshotId: requestedRunId,
+                errorMessage: normalizeMastraError(error),
+            }), options);
+
+            return createErrorResponse(
+                sessionId,
+                `Mastra Agent 执行失败：${normalizeMastraError(error)}`,
+                events,
+                options,
+            );
+        } finally {
+            if (shouldDisconnectBundle) {
+                streamCleanup?.();
+                await mcpBundle.disconnectAll();
+            }
+        }
     }
 
     async resolveApproval(
@@ -920,6 +1286,7 @@ export class MastraRuntime {
 
         const events: TAgentRuntimeOutputEvent[] = [];
         let shouldDisconnectBundle = true;
+        let streamCleanup: (() => void) | undefined;
 
         try {
             const stream = await continueStream({
@@ -927,6 +1294,7 @@ export class MastraRuntime {
                 toolCallId: decodedRequest.toolCallId,
                 ...(options.context?.signal ? { abortSignal: options.context.signal } : {}),
             });
+            streamCleanup = stream.cleanup;
             const streamSummary = await this.consumeTextStream(
                 pending.agent,
                 pending.bundle,
@@ -977,8 +1345,175 @@ export class MastraRuntime {
             );
         } finally {
             if (shouldDisconnectBundle) {
+                streamCleanup?.();
                 await pending.bundle.disconnectAll();
             }
+        }
+    }
+
+    async restoreCheckpoint(
+        input: ICheckpointRestoreInput,
+        options: IAgentRuntimeRunOptions = {},
+    ): Promise<IAgentRuntimeResponse> {
+        const sessionId = input.sessionId ?? createSessionId('mastra-rollback');
+        const events: TAgentRuntimeOutputEvent[] = [];
+        const snapshotId = input.snapshotId ?? input.runId;
+        const createRuntimeEvent = createRuntimeEventFactory({
+            runId: input.runId,
+            sessionId,
+            agentId: DEFAULT_EXECUTION_AGENT_ID,
+            ...(this.now ? { now: this.now } : {}),
+        });
+        const modelConfig = this.readModelConfig();
+
+        if (!modelConfig) {
+            return createErrorResponse(
+                sessionId,
+                'DeepSeek 未配置：请在 Node sidecar 环境设置 DEEPSEEK_API_KEY。',
+                events,
+                options,
+            );
+        }
+
+        try {
+            const snapshot = await this.loadExecutionSnapshot(DurableStepIds.AGENTIC_LOOP, input.runId);
+
+            if (!snapshot) {
+                pushUiEvent(events, createRuntimeEvent({
+                    type: 'rollback.restore.failed',
+                    visibility: 'user',
+                    level: 'error',
+                    snapshotId,
+                    errorMessage: '未找到可恢复的 checkpoint。',
+                }), options);
+
+                return createErrorResponse(
+                    sessionId,
+                    'Mastra 回滚恢复失败：未找到可恢复的 checkpoint。',
+                    events,
+                    options,
+                );
+            }
+
+            if (snapshot.status === 'running') {
+                pushUiEvent(events, createRuntimeEvent({
+                    type: 'rollback.restore.failed',
+                    visibility: 'user',
+                    level: 'error',
+                    snapshotId,
+                    errorMessage: '当前 run 仍在执行，暂时不能回滚。',
+                }), options);
+
+                return createErrorResponse(
+                    sessionId,
+                    'Mastra 回滚恢复失败：当前 run 仍在执行，暂时不能回滚。',
+                    events,
+                    options,
+                );
+            }
+
+            const systemPrompt = resolveSystemPromptFromSnapshot(snapshot);
+
+            if (!systemPrompt) {
+                pushUiEvent(events, createRuntimeEvent({
+                    type: 'rollback.restore.failed',
+                    visibility: 'user',
+                    level: 'error',
+                    snapshotId,
+                    errorMessage: 'checkpoint 缺少可恢复的系统提示词。',
+                }), options);
+
+                return createErrorResponse(
+                    sessionId,
+                    'Mastra 回滚恢复失败：checkpoint 缺少可恢复的系统提示词。',
+                    events,
+                    options,
+                );
+            }
+
+            const workspaceRootPath = resolveWorkspaceRootPathFromSnapshot(snapshot);
+            const {
+                bundle: mcpBundle,
+                tools: mastraTools,
+                hasTools,
+            } = await loadMastraMcpTools(this.createMcpClientBundle, workspaceRootPath);
+
+            try {
+                const executionHandle = await this.createExecutionHandle({
+                    id: DEFAULT_EXECUTION_AGENT_ID,
+                    name: DEFAULT_EXECUTION_AGENT_NAME,
+                    instructions: systemPrompt,
+                    model: createMastraModelConfig(modelConfig),
+                    ...(hasTools ? { tools: mastraTools } : {}),
+                });
+                const run = await executionHandle.workflow.createRun({ runId: input.runId });
+                const requestContext = toRecord(snapshot.requestContext) ?? undefined;
+
+                pushUiEvent(events, createRuntimeEvent({
+                    type: 'rollback.restore.started',
+                    visibility: 'user',
+                    level: 'info',
+                    snapshotId,
+                }), options);
+
+                const restoreResult = await run.timeTravel({
+                    step: input.step ?? DEFAULT_ROLLBACK_STEP,
+                    ...(requestContext ? { requestContext } : {}),
+                });
+                const restoreMessage = extractRestoreResultText(restoreResult)
+                    ?? '已使用 Mastra 官方 timeTravel 恢复到最近 checkpoint。';
+
+                pushUiEvent(events, createRuntimeEvent({
+                    type: 'rollback.restore.completed',
+                    visibility: 'user',
+                    level: 'info',
+                    snapshotId,
+                    savedAsLatest: true,
+                    message: restoreMessage,
+                }), options);
+                pushUiEvent(events, {
+                    type: 'done',
+                    result: restoreMessage,
+                }, options);
+
+                return {
+                    sessionId,
+                    events,
+                    result: restoreMessage,
+                };
+            } catch (error) {
+                pushUiEvent(events, createRuntimeEvent({
+                    type: 'rollback.restore.failed',
+                    visibility: 'user',
+                    level: 'error',
+                    snapshotId,
+                    errorMessage: normalizeMastraError(error),
+                }), options);
+
+                return createErrorResponse(
+                    sessionId,
+                    `Mastra 回滚恢复失败：${normalizeMastraError(error)}`,
+                    events,
+                    options,
+                );
+            } finally {
+                await mcpBundle.disconnectAll();
+            }
+        } catch (error) {
+            pushUiEvent(events, createRuntimeEvent({
+                type: 'rollback.restore.failed',
+                visibility: 'user',
+                level: 'error',
+                snapshotId,
+                errorMessage: normalizeMastraError(error),
+            }), options);
+
+            return createErrorResponse(
+                sessionId,
+                `Mastra 回滚恢复失败：${normalizeMastraError(error)}`,
+                events,
+                options,
+            );
         }
     }
 }

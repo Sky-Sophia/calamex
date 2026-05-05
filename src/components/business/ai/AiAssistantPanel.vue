@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import Checkpoint from '@/components/ai-elements/checkpoint/Checkpoint.vue';
+import CheckpointIcon from '@/components/ai-elements/checkpoint/CheckpointIcon.vue';
+import CheckpointTrigger from '@/components/ai-elements/checkpoint/CheckpointTrigger.vue';
+import { Loader } from '@/components/ai-elements/loader';
 import AiChatThread from '@/components/business/ai/AiChatThread.vue';
 import AiPatchPreview from '@/components/business/ai/AiPatchPreview.vue';
 import AiPlanModePanel from '@/components/business/ai/AiPlanModePanel.vue';
@@ -9,7 +13,7 @@ import AiToolConfirmationCard from '@/components/business/ai/AiToolConfirmationC
 import AiWebSourcesPanel from '@/components/business/ai/AiWebSourcesPanel.vue';
 import { useAiAgentNetwork } from '@/composables/useAiAgentNetwork';
 import { useAiAgentRun } from '@/composables/useAiAgentRun';
-import { useAiAssistant } from '@/composables/useAiAssistant';
+import { useAiAssistant, type IAiConversationCheckpoint } from '@/composables/useAiAssistant';
 import { useAiWebSources } from '@/composables/useAiWebSources';
 import { findAiServicePlatformByModel } from '@/constants/ai-providers';
 import type {
@@ -20,7 +24,6 @@ import type {
   IAiTaskPlanStep,
   IAiToolActivityInline,
   IAiToolCall,
-  TAiChatMessageActionId,
   TAiModelRole,
   TAiToolConfirmationDecision,
 } from '@/types/ai';
@@ -101,6 +104,19 @@ const aiProviderSummaryTitle = computed(() => {
 });
 const historyThreads = computed(() => assistant.historyThreads.value.slice(-MAX_HISTORY_MESSAGES).reverse());
 const historyCountLabel = computed(() => `最近 ${historyThreads.value.length} 组`);
+const conversationCheckpointByMessageId = computed<Record<string, IAiConversationCheckpoint>>(() => {
+  const checkpointMap: Record<string, IAiConversationCheckpoint> = {};
+
+  assistant.conversationCheckpoints.value.forEach((checkpoint) => {
+    checkpointMap[checkpoint.messageId] = checkpoint;
+  });
+
+  return checkpointMap;
+});
+const isCheckpointRestorePending = computed(() => assistant.restoringCheckpointId.value !== null);
+const isConversationCheckpointDisabled = computed(
+  () => assistant.isSending.value || isCheckpointRestorePending.value,
+);
 const planStore = computed(() => assistant.agentPlan.store);
 const readPlanStoreValue = <T,>(value: T | { value: T }): T => {
   if (typeof value === 'object' && value !== null && 'value' in value) {
@@ -416,6 +432,49 @@ const getHistoryTimeLabel = (timestampText: string): string => {
   }).format(new Date(timestamp));
 };
 
+const getConversationCheckpoint = (messageId: string): IAiConversationCheckpoint | null =>
+  conversationCheckpointByMessageId.value[messageId] ?? null;
+
+const isConversationCheckpointRestoring = (messageId: string): boolean => {
+  const checkpoint = getConversationCheckpoint(messageId);
+
+  return checkpoint !== null && assistant.restoringCheckpointId.value === checkpoint.id;
+};
+
+const getConversationCheckpointLabel = (messageId: string): string => {
+  const checkpoint = getConversationCheckpoint(messageId);
+
+  if (!checkpoint) {
+    return '';
+  }
+
+  if (assistant.restoringCheckpointId.value === checkpoint.id) {
+    return '正在恢复检查点';
+  }
+
+  return `恢复到 ${getHistoryTimeLabel(checkpoint.createdAt)} 检查点`;
+};
+
+const getConversationCheckpointTooltip = (messageId: string): string | undefined => {
+  const checkpoint = getConversationCheckpoint(messageId);
+
+  if (!checkpoint) {
+    return undefined;
+  }
+
+  return `恢复到 ${getHistoryTimeLabel(checkpoint.createdAt)} 的对话检查点，并丢弃其后的消息`;
+};
+
+const handleRestoreConversationCheckpoint = async (messageId: string): Promise<void> => {
+  const checkpoint = getConversationCheckpoint(messageId);
+
+  if (!checkpoint || isConversationCheckpointDisabled.value) {
+    return;
+  }
+
+  await assistant.restoreConversationCheckpoint(checkpoint.id);
+};
+
 const getHistoryMessageCountLabel = (messages: IAiChatMessage[]): string => `${messages.length} 条消息`;
 
 const setPlanError = (error: unknown, fallback: string): void => {
@@ -645,13 +704,6 @@ const testProvider = async (
   }
 };
 
-const handleMessageAction = async (
-  messageId: string,
-  actionId: TAiChatMessageActionId,
-): Promise<void> => {
-  await assistant.handleMessageAction(messageId, actionId);
-};
-
 onMounted(() => {
   assistant.loadConfig().then(() => {
     settingsDraft.value = cloneAiConfigPayload(assistant.config.value);
@@ -715,7 +767,20 @@ onBeforeUnmount(() => {
     </header>
 
     <AiChatThread :messages="threadMessages" :is-typing="assistant.isSending.value" :platform-id="aiIconPlatformId"
-      :provider-label="aiIconTitle" @message-action="handleMessageAction" />
+      :provider-label="aiIconTitle">
+      <template #after-message="{ message }">
+        <Checkpoint v-if="getConversationCheckpoint(message.id)" class="ai-conversation-checkpoint">
+          <CheckpointTrigger class="ai-conversation-checkpoint__trigger" :disabled="isConversationCheckpointDisabled"
+            :tooltip="getConversationCheckpointTooltip(message.id)"
+            @click="handleRestoreConversationCheckpoint(message.id)">
+            <CheckpointIcon class="ai-conversation-checkpoint__icon" aria-hidden="true" />
+            <span>{{ getConversationCheckpointLabel(message.id) }}</span>
+            <Loader v-if="isConversationCheckpointRestoring(message.id)" class="ai-conversation-checkpoint__loader"
+              :size="12" />
+          </CheckpointTrigger>
+        </Checkpoint>
+      </template>
+    </AiChatThread>
     <div v-if="fileRollbackPrompt" class="ai-file-rollback-entry" :class="`is-${fileRollbackPrompt.status}`">
       <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
       <button type="button" class="ai-file-rollback-entry__button" :disabled="isFileRollbackDisabled"
@@ -835,6 +900,7 @@ onBeforeUnmount(() => {
   min-height: 0;
   flex: 1;
   flex-direction: column;
+  overflow-x: hidden;
   background: var(--sidebar-bg);
   color: var(--text-primary);
 }
@@ -1081,11 +1147,46 @@ onBeforeUnmount(() => {
 }
 
 .ai-patch-entry,
+.ai-conversation-checkpoint,
 .ai-file-rollback-entry {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 8px 12px 0;
+}
+
+.ai-conversation-checkpoint {
+  padding-left: 42px;
+  color: var(--text-quaternary);
+}
+
+.ai-conversation-checkpoint__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.ai-conversation-checkpoint__trigger:hover {
+  color: var(--text-secondary);
+}
+
+.ai-conversation-checkpoint__trigger:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.ai-conversation-checkpoint__icon,
+.ai-conversation-checkpoint__loader {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
 }
 
 .ai-patch-entry__line,

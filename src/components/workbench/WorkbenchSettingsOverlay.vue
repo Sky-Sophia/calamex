@@ -1621,7 +1621,7 @@ const diagnosticLevelOptions = [
 ] as const;
 
 const accentSwatches = [
-  { value: 'indigo', label: '靛蓝', color: '#5e6ad2' },
+  { value: 'indigo', label: 'Primer 蓝', color: '#0969da' },
   { value: 'violet', label: '紫色', color: '#7c3aed' },
   { value: 'blue', label: '蓝色', color: '#2f80ed' },
   { value: 'teal', label: '青绿色', color: '#14b8a6' },

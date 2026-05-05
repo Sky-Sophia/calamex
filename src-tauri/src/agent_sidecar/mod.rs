@@ -8,8 +8,9 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::ai::credential::CredentialStore;
 use crate::commands::contracts::{
-    AgentSidecarApprovalResolveRequest, AgentSidecarChatRequest, AgentSidecarExecuteRequest,
-    AgentSidecarHealthPayload, AgentSidecarPlanRequest, AgentSidecarResponsePayload,
+    AgentSidecarApprovalResolveRequest, AgentSidecarChatRequest,
+    AgentSidecarCheckpointRestoreRequest, AgentSidecarExecuteRequest, AgentSidecarHealthPayload,
+    AgentSidecarPlanRequest, AgentSidecarResponsePayload,
 };
 
 const DEFAULT_SIDECAR_URL: &str = "http://127.0.0.1:39871";
@@ -751,6 +752,21 @@ pub async fn resolve_approval(
     .await
 }
 
+pub async fn restore_checkpoint(
+    app: AppHandle,
+    mut payload: AgentSidecarCheckpointRestoreRequest,
+) -> Result<AgentSidecarResponsePayload, String> {
+    let session_id = ensure_request_session_id(&mut payload.session_id, "sidecar-rollback");
+    post_json_streaming_events(
+        &app,
+        "/rollback/restore",
+        "/rollback/restore/stream",
+        &payload,
+        &session_id,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -831,7 +847,7 @@ mod tests {
         };
         let unavailable_payload = SidecarHealthProbePayload {
             ok: false,
-            _engine: Some("strands".to_string()),
+            _engine: Some("legacy-runtime".to_string()),
             protocol_version: Some("5".to_string()),
         };
 

@@ -2,6 +2,7 @@ import { tauriService } from '@/services/tauri';
 import type {
   IAgentSidecarApprovalResolveRequest,
   IAgentSidecarChatRequest,
+  IAgentSidecarCheckpointRestoreRequest,
   IAgentSidecarExecuteRequest,
   IAgentSidecarHealthPayload,
   IAgentSidecarPlanRequest,
@@ -72,6 +73,11 @@ export const aiService = {
     payload: IAgentSidecarApprovalResolveRequest,
   ): Promise<IAgentSidecarResponsePayload> {
     return tauriService.agentSidecarResolveApproval(payload);
+  },
+  sidecarRestoreCheckpoint(
+    payload: IAgentSidecarCheckpointRestoreRequest,
+  ): Promise<IAgentSidecarResponsePayload> {
+    return tauriService.agentSidecarRestoreCheckpoint(payload);
   },
   onSidecarStream(
     handler: (payload: IAgentSidecarStreamEventPayload) => void,

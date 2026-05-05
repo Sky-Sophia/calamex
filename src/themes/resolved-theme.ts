@@ -30,11 +30,11 @@ export const ACCENT_STYLE_MAP: Record<
     }
 > = {
     indigo: {
-        accent: '#5e6ad2',
-        accentStrong: '#6f7cff',
-        accentMuted: 'rgba(94, 106, 210, 0.16)',
-        accentSoft: 'rgba(94, 106, 210, 0.35)',
-        statusbarAccent: '#4c6fff',
+        accent: 'var(--r-accent-default)',
+        accentStrong: 'var(--r-accent-strong)',
+        accentMuted: 'var(--r-accent-muted)',
+        accentSoft: 'var(--r-accent-soft)',
+        statusbarAccent: 'var(--r-accent-statusbar)',
     },
     violet: {
         accent: '#7c3aed',

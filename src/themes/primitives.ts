@@ -1,196 +1,155 @@
 /**
- * L1 Primitives — 原始调色板
+ * L1 Primitives — Primer 官方 functional color tokens
  *
+ * 来源：@primer/primitives@11.7.1 dist/css/functional/themes/{light,dark}.css。
  * 规则：
- *  - 每个值只在此文件出现一次；新增颜色在此追加，不在别处定义字面量
- *  - 命名描述"颜色是什么"（色族 + 明度档位），不描述"用在哪里"
+ *  - 每个官方值只在此文件出现一次；新增颜色在此追加，不在别处散落字面量
+ *  - 命名保留 Primer functional token 语义，便于与官方文档核对
  *  - 此文件只供 variants/ 引用；禁止 derive/、components.ts、UI 代码直接 import
- *
- * 命名规则：
- *  前缀  含义
- *  n     Neutral（中性灰，从深到浅，数字越大越浅）
- *  a     Accent/Indigo（品牌蓝紫，数字越大越深）
- *  v     Violet（紫罗兰，用于光标/关键字高亮）
- *  c     Cyan/Sky（青色）
- *  g     Green（绿色/成功）
- *  y     Yellow/Amber（黄色/警告）
- *  r     Red/Rose（红色/危险）
- *  p     Purple（深紫，终端/语法）
- *  wa    White Alpha（白色 + 透明度，适用于深色遮罩）
- *  ba    Black Alpha（深底色 + 透明度，适用于浅色遮罩）
- *  aa    Accent Alpha（品牌色 + 透明度）
  */
 
 export const P = {
-    // ─────────────────────────────────────────────
-    // Neutral — 深色背景 (n980 最深 → n860 较浅)
-    // ─────────────────────────────────────────────
-    n980: '#08090a',   // Woodsmoke bg-0：最深画布
-    n960: '#0c0c0f',   // tabbar 深色背景
-    n950: '#0d0f12',   // 应用根背景（深色）
-    n940: '#0f0f12',   // 编辑器背景（深色）
-    n930: '#0f1011',
-    n920: '#101319',   // 状态栏背景（深色）
-    n910: '#111318',   // 活动栏背景（深色）
-    n900: '#111419',   // 面板次级背景（深色）
-    n890: '#15181d',   // 侧边栏背景（深色）
-    n880: '#15191e',   // 面板/终端背景（深色）
-    n870: '#181a1f',   // 标题栏背景（深色）
-    n865: '#16171a',   // Woodsmoke gutter：编辑器装订线
-    n860: '#1a1b1e',   // Woodsmoke code：代码/终端背景
-    n850: '#1c1c1f',   // Woodsmoke bg-1：主面板/卡片
-    n840: '#222326',   // Woodsmoke bg-2：二级面板/输入
-    n800: '#1f232a',   // 编辑器组件面（内嵌 Widget 背景）
-    n795: '#2b2c30',   // Woodsmoke bg-3：控件/标签底
-    n780: '#20242c',   // 选中背景（深色）
-    n760: '#262c35',   // 按钮次级悬浮背景（深色）
-    n755: '#35363a',   // Woodsmoke bg-4：高对比浮层/控件悬停
-    n740: '#28282c',
+    transparentDark: '#00000000',
+    transparentLight: '#ffffff00',
+    white: '#ffffff',
+    black: '#010409',
 
     // ─────────────────────────────────────────────
-    // Neutral — 浅色背景 (n050 最亮 → n200 稍深)
+    // Primer Light — Functional colors
     // ─────────────────────────────────────────────
-    n020: '#f3f4f6',   // 近白（深色模式主文字色）
-    n050: '#ffffff',   // 纯白（浅色模式编辑器背景）
-    n060: '#f8fafc',   // 近白
-    n070: '#f7f9fc',   // 侧边栏背景（浅色）
-    n080: '#f6f7fb',   // 标题栏背景（浅色）
-    n090: '#f5f7fb',   // 面板/终端背景（浅色）
-    n100: '#f3f5f8',   // 应用根背景（浅色）
-    n150: '#eef2f8',   // Tab 悬浮 / 选中高亮（浅色）
-    n160: '#edf1f8',   // 活动栏背景（浅色）
-    n200: '#dbe7ff',   // 状态栏背景（浅色，蓝调）
-    n250: '#e2e8f0',   // 通用浅灰
+    lightBgDefault: '#ffffff',              // --bgColor-default
+    lightBgMuted: '#f6f8fa',                // --bgColor-muted
+    lightBgInset: '#f6f8fa',                // --bgColor-inset
+    lightBgEmphasis: '#25292e',             // --bgColor-emphasis
+    lightBgNeutralMuted: '#818b981f',       // --bgColor-neutral-muted
+    lightBgAccentEmphasis: '#0969da',       // --bgColor-accent-emphasis
+    lightBgAccentMuted: '#ddf4ff',          // --bgColor-accent-muted
+    lightBgSuccessEmphasis: '#1f883d',      // --bgColor-success-emphasis
+    lightBgSuccessMuted: '#dafbe1',         // --bgColor-success-muted
+    lightBgAttentionEmphasis: '#9a6700',    // --bgColor-attention-emphasis
+    lightBgAttentionMuted: '#fff8c5',       // --bgColor-attention-muted
+    lightBgDangerEmphasis: '#cf222e',       // --bgColor-danger-emphasis
+    lightBgDangerMuted: '#ffebe9',          // --bgColor-danger-muted
+    lightBgDoneEmphasis: '#8250df',         // --bgColor-done-emphasis
+    lightBgDoneMuted: '#fbefff',            // --bgColor-done-muted
+    lightControlBgRest: '#f6f8fa',          // --control-bgColor-rest
+    lightControlBgHover: '#eff2f5',         // --control-bgColor-hover
+    lightControlBgActive: '#e6eaef',        // --control-bgColor-active
+
+    lightFgDefault: '#1f2328',              // --fgColor-default
+    lightFgMuted: '#59636e',                // --fgColor-muted
+    lightFgDisabled: '#818b98',             // --fgColor-disabled
+    lightFgOnEmphasis: '#ffffff',           // --fgColor-onEmphasis
+    lightFgAccent: '#0969da',               // --fgColor-accent
+    lightFgSuccess: '#1a7f37',              // --fgColor-success
+    lightFgAttention: '#9a6700',            // --fgColor-attention
+    lightFgDanger: '#d1242f',               // --fgColor-danger
+    lightFgDone: '#8250df',                 // --fgColor-done
+
+    lightBorderDefault: '#d1d9e0',          // --borderColor-default
+    lightBorderMuted: '#d1d9e0b3',          // --borderColor-muted
+    lightBorderEmphasis: '#818b98',         // --borderColor-emphasis
+    lightBorderAccentMuted: '#54aeff66',    // --borderColor-accent-muted
+    lightBorderSuccessMuted: '#4ac26b66',   // --borderColor-success-muted
+    lightBorderAttentionMuted: '#d4a72c66', // --borderColor-attention-muted
+    lightBorderDangerMuted: '#ff818266',    // --borderColor-danger-muted
 
     // ─────────────────────────────────────────────
-    // Neutral — 中间段（文字、行号、边框相关）
+    // Primer Dark — Functional colors
     // ─────────────────────────────────────────────
-    n600: '#383c44',   // 行号（深色）
-    n580: '#475569',   // 低优先级文字
-    n560: '#4d5166',   // 注释颜色（深色）
-    n540: '#5c6370',   // 注释颜色（备选）
-    n520: '#62666d',
-    n510: '#64748b',   // 文字三级（浅色模式）
-    n505: '#737780',   // 分隔符（深色）
-    n500: '#8a8f98',
-    n490: '#8e96a3',
-    n480: '#949aa6',   // 文字三级（深色）
-    n470: '#94a3b8',   // 文字四级（浅色）
-    n460: '#a0a7b0',   // 运算符（深色）
-    n440: '#c9ced8',   // 文字次级（深色）
-    n430: '#cccdd8',   // 活动行号（深色）
-    n420: '#d0d6e0',
-    n410: '#d7dce5',   // 终端前景（深色）
-    n390: '#334155',   // 文字次级（浅色）
-    n380: '#656b76',   // 文字四级（深色）/终端 brightBlack（深色）
-    n370: '#111827',   // 文字主色（浅色）
+    darkBgDefault: '#0d1117',               // --bgColor-default
+    darkBgMuted: '#151b23',                 // --bgColor-muted
+    darkBgInset: '#010409',                 // --bgColor-inset
+    darkBgEmphasis: '#3d444d',              // --bgColor-emphasis
+    darkBgNeutralMuted: '#656c7633',        // --bgColor-neutral-muted
+    darkBgAccentEmphasis: '#1f6feb',        // --bgColor-accent-emphasis
+    darkBgAccentMuted: '#388bfd1a',         // --bgColor-accent-muted
+    darkBgSuccessEmphasis: '#238636',       // --bgColor-success-emphasis
+    darkBgSuccessMuted: '#2ea04326',        // --bgColor-success-muted
+    darkBgAttentionEmphasis: '#9e6a03',     // --bgColor-attention-emphasis
+    darkBgAttentionMuted: '#bb800926',      // --bgColor-attention-muted
+    darkBgDangerEmphasis: '#da3633',        // --bgColor-danger-emphasis
+    darkBgDangerMuted: '#f851491a',         // --bgColor-danger-muted
+    darkBgDoneEmphasis: '#8957e5',          // --bgColor-done-emphasis
+    darkBgDoneMuted: '#ab7df826',           // --bgColor-done-muted
+    darkControlBgRest: '#212830',           // --control-bgColor-rest
+    darkControlBgHover: '#262c36',          // --control-bgColor-hover
+    darkControlBgActive: '#2a313c',         // --control-bgColor-active
+
+    darkFgDefault: '#f0f6fc',               // --fgColor-default
+    darkFgMuted: '#9198a1',                 // --fgColor-muted
+    darkFgDisabled: '#656c76',              // --fgColor-disabled
+    darkFgOnEmphasis: '#ffffff',            // --fgColor-onEmphasis
+    darkFgAccent: '#4493f8',                // --fgColor-accent
+    darkFgSuccess: '#3fb950',               // --fgColor-success
+    darkFgAttention: '#d29922',             // --fgColor-attention
+    darkFgDanger: '#f85149',                // --fgColor-danger
+    darkFgDone: '#ab7df8',                  // --fgColor-done
+
+    darkBorderDefault: '#3d444d',           // --borderColor-default
+    darkBorderMuted: '#3d444db3',           // --borderColor-muted
+    darkBorderEmphasis: '#656c76',          // --borderColor-emphasis
+    darkBorderAccentMuted: '#388bfd66',     // --borderColor-accent-muted
+    darkBorderSuccessMuted: '#2ea04366',    // --borderColor-success-muted
+    darkBorderAttentionMuted: '#bb800966',  // --borderColor-attention-muted
+    darkBorderDangerMuted: '#f8514966',     // --borderColor-danger-muted
 
     // ─────────────────────────────────────────────
-    // Accent / Indigo — 品牌蓝紫
+    // Primer syntax — Prettylights
     // ─────────────────────────────────────────────
-    a400: '#9aa6ff',   // 浅 accent（高亮文字）
-    a500: '#7c89ff',   // accent 主色（深色模式状态栏、终端光标）
-    a600: '#6f7cff',   // accent 深色
-    a700: '#5e6ad2',   // accent base（settings accent）
-    a800: '#4c6fff',   // 状态栏 accent（深色）
-    a900: '#335cff',   // accent（浅色模式）
+    lightSyntaxComment: '#59636e',
+    lightSyntaxConstant: '#0550ae',
+    lightSyntaxString: '#0a3069',
+    lightSyntaxEntity: '#6639ba',
+    lightSyntaxKeyword: '#cf222e',
+    lightSyntaxVariable: '#953800',
+    lightSyntaxMarkupList: '#3b2300',
+
+    darkSyntaxComment: '#9198a1',
+    darkSyntaxConstant: '#79c0ff',
+    darkSyntaxString: '#a5d6ff',
+    darkSyntaxEntity: '#d2a8ff',
+    darkSyntaxEntityTag: '#7ee787',
+    darkSyntaxKeyword: '#ff7b72',
+    darkSyntaxVariable: '#ffa657',
+    darkSyntaxMarkupList: '#f2cc60',
 
     // ─────────────────────────────────────────────
-    // Violet — 紫罗兰（编辑器光标、关键字）
+    // Primer ANSI colors
     // ─────────────────────────────────────────────
-    v400: '#a78bfa',   // 编辑器光标（深色）
-    v500: '#c4b5fd',   // 关键字高亮（深色）
-    v600: '#7c3aed',   // 终端 magenta（浅色）/ violet accent
-    v700: '#9462ff',
+    lightAnsiBlack: '#1f2328',
+    lightAnsiBrightBlack: '#393f46',
+    lightAnsiRed: '#cf222e',
+    lightAnsiBrightRed: '#a40e26',
+    lightAnsiGreen: '#116329',
+    lightAnsiBrightGreen: '#1a7f37',
+    lightAnsiYellow: '#4d2d00',
+    lightAnsiBrightYellow: '#633c01',
+    lightAnsiBlue: '#0969da',
+    lightAnsiBrightBlue: '#218bff',
+    lightAnsiMagenta: '#8250df',
+    lightAnsiBrightMagenta: '#a475f9',
+    lightAnsiCyan: '#1b7c83',
+    lightAnsiBrightCyan: '#3192aa',
+    lightAnsiWhite: '#59636e',
+    lightAnsiBrightWhite: '#818b98',
 
-    // ─────────────────────────────────────────────
-    // Cyan / Sky — 青色（类型、终端）
-    // ─────────────────────────────────────────────
-    c400: '#a9e7ff',   // 终端 brightCyan（深色）
-    c500: '#89ddff',   // 终端 cyan（深色）
-    c600: '#7dd3fc',   // 语法类型/函数（深色）
-    c700: '#0891b2',   // 终端 brightCyan（浅色）
-    c800: '#0f766e',   // 终端 cyan（浅色）/ teal
-
-    // ─────────────────────────────────────────────
-    // Green — 绿色（成功、字符串、diff added）
-    // ─────────────────────────────────────────────
-    g300: '#86efac',   // 语法字符串（深色）/ diff added（深色）
-    g400: '#74e2ad',   // 终端 brightGreen（深色）
-    g500: '#5dd39e',   // 终端 green（深色）
-    g600: '#22c55e',   // 成功状态（深色）
-    g700: '#16a34a',   // 终端 brightGreen（浅色）/ diff added（浅色）
-    g800: '#15803d',   // 语法字符串（浅色）/ 终端 green（浅色）
-
-    // ─────────────────────────────────────────────
-    // Yellow / Amber — 警告、变量
-    // ─────────────────────────────────────────────
-    y300: '#f8d88b',   // 终端 brightYellow（深色）
-    y400: '#f3c969',   // 警告颜色（深色）
-    y500: '#fcd34d',   // 语法变量（深色）
-    y600: '#ca8a04',   // 终端 brightYellow（浅色）
-    y700: '#a16207',   // 语法数字（浅色）/ 终端 yellow（浅色）
-
-    // ─────────────────────────────────────────────
-    // Red / Rose — 危险、错误
-    // ─────────────────────────────────────────────
-    r200: '#fca5a5',   // 语法数字（深色）
-    r300: '#ff9aa5',   // 终端 brightRed（深色）
-    r400: '#ff7b88',   // 终端 red（深色）
-    r500: '#ff6b7a',   // 危险状态（深色）
-    r600: '#fb7185',   // diff deleted（深色）
-    r700: '#e11d48',   // diff deleted（浅色）/ 终端 brightRed（浅色）
-    r800: '#d92d4f',   // 危险状态（浅色）
-    r900: '#c2415b',   // 终端 red（浅色）
-
-    // ─────────────────────────────────────────────
-    // Purple — 深紫（终端、语法）
-    // ─────────────────────────────────────────────
-    p400: '#d7a6ff',   // 终端 brightMagenta（深色）
-    p600: '#c792ea',   // 终端 magenta（深色）
-    p800: '#9333ea',   // 终端 brightMagenta（浅色）
-    p900: '#4f46e5',   // 终端 brightBlue（浅色）
-
-    // ─────────────────────────────────────────────
-    // White Alpha — 深色模式遮罩层
-    // ─────────────────────────────────────────────
-    wa04: 'rgba(255, 255, 255, 0.04)',
-    wa05: 'rgba(255, 255, 255, 0.05)',
-    wa06: 'rgba(255, 255, 255, 0.06)',
-    wa07: 'rgba(255, 255, 255, 0.07)',
-    wa075: 'rgba(255, 255, 255, 0.075)',
-    wa08: 'rgba(255, 255, 255, 0.08)',
-    wa10: 'rgba(255, 255, 255, 0.10)',
-    wa12: 'rgba(255, 255, 255, 0.12)',
-    wa14: 'rgba(255, 255, 255, 0.14)',
-    wa18: 'rgba(255, 255, 255, 0.18)',
-    wa20: 'rgba(255, 255, 255, 0.20)',
-    wa24: 'rgba(255, 255, 255, 0.24)',
-    wa26: 'rgba(255, 255, 255, 0.26)',
-    wa29: 'rgba(255, 255, 255, 0.29)',
-
-    // ─────────────────────────────────────────────
-    // Black Alpha — 浅色模式遮罩层
-    // ─────────────────────────────────────────────
-    ba04: 'rgba(15, 23, 42, 0.04)',
-    ba06: 'rgba(15, 23, 42, 0.06)',
-    ba08: 'rgba(15, 23, 42, 0.08)',
-    ba12: 'rgba(15, 23, 42, 0.12)',
-    ba14: 'rgba(15, 23, 42, 0.14)',
-    ba22: 'rgba(15, 23, 42, 0.22)',
-    ba33: 'rgba(15, 23, 42, 0.33)',
-
-    // ─────────────────────────────────────────────
-    // Accent Alpha — 品牌蓝紫 + 透明度
-    // ─────────────────────────────────────────────
-    aa16: 'rgba(94, 106, 210, 0.16)',
-    aa26: 'rgba(94, 106, 210, 0.26)',
-    aa35: 'rgba(94, 106, 210, 0.35)',
-
-    // ─────────────────────────────────────────────
-    // Special
-    // ─────────────────────────────────────────────
-    transparent: '#00000000',
+    darkAnsiBlack: '#2f3742',
+    darkAnsiBrightBlack: '#656c76',
+    darkAnsiRed: '#ff7b72',
+    darkAnsiBrightRed: '#ffa198',
+    darkAnsiGreen: '#3fb950',
+    darkAnsiBrightGreen: '#56d364',
+    darkAnsiYellow: '#d29922',
+    darkAnsiBrightYellow: '#e3b341',
+    darkAnsiBlue: '#58a6ff',
+    darkAnsiBrightBlue: '#79c0ff',
+    darkAnsiMagenta: '#be8fff',
+    darkAnsiBrightMagenta: '#d2a8ff',
+    darkAnsiCyan: '#39c5cf',
+    darkAnsiBrightCyan: '#56d4dd',
+    darkAnsiWhite: '#f0f6fc',
+    darkAnsiBrightWhite: '#ffffff',
 } as const satisfies Record<string, string>;
 
 export type TPrimitive = (typeof P)[keyof typeof P];

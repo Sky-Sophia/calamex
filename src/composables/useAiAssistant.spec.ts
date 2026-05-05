@@ -6,6 +6,7 @@ import { useAiAssistant } from '@/composables/useAiAssistant';
 import { useAiAgentStore } from '@/store/aiAgent';
 import { useAiConversationStore } from '@/store/aiConversation';
 import type {
+    IAgentSidecarCheckpointRestoreRequest,
     IAgentSidecarExecuteRequest,
     IAgentSidecarPlanRequest,
     IAgentSidecarResponsePayload,
@@ -355,10 +356,10 @@ const aiServiceMock = vi.hoisted(() => {
             },
             {
                 type: 'done',
-                result: `已通过 Strands Agent 处理：${goal}`,
+                result: `已通过 Mastra Agent 处理：${goal}`,
             },
         ],
-        result: `已通过 Strands Agent 处理：${goal}`,
+        result: `已通过 Mastra Agent 处理：${goal}`,
     });
 
     const sidecarExecute = vi.fn(async (payload: IAgentSidecarExecuteRequest) =>
@@ -373,6 +374,18 @@ const aiServiceMock = vi.hoisted(() => {
             },
         ],
         result: '审批结果已交给 sidecar。',
+    }));
+    const sidecarRestoreCheckpoint = vi.fn<
+        (payload: IAgentSidecarCheckpointRestoreRequest) => Promise<IAgentSidecarResponsePayload>
+    >(async (payload) => ({
+        sessionId: payload.sessionId ?? 'sidecar-restore-session-1',
+        events: [
+            {
+                type: 'done',
+                result: '已恢复到指定检查点。',
+            },
+        ],
+        result: '已恢复到指定检查点。',
     }));
     const onSidecarStream = vi.fn(async (handler: SidecarStreamHandler) => {
         sidecarStreamHandler = handler;
@@ -403,6 +416,7 @@ const aiServiceMock = vi.hoisted(() => {
         sidecarPlan,
         sidecarExecute,
         sidecarResolveApproval,
+        sidecarRestoreCheckpoint,
         onSidecarStream,
         approvePlan,
         queueStreamResponse(content: string, terminalKind: 'done' | 'error' = 'done', terminalMessage: string | null = null): void {
@@ -458,6 +472,7 @@ const aiServiceMock = vi.hoisted(() => {
             sidecarPlan.mockClear();
             sidecarExecute.mockClear();
             sidecarResolveApproval.mockClear();
+            sidecarRestoreCheckpoint.mockClear();
             onSidecarStream.mockClear();
             approvePlan.mockClear();
         },
@@ -482,6 +497,7 @@ vi.mock('@/services/modules/ai', () => ({
         sidecarPlan: aiServiceMock.sidecarPlan,
         sidecarExecute: aiServiceMock.sidecarExecute,
         sidecarResolveApproval: aiServiceMock.sidecarResolveApproval,
+        sidecarRestoreCheckpoint: aiServiceMock.sidecarRestoreCheckpoint,
         onSidecarStream: aiServiceMock.onSidecarStream,
         approvePlan: aiServiceMock.approvePlan,
     },
@@ -1219,7 +1235,7 @@ describe('useAiAssistant streaming integration', () => {
         expect(assistant.draft.value).toBe('');
     });
 
-    it('uses Strands sidecar execute directly in agent mode without generating a plan', async () => {
+    it('uses Mastra sidecar execute directly in agent mode without generating a plan', async () => {
         const { assistant } = createAssistantHarnessContext();
 
         assistant.activeMode.value = 'agent';
@@ -1233,7 +1249,7 @@ describe('useAiAssistant streaming integration', () => {
         expect(aiServiceMock.chatStream).toHaveBeenCalledTimes(0);
         expect(aiServiceMock.sidecarExecute).toHaveBeenCalledTimes(1);
         expect(aiServiceMock.applyPatch).toHaveBeenCalledTimes(0);
-        expect(assistant.messages.value[1]?.content).toContain('已通过 Strands Agent 处理：');
+        expect(assistant.messages.value[1]?.content).toContain('已通过 Mastra Agent 处理：');
         expect(assistant.messages.value[1]?.toolCalls?.[0]).toMatchObject({
             name: 'read_project_file',
             status: 'succeeded',
@@ -1274,7 +1290,7 @@ describe('useAiAssistant streaming integration', () => {
         expect(assistant.messages.value[1]?.stream?.activityNotes).toBeUndefined();
     });
 
-    it('raw strands event 模式下编辑完成时不会再启动 narrator', async () => {
+    it('raw sidecar event 模式下编辑完成时不会再启动 narrator', async () => {
         const { assistant } = createAssistantHarnessContext({ narratorConfigured: true });
         aiServiceMock.sidecarExecute.mockResolvedValueOnce({
             sessionId: 'sidecar-narrator-edit-session',
@@ -1307,7 +1323,7 @@ describe('useAiAssistant streaming integration', () => {
         expect(assistant.messages.value[1]?.stream?.activityNotes).toBeUndefined();
     });
 
-    it('raw strands event 模式下重复编辑事件也不会创建 narrator 请求', async () => {
+    it('raw sidecar event 模式下重复编辑事件也不会创建 narrator 请求', async () => {
         const { assistant } = createAssistantHarnessContext({ narratorConfigured: true });
 
         aiServiceMock.sidecarExecute.mockImplementationOnce(async (payload: IAgentSidecarExecuteRequest) => {
@@ -1346,7 +1362,7 @@ describe('useAiAssistant streaming integration', () => {
         expect(assistant.messages.value[1]?.stream?.activityNotes).toBeUndefined();
     });
 
-    it('raw strands event 模式下不会监听 narrator turn 结果', async () => {
+    it('raw sidecar event 模式下不会监听 narrator turn 结果', async () => {
         const { assistant } = createAssistantHarnessContext({ narratorConfigured: true });
         aiServiceMock.sidecarExecute.mockResolvedValueOnce({
             sessionId: 'sidecar-narrator-turn-session',
@@ -1378,7 +1394,7 @@ describe('useAiAssistant streaming integration', () => {
         expect(assistant.messages.value[1]?.stream?.activityNotes).toBeUndefined();
     });
 
-    it('raw strands event 模式下连续序列更新不会创建 narrator 序列', async () => {
+    it('raw sidecar event 模式下连续序列更新不会创建 narrator 序列', async () => {
         const { assistant } = createAssistantHarnessContext({ narratorConfigured: true });
         aiServiceMock.sidecarExecute.mockImplementationOnce(async (payload: IAgentSidecarExecuteRequest) => {
             const sessionId = payload.sessionId ?? 'sidecar-narrator-sequence-session';
@@ -1443,7 +1459,7 @@ describe('useAiAssistant streaming integration', () => {
         expect(assistant.messages.value[1]?.stream?.activityNotes).toBeUndefined();
     });
 
-    it('raw strands event 模式下不会再发送 narrator facts', async () => {
+    it('raw sidecar event 模式下不会再发送 narrator facts', async () => {
         const { assistant } = createAssistantHarnessContext({ narratorConfigured: true });
 
         aiServiceMock.sidecarExecute.mockResolvedValueOnce({
@@ -2223,10 +2239,10 @@ describe('useAiAssistant streaming integration', () => {
                 events: [
                     {
                         type: 'done',
-                        result: `已通过 Strands Agent 处理：${payload.goal}`,
+                        result: `已通过 Mastra Agent 处理：${payload.goal}`,
                     },
                 ],
-                result: `已通过 Strands Agent 处理：${payload.goal}`,
+                result: `已通过 Mastra Agent 处理：${payload.goal}`,
             };
         });
 
@@ -2252,7 +2268,7 @@ describe('useAiAssistant streaming integration', () => {
         sidecarGate.resolve(undefined);
         await sendPromise;
 
-        expect(assistant.messages.value[1]?.content).toContain('已通过 Strands Agent 处理');
+        expect(assistant.messages.value[1]?.content).toContain('已通过 Mastra Agent 处理');
         expect(assistant.messages.value[1]?.stream?.status).toBe('completed');
     });
 
@@ -2353,7 +2369,7 @@ describe('useAiAssistant streaming integration', () => {
         expect(assistant.errorMessage.value).toContain('未保存改动');
     });
 
-    it('passes UI context to Strands sidecar agent mode as system context', async () => {
+    it('passes UI context to Mastra sidecar agent mode as system context', async () => {
         const { assistant } = createAssistantHarnessContext();
 
         assistant.activeMode.value = 'agent';
@@ -2473,6 +2489,163 @@ describe('useAiAssistant streaming integration', () => {
         expect(document.value.charCount).toBe(8);
         expect(assistant.messages.value.at(-1)?.content).toBe('Patch 已应用：D:/test/xiaojianc.sh');
         expect(assistant.proposedPatch.value).toBeNull();
+    });
+
+    it('restores a conversation checkpoint and trims messages after the checkpoint', async () => {
+        const { assistant } = createAssistantHarnessContext();
+
+        assistant.messages.value = [
+            {
+                id: 'user-before-checkpoint',
+                role: 'user',
+                content: '先做第一步修改',
+                createdAt: '2026-05-03T10:00:00.000Z',
+                references: [],
+            },
+            {
+                id: 'assistant-checkpoint',
+                role: 'assistant',
+                content: '第一步已经完成。',
+                createdAt: '2026-05-03T10:01:00.000Z',
+                references: [],
+                stream: {
+                    status: 'completed',
+                    runtimeEvents: [
+                        {
+                            id: 'checkpoint-created-1',
+                            type: 'rollback.checkpoint.created',
+                            runId: 'run-checkpoint-1',
+                            sessionId: 'session-checkpoint-1',
+                            agentId: 'agent-checkpoint-1',
+                            timestamp: '2026-05-03T10:01:00.000Z',
+                            seq: 0,
+                            schemaVersion: 1,
+                            redacted: true,
+                            visibility: 'user',
+                            level: 'info',
+                            snapshotId: 'snapshot-checkpoint-1',
+                        },
+                    ],
+                },
+            },
+            {
+                id: 'user-after-checkpoint',
+                role: 'user',
+                content: '继续做第二步修改',
+                createdAt: '2026-05-03T10:02:00.000Z',
+                references: [],
+            },
+            {
+                id: 'assistant-after-checkpoint',
+                role: 'assistant',
+                content: '第二步也完成了。',
+                createdAt: '2026-05-03T10:03:00.000Z',
+                references: [],
+            },
+        ];
+
+        expect(assistant.conversationCheckpoints.value).toEqual([
+            expect.objectContaining({
+                id: 'checkpoint-created-1',
+                messageId: 'assistant-checkpoint',
+                runId: 'run-checkpoint-1',
+                snapshotId: 'snapshot-checkpoint-1',
+            }),
+        ]);
+
+        aiServiceMock.sidecarRestoreCheckpoint.mockImplementationOnce(async (payload: IAgentSidecarCheckpointRestoreRequest) => {
+            const sessionId = payload.sessionId ?? 'sidecar-restore-session-1';
+            const restoreStartedEvent = {
+                id: 'checkpoint-restore-started',
+                type: 'rollback.restore.started' as const,
+                runId: 'run-checkpoint-1',
+                sessionId,
+                agentId: 'agent-checkpoint-1',
+                timestamp: '2026-05-03T10:04:00.000Z',
+                seq: 1,
+                schemaVersion: 1 as const,
+                redacted: true as const,
+                visibility: 'user' as const,
+                level: 'info' as const,
+                snapshotId: 'snapshot-checkpoint-1',
+            };
+
+            aiServiceMock.emitSidecar({
+                sessionId,
+                seq: 1,
+                event: {
+                    type: 'agent_event',
+                    event: restoreStartedEvent,
+                },
+            });
+
+            return {
+                sessionId,
+                events: [
+                    {
+                        type: 'agent_event',
+                        event: restoreStartedEvent,
+                    },
+                    {
+                        type: 'agent_event',
+                        event: {
+                            id: 'checkpoint-restore-completed',
+                            type: 'rollback.restore.completed',
+                            runId: 'run-checkpoint-1',
+                            sessionId,
+                            agentId: 'agent-checkpoint-1',
+                            timestamp: '2026-05-03T10:04:01.000Z',
+                            seq: 2,
+                            schemaVersion: 1,
+                            redacted: true,
+                            visibility: 'user',
+                            level: 'info',
+                            snapshotId: 'snapshot-checkpoint-1',
+                            savedAsLatest: true,
+                            message: '已恢复到指定检查点。',
+                        },
+                    },
+                    {
+                        type: 'done',
+                        result: '已恢复到指定检查点。',
+                    },
+                ],
+                result: '已恢复到指定检查点。',
+            };
+        });
+
+        await assistant.restoreConversationCheckpoint('checkpoint-created-1');
+
+        expect(aiServiceMock.sidecarRestoreCheckpoint).toHaveBeenCalledWith(expect.objectContaining({
+            runId: 'run-checkpoint-1',
+            snapshotId: 'snapshot-checkpoint-1',
+            sessionId: expect.stringContaining('sidecar-restore'),
+        }));
+        expect(assistant.messages.value.map((message) => message.id)).toEqual([
+            'user-before-checkpoint',
+            'assistant-checkpoint',
+        ]);
+        expect(assistant.messages.value[1]?.stream?.runtimeEvents).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'rollback.checkpoint.created',
+                id: 'checkpoint-created-1',
+            }),
+            expect.objectContaining({
+                type: 'rollback.restore.started',
+                id: 'checkpoint-restore-started',
+            }),
+            expect.objectContaining({
+                type: 'rollback.restore.completed',
+                id: 'checkpoint-restore-completed',
+            }),
+        ]));
+        expect(assistant.runtimeTimelineEvents.value).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'rollback.checkpoint.created' }),
+            expect.objectContaining({ type: 'rollback.restore.started' }),
+            expect.objectContaining({ type: 'rollback.restore.completed' }),
+        ]));
+        expect(assistant.restoringCheckpointId.value).toBeNull();
+        expect(assistant.errorMessage.value).toBe('');
     });
 
     it('exposes a rollback prompt after an AED operation is available and can undo it', async () => {

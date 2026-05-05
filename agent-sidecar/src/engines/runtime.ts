@@ -6,6 +6,7 @@ import type {
 import type {
     IAgentRuntimeInput,
     IApprovalResolutionInput,
+    ICheckpointRestoreInput,
 } from './runtime-input.js';
 
 export type {
@@ -38,6 +39,10 @@ export interface IAgentSidecarRuntime {
     ): Promise<IAgentRuntimeResponse>;
     resolveApproval(
         input: IApprovalResolutionInput,
+        options?: IAgentRuntimeRunOptions,
+    ): Promise<IAgentRuntimeResponse>;
+    restoreCheckpoint(
+        input: ICheckpointRestoreInput,
         options?: IAgentRuntimeRunOptions,
     ): Promise<IAgentRuntimeResponse>;
 }

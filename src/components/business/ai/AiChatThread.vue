@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import type { TAiServicePlatformId } from '@/constants/ai-providers';
-import type { IAiChatMessage, TAiChatMessageActionId } from '@/types/ai';
 import {
   Conversation,
   ConversationContent,
@@ -8,9 +6,10 @@ import {
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import { Loader } from '@/components/ai-elements/loader';
+import type { TAiServicePlatformId } from '@/constants/ai-providers';
+import type { IAiChatMessage, TAiChatMessageActionId } from '@/types/ai';
 import { computed } from 'vue';
 import AiMessageItem from './AiMessageItem.vue';
-import AiProviderIcon from './AiProviderIcon.vue';
 
 const props = defineProps<{
   messages: IAiChatMessage[];
@@ -69,44 +68,25 @@ const handleMessageAction = (messageId: string, actionId: TAiChatMessageActionId
 </script>
 
 <template>
-  <Conversation class="ai-chat-list" aria-label="AI 对话记录">
-    <ConversationContent
-      v-if="messages.length > 0 || shouldRenderStandaloneTyping"
-      class="ai-chat-list__content"
-    >
+  <Conversation class="ai-chat-list overflow-x-hidden" aria-label="AI 对话记录">
+    <ConversationContent v-if="messages.length > 0 || shouldRenderStandaloneTyping" class="ai-chat-list__content">
       <slot name="before-messages" />
       <template v-for="message in messages" :key="message.id">
-        <slot
-          v-if="message.id === lastAssistantMessageId"
-          name="before-last-assistant"
-          :message="message"
-        />
-        <AiMessageItem
-          :message="message"
-          :platform-id="platformId"
-          :provider-label="providerLabel"
-          @message-action="handleMessageAction"
-        />
+        <slot v-if="message.id === lastAssistantMessageId" name="before-last-assistant" :message="message" />
+        <AiMessageItem :message="message" :platform-id="platformId" :provider-label="providerLabel"
+          @message-action="handleMessageAction" />
+        <slot name="after-message" :message="message" />
       </template>
       <slot name="after-messages" />
-      <article
-        v-if="shouldRenderStandaloneTyping"
-        class="ai-message-typing"
-        aria-label="AI 正在准备回复"
-      >
-        <AiProviderIcon class="ai-logo" :platform-id="platformId" :title="providerLabel" />
+      <article v-if="shouldRenderStandaloneTyping" class="ai-message-typing" aria-label="AI 正在准备回复">
         <div class="typing-status" role="status" aria-live="polite">
           <Loader class="typing-status-icon" :size="13" />
           <span>AI 正在准备回复</span>
         </div>
       </article>
     </ConversationContent>
-    <ConversationEmptyState
-      v-else
-      class="ai-chat-empty-state"
-      title="开始一段 AI 对话"
-      description="输入你的问题，AI 会结合当前文件、选择区和工作区上下文给出回答。"
-    />
+    <ConversationEmptyState v-else class="ai-chat-empty-state" title="开始一段 AI 对话"
+      description="输入你的问题，AI 会结合当前文件、选择区和工作区上下文给出回答。" />
     <ConversationScrollButton class="ai-chat-scroll-button" />
   </Conversation>
 </template>
@@ -118,8 +98,10 @@ const handleMessageAction = (messageId: string, actionId: TAiChatMessageActionId
 }
 
 .ai-chat-list__content {
+  min-width: 0;
   gap: 14px;
-  padding: 14px 12px;
+  overflow-x: hidden;
+  padding: 14px 0;
 }
 
 .ai-chat-empty-state {
@@ -151,19 +133,14 @@ const handleMessageAction = (messageId: string, actionId: TAiChatMessageActionId
 
 .ai-message-typing {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.ai-logo {
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  margin-top: 1px;
+  min-width: 0;
+  align-items: center;
+  padding-inline: 30px;
 }
 
 .typing-status {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   color: var(--text-quaternary);

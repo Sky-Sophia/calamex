@@ -1,15 +1,16 @@
 ﻿import { mount } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
+import { h } from 'vue';
 
 import AiChatThread from '@/components/business/ai/AiChatThread.vue';
 import type { IAiChatMessage } from '@/types/ai';
 
 class ResizeObserverMock {
-  observe(): void {}
+  observe(): void { }
 
-  unobserve(): void {}
+  unobserve(): void { }
 
-  disconnect(): void {}
+  disconnect(): void { }
 }
 
 vi.stubGlobal('ResizeObserver', ResizeObserverMock);
@@ -64,6 +65,25 @@ describe('AiChatThread', () => {
     });
 
     expect(wrapper.find('.ai-message-typing').exists()).toBe(true);
+    expect(wrapper.find('.ai-logo').exists()).toBe(false);
+  });
+
+  it('locks horizontal overflow inside the thread container instead of exposing a bottom slider', () => {
+    const wrapper = mount(AiChatThread, {
+      props: {
+        messages: [createMessage({ content: '表格内容改为在局部区域滚动' })],
+        isTyping: false,
+        platformId: 'deepseek',
+        providerLabel: 'DeepSeek',
+      },
+      global: {
+        stubs: {
+          AiMessageItem: { template: '<div class="message-item-stub" />' },
+        },
+      },
+    });
+
+    expect(wrapper.find('.ai-chat-list').classes()).toContain('overflow-x-hidden');
   });
 
   it('forwards message actions with both payload arguments intact', async () => {
@@ -94,6 +114,35 @@ describe('AiChatThread', () => {
 
     expect(wrapper.emitted('messageAction')).toEqual([
       ['message-1', 'allow-agent-execution'],
+    ]);
+  });
+
+  it('renders the per-message trailing slot with the current message payload', () => {
+    const wrapper = mount(AiChatThread, {
+      props: {
+        messages: [
+          createMessage({ id: 'message-1', content: '第一条消息' }),
+          createMessage({ id: 'message-2', content: '第二条消息' }),
+        ],
+        isTyping: false,
+        platformId: 'deepseek',
+        providerLabel: 'DeepSeek',
+      },
+      slots: {
+        'after-message': ({ message }: { message: IAiChatMessage }) =>
+          h('div', { class: 'after-message-stub' }, message.id),
+      },
+      global: {
+        stubs: {
+          AiMessageItem: { template: '<div class="message-item-stub" />' },
+        },
+      },
+    });
+
+    expect(wrapper.findAll('.after-message-stub')).toHaveLength(2);
+    expect(wrapper.findAll('.after-message-stub').map((node) => node.text())).toEqual([
+      'message-1',
+      'message-2',
     ]);
   });
 

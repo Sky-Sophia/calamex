@@ -106,6 +106,18 @@ const approvalResolutionSchema = z.object({
   decision: z.string().min(1),
 });
 
+const rollbackStepSchema = z.union([
+  requiredNonEmptyStringSchema,
+  z.array(requiredNonEmptyStringSchema).min(1),
+]);
+
+export const agentSidecarRollbackRestoreRequestSchema = z.object({
+  sessionId: optionalNonEmptyStringSchema,
+  runId: requiredNonEmptyStringSchema,
+  snapshotId: optionalNonEmptyStringSchema,
+  step: rollbackStepSchema.optional(),
+});
+
 const writeJson = (response: ServerResponse, statusCode: number, payload: unknown): void => {
   response.writeHead(statusCode, {
     'content-type': 'application/json; charset=utf-8',
@@ -351,6 +363,22 @@ export const createAgentSidecarServer = (
       void handlePostStream(request, response, async (body, options) => {
         const payload = approvalResolutionSchema.parse(body);
         return runtime.resolveApproval(payload, options);
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && url === '/rollback/restore') {
+      void handlePost(request, response, async (body, options) => {
+        const payload = agentSidecarRollbackRestoreRequestSchema.parse(body);
+        return runtime.restoreCheckpoint(payload, options);
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && url === '/rollback/restore/stream') {
+      void handlePostStream(request, response, async (body, options) => {
+        const payload = agentSidecarRollbackRestoreRequestSchema.parse(body);
+        return runtime.restoreCheckpoint(payload, options);
       });
       return;
     }

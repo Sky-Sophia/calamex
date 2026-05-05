@@ -16,6 +16,7 @@ import {
   agentSidecarChatRequestSchema,
   agentSidecarExecuteRequestSchema,
   agentSidecarPlanRequestSchema,
+  agentSidecarRollbackRestoreRequestSchema,
   createAgentSidecarServer,
 } from './server.js';
 
@@ -31,6 +32,12 @@ const unsupportedApprovalResolution = async (
   throw new Error('Not implemented in test runtime.');
 };
 
+const unsupportedRollbackRestore = async (
+  ..._args: Parameters<IAgentSidecarRuntime['restoreCheckpoint']>
+): Promise<Awaited<ReturnType<IAgentSidecarRuntime['restoreCheckpoint']>>> => {
+  throw new Error('Not implemented in test runtime.');
+};
+
 const createFakeRuntime = (
   overrides: Partial<IAgentSidecarRuntime> = {},
 ): IAgentSidecarRuntime => ({
@@ -40,6 +47,7 @@ const createFakeRuntime = (
   plan: unsupportedRuntimeResponse,
   execute: unsupportedRuntimeResponse,
   resolveApproval: unsupportedApprovalResolution,
+  restoreCheckpoint: unsupportedRollbackRestore,
   ...overrides,
 });
 
@@ -169,6 +177,20 @@ describe('Agent sidecar request schema', () => {
     assert.equal(payload.goal, 'run');
     assert.equal(payload.messages.length, 1);
     assert.equal(payload.workspaceRootPath, 'D:/com.xiaojianc/my_desktop_app');
+  });
+
+  it('accepts rollback restore requests with optional nested step paths', () => {
+    const payload = agentSidecarRollbackRestoreRequestSchema.parse({
+      sessionId: 'rollback-session',
+      runId: 'run-1',
+      snapshotId: 'run-1',
+      step: ['durable-agentic-execution', 'durable-llm-execution'],
+    });
+
+    assert.equal(payload.sessionId, 'rollback-session');
+    assert.equal(payload.runId, 'run-1');
+    assert.equal(payload.snapshotId, 'run-1');
+    assert.deepEqual(payload.step, ['durable-agentic-execution', 'durable-llm-execution']);
   });
 });
 
@@ -506,55 +528,66 @@ describe('Mastra runtime execute', () => {
           disconnectCalls += 1;
         },
       }),
-      createAgent: (config) => {
+      now: () => '2026-05-03T00:00:00.000Z',
+      createExecutionHandle: async (config) => {
         capturedInstructions = config.instructions;
         capturedToolNames = Object.keys(config.tools ?? {});
 
         return {
-          stream: async (messages, streamOptions) => {
-            capturedMessages = messages;
-            capturedStreamOptions = streamOptions;
+          agent: {
+            stream: async (messages, streamOptions) => {
+              capturedMessages = messages;
+              capturedStreamOptions = streamOptions;
 
-            return {
-              fullStream: (async function* () {
-                yield {
-                  type: 'tool-call',
-                  runId: 'run-execute',
-                  from: 'AGENT',
-                  payload: {
-                    toolCallId: 'tool-1',
-                    toolName: 'read_file',
-                    args: {
-                      path: 'README.md',
+              return {
+                runId: 'run-execute',
+                cleanup: () => undefined,
+                fullStream: (async function* () {
+                  yield {
+                    type: 'tool-call',
+                    runId: 'run-execute',
+                    from: 'AGENT',
+                    payload: {
+                      toolCallId: 'tool-1',
+                      toolName: 'read_file',
+                      args: {
+                        path: 'README.md',
+                      },
                     },
-                  },
-                };
-                yield {
-                  type: 'tool-result',
-                  runId: 'run-execute',
-                  from: 'TOOL',
-                  payload: {
-                    toolName: 'read_file',
-                    result: {
-                      content: [{ type: 'text', text: 'README 内容' }],
-                      isError: false,
+                  };
+                  yield {
+                    type: 'tool-result',
+                    runId: 'run-execute',
+                    from: 'TOOL',
+                    payload: {
+                      toolName: 'read_file',
+                      result: {
+                        content: [{ type: 'text', text: 'README 内容' }],
+                        isError: false,
+                      },
                     },
-                  },
-                };
-                yield {
-                  type: 'text-delta',
-                  runId: 'run-execute',
-                  from: 'AGENT',
-                  payload: {
-                    id: 'text-execute',
-                    text: '执行完成',
-                  },
-                };
-              })(),
-            };
+                  };
+                  yield {
+                    type: 'text-delta',
+                    runId: 'run-execute',
+                    from: 'AGENT',
+                    payload: {
+                      id: 'text-execute',
+                      text: '执行完成',
+                    },
+                  };
+                })(),
+              };
+            },
+            generate: async () => {
+              throw new Error('generate should not be used in Mastra execute test');
+            },
           },
-          generate: async () => {
-            throw new Error('generate should not be used in Mastra execute test');
+          workflow: {
+            id: 'durable-agentic-loop',
+            createRun: async () => ({
+              timeTravel: async () => ({ output: { text: '' } }),
+            }),
           },
         };
       },
@@ -577,11 +610,39 @@ describe('Mastra runtime execute', () => {
       { role: 'user', content: '请直接执行' },
     ]);
     assert.deepEqual(capturedToolNames, ['read_file']);
+    assert.equal(typeof (capturedStreamOptions as { runId?: unknown }).runId, 'string');
     assert.deepEqual(capturedStreamOptions, {
+      ...(capturedStreamOptions as { runId: string }),
       maxSteps: 10,
       toolChoice: 'auto',
+      requestContext: {
+        mode: 'agent',
+        goal: '请直接执行',
+        systemPrompt: capturedInstructions,
+        workspaceRootPath: null,
+        context: [],
+      },
     });
     assert.deepEqual(streamedEvents, [
+      {
+        type: 'agent_event',
+        event: {
+          id: streamedEvents[0] && typeof streamedEvents[0] === 'object' && streamedEvents[0] !== null && 'event' in streamedEvents[0]
+            ? (streamedEvents[0] as { event: { id: string } }).event.id
+            : '',
+          type: 'rollback.checkpoint.created',
+          runId: 'run-execute',
+          sessionId: response.sessionId,
+          agentId: 'calamex-agent-sidecar',
+          timestamp: '2026-05-03T00:00:00.000Z',
+          seq: 0,
+          schemaVersion: 1,
+          redacted: true,
+          visibility: 'user',
+          level: 'info',
+          snapshotId: 'run-execute',
+        },
+      },
       {
         type: 'tool_start',
         toolName: 'read_file',
@@ -636,56 +697,69 @@ describe('Mastra runtime approval resolution', () => {
           disconnectCalls += 1;
         },
       }),
-      createAgent: () => ({
-        stream: async () => ({
-          fullStream: (async function* () {
-            yield {
-              type: 'tool-call-approval',
-              runId: 'approval-run-1',
-              from: 'AGENT',
-              payload: {
-                toolCallId: 'tool-approval-1',
-                toolName: 'write_file',
-                args: {
-                  path: 'README.md',
-                },
-              },
-            };
-          })(),
-        }),
-        generate: async () => {
-          throw new Error('generate should not be used in Mastra approval resume test');
-        },
-        approveToolCall: async (approvalOptions) => {
-          capturedApprovalOptions = approvalOptions;
-
-          return {
+      now: () => '2026-05-03T00:00:00.000Z',
+      createExecutionHandle: async () => ({
+        agent: {
+          stream: async () => ({
+            runId: 'approval-run-1',
+            cleanup: () => undefined,
             fullStream: (async function* () {
               yield {
-                type: 'tool-result',
-                runId: 'approval-run-1',
-                from: 'TOOL',
-                payload: {
-                  toolName: 'write_file',
-                  result: {
-                    ok: true,
-                  },
-                },
-              };
-              yield {
-                type: 'text-delta',
+                type: 'tool-call-approval',
                 runId: 'approval-run-1',
                 from: 'AGENT',
                 payload: {
-                  id: 'approval-text-1',
-                  text: '审批后继续执行',
+                  toolCallId: 'tool-approval-1',
+                  toolName: 'write_file',
+                  args: {
+                    path: 'README.md',
+                  },
                 },
               };
             })(),
-          };
+          }),
+          generate: async () => {
+            throw new Error('generate should not be used in Mastra approval resume test');
+          },
+          approveToolCall: async (approvalOptions) => {
+            capturedApprovalOptions = approvalOptions;
+
+            return {
+              runId: 'approval-run-1',
+              cleanup: () => undefined,
+              fullStream: (async function* () {
+                yield {
+                  type: 'tool-result',
+                  runId: 'approval-run-1',
+                  from: 'TOOL',
+                  payload: {
+                    toolName: 'write_file',
+                    result: {
+                      ok: true,
+                    },
+                  },
+                };
+                yield {
+                  type: 'text-delta',
+                  runId: 'approval-run-1',
+                  from: 'AGENT',
+                  payload: {
+                    id: 'approval-text-1',
+                    text: '审批后继续执行',
+                  },
+                };
+              })(),
+            };
+          },
+          declineToolCall: async () => {
+            throw new Error('declineToolCall should not be used in Mastra approval resume test');
+          },
         },
-        declineToolCall: async () => {
-          throw new Error('declineToolCall should not be used in Mastra approval resume test');
+        workflow: {
+          id: 'durable-agentic-loop',
+          createRun: async () => ({
+            timeTravel: async () => ({ output: { text: '' } }),
+          }),
         },
       }),
     });
@@ -698,15 +772,16 @@ describe('Mastra runtime approval resolution', () => {
     });
 
     assert.equal(initial.result, null);
-    assert.equal(initial.events.length, 1);
-    assert.equal(initial.events[0]?.type, 'approval_required');
+    assert.equal(initial.events.length, 2);
+    assert.equal(initial.events[0]?.type, 'agent_event');
+    assert.equal(initial.events[1]?.type, 'approval_required');
     assert.equal(disconnectCalls, 0);
 
-    if (initial.events[0]?.type !== 'approval_required') {
+    if (initial.events[1]?.type !== 'approval_required') {
       throw new Error('expected approval_required event');
     }
 
-    const approvalRequestId = initial.events[0].request.id;
+    const approvalRequestId = initial.events[1].request.id;
     assert.match(approvalRequestId, /^mastra-approval\./u);
 
     const resumed = await runtime.resolveApproval({
@@ -962,6 +1037,115 @@ describe('Mastra runtime plan', () => {
       message: 'Mastra structured output 没有返回有效 AgentPlan，计划未生成。',
     }]);
     assert.equal(response.result, null);
+    assert.equal(disconnectCalls, 1);
+  });
+
+  it('restores a persisted checkpoint through Mastra timeTravel and preserves rollback runtime events', async () => {
+    let capturedRollbackOptions: unknown;
+    let disconnectCalls = 0;
+    const runtime = new MastraRuntime({
+      now: () => '2026-05-03T01:00:00.000Z',
+      readModelConfig: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://example.com/v1',
+        model: 'deepseek-chat',
+      }),
+      loadExecutionSnapshot: async () => ({
+        status: 'success',
+        requestContext: {
+          systemPrompt: '恢复前的 system prompt',
+          workspaceRootPath: 'D:/com.xiaojianc/my_desktop_app',
+        },
+      }),
+      createMcpClientBundle: async () => ({
+        tools: [],
+        disconnectAll: async () => {
+          disconnectCalls += 1;
+        },
+      }),
+      createExecutionHandle: async () => ({
+        agent: {
+          stream: async () => ({
+            runId: 'run-restore-1',
+            cleanup: () => undefined,
+            fullStream: (async function* () { })(),
+          }),
+          generate: async () => {
+            throw new Error('generate should not be used in restore test');
+          },
+        },
+        workflow: {
+          id: 'durable-agentic-loop',
+          createRun: async () => ({
+            timeTravel: async (rollbackOptions) => {
+              capturedRollbackOptions = rollbackOptions;
+              return {
+                output: {
+                  text: '已恢复到最近 checkpoint。',
+                },
+              };
+            },
+          }),
+        },
+      }),
+    });
+
+    const response = await runtime.restoreCheckpoint({
+      sessionId: 'rollback-session',
+      runId: 'run-restore-1',
+      snapshotId: 'run-restore-1',
+    });
+
+    assert.deepEqual(capturedRollbackOptions, {
+      step: ['durable-agentic-execution', 'durable-llm-execution'],
+      requestContext: {
+        systemPrompt: '恢复前的 system prompt',
+        workspaceRootPath: 'D:/com.xiaojianc/my_desktop_app',
+      },
+    });
+    assert.deepEqual(response.events, [
+      {
+        type: 'agent_event',
+        event: {
+          id: response.events[0] && response.events[0].type === 'agent_event' ? response.events[0].event.id : '',
+          type: 'rollback.restore.started',
+          runId: 'run-restore-1',
+          sessionId: 'rollback-session',
+          agentId: 'calamex-agent-sidecar',
+          timestamp: '2026-05-03T01:00:00.000Z',
+          seq: 0,
+          schemaVersion: 1,
+          redacted: true,
+          visibility: 'user',
+          level: 'info',
+          snapshotId: 'run-restore-1',
+        },
+      },
+      {
+        type: 'agent_event',
+        event: {
+          id: response.events[1] && response.events[1].type === 'agent_event' ? response.events[1].event.id : '',
+          type: 'rollback.restore.completed',
+          runId: 'run-restore-1',
+          sessionId: 'rollback-session',
+          agentId: 'calamex-agent-sidecar',
+          timestamp: '2026-05-03T01:00:00.000Z',
+          seq: 1,
+          schemaVersion: 1,
+          redacted: true,
+          visibility: 'user',
+          level: 'info',
+          snapshotId: 'run-restore-1',
+          savedAsLatest: true,
+          message: '已恢复到最近 checkpoint。',
+        },
+      },
+      {
+        type: 'done',
+        result: '已恢复到最近 checkpoint。',
+      },
+    ]);
+    assert.equal(response.result, '已恢复到最近 checkpoint。');
     assert.equal(disconnectCalls, 1);
   });
 });

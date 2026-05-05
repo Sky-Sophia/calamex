@@ -198,6 +198,18 @@ export const agentSidecarApprovalResolveRequestSchema = z.object({
   decision: z.string().min(1),
 });
 
+export const agentSidecarRollbackStepSchema = z.union([
+  requiredNonEmptyStringSchema,
+  z.array(requiredNonEmptyStringSchema).min(1),
+]);
+
+export const agentSidecarCheckpointRestoreRequestSchema = z.object({
+  sessionId: optionalNonEmptyStringSchema,
+  runId: requiredNonEmptyStringSchema,
+  snapshotId: optionalNonEmptyStringSchema,
+  step: agentSidecarRollbackStepSchema.optional(),
+});
+
 export const agentSidecarResponsePayloadSchema = z.object({
   sessionId: z.string().min(1),
   events: z.array(agentUiEventSchema),

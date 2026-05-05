@@ -290,6 +290,15 @@ export interface IAgentSidecarApprovalResolveRequest {
   decision: string;
 }
 
+export type TAgentSidecarRollbackStepPath = string | string[];
+
+export interface IAgentSidecarCheckpointRestoreRequest {
+  sessionId?: string;
+  runId: string;
+  snapshotId?: string;
+  step?: TAgentSidecarRollbackStepPath;
+}
+
 export interface IAgentSidecarHealthPayload {
   ok: boolean;
   status: string;

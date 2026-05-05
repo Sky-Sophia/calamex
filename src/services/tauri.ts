@@ -605,6 +605,13 @@ const agentSidecarResolveApprovalIpc = definePayloadIpc(
   { audit: 'sensitive', timeoutMs: AGENT_SIDECAR_TASK_TIMEOUT_MS },
 );
 
+const agentSidecarRestoreCheckpointIpc = definePayloadIpc(
+  'agent_sidecar_restore_checkpoint',
+  '通过 Node sidecar 恢复 Agent 回滚检查点',
+  tauriContracts.agentSidecarRestoreCheckpoint,
+  { audit: 'sensitive', timeoutMs: AGENT_SIDECAR_TASK_TIMEOUT_MS },
+);
+
 const analyzeScriptIpc = definePayloadIpc(
   'analyze_script',
   '执行 ShellCheck 实时诊断',
@@ -1175,6 +1182,8 @@ export const tauriService: ITauriService & {
   agentSidecarExecute: agentSidecarExecuteIpc,
 
   agentSidecarResolveApproval: agentSidecarResolveApprovalIpc,
+
+  agentSidecarRestoreCheckpoint: agentSidecarRestoreCheckpointIpc,
 
   analyzeScript: analyzeScriptIpc,
 

@@ -16,23 +16,17 @@ const { isOpen, setIsOpen } = useChainOfThought();
 
 <template>
   <Collapsible :open="isOpen" @update:open="setIsOpen">
-    <CollapsibleTrigger
-      :class="
-        cn(
-          'flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground',
-          props.class,
-        )
-      "
-      v-bind="$attrs"
-    >
+    <CollapsibleTrigger :class="cn(
+      'flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground',
+      props.class,
+    )
+      " v-bind="$attrs">
       <BrainIcon class="size-4" aria-hidden="true" />
       <span class="flex-1 text-left">
-        <slot>Chain of Thought</slot>
+        <slot>思考过程</slot>
       </span>
-      <ChevronDownIcon
-        :class="cn('size-4 transition-transform', isOpen ? 'rotate-180' : 'rotate-0')"
-        aria-hidden="true"
-      />
+      <ChevronDownIcon :class="cn('size-4 transition-transform', isOpen ? 'rotate-180' : 'rotate-0')"
+        aria-hidden="true" />
     </CollapsibleTrigger>
   </Collapsible>
 </template>

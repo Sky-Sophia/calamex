@@ -1,6 +1,7 @@
 import {
   agentSidecarApprovalResolveRequestSchema,
   agentSidecarChatRequestSchema,
+  agentSidecarCheckpointRestoreRequestSchema,
   agentSidecarExecuteRequestSchema,
   agentSidecarHealthPayloadSchema,
   agentSidecarPlanRequestSchema,
@@ -339,6 +340,10 @@ export const tauriContracts = {
   },
   agentSidecarResolveApproval: {
     inSchema: agentSidecarApprovalResolveRequestSchema,
+    outSchema: agentSidecarResponsePayloadSchema,
+  },
+  agentSidecarRestoreCheckpoint: {
+    inSchema: agentSidecarCheckpointRestoreRequestSchema,
     outSchema: agentSidecarResponsePayloadSchema,
   },
   analyzeScript: {

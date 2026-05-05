@@ -247,6 +247,46 @@ describe('tauriService', () => {
     }
   });
 
+  it('agentSidecarRestoreCheckpoint 复用 sidecar 长任务超时预算并透传 payload', async () => {
+    vi.useFakeTimers();
+    invokeMock.mockImplementation(() => new Promise(() => undefined));
+
+    try {
+      const sidecarTaskTimeoutMs = 30 * 60 * 1000;
+      const promise = tauriService.agentSidecarRestoreCheckpoint({
+        runId: 'run-1',
+        snapshotId: 'snapshot-1',
+        step: ['durable-agentic-execution', 'durable-llm-execution'],
+      });
+
+      let settled = false;
+      void promise.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(sidecarTaskTimeoutMs);
+      await expect(promise).rejects.toMatchObject({
+        code: 'ipc.timeout',
+        scope: 'ipc',
+      });
+      expect(invokeMock).toHaveBeenCalledWith('agent_sidecar_restore_checkpoint', {
+        payload: {
+          runId: 'run-1',
+          snapshotId: 'snapshot-1',
+          step: ['durable-agentic-execution', 'durable-llm-execution'],
+        },
+      });
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('aiPlanTask accepts Rust plan payload with null optional fields', async () => {
     invokeMock.mockResolvedValue({
       steps: [
