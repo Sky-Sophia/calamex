@@ -3,6 +3,7 @@ import type {
   IInstallWslLinkAgentPayload,
   IProbeWslLinkPrimaryPayload,
   IStartWslLinkAgentPayload,
+  IWslLinkSupervisorControlPayload,
   IWslLinkAgentArtifactPayload,
   IWslLinkEnvironmentReport,
   IWslLinkStatusPayload,
@@ -16,7 +17,9 @@ export type TWslLinkPanelAction =
   | 'check'
   | 'install'
   | 'start'
-  | 'probe';
+  | 'probe'
+  | 'connect'
+  | 'disconnect';
 
 const normalizeDistroName = (value?: string): string | undefined => {
   const trimmed = value?.trim();
@@ -44,6 +47,7 @@ export const useWslLinkPanel = () => {
   const installResult = ref<IInstallWslLinkAgentPayload | null>(null);
   const startResult = ref<IStartWslLinkAgentPayload | null>(null);
   const probeResult = ref<IProbeWslLinkPrimaryPayload | null>(null);
+  const supervisorResult = ref<IWslLinkSupervisorControlPayload | null>(null);
   const activeAction = ref<TWslLinkPanelAction | null>(null);
   const errorMessage = ref<string | null>(null);
 
@@ -127,6 +131,33 @@ export const useWslLinkPanel = () => {
       return payload;
     });
 
+  const startSupervisor = async (): Promise<IWslLinkSupervisorControlPayload | null> =>
+    runAction('connect', async () => {
+      const payload = await tauriService.startWslLinkSupervisor({ confirmStart: true });
+      supervisorResult.value = payload;
+      await loadStatus();
+      return payload;
+    });
+
+  const stopSupervisor = async (): Promise<IWslLinkSupervisorControlPayload | null> =>
+    runAction('disconnect', async () => {
+      const payload = await tauriService.stopWslLinkSupervisor();
+      supervisorResult.value = payload;
+      await loadStatus();
+      return payload;
+    });
+
+  const subscribeStatus = async (): Promise<(() => void) | null> => {
+    try {
+      return await tauriService.onWslLinkStatus((payload) => {
+        status.value = payload;
+      });
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error, 'WSL Link 状态订阅失败');
+      return null;
+    }
+  };
+
   return {
     status,
     artifact,
@@ -134,6 +165,7 @@ export const useWslLinkPanel = () => {
     installResult,
     startResult,
     probeResult,
+    supervisorResult,
     activeAction,
     errorMessage,
     isBusy,
@@ -143,5 +175,8 @@ export const useWslLinkPanel = () => {
     installAgent,
     startAgent,
     probePrimary,
+    startSupervisor,
+    stopSupervisor,
+    subscribeStatus,
   };
 };

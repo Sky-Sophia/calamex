@@ -126,8 +126,10 @@ import type {
   IProbeWslLinkPrimaryPayload,
   IStartWslLinkAgentPayload,
   IStartWslLinkAgentRequest,
+  IStartWslLinkSupervisorRequest,
   IWslLinkAgentArtifactPayload,
   IWslLinkEnvironmentReport,
+  IWslLinkSupervisorControlPayload,
   IWslLinkStatusPayload,
 } from './wsl-link';
 
@@ -245,6 +247,11 @@ export interface ITauriService {
   getWslLinkAgentArtifactStatus(): Promise<IWslLinkAgentArtifactPayload>;
   installWslLinkAgent(payload: IInstallWslLinkAgentRequest): Promise<IInstallWslLinkAgentPayload>;
   startWslLinkAgent(payload: IStartWslLinkAgentRequest): Promise<IStartWslLinkAgentPayload>;
+  startWslLinkSupervisor(
+    payload: IStartWslLinkSupervisorRequest,
+  ): Promise<IWslLinkSupervisorControlPayload>;
+  stopWslLinkSupervisor(): Promise<IWslLinkSupervisorControlPayload>;
+  onWslLinkStatus(handler: (payload: IWslLinkStatusPayload) => void): Promise<() => void>;
   probeWslLinkPrimary(): Promise<IProbeWslLinkPrimaryPayload>;
   listWorkspaceEntries(path?: string, rootPath?: string): Promise<IWorkspaceDirectoryPayload>;
   createWorkspacePath(payload: IWorkspacePathCreateRequest): Promise<IWorkspacePathCreatePayload>;

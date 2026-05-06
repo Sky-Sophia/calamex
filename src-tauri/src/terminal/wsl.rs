@@ -1,11 +1,8 @@
 use std::{
-    path::{Path, PathBuf},
-    process::{Command as StdCommand, Stdio},
+    path::Path,
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
-
-use crate::commands::configure_std_command_for_background;
 
 const WSL_TEMP_DIRECTORY: &str = "/tmp";
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -82,45 +79,4 @@ pub(crate) fn build_terminal_temp_script_path(original_name: &str) -> Result<Str
         .unwrap_or("untitled");
 
     Ok(format!("{WSL_TEMP_DIRECTORY}/{stem}-{suffix}.tmp.sh"))
-}
-
-/// 通过 WSL stdin 安全写入文件并设置为仅当前用户可读写。
-pub fn write_wsl_file(wsl_command_path: PathBuf, path: &str, content: &[u8]) -> Result<(), String> {
-    let shell_command = format!(
-        "umask 077 && cat > {} && chmod 600 {}",
-        bash_quote(path),
-        bash_quote(path),
-    );
-    let mut command = StdCommand::new(wsl_command_path);
-    configure_std_command_for_background(&mut command);
-    command
-        .args(["--", "sh", "-lc", &shell_command])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("写入 WSL 临时文件失败：{error}"))?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| "WSL 写入通道不可用。".to_string())?;
-    std::io::Write::write_all(&mut stdin, content)
-        .map_err(|error| format!("写入 WSL 临时文件失败：{error}"))?;
-    drop(stdin);
-
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("等待 WSL 临时文件写入完成失败：{error}"))?;
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if stderr.is_empty() {
-        Err("写入 WSL 临时文件失败。".into())
-    } else {
-        Err(format!("写入 WSL 临时文件失败：{stderr}"))
-    }
 }

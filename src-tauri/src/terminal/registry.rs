@@ -3,14 +3,14 @@ use std::sync::{OnceLock, RwLock};
 use super::{
     event_bus::EventBus,
     interactive_pty::InteractivePty,
-    types::{Geometry, RunPtyHandle, TerminalState},
+    types::{Geometry, RunHandle, TerminalState},
 };
 
 pub struct Registry {
     pub geometry: RwLock<Geometry>,
     pub state: RwLock<TerminalState>,
     pub interactive: RwLock<Option<InteractivePty>>,
-    pub active_run: RwLock<Option<RunPtyHandle>>,
+    pub active_run: RwLock<Option<RunHandle>>,
     pub event_bus: EventBus,
 }
 

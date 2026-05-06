@@ -5,8 +5,8 @@ use crate::wsl_link::{
         start_installed_agent, WslLinkAgentDistributionPlan, WslLinkDistroTarget,
         PACKAGED_AGENT_RESOURCE_PATH,
     },
-    grpc_transport::{open_primary_grpc_session, WslLinkOpenSessionHandshake},
-    noise_material::KeyringWslLinkNoiseMaterialStore,
+    noise_material::{KeyringWslLinkNoiseMaterialStore, WslLinkNoiseMaterialStore},
+    primary_supervisor::WslLinkPrimarySupervisor,
     runtime::{WslLinkRuntimeState, WslLinkStatusPayload},
     self_check::{
         check_wsl_link_environment as run_wsl_link_environment_check, WslLinkEnvironmentReport,
@@ -30,6 +30,12 @@ pub struct StartWslLinkAgentRequest {
     pub distro_name: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartWslLinkSupervisorRequest {
+    pub confirm_start: bool,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallWslLinkAgentPayload {
@@ -46,6 +52,13 @@ pub struct StartWslLinkAgentPayload {
     pub pid_path: String,
     pub log_path: String,
     pub stdout: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WslLinkSupervisorControlPayload {
+    pub running: bool,
+    pub message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -145,29 +158,95 @@ pub async fn start_wsl_link_agent(
 }
 
 #[tauri::command]
+pub async fn start_wsl_link_supervisor(
+    app: AppHandle,
+    state: tauri::State<'_, WslLinkRuntimeState>,
+    payload: StartWslLinkSupervisorRequest,
+) -> Result<WslLinkSupervisorControlPayload, String> {
+    if !payload.confirm_start {
+        return Err("启动 WSL Link 常驻连接需要显式确认 confirmStart=true。".to_string());
+    }
+
+    let store = KeyringWslLinkNoiseMaterialStore;
+    let desktop_material = store
+        .load_desktop_material()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            "WSL Link Noise 桌面密钥材料不存在，请先安装 WSL Link agent。".to_string()
+        })?;
+    let started = state.start_supervisor(app, desktop_material)?;
+
+    Ok(WslLinkSupervisorControlPayload {
+        running: true,
+        message: if started {
+            "WSL Link 常驻连接已启动，后台会自动 heartbeat 与退避重连。".to_string()
+        } else {
+            "WSL Link 常驻连接已经在运行。".to_string()
+        },
+    })
+}
+
+#[tauri::command]
+pub fn stop_wsl_link_supervisor(
+    app: AppHandle,
+    state: tauri::State<'_, WslLinkRuntimeState>,
+) -> Result<WslLinkSupervisorControlPayload, String> {
+    let stopped = state.stop_supervisor(&app)?;
+
+    Ok(WslLinkSupervisorControlPayload {
+        running: false,
+        message: if stopped {
+            "WSL Link 常驻连接已停止。".to_string()
+        } else {
+            "WSL Link 常驻连接未在运行。".to_string()
+        },
+    })
+}
+
+#[tauri::command]
 pub async fn probe_wsl_link_primary(
     state: tauri::State<'_, WslLinkRuntimeState>,
 ) -> Result<ProbeWslLinkPrimaryPayload, String> {
     let config = state.begin_connect_attempt()?;
-    let handshake = WslLinkOpenSessionHandshake::new(
-        "calamex-desktop",
-        format!("wsl-link-probe-{}", crate::wsl_link::types::now_unix_ms()),
-        0,
-    )
-    .map_err(|error| error.to_string())?;
     let started_at = Instant::now();
 
-    match open_primary_grpc_session(config, handshake).await {
-        Ok(session) => {
+    let store = KeyringWslLinkNoiseMaterialStore;
+    let desktop_material = store
+        .load_desktop_material()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            "WSL Link Noise 桌面密钥材料不存在，请先安装 WSL Link agent。".to_string()
+        })?;
+
+    let mut supervisor = WslLinkPrimarySupervisor::new("calamex-desktop", config);
+    match supervisor.open_noise_connection(&desktop_material).await {
+        Ok(mut connection) => {
+            let session_id = connection.session.session_id.clone();
+            let heartbeat = match supervisor.heartbeat(&mut connection).await {
+                Ok(ack) => ack,
+                Err(error) => {
+                    let message = error.to_string();
+                    state.record_connect_failure(message.clone())?;
+                    return Ok(ProbeWslLinkPrimaryPayload {
+                        ok: false,
+                        message,
+                        session_id: None,
+                        transport: None,
+                        server_seq: None,
+                        ack_client_seq: None,
+                        rtt_ms: None,
+                    });
+                }
+            };
             let rtt_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-            state.record_connect_success(session.transport)?;
+            state.record_connect_success(connection.session.transport)?;
             Ok(ProbeWslLinkPrimaryPayload {
                 ok: true,
-                message: "WSL Link 主通道 OpenSession 握手成功。".to_string(),
-                session_id: Some(session.session_id),
-                transport: Some(session.transport),
-                server_seq: Some(session.server_seq),
-                ack_client_seq: Some(session.ack_client_seq),
+                message: "WSL Link 主通道 Noise + OpenSession + Heartbeat 成功。".to_string(),
+                session_id: Some(session_id),
+                transport: Some(connection.session.transport),
+                server_seq: Some(heartbeat.server_seq),
+                ack_client_seq: Some(heartbeat.ack_client_seq),
                 rtt_ms: Some(rtt_ms),
             })
         }

@@ -69,7 +69,7 @@ pub async fn check_wsl_link_environment() -> WslLinkEnvironmentReport {
     let distro_probe = probe_wsl_distributions().await;
     let vmcompute_probe = probe_vmcompute().await;
     let mirrored_probe = probe_mirrored_networking().await;
-    let mut checks = Vec::with_capacity(5);
+    let mut checks = Vec::with_capacity(4);
 
     let wsl_version = version_probe
         .as_ref()
@@ -79,7 +79,7 @@ pub async fn check_wsl_link_environment() -> WslLinkEnvironmentReport {
         .as_ref()
         .ok()
         .and_then(|output| parse_default_distro(&output.stdout));
-    let mirrored_networking = mirrored_probe.mirrored_networking;
+    let mirrored_networking = mirrored_probe;
 
     checks.push(build_wsl_version_check(
         version_probe,
@@ -88,7 +88,6 @@ pub async fn check_wsl_link_environment() -> WslLinkEnvironmentReport {
     checks.push(build_default_distro_check(status_probe));
     checks.push(build_distribution_check(distro_probe));
     checks.push(build_vmcompute_check(vmcompute_probe));
-    checks.push(mirrored_probe.result);
 
     let status = aggregate_status(&checks);
 
@@ -308,85 +307,20 @@ fn build_vmcompute_check(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct MirroredProbe {
-    mirrored_networking: Option<bool>,
-    result: WslLinkProbeResult,
-}
-
-async fn probe_mirrored_networking() -> MirroredProbe {
+async fn probe_mirrored_networking() -> Option<bool> {
     let Some(path) = user_wslconfig_path() else {
-        return MirroredProbe {
-            mirrored_networking: None,
-            result: WslLinkProbeResult {
-                key: "mirrored-networking",
-                label: "mirrored networking",
-                status: WslLinkProbeStatus::Unknown,
-                message: "无法定位用户级 `.wslconfig`。".to_string(),
-                detail: None,
-            },
-        };
+        return None;
     };
 
     let bytes = match tokio::fs::read(&path).await {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return MirroredProbe {
-                mirrored_networking: None,
-                result: WslLinkProbeResult {
-                    key: "mirrored-networking",
-                    label: "mirrored networking",
-                    status: WslLinkProbeStatus::Unknown,
-                    message: "未找到用户级 `.wslconfig`，无法静态确认 mirrored networking。"
-                        .to_string(),
-                    detail: Some(path.display().to_string()),
-                },
-            };
-        }
-        Err(error) => {
-            return MirroredProbe {
-                mirrored_networking: None,
-                result: WslLinkProbeResult {
-                    key: "mirrored-networking",
-                    label: "mirrored networking",
-                    status: WslLinkProbeStatus::Warning,
-                    message: "读取用户级 `.wslconfig` 失败。".to_string(),
-                    detail: Some(format!("{}: {error}", path.display())),
-                },
-            };
-        }
+        Err(_) => return None,
     };
 
     let content = decode_command_output(&bytes);
     let mode = parse_wslconfig_networking_mode(&content);
-    let mirrored_networking = mode
-        .as_deref()
-        .map(|value| value.eq_ignore_ascii_case("mirrored"));
-    let status = match mirrored_networking {
-        Some(true) => WslLinkProbeStatus::Ok,
-        Some(false) => WslLinkProbeStatus::Warning,
-        None => WslLinkProbeStatus::Unknown,
-    };
-    let message = match mode {
-        Some(value) if value.eq_ignore_ascii_case("mirrored") => {
-            "已配置 mirrored networking，localhost QUIC fallback 具备前置条件。".to_string()
-        }
-        Some(value) => {
-            format!("当前 networkingMode={value}，localhost QUIC fallback 可能不可用。")
-        }
-        None => "`.wslconfig` 未声明 `[wsl2].networkingMode`。".to_string(),
-    };
-
-    MirroredProbe {
-        mirrored_networking,
-        result: WslLinkProbeResult {
-            key: "mirrored-networking",
-            label: "mirrored networking",
-            status,
-            message,
-            detail: Some(path.display().to_string()),
-        },
-    }
+    mode.as_deref()
+        .map(|value| value.eq_ignore_ascii_case("mirrored"))
 }
 
 fn user_wslconfig_path() -> Option<PathBuf> {

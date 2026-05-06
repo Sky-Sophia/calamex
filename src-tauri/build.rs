@@ -23,5 +23,8 @@ fn main() {
         .compile_protos(&["../proto/wsl-link/v1/wsl_link.proto"], &["../proto"])
         .expect("生成 WSL Link gRPC 代码失败");
 
-    tauri_build::build();
+    #[cfg(feature = "desktop")]
+    {
+        tauri_build::build();
+    }
 }

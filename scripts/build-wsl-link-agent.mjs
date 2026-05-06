@@ -19,6 +19,7 @@ const OUTPUT_PATH = resolve(
 const wslPrefix = DISTRO ? ['--distribution', DISTRO] : [];
 
 const shQuote = (value) => `'${String(value).replaceAll("'", "'\"'\"'")}'`;
+const escapeWslDollars = (value) => value.replaceAll('$', '\\$');
 
 const run = (program, args, options = {}) =>
   new Promise((resolveRun, rejectRun) => {
@@ -34,12 +35,14 @@ const run = (program, args, options = {}) =>
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
-      stdout += chunk;
-      process.stdout.write(chunk);
+      const text = chunk.replaceAll('\u0000', '');
+      stdout += text;
+      process.stdout.write(text);
     });
     child.stderr.on('data', (chunk) => {
-      stderr += chunk;
-      process.stderr.write(chunk);
+      const text = chunk.replaceAll('\u0000', '');
+      stderr += text;
+      process.stderr.write(text);
     });
     child.on('error', rejectRun);
     child.on('close', (code) => {
@@ -76,8 +79,12 @@ workspace=${shQuote(workspaceInWsl)}
 target=${shQuote(TARGET)}
 profile=${shQuote(PROFILE)}
 cd "$workspace/src-tauri"
-cargo build --bin wsl_link_agent --target "$target" ${releaseFlag}
-artifact="target/$target/$profile/wsl_link_agent"
+if ! command -v cargo >/dev/null 2>&1; then
+  printf 'WSL 内未找到 cargo。请先在目标 WSL 发行版安装 Rust 工具链。\\n' >&2
+  exit 127
+fi
+cargo build --bin wsl_link_agent --target "$target" --features wsl-link-agent --no-default-features ${releaseFlag}
+artifact="$workspace/target/$target/$profile/wsl_link_agent"
 dest="$workspace/src-tauri/binaries/wsl-link/wsl-link-agent-$target"
 test -x "$artifact"
 mkdir -p "$(dirname "$dest")"
@@ -85,7 +92,7 @@ install -m 0755 "$artifact" "$dest"
 printf 'WSL Link agent artifact: %s\\n' "$dest"
 `;
 
-  await run('wsl.exe', [...wslPrefix, '--', 'sh', '-lc', script]);
+  await run('wsl.exe', [...wslPrefix, '--', 'sh', '-lc', escapeWslDollars(script)]);
 };
 
 try {

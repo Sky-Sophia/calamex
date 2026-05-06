@@ -345,7 +345,6 @@ dependencies = [
  "portable-pty",
  "prost",
  "protoc-bin-vendored",
- "quinn",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

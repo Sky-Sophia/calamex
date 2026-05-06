@@ -8,7 +8,7 @@ import type {
   TWslLinkTransportKind,
 } from '@/types/wsl-link';
 import { Activity, Download, Play, RadioTower, RefreshCw } from 'lucide-vue-next';
-import { computed, onMounted, watch } from 'vue';
+import { computed, onMounted, onUnmounted, watch } from 'vue';
 
 const props = defineProps<{
   isDesktopRuntime: boolean;
@@ -23,6 +23,7 @@ const {
   installResult,
   startResult,
   probeResult,
+  supervisorResult,
   activeAction,
   errorMessage,
   isBusy,
@@ -31,8 +32,12 @@ const {
   checkEnvironment,
   installAgent,
   startAgent,
-  probePrimary,
+  startSupervisor,
+  stopSupervisor,
+  subscribeStatus,
 } = useWslLinkPanel();
+
+let stopStatusEvents: (() => void) | null = null;
 
 const stateLabels: Record<TWslLinkConnectionState, string> = {
   idle: '未连接',
@@ -55,7 +60,6 @@ const probeStatusLabels: Record<TWslLinkProbeStatus, string> = {
 
 const transportLabels: Record<TWslLinkTransportKind, string> = {
   vsockGrpc: 'AF_HYPERV gRPC',
-  mirroredQuic: 'localhost QUIC',
 };
 
 const statusLabel = computed(() => {
@@ -96,6 +100,14 @@ const transportLabel = computed(() => {
 });
 
 const probeLabel = computed(() => {
+  if (status.value?.supervisorRunning && status.value.lastHeartbeatAtUnixMs) {
+    return status.value.metrics.rttMs !== null ? `心跳 ${status.value.metrics.rttMs} ms` : '心跳正常';
+  }
+
+  if (status.value?.supervisorRunning) {
+    return '连接中';
+  }
+
   if (probeResult.value?.ok && probeResult.value.rttMs !== null) {
     return `握手 ${probeResult.value.rttMs} ms`;
   }
@@ -144,6 +156,10 @@ const lastPathLabel = computed(() => {
     return startResult.value.pidPath;
   }
 
+  if (supervisorResult.value?.message) {
+    return supervisorResult.value.message;
+  }
+
   if (installResult.value?.noiseConfigPath) {
     return installResult.value.noiseConfigPath;
   }
@@ -161,6 +177,9 @@ const lastPathLabel = computed(() => {
 
 const canUseActions = computed(() => props.isDesktopRuntime && !isBusy.value);
 const canInstallAgent = computed(() => canUseActions.value && artifact.value?.found === true);
+const isSupervisorRunning = computed(() => status.value?.supervisorRunning === true);
+const connectionAction = computed(() => (isSupervisorRunning.value ? '停止' : '连接'));
+const connectionActionKey = computed(() => (isSupervisorRunning.value ? 'disconnect' : 'connect'));
 
 const actionLabel = (action: string, fallback: string): string =>
   activeAction.value === action ? '执行中' : fallback;
@@ -234,12 +253,10 @@ const handleStart = async (): Promise<void> => {
   }
 };
 
-const handleProbe = async (): Promise<void> => {
-  const payload = await probePrimary();
-  if (payload?.ok) {
+const handleConnection = async (): Promise<void> => {
+  const payload = isSupervisorRunning.value ? await stopSupervisor() : await startSupervisor();
+  if (payload) {
     message.success(payload.message);
-  } else if (payload) {
-    message.error(payload.message);
   } else if (errorMessage.value) {
     message.error(errorMessage.value);
   }
@@ -250,10 +267,32 @@ const refreshOverview = async (): Promise<void> => {
   await refreshArtifact();
 };
 
+const ensureStatusSubscription = async (): Promise<void> => {
+  if (stopStatusEvents) {
+    return;
+  }
+
+  stopStatusEvents = await subscribeStatus();
+};
+
+const cleanupStatusSubscription = (): void => {
+  if (!stopStatusEvents) {
+    return;
+  }
+
+  stopStatusEvents();
+  stopStatusEvents = null;
+};
+
 onMounted(() => {
   if (props.isDesktopRuntime) {
     void refreshOverview();
+    void ensureStatusSubscription();
   }
+});
+
+onUnmounted(() => {
+  cleanupStatusSubscription();
 });
 
 watch(
@@ -261,7 +300,11 @@ watch(
   (isDesktopRuntime) => {
     if (isDesktopRuntime) {
       void refreshOverview();
+      void ensureStatusSubscription();
+      return;
     }
+
+    cleanupStatusSubscription();
   },
 );
 </script>
@@ -333,10 +376,10 @@ watch(
           type="button"
           class="wsl-link-action is-primary"
           :disabled="!canUseActions"
-          @click="void handleProbe()"
+          @click="void handleConnection()"
         >
           <RadioTower class="wsl-link-action-icon" aria-hidden="true" />
-          <span>{{ actionLabel('probe', '探测') }}</span>
+          <span>{{ actionLabel(connectionActionKey, connectionAction) }}</span>
         </button>
       </div>
     </div>

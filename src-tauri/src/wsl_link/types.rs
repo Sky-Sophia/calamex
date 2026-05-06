@@ -3,13 +3,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_PROTOCOL_VERSION: &str = "wsl-link.v1";
 pub const DEFAULT_VSOCK_GRPC_PORT: u32 = 50_373;
-pub const DEFAULT_MIRRORED_QUIC_PORT: u16 = 50_374;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum WslLinkTransportKind {
     VsockGrpc,
-    MirroredQuic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,7 +68,6 @@ pub struct WslLinkMetrics {
     pub rtt_ms: Option<u64>,
     pub reconnects_total: u64,
     pub inflight_requests: u64,
-    pub outbox_depth: u64,
     pub last_error: Option<String>,
 }
 
@@ -79,6 +76,10 @@ pub fn now_unix_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or(0)
+}
+
+pub fn noise_server_proof_payload(trace_id: &str, session_id: &str) -> Vec<u8> {
+    format!("wsl-link:v1:server-proof:{trace_id}:{session_id}").into_bytes()
 }
 
 #[cfg(test)]

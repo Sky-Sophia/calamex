@@ -103,14 +103,6 @@ pub struct RunSpec {
     pub extra_env: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone)]
-pub struct RunPtyHandle {
-    pub run_id: RunId,
-    pub session_id: SessionId,
-    pub started_at_ms: i64,
-    pub pid: u32,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CancelMode {

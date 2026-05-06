@@ -184,29 +184,48 @@ pub fn complete_handshake(
 ) -> Result<(WslLinkNoiseTransport, WslLinkNoiseTransport), WslLinkNoiseError> {
     let mut initiator = build_initiator(initiator_config)?;
     let mut responder = build_responder(responder_config)?;
-    let mut message = vec![0_u8; WSL_LINK_NOISE_MAX_MESSAGE_BYTES];
-    let mut payload = vec![0_u8; WSL_LINK_NOISE_MAX_MESSAGE_BYTES];
 
-    let message_len = initiator.write_message(&[], &mut message)?;
-    let payload_len = responder.read_message(&message[..message_len], &mut payload)?;
-    if payload_len != 0 {
-        return Err(WslLinkNoiseError::UnexpectedHandshakePayload { len: payload_len });
-    }
+    let message = write_empty_handshake_message(&mut initiator)?;
+    read_empty_handshake_message(&mut responder, &message)?;
 
-    let message_len = responder.write_message(&[], &mut message)?;
-    let payload_len = initiator.read_message(&message[..message_len], &mut payload)?;
-    if payload_len != 0 {
-        return Err(WslLinkNoiseError::UnexpectedHandshakePayload { len: payload_len });
-    }
+    let message = write_empty_handshake_message(&mut responder)?;
+    read_empty_handshake_message(&mut initiator, &message)?;
 
     Ok((
-        WslLinkNoiseTransport {
-            inner: initiator.into_transport_mode()?,
-        },
-        WslLinkNoiseTransport {
-            inner: responder.into_transport_mode()?,
-        },
+        into_transport_mode(initiator)?,
+        into_transport_mode(responder)?,
     ))
+}
+
+pub fn write_empty_handshake_message(
+    state: &mut HandshakeState,
+) -> Result<Vec<u8>, WslLinkNoiseError> {
+    let mut message = vec![0_u8; WSL_LINK_NOISE_MAX_MESSAGE_BYTES];
+    let message_len = state.write_message(&[], &mut message)?;
+    message.truncate(message_len);
+    Ok(message)
+}
+
+pub fn read_empty_handshake_message(
+    state: &mut HandshakeState,
+    message: &[u8],
+) -> Result<(), WslLinkNoiseError> {
+    ensure_noise_message_len(message.len(), WSL_LINK_NOISE_MAX_MESSAGE_BYTES)?;
+
+    let mut payload = vec![0_u8; WSL_LINK_NOISE_MAX_MESSAGE_BYTES];
+    let payload_len = state.read_message(message, &mut payload)?;
+    if payload_len != 0 {
+        return Err(WslLinkNoiseError::UnexpectedHandshakePayload { len: payload_len });
+    }
+    Ok(())
+}
+
+pub fn into_transport_mode(
+    state: HandshakeState,
+) -> Result<WslLinkNoiseTransport, WslLinkNoiseError> {
+    Ok(WslLinkNoiseTransport {
+        inner: state.into_transport_mode()?,
+    })
 }
 
 fn noise_builder() -> Result<Builder<'static>, WslLinkNoiseError> {

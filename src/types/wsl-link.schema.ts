@@ -11,9 +11,7 @@ export const wslLinkConnectionStateSchema = z.enum([
   'closed',
 ]);
 
-export const wslLinkTransportKindSchema = z.enum(['vsockGrpc', 'mirroredQuic']);
-
-export const wslLinkCircuitBreakerStateSchema = z.enum(['closed', 'open', 'halfOpen']);
+export const wslLinkTransportKindSchema = z.enum(['vsockGrpc']);
 
 export const wslLinkProbeStatusSchema = z.enum([
   'ok',
@@ -28,7 +26,6 @@ export const wslLinkMetricsSchema = z.object({
   rttMs: z.number().int().nonnegative().nullable(),
   reconnectsTotal: z.number().int().nonnegative(),
   inflightRequests: z.number().int().nonnegative(),
-  outboxDepth: z.number().int().nonnegative(),
   lastError: z.string().nullable(),
 });
 
@@ -37,10 +34,12 @@ export const wslLinkStatusPayloadSchema = z.object({
   maturity: z.enum(['yellow', 'green', 'red']),
   protocolVersion: z.string().min(1),
   primaryTransport: wslLinkTransportKindSchema,
-  fallbackTransport: wslLinkTransportKindSchema,
   vsockGrpcPort: z.number().int().min(1).max(65535),
-  mirroredQuicPort: z.number().int().min(1).max(65535),
-  circuitBreaker: wslLinkCircuitBreakerStateSchema,
+  supervisorRunning: z.boolean(),
+  sessionId: z.string().min(1).nullable(),
+  supervisorStartedAtUnixMs: z.number().int().nonnegative().nullable(),
+  lastHeartbeatAtUnixMs: z.number().int().nonnegative().nullable(),
+  nextRetryInMs: z.number().int().nonnegative().nullable(),
   metrics: wslLinkMetricsSchema,
   note: z.string(),
 });
@@ -79,6 +78,10 @@ export const startWslLinkAgentRequestSchema = z.object({
   distroName: z.string().min(1).optional(),
 });
 
+export const startWslLinkSupervisorRequestSchema = z.object({
+  confirmStart: z.literal(true),
+});
+
 export const installWslLinkAgentPayloadSchema = z.object({
   binaryPath: z.string().min(1),
   noiseConfigPath: z.string().min(1),
@@ -101,4 +104,9 @@ export const probeWslLinkPrimaryPayloadSchema = z.object({
   serverSeq: z.number().int().nonnegative().nullable(),
   ackClientSeq: z.number().int().nonnegative().nullable(),
   rttMs: z.number().int().nonnegative().nullable(),
+});
+
+export const wslLinkSupervisorControlPayloadSchema = z.object({
+  running: z.boolean(),
+  message: z.string().min(1),
 });

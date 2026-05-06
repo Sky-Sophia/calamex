@@ -55,8 +55,9 @@
 | WSL Link RTT | `wsl_link_rtt_ms`，按 active transport 维度聚合 |
 | WSL Link 重连次数 | `wsl_link_reconnects_total`，区分 reconnect / resume |
 | WSL Link inflight 请求数 | `wsl_link_inflight_requests`，用于识别阻塞和背压 |
-| WSL Link outbox 深度 | `wsl_link_outbox_depth`，用于识别 WAL 堆积 |
-| WSL Link 当前通道 | `wsl_link_active_transport`，取值 `vsockGrpc` / `mirroredQuic` |
+| WSL Link 当前通道 | `wsl_link_active_transport`，当前固定为 `vsockGrpc` |
+| WSL Link supervisor 状态 | `wsl-link:state-changed`，包含 `supervisorRunning`、`sessionId`、`lastHeartbeatAtUnixMs`、`nextRetryInMs` |
+| WSL Link 脚本执行 | 默认复用 `terminal:run-started` / `terminal:run-chunk` / `terminal:run-completed`，由 agent 回传 started / chunk / completed |
 
 ---
 

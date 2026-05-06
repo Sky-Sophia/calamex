@@ -1,3 +1,4 @@
+#[cfg(target_os = "linux")]
 #[path = "../wsl_link/mod.rs"]
 mod wsl_link;
 
@@ -6,8 +7,8 @@ mod wsl_link;
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use std::env;
 
+    use tokio_vsock::{VsockAddr, VsockListener, VMADDR_CID_ANY};
     use wsl_link::{
-        adapters::linux_vsock::{VsockListener, VMADDR_CID_ANY},
         agent::WslLinkAgentService,
         agent_runtime::{
             agent_help_text, resolve_agent_startup_action, WslLinkAgentStartupAction,
@@ -28,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     };
     let noise_material = load_agent_material_from_file(&startup_config.noise_config_path)?;
     let config = WslLinkTransportConfig::default();
-    let listener = VsockListener::bind(VMADDR_CID_ANY, config.vsock_grpc_port)?;
+    let listener = VsockListener::bind(VsockAddr::new(VMADDR_CID_ANY, config.vsock_grpc_port))?;
     let incoming = listener.incoming();
 
     config

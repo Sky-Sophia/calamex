@@ -66,8 +66,10 @@ import {
   probeWslLinkPrimaryPayloadSchema,
   startWslLinkAgentPayloadSchema,
   startWslLinkAgentRequestSchema,
+  startWslLinkSupervisorRequestSchema,
   wslLinkAgentArtifactPayloadSchema,
   wslLinkEnvironmentReportSchema,
+  wslLinkSupervisorControlPayloadSchema,
   wslLinkStatusPayloadSchema,
 } from '@/types/wsl-link.schema';
 import { z } from 'zod';
@@ -433,6 +435,14 @@ export const tauriContracts = {
   startWslLinkAgent: {
     inSchema: startWslLinkAgentRequestSchema,
     outSchema: startWslLinkAgentPayloadSchema,
+  },
+  startWslLinkSupervisor: {
+    inSchema: startWslLinkSupervisorRequestSchema,
+    outSchema: wslLinkSupervisorControlPayloadSchema,
+  },
+  stopWslLinkSupervisor: {
+    inSchema: z.void(),
+    outSchema: wslLinkSupervisorControlPayloadSchema,
   },
   probeWslLinkPrimary: {
     inSchema: z.void(),

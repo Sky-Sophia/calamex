@@ -1,30 +1,23 @@
 <script setup lang="ts">
-import { Collapsible } from '@/components/ui/collapsible';
-import { cn } from '@/lib/utils';
-import { provide, ref, type HTMLAttributes } from 'vue';
+import { Collapsible } from '@/components/ui/collapsible'
+import { cn } from '@/lib/utils'
+import type { HTMLAttributes } from 'vue'
 
-interface ITaskProps {
-  defaultOpen?: boolean;
-  class?: HTMLAttributes['class'];
+interface Props {
+  defaultOpen?: boolean
+  class?: HTMLAttributes['class']
 }
 
-const props = withDefaults(defineProps<ITaskProps>(), {
+const props = withDefaults(defineProps<Props>(), {
   defaultOpen: true,
-  class: undefined,
-});
-
-const isOpen = ref(props.defaultOpen);
-
-function toggleOpen(): void {
-  isOpen.value = !isOpen.value;
-}
-
-provide('isOpen', isOpen);
-provide('toggle', toggleOpen);
+  class: '',
+})
 </script>
 
 <template>
-  <Collapsible v-model:open="isOpen" :class="cn(props.class)" as-child v-bind="$attrs">
-    <slot :is-open="isOpen" :toggle="toggleOpen" />
+  <Collapsible :default-open="props.defaultOpen" :class="cn('w-full', props.class)" as-child>
+    <div>
+      <slot />
+    </div>
   </Collapsible>
 </template>

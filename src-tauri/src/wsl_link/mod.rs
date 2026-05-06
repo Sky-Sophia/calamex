@@ -1,33 +1,46 @@
 //! WSL Link 可靠连接核心。
 //!
-//! 当前模块先落地可测试的协议状态核心：状态机、退避抖动、熔断、
-//! WAL outbox 与 hedged 策略。真实 `AF_HYPERV` / `AF_VSOCK` / QUIC
-//! 传输已按 ADR-20260506 分阶段接入，生产切流必须等待真机矩阵。
+//! 当前模块收敛为单通道连接核心：状态机、退避抖动、HTTP/2 keepalive、
+//! `AF_HYPERV` / `AF_VSOCK` + tonic gRPC、Noise 握手和 `(session, client_seq)`
+//! 去重。生产切流必须等待真机矩阵。
 
 // @status: yellow
 // 保留原因：ADR-20260506 的 P0 可靠性核心先于生产传输接入落地。
-// 复活条件：P1/P2 接入 WSL agent、AF_HYPERV / AF_VSOCK 与 QUIC adapter 后移除此豁免。
+// 复活条件：WSL agent、AF_HYPERV / AF_VSOCK、重连和终端切流矩阵完成后移除此豁免。
 // 负责人：xiaojianc
 // 截止日期：2026-06-06
 #![allow(dead_code)]
 
+#[cfg(not(feature = "wsl-link-agent"))]
 pub mod adapters;
 pub mod agent;
+#[cfg(not(feature = "wsl-link-agent"))]
 pub mod agent_distribution;
+#[cfg(not(feature = "wsl-link-agent"))]
 pub mod agent_install;
 pub mod agent_runtime;
-pub mod circuit_breaker;
 pub mod config;
+#[cfg(not(feature = "wsl-link-agent"))]
 pub mod grpc_transport;
+#[cfg(not(feature = "wsl-link-agent"))]
 pub mod manager;
 pub mod noise;
 pub mod noise_material;
-pub mod outbox;
+#[cfg(not(feature = "wsl-link-agent"))]
+pub mod primary_supervisor;
 pub mod protocol;
-pub mod quic_fallback;
+#[cfg(not(feature = "wsl-link-agent"))]
 pub mod retry;
+#[cfg(not(feature = "wsl-link-agent"))]
 pub mod runtime;
+#[cfg(not(feature = "wsl-link-agent"))]
 pub mod self_check;
+#[cfg(not(feature = "wsl-link-agent"))]
 pub mod state_machine;
-pub mod transport;
+#[cfg(not(feature = "wsl-link-agent"))]
+pub mod terminal_client;
+pub mod terminal_exec;
 pub mod types;
+
+#[cfg(all(test, windows, not(feature = "wsl-link-agent")))]
+mod smoke_tests;

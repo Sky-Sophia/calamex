@@ -75,27 +75,28 @@ pub(crate) fn prepare_terminal_dispatch_script(
     })
 }
 
-pub(crate) fn build_terminal_run_command(
+pub(crate) fn build_terminal_run_command_for_wsl_link(
     payload: &DispatchTerminalScriptRequest,
     terminal_working_directory: &str,
-    write_wsl_file: impl FnOnce(&str, &[u8]) -> Result<(), String>,
-) -> Result<TerminalDispatchCommand, String> {
+) -> Result<(TerminalDispatchCommand, Option<String>), String> {
     let prepared = prepare_terminal_dispatch_script(payload, terminal_working_directory)?;
-    if prepared.should_materialize_inline_content {
-        write_wsl_file(&prepared.execution_path, payload.content.as_bytes())
-            .map_err(|error| format!("写入临时脚本失败：{error}"))?;
-    }
+    let script_content = prepared
+        .should_materialize_inline_content
+        .then(|| payload.content.clone());
     let cleanup_paths = if prepared.should_cleanup_execution_path {
         vec![prepared.execution_path.clone()]
     } else {
         Vec::new()
     };
 
-    Ok(TerminalDispatchCommand {
-        display_command: format!("/bin/bash {}", wsl::bash_quote(&prepared.execution_path)),
-        used_temp_file: prepared.used_temp_file,
-        execution_path: prepared.execution_path,
-        working_directory: prepared.working_directory,
-        cleanup_paths,
-    })
+    Ok((
+        TerminalDispatchCommand {
+            display_command: format!("/bin/bash {}", wsl::bash_quote(&prepared.execution_path)),
+            used_temp_file: prepared.used_temp_file,
+            execution_path: prepared.execution_path,
+            working_directory: prepared.working_directory,
+            cleanup_paths,
+        },
+        script_content,
+    ))
 }

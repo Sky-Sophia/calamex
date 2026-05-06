@@ -12,7 +12,9 @@ use super::{
     types::now_unix_ms,
 };
 
+#[cfg(not(feature = "wsl-link-agent"))]
 const KEYRING_SERVICE_NAME: &str = "calamex.wsl-link";
+#[cfg(not(feature = "wsl-link-agent"))]
 const DESKTOP_NOISE_ACCOUNT: &str = "noise.desktop.v1";
 const MATERIAL_VERSION: u32 = 1;
 
@@ -171,8 +173,10 @@ pub trait WslLinkNoiseMaterialStore {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+#[cfg(not(feature = "wsl-link-agent"))]
 pub struct KeyringWslLinkNoiseMaterialStore;
 
+#[cfg(not(feature = "wsl-link-agent"))]
 impl WslLinkNoiseMaterialStore for KeyringWslLinkNoiseMaterialStore {
     fn load_desktop_material(
         &self,
@@ -295,6 +299,7 @@ fn validate_agent_config_permissions(_path: &Path) -> Result<(), WslLinkNoiseMat
     Ok(())
 }
 
+#[cfg(not(feature = "wsl-link-agent"))]
 fn keyring_entry() -> Result<keyring::Entry, WslLinkNoiseMaterialError> {
     keyring::Entry::new(KEYRING_SERVICE_NAME, DESKTOP_NOISE_ACCOUNT)
         .map_err(|error| WslLinkNoiseMaterialError::Keyring(error.to_string()))

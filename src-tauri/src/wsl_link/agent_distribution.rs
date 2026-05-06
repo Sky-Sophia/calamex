@@ -254,15 +254,13 @@ impl WslLinkAgentDistributionPlan {
     }
 
     pub fn prepare_command(&self) -> WslLinkWslCommandSpec {
+        let install_dir = sh_path_expr(&self.install_dir);
+        let config_dir = sh_path_expr(&self.config_dir);
         self.shell_command(format!(
             "set -eu\n\
              umask 077\n\
-             mkdir -p {} {}\n\
-             chmod 700 {} {}",
-            sh_quote(&self.install_dir),
-            sh_quote(&self.config_dir),
-            sh_quote(&self.install_dir),
-            sh_quote(&self.config_dir)
+             mkdir -p {install_dir} {config_dir}\n\
+             chmod 700 {install_dir} {config_dir}"
         ))
     }
 
@@ -283,33 +281,44 @@ impl WslLinkAgentDistributionPlan {
     }
 
     pub fn verify_command(&self) -> WslLinkWslCommandSpec {
+        let binary_path = sh_path_expr(&self.binary_path);
+        let noise_config_path = sh_path_expr(&self.noise_config_path);
         self.shell_command(format!(
             "set -eu\n\
-             test -x {}\n\
-             test -r {}\n\
-             {} --help >/dev/null",
-            sh_quote(&self.binary_path),
-            sh_quote(&self.noise_config_path),
-            sh_quote(&self.binary_path)
+             test -x {binary_path}\n\
+             test -r {noise_config_path}\n\
+             {binary_path} --help >/dev/null"
         ))
     }
 
     pub fn start_command(&self) -> WslLinkWslCommandSpec {
+        let binary_path = sh_path_expr(&self.binary_path);
+        let noise_config_path = sh_path_expr(&self.noise_config_path);
+        let pid_path = sh_path_expr(&self.pid_path);
+        let log_path = sh_path_expr(&self.log_path);
+        let install_dir = sh_path_expr(&self.install_dir);
         self.shell_command(format!(
             "set -eu\n\
-             binary={}\n\
-             config={}\n\
-             pid_file={}\n\
-             log_file={}\n\
+             binary={binary_path}\n\
+             config={noise_config_path}\n\
+             pid_file={pid_path}\n\
+             log_file={log_path}\n\
              test -x \"$binary\"\n\
              test -r \"$config\"\n\
-             mkdir -p {}\n\
-             chmod 700 {}\n\
+             mkdir -p {install_dir}\n\
+             chmod 700 {install_dir}\n\
              if [ -f \"$pid_file\" ]; then\n\
                old_pid=$(cat \"$pid_file\" 2>/dev/null || true)\n\
                if [ -n \"$old_pid\" ] && kill -0 \"$old_pid\" 2>/dev/null; then\n\
-                 printf 'already-running pid=%s\\n' \"$old_pid\"\n\
-                 exit 0\n\
+                 kill \"$old_pid\" 2>/dev/null || true\n\
+                 j=0\n\
+                 while [ \"$j\" -lt 20 ] && kill -0 \"$old_pid\" 2>/dev/null; do\n\
+                   j=$((j + 1))\n\
+                   sleep 0.1\n\
+                 done\n\
+                 if kill -0 \"$old_pid\" 2>/dev/null; then\n\
+                   kill -KILL \"$old_pid\" 2>/dev/null || true\n\
+                 fi\n\
                fi\n\
              fi\n\
              rm -f \"$pid_file\"\n\
@@ -327,13 +336,7 @@ impl WslLinkAgentDistributionPlan {
                i=$((i + 1))\n\
                sleep 0.1\n\
              done\n\
-             printf 'started pid=%s\\n' \"$pid\"",
-            sh_quote(&self.binary_path),
-            sh_quote(&self.noise_config_path),
-            sh_quote(&self.pid_path),
-            sh_quote(&self.log_path),
-            sh_quote(&self.install_dir),
-            sh_quote(&self.install_dir)
+             printf 'started pid=%s\\n' \"$pid\""
         ))
     }
 
@@ -343,8 +346,8 @@ impl WslLinkAgentDistributionPlan {
         mode: &'static str,
         payload: WslLinkDistributionPayload,
     ) -> WslLinkWslCommandSpec {
-        let target = sh_quote(target_path);
-        let parent = sh_quote(parent_linux_path(target_path));
+        let target = sh_path_expr(target_path);
+        let parent = sh_path_expr(parent_linux_path(target_path));
         let script = format!(
             "set -eu\n\
              umask 077\n\
@@ -374,7 +377,7 @@ impl WslLinkAgentDistributionPlan {
             "--".to_string(),
             "sh".to_string(),
             "-lc".to_string(),
-            script,
+            escape_wsl_shell_dollars(&script),
         ]);
 
         WslLinkWslCommandSpec {
@@ -775,6 +778,28 @@ fn sh_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
+fn sh_path_expr(value: &str) -> String {
+    if let Some(rest) = value.strip_prefix("${HOME}/") {
+        return format!("\"$HOME/{}\"", sh_double_quote_body(rest));
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        return format!("\"$HOME/{}\"", sh_double_quote_body(rest));
+    }
+    sh_quote(value)
+}
+
+fn sh_double_quote_body(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('`', "\\`")
+        .replace('$', "\\$")
+}
+
+fn escape_wsl_shell_dollars(script: &str) -> String {
+    script.replace('$', "\\$")
+}
+
 fn decode_command_output(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).trim().to_string()
 }
@@ -945,7 +970,7 @@ mod tests {
             command.stdin_payload,
             Some(WslLinkDistributionPayload::AgentBinary)
         );
-        assert!(script.contains("chmod 700 \"$tmp\""));
+        assert!(script.contains("chmod 700 \"\\$tmp\""));
         assert!(script.contains("wsl-link-agent"));
     }
 
@@ -959,7 +984,7 @@ mod tests {
             command.stdin_payload,
             Some(WslLinkDistributionPayload::NoiseConfig)
         );
-        assert!(script.contains("chmod 600 \"$tmp\""));
+        assert!(script.contains("chmod 600 \"\\$tmp\""));
         assert!(script.contains("agent-noise.json"));
     }
 
@@ -970,10 +995,10 @@ mod tests {
         let script = command.args.last().expect("script should exist");
 
         assert_eq!(command.stdin_payload, None);
-        assert!(script.contains("nohup \"$binary\" --noise-config \"$config\""));
+        assert!(script.contains("nohup \"\\$binary\" --noise-config \"\\$config\""));
         assert!(script.contains("agent.pid"));
-        assert!(script.contains("kill -0 \"$pid\""));
-        assert!(script.contains("tail -n 40 \"$log_file\""));
+        assert!(script.contains("kill -0 \"\\$pid\""));
+        assert!(script.contains("tail -n 40 \"\\$log_file\""));
     }
 
     #[test]
@@ -993,6 +1018,16 @@ mod tests {
     #[test]
     fn shell_quote_handles_single_quotes() {
         assert_eq!(sh_quote("/tmp/a'b"), "'/tmp/a'\"'\"'b'");
+    }
+
+    #[test]
+    fn home_path_expr_expands_in_wsl_shell_command() {
+        let plan = WslLinkAgentDistributionPlan::user_default();
+        let command = plan.prepare_command();
+        let script = command.args.last().expect("script should exist");
+
+        assert!(script.contains("\"\\$HOME/.local/share/calamex/wsl-link\""));
+        assert!(!script.contains("'${HOME}/"));
     }
 
     #[test]

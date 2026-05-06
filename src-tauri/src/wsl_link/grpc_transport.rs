@@ -3,10 +3,16 @@ use tonic::transport::Channel;
 
 use super::{
     config::WslLinkTransportConfig,
-    protocol::v1::{
-        wsl_link_client::WslLinkClient, OpenSessionRequest, OpenSessionResponse, TransportKind,
+    noise::{
+        build_initiator, into_transport_mode, read_empty_handshake_message,
+        write_empty_handshake_message, WslLinkNoiseError,
     },
-    types::{WslLinkTransportKind, DEFAULT_PROTOCOL_VERSION},
+    noise_material::{WslLinkDesktopNoiseMaterial, WslLinkNoiseMaterialError},
+    protocol::v1::{
+        wsl_link_client::WslLinkClient, HeartbeatRequest, HeartbeatResponse,
+        OpenNoiseSessionRequest, OpenSessionRequest, OpenSessionResponse, TransportKind,
+    },
+    types::{noise_server_proof_payload, WslLinkTransportKind, DEFAULT_PROTOCOL_VERSION},
 };
 
 pub type WslLinkGrpcClient = WslLinkClient<Channel>;
@@ -23,6 +29,12 @@ pub enum WslLinkGrpcTransportError {
     Transport(#[from] tonic::transport::Error),
     #[error("WSL Link OpenSession RPC 失败：{0}")]
     Status(#[from] tonic::Status),
+    #[error("WSL Link Noise 密钥材料不可用：{0}")]
+    NoiseMaterial(#[from] WslLinkNoiseMaterialError),
+    #[error("WSL Link Noise 握手失败：{0}")]
+    Noise(#[from] WslLinkNoiseError),
+    #[error("WSL Link Noise server proof 不匹配。")]
+    InvalidNoiseServerProof,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +79,10 @@ impl WslLinkOpenSessionHandshake {
             trace_id: self.trace_id,
         }
     }
+
+    pub fn trace_id(&self) -> &str {
+        &self.trace_id
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,10 +112,9 @@ impl WslLinkGrpcSession {
             .unwrap_or(TransportKind::Unspecified)
         {
             TransportKind::VsockGrpc => WslLinkTransportKind::VsockGrpc,
-            TransportKind::MirroredQuic => WslLinkTransportKind::MirroredQuic,
             TransportKind::Unspecified => {
                 return Err(WslLinkGrpcTransportError::InvalidOpenSessionResponse(
-                    "transport 不能为空。",
+                    "transport 必须是 VSOCK gRPC。",
                 ));
             }
         };
@@ -109,6 +124,44 @@ impl WslLinkGrpcSession {
             server_seq: response.server_seq,
             ack_client_seq: response.ack_client_seq,
             transport,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct WslLinkGrpcConnection {
+    pub client: WslLinkGrpcClient,
+    pub session: WslLinkGrpcSession,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WslLinkGrpcHeartbeatAck {
+    pub session_id: String,
+    pub server_seq: u64,
+    pub ack_client_seq: u64,
+    pub received_at_unix_ms: i64,
+}
+
+impl WslLinkGrpcHeartbeatAck {
+    pub fn try_from_response(
+        response: HeartbeatResponse,
+    ) -> Result<Self, WslLinkGrpcTransportError> {
+        if response.session_id.trim().is_empty() {
+            return Err(WslLinkGrpcTransportError::InvalidOpenSessionResponse(
+                "heartbeat session_id 不能为空。",
+            ));
+        }
+        if response.server_seq == 0 {
+            return Err(WslLinkGrpcTransportError::InvalidOpenSessionResponse(
+                "heartbeat server_seq 必须大于 0。",
+            ));
+        }
+
+        Ok(Self {
+            session_id: response.session_id,
+            server_seq: response.server_seq,
+            ack_client_seq: response.ack_client_seq,
+            received_at_unix_ms: response.received_at_unix_ms,
         })
     }
 }
@@ -134,6 +187,26 @@ pub async fn open_primary_grpc_session(
     open_session_with_grpc_client(&mut client, handshake).await
 }
 
+pub async fn open_primary_noise_session(
+    config: WslLinkTransportConfig,
+    handshake: WslLinkOpenSessionHandshake,
+    desktop_material: &WslLinkDesktopNoiseMaterial,
+) -> Result<WslLinkGrpcSession, WslLinkGrpcTransportError> {
+    let mut client = connect_primary_grpc_client(config).await?;
+    open_noise_session_with_grpc_client(&mut client, handshake, desktop_material).await
+}
+
+pub async fn open_primary_noise_connection(
+    config: WslLinkTransportConfig,
+    handshake: WslLinkOpenSessionHandshake,
+    desktop_material: &WslLinkDesktopNoiseMaterial,
+) -> Result<WslLinkGrpcConnection, WslLinkGrpcTransportError> {
+    let mut client = connect_primary_grpc_client(config).await?;
+    let session =
+        open_noise_session_with_grpc_client(&mut client, handshake, desktop_material).await?;
+    Ok(WslLinkGrpcConnection { client, session })
+}
+
 pub async fn open_session_with_grpc_client(
     client: &mut WslLinkGrpcClient,
     handshake: WslLinkOpenSessionHandshake,
@@ -143,6 +216,47 @@ pub async fn open_session_with_grpc_client(
         .await?
         .into_inner();
     WslLinkGrpcSession::try_from_open_session_response(response)
+}
+
+pub async fn open_noise_session_with_grpc_client(
+    client: &mut WslLinkGrpcClient,
+    handshake: WslLinkOpenSessionHandshake,
+    desktop_material: &WslLinkDesktopNoiseMaterial,
+) -> Result<WslLinkGrpcSession, WslLinkGrpcTransportError> {
+    let trace_id = handshake.trace_id().to_string();
+    let mut initiator = build_initiator(&desktop_material.initiator_config())?;
+    let handshake_message = write_empty_handshake_message(&mut initiator)?;
+    let response = client
+        .open_noise_session(OpenNoiseSessionRequest {
+            open_session: Some(handshake.into_proto()),
+            handshake_message,
+        })
+        .await?
+        .into_inner();
+
+    read_empty_handshake_message(&mut initiator, &response.handshake_message)?;
+    let mut transport = into_transport_mode(initiator)?;
+    let open_session =
+        response
+            .open_session
+            .ok_or(WslLinkGrpcTransportError::InvalidOpenSessionResponse(
+                "open_session 不能为空。",
+            ))?;
+    let proof = transport.decrypt_frame(&response.encrypted_server_proof)?;
+    let expected = noise_server_proof_payload(&trace_id, &open_session.session_id);
+    if proof != expected {
+        return Err(WslLinkGrpcTransportError::InvalidNoiseServerProof);
+    }
+
+    WslLinkGrpcSession::try_from_open_session_response(open_session)
+}
+
+pub async fn heartbeat_with_grpc_client(
+    client: &mut WslLinkGrpcClient,
+    request: HeartbeatRequest,
+) -> Result<WslLinkGrpcHeartbeatAck, WslLinkGrpcTransportError> {
+    let response = client.heartbeat(request).await?.into_inner();
+    WslLinkGrpcHeartbeatAck::try_from_response(response)
 }
 
 #[cfg(windows)]
@@ -277,6 +391,23 @@ mod tests {
                 server_seq: 1,
                 ack_client_seq: 0,
                 transport: TransportKind::Unspecified as i32,
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(super::WslLinkGrpcTransportError::InvalidOpenSessionResponse(_))
+        ));
+    }
+
+    #[test]
+    fn heartbeat_response_rejects_empty_session_id() {
+        let result = super::WslLinkGrpcHeartbeatAck::try_from_response(
+            crate::wsl_link::protocol::v1::HeartbeatResponse {
+                session_id: String::new(),
+                server_seq: 1,
+                ack_client_seq: 1,
+                received_at_unix_ms: 1,
             },
         );
 

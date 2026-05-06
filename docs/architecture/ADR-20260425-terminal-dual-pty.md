@@ -105,3 +105,5 @@ Windows + WSL2 环境下，原有集成终端把交互 shell 与脚本运行 chi
 ---
 
 > 如需推翻本 ADR，MUST 新建新 ADR 并在本文末尾标注 `superseded by ADR-XXXX`，**禁止**就地修改历史决策。
+
+superseded by [ADR-20260506](./ADR-20260506-wsl-link-vsock-grpc-quic.md)：2026-05-06 起，脚本执行的 per-run PTY 路径由 WSL Link gRPC 流式通道取代；本文仅保留历史决策记录和交互 iPTY 背景。

@@ -3,9 +3,10 @@ syntax = "proto3";
 package calamex.wsl_link.v1;
 
 // WSL Link 的跨 VM 协议契约。所有请求必须带 session / seq / ack，
-// 用于断线恢复、幂等去重和 outbox 重放。
+// 用于断线恢复、进程内恢复和幂等去重。
 service WslLink {
   rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
+  rpc OpenNoiseSession(OpenNoiseSessionRequest) returns (OpenNoiseSessionResponse);
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   rpc Duplex(stream ClientFrame) returns (stream ServerFrame);
@@ -14,7 +15,6 @@ service WslLink {
 enum TransportKind {
   TRANSPORT_KIND_UNSPECIFIED = 0;
   TRANSPORT_KIND_VSOCK_GRPC = 1;
-  TRANSPORT_KIND_MIRRORED_QUIC = 2;
 }
 
 message OpenSessionRequest {
@@ -29,6 +29,17 @@ message OpenSessionResponse {
   uint64 server_seq = 2;
   uint64 ack_client_seq = 3;
   TransportKind transport = 4;
+}
+
+message OpenNoiseSessionRequest {
+  OpenSessionRequest open_session = 1;
+  bytes handshake_message = 2;
+}
+
+message OpenNoiseSessionResponse {
+  OpenSessionResponse open_session = 1;
+  bytes handshake_message = 2;
+  bytes encrypted_server_proof = 3;
 }
 
 message ResumeSessionRequest {
@@ -62,6 +73,7 @@ message HeartbeatResponse {
 message ClientFrame {
   string session_id = 1;
   string request_id = 2;
+  // 保留给上层审计 / 兼容，agent 去重主键固定为 (session_id, client_seq)。
   string idempotency_key = 3;
   uint64 client_seq = 4;
   uint64 ack_server_seq = 5;

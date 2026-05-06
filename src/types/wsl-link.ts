@@ -8,9 +8,7 @@ export type TWslLinkConnectionState =
   | 'backoff'
   | 'closed';
 
-export type TWslLinkTransportKind = 'vsockGrpc' | 'mirroredQuic';
-
-export type TWslLinkCircuitBreakerState = 'closed' | 'open' | 'halfOpen';
+export type TWslLinkTransportKind = 'vsockGrpc';
 
 export type TWslLinkProbeStatus = 'ok' | 'warning' | 'error' | 'unknown' | 'unsupported';
 
@@ -19,7 +17,6 @@ export interface IWslLinkMetrics {
   rttMs: number | null;
   reconnectsTotal: number;
   inflightRequests: number;
-  outboxDepth: number;
   lastError: string | null;
 }
 
@@ -28,10 +25,12 @@ export interface IWslLinkStatusPayload {
   maturity: 'yellow' | 'green' | 'red';
   protocolVersion: string;
   primaryTransport: TWslLinkTransportKind;
-  fallbackTransport: TWslLinkTransportKind;
   vsockGrpcPort: number;
-  mirroredQuicPort: number;
-  circuitBreaker: TWslLinkCircuitBreakerState;
+  supervisorRunning: boolean;
+  sessionId: string | null;
+  supervisorStartedAtUnixMs: number | null;
+  lastHeartbeatAtUnixMs: number | null;
+  nextRetryInMs: number | null;
   metrics: IWslLinkMetrics;
   note: string;
 }
@@ -70,6 +69,10 @@ export interface IStartWslLinkAgentRequest {
   distroName?: string;
 }
 
+export interface IStartWslLinkSupervisorRequest {
+  confirmStart: true;
+}
+
 export interface IInstallWslLinkAgentPayload {
   binaryPath: string;
   noiseConfigPath: string;
@@ -92,4 +95,9 @@ export interface IProbeWslLinkPrimaryPayload {
   serverSeq: number | null;
   ackClientSeq: number | null;
   rttMs: number | null;
+}
+
+export interface IWslLinkSupervisorControlPayload {
+  running: boolean;
+  message: string;
 }

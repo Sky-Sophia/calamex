@@ -5,6 +5,7 @@ import {
 } from '@/types/ai.schema';
 import { AppError, isAppError } from '@/types/app-error';
 import type { ITauriService } from '@/types/tauri';
+import { wslLinkStatusPayloadSchema } from '@/types/wsl-link.schema';
 import { assertDesktopRuntime } from '@/utils/desktop-runtime';
 import { toErrorMessage } from '@/utils/error';
 import {
@@ -680,6 +681,20 @@ const startWslLinkAgentIpc = definePayloadIpc(
   { idempotent: false, audit: 'sensitive', timeoutMs: 20_000 },
 );
 
+const startWslLinkSupervisorIpc = definePayloadIpc(
+  'start_wsl_link_supervisor',
+  '启动 WSL Link 常驻连接',
+  tauriContracts.startWslLinkSupervisor,
+  { idempotent: false, audit: 'sensitive', timeoutMs: 5_000 },
+);
+
+const stopWslLinkSupervisorIpc = defineContractIpc(
+  'stop_wsl_link_supervisor',
+  '停止 WSL Link 常驻连接',
+  tauriContracts.stopWslLinkSupervisor,
+  { idempotent: false, audit: 'sensitive', timeoutMs: 5_000 },
+);
+
 const probeWslLinkPrimaryIpc = defineContractIpc(
   'probe_wsl_link_primary',
   '探测 WSL Link 主通道',
@@ -1304,6 +1319,10 @@ export const tauriService: ITauriService & {
 
   startWslLinkAgent: (payload) => startWslLinkAgentIpc(payload),
 
+  startWslLinkSupervisor: (payload) => startWslLinkSupervisorIpc(payload),
+
+  stopWslLinkSupervisor: () => stopWslLinkSupervisorIpc(undefined),
+
   probeWslLinkPrimary: () => probeWslLinkPrimaryIpc(undefined),
 
   listWorkspaceEntries(path, rootPath) {
@@ -1453,6 +1472,18 @@ export const tauriService: ITauriService & {
     const { listen } = await loadTauriEvent();
     return listen('ai:sidecar-stream', (event) => {
       const parsed = agentSidecarStreamEventPayloadSchema.safeParse(event.payload);
+      if (!parsed.success) {
+        return;
+      }
+      handler(parsed.data);
+    });
+  },
+
+  async onWslLinkStatus(handler) {
+    await assertDesktopRuntime('监听 WSL Link 状态事件');
+    const { listen } = await loadTauriEvent();
+    return listen('wsl-link:state-changed', (event) => {
+      const parsed = wslLinkStatusPayloadSchema.safeParse(event.payload);
       if (!parsed.success) {
         return;
       }

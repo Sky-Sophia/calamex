@@ -58,7 +58,7 @@ describe('TerminalFlowPanel', () => {
     expect(wrapper.text()).toContain('run-ui-1');
     expect(wrapper.text()).toContain('terminal:run-chunk');
     expect(wrapper.text()).toContain('1 chunks');
-    expect(wrapper.text()).toContain('rPTY');
+    expect(wrapper.text()).toContain('WSL Link');
 
     const toggleButtons = wrapper.findAll('.terminal-flow-toggle-button');
     expect(toggleButtons).toHaveLength(2);
@@ -71,7 +71,7 @@ describe('TerminalFlowPanel', () => {
     expect(store.showRunSeparator).toBe(false);
   });
 
-  it('renders child.wait completion result', () => {
+  it('renders WSL Link completion result', () => {
     const store = useTerminalRuntimeStore();
     store.setDeepDiagnosticsEnabled(true);
     store.markInteractiveReady();

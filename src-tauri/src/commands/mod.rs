@@ -75,6 +75,7 @@ pub(crate) use workspace_fs::{
 pub use wsl_link::{
     check_wsl_link_environment, get_wsl_link_agent_artifact_status, get_wsl_link_status,
     install_wsl_link_agent, probe_wsl_link_primary, start_wsl_link_agent,
+    start_wsl_link_supervisor, stop_wsl_link_supervisor,
 };
 
 #[cfg(windows)]

@@ -1,9 +1,6 @@
-use std::{net::SocketAddr, time::Duration};
-
 use super::{
-    config::WslLinkTransportConfig,
     manager::WslLinkTransportAdapter,
-    types::{WslLinkTransportKind, DEFAULT_MIRRORED_QUIC_PORT, DEFAULT_VSOCK_GRPC_PORT},
+    types::{WslLinkTransportKind, DEFAULT_VSOCK_GRPC_PORT},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,19 +12,6 @@ impl Default for VsockGrpcEndpoint {
     fn default() -> Self {
         Self {
             port: DEFAULT_VSOCK_GRPC_PORT,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MirroredQuicEndpoint {
-    pub addr: SocketAddr,
-}
-
-impl Default for MirroredQuicEndpoint {
-    fn default() -> Self {
-        Self {
-            addr: SocketAddr::from(([127, 0, 0, 1], DEFAULT_MIRRORED_QUIC_PORT)),
         }
     }
 }
@@ -58,39 +42,6 @@ impl WslLinkTransportAdapter for VsockGrpcAdapter {
 
     fn is_available(&self) -> bool {
         self.is_platform_available
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MirroredQuicAdapter {
-    endpoint: MirroredQuicEndpoint,
-    connect_timeout: Duration,
-}
-
-impl MirroredQuicAdapter {
-    pub fn new(endpoint: MirroredQuicEndpoint, config: WslLinkTransportConfig) -> Self {
-        Self {
-            endpoint,
-            connect_timeout: config.connect_timeout,
-        }
-    }
-
-    pub fn endpoint(&self) -> &MirroredQuicEndpoint {
-        &self.endpoint
-    }
-
-    pub fn connect_timeout(&self) -> Duration {
-        self.connect_timeout
-    }
-}
-
-impl WslLinkTransportAdapter for MirroredQuicAdapter {
-    fn kind(&self) -> WslLinkTransportKind {
-        WslLinkTransportKind::MirroredQuic
-    }
-
-    fn is_available(&self) -> bool {
-        self.endpoint.addr.ip().is_loopback()
     }
 }
 
@@ -568,17 +519,6 @@ pub mod linux_vsock {
 mod tests {
     use super::*;
     use crate::wsl_link::manager::WslLinkTransportAdapter;
-
-    #[test]
-    fn mirrored_quic_adapter_requires_loopback_endpoint() {
-        let adapter = MirroredQuicAdapter::new(
-            MirroredQuicEndpoint::default(),
-            WslLinkTransportConfig::default(),
-        );
-
-        assert_eq!(adapter.kind(), WslLinkTransportKind::MirroredQuic);
-        assert!(adapter.is_available());
-    }
 
     #[test]
     fn vsock_grpc_adapter_uses_reserved_port() {

@@ -38,8 +38,8 @@ use commands::{
     list_workspace_entries, load_image_asset, load_script, probe_wsl_link_primary, rename_ssh_path,
     rename_workspace_path, resize_terminal_session, save_git_stash, save_script, search_workspace,
     set_window_background, shutdown_all_terminal_sessions, stage_git_paths, start_wsl_link_agent,
-    test_ssh_connection, unstage_git_paths, upload_ssh_file, write_terminal_input,
-    TerminalSessionState,
+    start_wsl_link_supervisor, stop_wsl_link_supervisor, test_ssh_connection, unstage_git_paths,
+    upload_ssh_file, write_terminal_input, TerminalSessionState,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
@@ -223,6 +223,8 @@ fn main() {
             get_wsl_link_agent_artifact_status,
             install_wsl_link_agent,
             start_wsl_link_agent,
+            start_wsl_link_supervisor,
+            stop_wsl_link_supervisor,
             probe_wsl_link_primary,
             dispatch_script_to_terminal,
             list_workspace_entries,

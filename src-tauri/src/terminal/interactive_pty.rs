@@ -221,12 +221,7 @@ fn resolve_wsl_cwd(cwd: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        io::Write,
-        process::{Command, Stdio},
-        sync::{Arc, Mutex},
-        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-    };
+    use std::time::{Duration, Instant};
 
     #[test]
     fn test_ipty_spawns_and_emits_first_prompt() {
@@ -307,59 +302,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_ipty_isolation_from_rpty_bytes() {
-        let _guard = crate::terminal::test_support::wsl_test_guard();
-        let ipty = InteractivePty::spawn(
-            "ipty-isolation-test".to_string(),
-            PathBuf::from("~"),
-            Geometry {
-                cols: 120,
-                rows: 40,
-            },
-        )
-        .expect("iPTY should spawn");
-        let rx = ipty.subscribe_data();
-        let _ = collect_until(&rx, Duration::from_secs(3), |value| {
-            value.contains('$') || value.contains('#')
-        });
-
-        let wsl_path = resolve_wsl_command_path().expect("wsl should resolve");
-        let script_path = format!("/tmp/calamex-ipty-isolation-{}.sh", now_ms_for_tests());
-        write_wsl_script_for_tests(&wsl_path, &script_path, "printf '__RPTY_ONLY__\\n'\n");
-        let rpty_output = Arc::new(Mutex::new(String::new()));
-        let rpty_output_ref = Arc::clone(&rpty_output);
-        let exit = crate::terminal::run_supervisor::run_pty_script(
-            crate::terminal::run_supervisor::RunPtySpec {
-                wsl_command_path: wsl_path.clone(),
-                working_directory: "/tmp".to_string(),
-                execution_path: script_path.clone(),
-                cols: 120,
-                rows: 40,
-                timeout: Some(Duration::from_secs(8)),
-            },
-            move |chunk| {
-                rpty_output_ref
-                    .lock()
-                    .expect("rPTY output mutex")
-                    .push_str(&chunk);
-            },
-        )
-        .expect("rPTY should run");
-        cleanup_wsl_path_for_tests(&wsl_path, &script_path);
-        let leaked_ipty_output = collect_until(&rx, Duration::from_millis(500), |value| {
-            value.contains("__RPTY_ONLY__")
-        });
-        let _ = ipty.terminate();
-
-        assert_eq!(exit.exit_code, Some(0));
-        assert!(rpty_output
-            .lock()
-            .expect("rPTY output mutex")
-            .contains("__RPTY_ONLY__"));
-        assert!(!leaked_ipty_output.contains("__RPTY_ONLY__"));
-    }
-
     fn collect_until<F>(
         receiver: &mpsc::Receiver<Vec<u8>>,
         timeout: Duration,
@@ -384,55 +326,5 @@ mod tests {
             }
         }
         String::from_utf8_lossy(&output).to_string()
-    }
-
-    fn write_wsl_script_for_tests(wsl_path: &PathBuf, script_path: &str, content: &str) {
-        let command = format!(
-            "cat > {} && chmod +x {}",
-            bash_quote_for_tests(script_path),
-            bash_quote_for_tests(script_path)
-        );
-        let mut child = Command::new(wsl_path)
-            .args(["--", "sh", "-lc", &command])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("wsl script writer should spawn");
-        child
-            .stdin
-            .take()
-            .expect("stdin should exist")
-            .write_all(content.as_bytes())
-            .expect("script content should be written");
-        let output = child
-            .wait_with_output()
-            .expect("wsl script writer should finish");
-        assert!(
-            output.status.success(),
-            "write script failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    fn cleanup_wsl_path_for_tests(wsl_path: &PathBuf, script_path: &str) {
-        let command = format!("rm -f {}", bash_quote_for_tests(script_path));
-        let _ = Command::new(wsl_path)
-            .args(["--", "sh", "-lc", &command])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-
-    fn bash_quote_for_tests(value: &str) -> String {
-        format!("'{}'", value.replace('\'', "'\"'\"'"))
-    }
-
-    fn now_ms_for_tests() -> i64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX))
-            .unwrap_or(0)
     }
 }

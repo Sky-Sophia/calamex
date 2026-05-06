@@ -35,7 +35,7 @@ const stateLabelMap: Record<TTerminalRuntimeState, string> = {
 
 const routeLabelMap = {
   interactive: 'iPTY',
-  run: 'rPTY',
+  run: 'WSL Link',
   buffered: '缓冲',
   dropped: '丢弃',
 } as const;
@@ -53,7 +53,7 @@ const activeSessionId = computed(() => activeRun.value?.sessionId ?? 'main-termi
 
 const completionLabel = computed(() => {
   if (props.isRunning || state.value === 'running') {
-    return '等待 child.wait()';
+    return '等待 WSL Link 完成事件';
   }
   if (!diagnostics.value.lastCompletedAt) {
     return '等待 terminal:run-completed';
@@ -285,8 +285,8 @@ const handleToggleDeepDiagnostics = (): void => {
             <div class="terminal-flow-route-arrow" aria-hidden="true">→</div>
             <div class="terminal-flow-route-node" :class="{ 'is-active': state === 'running' }">
               <span class="terminal-flow-route-kicker">running</span>
-              <strong>rPTY</strong>
-              <span>每次 run 独立 PTY</span>
+              <strong>WSL Link</strong>
+              <span>gRPC 流式脚本执行</span>
             </div>
             <div class="terminal-flow-route-arrow" aria-hidden="true">→</div>
             <div
@@ -294,8 +294,8 @@ const handleToggleDeepDiagnostics = (): void => {
               :class="{ 'is-active': state === 'switching_to_idle' }"
             >
               <span class="terminal-flow-route-kicker">complete</span>
-              <strong>child.wait()</strong>
-              <span>完成态只看 child.wait()</span>
+              <strong>terminal:run-completed</strong>
+              <span>完成态由 agent 回传</span>
             </div>
           </div>
 
