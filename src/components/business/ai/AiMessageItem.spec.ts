@@ -112,6 +112,32 @@ describe('AiMessageItem', () => {
     expect(wrapper.find('.markdown-stub').exists()).toBe(false);
   });
 
+  it('sidecar 占位流开始时立即显示思考头，不再显示正在加载行', () => {
+    const wrapper = mount(AiMessageItem, {
+      props: {
+        message: createMessage({
+          stream: {
+            status: 'streaming',
+            activityText: '',
+            runtimeEvents: [],
+          },
+        }),
+        platformId: 'deepseek',
+        providerLabel: 'DeepSeek',
+      },
+      global: {
+        stubs: {
+          AiMarkdown: { template: '<div class="markdown-stub" />' },
+        },
+      },
+    });
+
+    expect(wrapper.find('.ai-runtime-timeline').exists()).toBe(true);
+    expect(wrapper.find('.ai-message-status-line').exists()).toBe(false);
+    expect(wrapper.text()).toContain('正在思考');
+    expect(wrapper.text()).not.toContain('正在加载');
+  });
+
   it('有 Activity 树时直接渲染活动流，不把公开过程放进回答气泡', () => {
     const wrapper = mount(AiMessageItem, {
       props: {
@@ -212,7 +238,7 @@ describe('AiMessageItem', () => {
     expect(wrapper.find('.markdown-stub').exists()).toBe(false);
   });
 
-  it('有 runtimeEvents 时把推理和活动树嵌入同一条 AI 消息，最终回答紧跟其后', () => {
+  it('有活动树数据时仍显示 runtime reasoning 面板，最终回答紧跟其后', () => {
     const wrapper = mount(AiMessageItem, {
       props: {
         message: createMessage({
@@ -233,6 +259,7 @@ describe('AiMessageItem', () => {
               }),
             ],
             activityText: '搜索 agent-sidecar',
+            activityTrail: ['我先确认真实工具列表。'],
           },
           toolCalls: [
             {
@@ -240,6 +267,7 @@ describe('AiMessageItem', () => {
               name: 'grep_search',
               status: 'running',
               summary: 'agent-sidecar',
+              targetPreview: 'agent-sidecar',
             },
           ],
         }),
@@ -253,15 +281,16 @@ describe('AiMessageItem', () => {
       },
     });
 
+    const activityTimeline = wrapper.find('.ai-tool-activity-inline');
     const runtimeTimeline = wrapper.find('.ai-runtime-timeline');
     const messageBubble = wrapper.find('.ai-message-bubble');
 
+    expect(activityTimeline.exists()).toBe(true);
     expect(runtimeTimeline.exists()).toBe(true);
-    expect(wrapper.find('.ai-tool-activity-inline').exists()).toBe(false);
     expect(wrapper.text()).toContain('我先确认真实工具列表。');
-    expect(wrapper.text()).toContain('开始调用 grep_search');
+    expect(wrapper.text()).toContain('搜索 agent-sidecar');
     expect(messageBubble.exists()).toBe(true);
-    expect(runtimeTimeline.element.compareDocumentPosition(messageBubble.element) & Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(activityTimeline.element.compareDocumentPosition(messageBubble.element) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBeTruthy();
   });
 

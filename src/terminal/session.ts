@@ -3,18 +3,23 @@
  * TerminalSession：终端会话核心实现（R-20.2.1 / R-20.2.3）。
  * 持有全部会话状态；与 UI 层解耦，可通过构造参数注入 fake 服务用于单测（R-20.2.6）。
  */
+import { resolveTerminalFontFamily } from '@/constants/terminal';
 import { getThemeManager } from '@/themes';
+import { buildTerminalTheme } from '@/themes/derive/terminal';
+import { dark } from '@/themes/variants/dark';
+import { light } from '@/themes/variants/light';
 import type { TThemeMode } from '@/types/app';
 import type { ITerminalSettings } from '@/types/settings';
 import type {
-    ITerminalDataEvent,
     ITerminalBufferDiagnostic,
+    ITerminalDataEvent,
     ITerminalExitEvent,
-    ITerminalRunCompletedPayload,
-    ITerminalRunChunkPayload,
-    ITerminalSessionPayload,
-    ITerminalStatusChangePayload,
     ITerminalInputRoutePayload,
+    ITerminalRunChunkPayload,
+    ITerminalRunCompletedPayload,
+    ITerminalSessionPayload,
+    ITerminalStateChangedPayload,
+    ITerminalStatusChangePayload,
     ITerminalVisualWritePayload,
     TTerminalConnectionState,
     TTerminalInputRoute,
@@ -24,10 +29,9 @@ import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
 import { toErrorMessage } from '@/utils/error';
 import {
     SHELL_WINDOW_RESIZE_END_EVENT,
-    SHELL_WINDOW_RESIZE_START_EVENT,
     SHELL_WINDOW_RESIZE_SETTLED_EVENT,
+    SHELL_WINDOW_RESIZE_START_EVENT,
 } from '@/utils/window-resize-events';
-import { resolveTerminalFontFamily } from '@/constants/terminal';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -67,6 +71,15 @@ const ANSI_ALT_SCREEN_SWITCH_PATTERN = new RegExp(
     `${ANSI_ESCAPE}\\[\\?(?:47|1047|1049)([hl])`,
     'gu',
 );
+const ANSI_SGR_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[([0-9;]*)m`, 'gu');
+const ANSI_DEFAULT_FOREGROUND_CODE = 39;
+const ANSI_DEFAULT_BACKGROUND_CODE = 49;
+const ANSI_EXTENDED_FOREGROUND_CODE = 38;
+const ANSI_EXTENDED_BACKGROUND_CODE = 48;
+const ANSI_EXTENDED_INDEXED_COLOR_MODE = 5;
+const ANSI_EXTENDED_RGB_COLOR_MODE = 2;
+const ANSI_LIGHT_THEME_FORCED_FOREGROUND_CODES = new Set([37, 97]);
+const ANSI_LIGHT_THEME_FORCED_BACKGROUND_CODES = new Set([40, 100]);
 type TTerminalBellStyle = 'none' | 'sound' | 'visual';
 type TTerminalLayoutSyncOptions = { settle?: boolean };
 
@@ -81,7 +94,11 @@ interface IRunVisualTransaction {
 /**
  * 从 ThemeManager 获取当前 xterm 主题；未初始化时返回空对象，由 xterm 使用内置默认色。
  */
-const getXtermTheme = () => getThemeManager().getTerminalTheme() ?? {};
+const getXtermTheme = (theme?: TThemeMode) => {
+    if (theme === 'light') return buildTerminalTheme(light);
+    if (theme === 'dark') return buildTerminalTheme(dark);
+    return getThemeManager().getTerminalTheme() ?? {};
+};
 
 const resolveInteger = (
     value: number | null | undefined,
@@ -107,7 +124,7 @@ const resolveTerminalBellStyle = (bellMode: ITerminalSettings['bellMode']): TTer
     }
 };
 
-const buildTerminalOptions = (s: ITerminalSettings) => ({
+const buildTerminalOptions = (s: ITerminalSettings, theme: TThemeMode) => ({
     allowTransparency: false,
     bellStyle: resolveTerminalBellStyle(s.bellMode),
     cols: DEFAULT_COLS,
@@ -125,7 +142,7 @@ const buildTerminalOptions = (s: ITerminalSettings) => ({
     scrollOnUserInput: true,
     scrollSensitivity: 1,
     smoothScrollDuration: 0,
-    theme: getXtermTheme(),
+    theme: getXtermTheme(theme),
 });
 
 const isPrintableTerminalInput = (data: string): boolean => {
@@ -169,12 +186,87 @@ const isLikelyInteractiveResizeRepaintFrame = (data: string): boolean =>
     ANSI_CSI_ERASE_PATTERN.test(data) &&
     (ANSI_CSI_HIDE_CURSOR_PATTERN.test(data) || data.includes('\x1b[H'));
 
+const normalizeSgrParamsForLightTerminal = (params: string): string => {
+    if (!params) return params;
+    const parts = params.split(';');
+    const normalized: string[] = [];
+
+    for (let index = 0; index < parts.length; index += 1) {
+        const rawPart = parts[index] ?? '';
+        const code = rawPart === '' ? 0 : Number(rawPart);
+        if (!Number.isInteger(code)) {
+            normalized.push(rawPart);
+            continue;
+        }
+
+        if (
+            code === ANSI_EXTENDED_FOREGROUND_CODE ||
+            code === ANSI_EXTENDED_BACKGROUND_CODE
+        ) {
+            normalized.push(rawPart);
+            const modeRaw = parts[index + 1];
+            const mode = modeRaw === undefined || modeRaw === '' ? 0 : Number(modeRaw);
+            if (modeRaw !== undefined) {
+                normalized.push(modeRaw);
+                index += 1;
+            }
+            if (mode === ANSI_EXTENDED_INDEXED_COLOR_MODE) {
+                const colorIndex = parts[index + 1];
+                if (colorIndex !== undefined) {
+                    normalized.push(colorIndex);
+                    index += 1;
+                }
+                continue;
+            }
+            if (mode === ANSI_EXTENDED_RGB_COLOR_MODE) {
+                for (let channel = 0; channel < 3; channel += 1) {
+                    const channelValue = parts[index + 1];
+                    if (channelValue === undefined) break;
+                    normalized.push(channelValue);
+                    index += 1;
+                }
+                continue;
+            }
+            continue;
+        }
+
+        if (ANSI_LIGHT_THEME_FORCED_FOREGROUND_CODES.has(code)) {
+            normalized.push(String(ANSI_DEFAULT_FOREGROUND_CODE));
+            continue;
+        }
+        if (ANSI_LIGHT_THEME_FORCED_BACKGROUND_CODES.has(code)) {
+            normalized.push(String(ANSI_DEFAULT_BACKGROUND_CODE));
+            continue;
+        }
+        normalized.push(rawPart);
+    }
+
+    return normalized.join(';');
+};
+
+export const normalizeTerminalAnsiForTheme = (value: string, theme: TThemeMode): string => {
+    if (theme !== 'light' || !value) return value;
+    ANSI_SGR_PATTERN.lastIndex = 0;
+    return value.replace(ANSI_SGR_PATTERN, (sequence: string, params: string) => {
+        const normalizedParams = normalizeSgrParamsForLightTerminal(params);
+        return normalizedParams === params ? sequence : `${ANSI_ESCAPE}[${normalizedParams}m`;
+    });
+};
+
 const previewTerminalDiagnosticText = (value: string): string =>
     value
         .replaceAll('\r', '\\r')
         .replaceAll('\n', '\\n')
         .replace(ANSI_ESCAPE_CHARACTER_PATTERN, '\\x1b')
         .slice(0, TERMINAL_BUFFER_DIAGNOSTIC_PREVIEW_LENGTH);
+
+const isInteractiveChannelClosedError = (error: unknown): boolean => {
+    const message = toErrorMessage(error, '');
+    return (
+        message.includes('interactive command channel 已关闭') ||
+        message.includes('terminal duplex 已关闭')
+    );
+};
 
 export const stripInjectedRunSeparatorForTerminalData = (data: string): string => {
     const markerIndex = data.indexOf(TERMINAL_RUN_SEPARATOR_PREFIX);
@@ -290,6 +382,7 @@ export class TerminalSession {
     private _runChunkUnlisten: UnlistenFn | null = null;
     private _runCompletedUnlisten: UnlistenFn | null = null;
     private _exitUnlisten: UnlistenFn | null = null;
+    private _stateChangedUnlisten: UnlistenFn | null = null;
     private _eventListenerRegistration: Promise<void> | null = null;
     /**
      * 每次 detach 时递增；registerEventListeners 异步完成时比对版本，
@@ -382,7 +475,11 @@ export class TerminalSession {
         this._hostEl = el;
         this._theme = theme;
         this._settings = settings;
+        const hadTerminal = this._terminalRef.value !== null;
         this._createTerminal();
+        if (hadTerminal) {
+            this._applyTerminalSettings();
+        }
     }
 
     // -- Public: set visibility ----------------------------------------------
@@ -421,7 +518,8 @@ export class TerminalSession {
             this._dataUnlisten &&
             this._runChunkUnlisten &&
             this._runCompletedUnlisten &&
-            this._exitUnlisten
+            this._exitUnlisten &&
+            this._stateChangedUnlisten
         ) {
             return Promise.resolve();
         }
@@ -436,7 +534,7 @@ export class TerminalSession {
                 return;
             }
 
-            const [dl, rl, cl, el] = await Promise.all([
+            const [dl, rl, cl, el, sl] = await Promise.all([
                 listen<ITerminalDataEvent>('terminal:data', (e) => this._handleDataEvent(e)),
                 listen<ITerminalRunChunkPayload>('terminal:run-chunk', (e) =>
                     this._handleRunChunkEvent(e),
@@ -447,16 +545,20 @@ export class TerminalSession {
                 listen<ITerminalExitEvent>('terminal:interactive-exited', (e) =>
                     this._handleExitEvent(e),
                 ),
+                listen<ITerminalStateChangedPayload>('terminal:state-changed', (e) =>
+                    this._handleStateChangedEvent(e),
+                ),
             ]);
             if (this._listenerVersion !== version) {
                 // detach 在注册期间被调用，立即释放这批监听器避免泄漏
-                dl(); rl(); cl(); el();
+                dl(); rl(); cl(); el(); sl();
                 return;
             }
             this._dataUnlisten = dl;
             this._runChunkUnlisten = rl;
             this._runCompletedUnlisten = cl;
             this._exitUnlisten = el;
+            this._stateChangedUnlisten = sl;
         })().finally(() => {
             this._eventListenerRegistration = null;
         });
@@ -547,7 +649,11 @@ export class TerminalSession {
         this._terminalRef.value?.reset();
         this._resetTerminalRunCapture();
         if (this.session.value) {
-            await this._tauri.closeTerminalSession({ sessionId: this.id });
+            try {
+                await this._tauri.closeTerminalSession({ sessionId: this.id });
+            } catch {
+                // 连接通道异常断开时关闭后端会话可能失败，直接进入重建流程。
+            }
             this.session.value = null;
         }
         this._isAutoFollowEnabled = true;
@@ -749,10 +855,12 @@ export class TerminalSession {
         this._runChunkUnlisten?.();
         this._runCompletedUnlisten?.();
         this._exitUnlisten?.();
+        this._stateChangedUnlisten?.();
         this._dataUnlisten = null;
         this._runChunkUnlisten = null;
         this._runCompletedUnlisten = null;
         this._exitUnlisten = null;
+        this._stateChangedUnlisten = null;
 
         this._clearLayoutFrame();
         this._clearLayoutSettleTimeout();
@@ -1195,12 +1303,13 @@ export class TerminalSession {
 
     private _queueTerminalWrite(value: string, options?: { scrollToBottom?: boolean }): void {
         if (!value) return;
+        const normalizedValue = normalizeTerminalAnsiForTheme(value, this._theme);
         if (!this._visible) {
-            this._hiddenTerminalWriteBacklog += value;
+            this._hiddenTerminalWriteBacklog += normalizedValue;
             if (options?.scrollToBottom) this._pendingHiddenScrollToBottom = true;
             return;
         }
-        this._bufferedTerminalWrite += value;
+        this._bufferedTerminalWrite += normalizedValue;
         if (options?.scrollToBottom) this._pendingScrollToBottomAfterWrite = true;
         this._scheduleTerminalWriteFlush();
     }
@@ -1379,6 +1488,12 @@ export class TerminalSession {
     private _handleRunCompletedEvent(event: { payload: ITerminalRunCompletedPayload }): void {
         if (event.payload.sessionId !== this.id) return;
         this._emitTerminalRunCompleted(event.payload);
+    }
+
+    private _handleStateChangedEvent(event: { payload: ITerminalStateChangedPayload }): void {
+        if (event.payload.to !== 'idle_interactive') return;
+        this._clearTrackedRunState();
+        this._interactiveResizeRepaintSuppressUntilMs = 0;
     }
 
     private _handleExitEvent(event: { payload: ITerminalExitEvent }): void {
@@ -1580,21 +1695,37 @@ export class TerminalSession {
     // -- Private: appearance sync --------------------------------------------
 
     private _syncTerminalSurfaceTone(): void {
-        const background = getXtermTheme().background ?? '#1a1b1e';
+        const theme = getXtermTheme(this._theme);
+        const background = theme.background ?? '#ffffff';
+        const cursor = theme.cursor ?? '#000000';
+        const cursorAccent = theme.cursorAccent ?? '#ffffff';
+        const applySurfaceStyle = (element: HTMLElement): void => {
+            element.style.setProperty('--terminal-fill', background);
+            element.style.setProperty('--terminal-cursor', cursor);
+            element.style.setProperty('--terminal-cursor-accent', cursorAccent);
+            element.style.setProperty('background-color', background, 'important');
+        };
         if (this._hostEl) {
-            this._hostEl.style.setProperty('--terminal-fill', background);
-            this._hostEl.style.backgroundColor = background;
+            applySurfaceStyle(this._hostEl);
+            const shell = this._hostEl.closest('.embedded-terminal-shell');
+            if (shell instanceof HTMLElement) {
+                applySurfaceStyle(shell);
+            }
+            for (const element of this._hostEl.querySelectorAll<HTMLElement>(
+                '.xterm, .xterm-viewport, .xterm-scroll-area, .xterm-screen, .xterm-screen canvas',
+            )) {
+                applySurfaceStyle(element);
+            }
         }
         if (this._terminalRef.value?.element) {
-            this._terminalRef.value.element.style.setProperty('--terminal-fill', background);
-            this._terminalRef.value.element.style.backgroundColor = background;
+            applySurfaceStyle(this._terminalRef.value.element);
         }
     }
 
     private _applyTerminalSettings(): void {
         const terminal = this._terminalRef.value;
         if (!terminal || !this._settings) return;
-        const opts = buildTerminalOptions(this._settings);
+        const opts = buildTerminalOptions(this._settings, this._theme);
         terminal.options.theme = opts.theme;
         terminal.options.fontFamily = opts.fontFamily;
         terminal.options.fontSize = opts.fontSize;
@@ -1604,6 +1735,7 @@ export class TerminalSession {
         terminal.options.scrollback = opts.scrollback;
         terminal.options.bellStyle = opts.bellStyle;
         this._syncTerminalSurfaceTone();
+        terminal.refresh(0, Math.max(0, terminal.rows - 1));
         this._scheduleLayoutSync({ settle: true });
         this._scheduleViewportSync({ clearTextureAtlas: true, refresh: true });
     }
@@ -1732,7 +1864,7 @@ export class TerminalSession {
         if (!this._hostEl) return;
         if (!this._terminalRef.value) {
             const terminal = markRaw(new Terminal(
-                buildTerminalOptions(this._settings ?? this._fallbackSettings()),
+                buildTerminalOptions(this._settings ?? this._fallbackSettings(), this._theme),
             ));
             const fitAddon = markRaw(new FitAddon());
             terminal.loadAddon(fitAddon);
@@ -1749,6 +1881,18 @@ export class TerminalSession {
                 void this._tauri
                     .writeTerminalInput({ sessionId: this.id, data })
                     .catch((error: unknown) => {
+                        if (isInteractiveChannelClosedError(error)) {
+                            this.session.value = null;
+                            const message = 'WSL Link interactive command channel 已关闭。';
+                            this._emitStatus('closed', message);
+                            this._queueTerminalWrite(`\r\n\x1b[90m${message}\x1b[0m\r\n`, {
+                                scrollToBottom: true,
+                            });
+                            this._flushTerminalWriteBufferNow();
+                            this._scheduleViewportSync({ scrollToBottom: true });
+                            return;
+                        }
+
                         this._emitStatus('error', toErrorMessage(error, '终端输入发送失败。'));
                     });
             });

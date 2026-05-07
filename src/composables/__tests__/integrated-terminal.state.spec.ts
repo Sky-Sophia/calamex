@@ -4,7 +4,10 @@
  */
 import type { TThemeMode } from '@/types/app';
 import { useEditorStore } from '@/store/editor';
-import { stripInjectedRunSeparatorForTerminalData } from '@/terminal/session';
+import {
+    normalizeTerminalAnsiForTheme,
+    stripInjectedRunSeparatorForTerminalData,
+} from '@/terminal/session';
 import type { ITerminalSettings } from '@/types/settings';
 import type { ITerminalStatusChangePayload } from '@/types/terminal';
 import { flushPromises, mount } from '@vue/test-utils';
@@ -98,19 +101,26 @@ vi.mock('@tauri-apps/api/event', () => ({
 // Mock：xterm
 // ─────────────────────────────────────────────
 vi.mock('@xterm/xterm', () => ({
-    Terminal: vi.fn(() => mockTerminalInstance),
+    Terminal: vi.fn(function Terminal(options: Record<string, unknown>) {
+        mockTerminalInstance.options = { ...options };
+        return mockTerminalInstance;
+    }),
 }));
 
 vi.mock('@xterm/addon-fit', () => ({
-    FitAddon: vi.fn(() => mockFitAddonInstance),
+    FitAddon: vi.fn(function FitAddon() {
+        return mockFitAddonInstance;
+    }),
 }));
 
 vi.mock('@xterm/addon-webgl', () => ({
-    WebglAddon: vi.fn(() => ({
-        dispose: vi.fn(),
-        clearTextureAtlas: vi.fn(),
-        onContextLoss: vi.fn(() => ({ dispose: vi.fn() })),
-    })),
+    WebglAddon: vi.fn(function WebglAddon() {
+        return {
+            dispose: vi.fn(),
+            clearTextureAtlas: vi.fn(),
+            onContextLoss: vi.fn(() => ({ dispose: vi.fn() })),
+        };
+    }),
 }));
 
 // ─────────────────────────────────────────────
@@ -160,12 +170,13 @@ const DEFAULT_TERMINAL_SETTINGS: ITerminalSettings = {
 const createTestComponent = (
     statusChanges: ITerminalStatusChangePayload[],
     sessionId = 'main-terminal',
+    initialTheme: TThemeMode = 'dark',
 ) =>
     defineComponent({
         setup() {
             const settings = ref<ITerminalSettings>(DEFAULT_TERMINAL_SETTINGS);
             const visible = ref(true);
-            const theme = ref<TThemeMode>('dark');
+            const theme = ref<TThemeMode>(initialTheme);
 
             const result = useIntegratedTerminal({
                 settings,
@@ -211,6 +222,7 @@ describe('suite 1', () => {
         mockTerminalInstance.buffer.active.getLine.mockReturnValue(null);
         mockTerminalInstance.rows = 28;
         mockTerminalInstance.cols = 120;
+        mockTerminalInstance.options = {};
     });
 
     // ── 1. 导出钩子的结果 ──
@@ -219,6 +231,68 @@ describe('suite 1', () => {
             const result = useIntegratedTerminalStatus();
             expect(result).toHaveProperty('status');
             expect(result).toHaveProperty('statusMessage');
+        });
+
+        it('浅色终端主题使用白色背景与指定文字色', async () => {
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const wrapper = mount(createTestComponent(statusChanges, 'main-terminal', 'light'), {
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+
+            expect(mockTerminalInstance.options.theme).toMatchObject({
+                background: '#ffffff',
+                foreground: '#1a1c1f',
+                cursor: '#000000',
+            });
+
+            wrapper.unmount();
+        });
+
+        it('浅色终端写入前移除强制白字与黑底 ANSI', () => {
+            expect(
+                normalizeTerminalAnsiForTheme('\x1b[37m[test@Predator]$\x1b[40m ', 'light'),
+            ).toBe('\x1b[39m[test@Predator]$\x1b[49m ');
+            expect(normalizeTerminalAnsiForTheme('\x1b[1;97;100m提示\x1b[0m', 'light')).toBe(
+                '\x1b[1;39;49m提示\x1b[0m',
+            );
+            expect(normalizeTerminalAnsiForTheme('\x1b[38;5;37m保留索引色', 'light')).toBe(
+                '\x1b[38;5;37m保留索引色',
+            );
+            expect(normalizeTerminalAnsiForTheme('\x1b[37m深色保留', 'dark')).toBe(
+                '\x1b[37m深色保留',
+            );
+        });
+
+        it('复用已有终端实例时重新应用浅色主题', async () => {
+            const pinia = createPinia();
+            const statusChanges: ITerminalStatusChangePayload[] = [];
+            const firstWrapper = mount(createTestComponent(statusChanges, 'main-terminal', 'dark'), {
+                global: { plugins: [pinia] },
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+            firstWrapper.unmount();
+            await flushPromises();
+
+            const secondWrapper = mount(createTestComponent(statusChanges, 'main-terminal', 'light'), {
+                global: { plugins: [pinia] },
+                attachTo: document.body,
+            });
+
+            await flushPromises();
+
+            expect(mockTerminalInstance.options.theme).toMatchObject({
+                background: '#ffffff',
+                foreground: '#1a1c1f',
+                cursor: '#000000',
+                cursorAccent: '#ffffff',
+            });
+            expect(mockTerminalInstance.refresh).toHaveBeenCalled();
+
+            secondWrapper.unmount();
         });
     });
 

@@ -276,7 +276,8 @@ const createProcessActivity = (
   index: number,
   status: TAgentActivityStatus,
 ): IAgentActivity | null => {
-  const title = clipActivityText(text);
+  const normalizedText = normalizeActivityText(text);
+  const title = clipActivityText(normalizedText);
 
   if (!title) {
     return null;
@@ -289,6 +290,7 @@ const createProcessActivity = (
     kind: 'reasoning_summary',
     status: status === 'running' ? 'running' : 'success',
     title,
+    ...(normalizedText !== title ? { description: normalizedText } : {}),
   };
 };
 

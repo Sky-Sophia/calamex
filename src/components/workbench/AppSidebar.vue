@@ -163,6 +163,8 @@ const props = defineProps<{
   isDesktopRuntime: boolean;
   workspaceRootPath: string | null;
   preloadedWorkspaceRoot: IWorkspaceDirectoryPayload | null;
+  startupExplorerExpandedPaths: string[];
+  startupExplorerSelectedPath: string | null;
   canRun: boolean;
   isRunning: boolean;
   hasRunArtifacts: boolean;
@@ -180,6 +182,7 @@ const emit = defineEmits<{
   'open-terminal': [];
   'insert-template': [template: ICommandTemplate];
   'clear-run-history': [];
+  'explorer-state-change': [payload: { expandedPaths: string[]; selectedPath: string | null }];
 }>();
 
 const message = useMessage();
@@ -415,7 +418,9 @@ const rootEntry = computed<IWorkspaceEntry | null>(() => {
   };
 });
 
-const selectedExplorerPath = computed(() => props.document.path ?? undefined);
+const selectedExplorerPath = computed(() =>
+  props.document.path ?? props.startupExplorerSelectedPath ?? undefined,
+);
 
 const searchExpandedPaths = computed(() => {
   if (!root.value || !hasExplorerSearch.value) {
@@ -478,7 +483,8 @@ const applyWorkspaceRootPayload = (
   loadedWorkspaceKey.value = workspaceKey;
   clearTreeState();
   childrenMap[payload.rootPath] = payload.entries;
-  manualExpandedPaths.value = new Set([payload.rootPath]);
+  manualExpandedPaths.value = new Set([payload.rootPath, ...props.startupExplorerExpandedPaths]);
+  emitExplorerStateChange();
 };
 
 const loadWorkspaceRoot = async (workspaceKey: string): Promise<void> => {
@@ -514,6 +520,7 @@ const loadWorkspaceRoot = async (workspaceKey: string): Promise<void> => {
     }
 
     applyWorkspaceRootPayload(payload, workspaceKey);
+    void loadStartupExpandedDirectories();
   } catch (error) {
     if (requestId !== rootRequestId) {
       return;
@@ -548,6 +555,25 @@ const loadDirectoryEntries = async (path: string): Promise<void> => {
   }
 };
 
+const loadStartupExpandedDirectories = async (): Promise<void> => {
+  if (!root.value) {
+    return;
+  }
+
+  const rootPath = root.value.rootPath;
+  const pendingPaths = [...manualExpandedPaths.value].filter(
+    (path) => path !== rootPath && childrenMap[path] === undefined,
+  );
+
+  for (const path of pendingPaths) {
+    if (!manualExpandedPaths.value.has(path)) {
+      continue;
+    }
+
+    await loadDirectoryEntries(path);
+  }
+};
+
 const expandExplorerPath = async (path: string): Promise<void> => {
   if (!root.value) {
     return;
@@ -557,6 +583,7 @@ const expandExplorerPath = async (path: string): Promise<void> => {
     const nextExpandedPaths = new Set(manualExpandedPaths.value);
     nextExpandedPaths.add(path);
     manualExpandedPaths.value = nextExpandedPaths;
+    emitExplorerStateChange();
   }
 
   if (path !== root.value.rootPath && childrenMap[path] === undefined) {
@@ -573,6 +600,7 @@ const toggleExplorerPath = async (path: string): Promise<void> => {
     const nextExpandedPaths = new Set(manualExpandedPaths.value);
     nextExpandedPaths.delete(path);
     manualExpandedPaths.value = nextExpandedPaths;
+    emitExplorerStateChange();
     return;
   }
 
@@ -590,6 +618,7 @@ const handleExplorerExpandedChange = async (nextExpanded: Set<string>): Promise<
   }
 
   manualExpandedPaths.value = nextManualExpanded;
+  emitExplorerStateChange();
 
   if (!root.value) {
     return;
@@ -637,11 +666,19 @@ const handleOpenFile = (path: string): void => {
 };
 
 const handleExplorerSelection = (path: string): void => {
+  emitExplorerStateChange(path);
   const entry = loadedExplorerEntries.value.get(path);
 
   if (entry?.kind === 'file') {
     handleOpenFile(entry.path);
   }
+};
+
+const emitExplorerStateChange = (selectedPath: string | null | undefined = selectedExplorerPath.value ?? null): void => {
+  emit('explorer-state-change', {
+    expandedPaths: [...manualExpandedPaths.value],
+    selectedPath: selectedPath ?? null,
+  });
 };
 
 const handleOpenGitDiff = (payload: IGitDiffPreviewRequest): void => {

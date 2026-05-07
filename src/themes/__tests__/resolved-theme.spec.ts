@@ -93,9 +93,9 @@ describe('buildComponentTokens / dark', () => {
     it('Primer dark 层级：深色主题使用官方核心表面色', () => {
         expect(dark.surface.app).toBe('#0d1117');
         expect(dark.surface.sidebar).toBe('#151b23');
-        expect(dark.surface.panelDepth).toBe('#212830');
+        expect(dark.surface.panelDepth).toBe('#FAFAFA');
         expect(dark.surface.overlayDepth).toBe('#262c36');
-        expect(dark.surface.overlay).toBe('#212830');
+        expect(dark.surface.overlay).toBe('#FAFAFA');
         expect(dark.surface.editor).toBe('#0d1117');
         expect(dark.surface.activity).toBe('#010409');
         expect(dark.surface.editorGutter).toBe('#0d1117');
@@ -165,8 +165,19 @@ describe('buildComponentTokens / light', () => {
         expect(lightTokens.layout.app.background).toBe(light.surface.app);
     });
 
-    it('编辑器令牌：background 等于 light.surface.editor（muted）', () => {
+    it('编辑器令牌：background 等于 light.surface.editor', () => {
         expect(lightTokens.editor.background).toBe(light.surface.editor);
+    });
+
+    it('浅色编辑器背景使用纯白', () => {
+        expect(lightTokens.editor.background).toBe('#ffffff');
+        expect(lightTokens.editor.gutter).toBe('#ffffff');
+    });
+
+    it('浅色底部面板与 tab 背景使用纯白', () => {
+        expect(lightTokens.panel.background).toBe('#ffffff');
+        expect(lightTokens.layout.tabbar.background).toBe('#ffffff');
+        expect(lightTokens.tab.background.active).toBe('#ffffff');
     });
 
     it('浅色与深色的编辑器背景应不同', () => {
@@ -191,8 +202,8 @@ describe('buildTerminalTheme / dark', () => {
         expect(darkTerminalTheme.foreground).toBe(dark.terminal.foreground);
     });
 
-    it('cursor 不出现在输出中（由 xterm 默认处理）', () => {
-        expect(darkTerminalTheme.cursor).toBeUndefined();
+    it('cursor 映射到 dark.terminal.cursor', () => {
+        expect(darkTerminalTheme.cursor).toBe(dark.terminal.cursor);
     });
 
     it('black 映射到 dark.terminal.black', () => {
@@ -227,15 +238,17 @@ describe('buildTerminalTheme / light', () => {
         expect(lightTerminalTheme.background).toBe(light.terminal.background);
     });
 
+    it('浅色终端前景色使用终端专用文字色', () => {
+        expect(lightTerminalTheme.foreground).toBe('#1a1c1f');
+    });
+
     it('深色与浅色终端背景应不同', () => {
         expect(lightTerminalTheme.background).not.toBe(darkTerminalTheme.background);
     });
 
-    it('终端主题不应包含 cursor / cursorAccent（由 xterm 默认处理，不随主题切换）', () => {
-        expect(lightTerminalTheme.cursor).toBeUndefined();
-        expect(lightTerminalTheme.cursorAccent).toBeUndefined();
-        expect(darkTerminalTheme.cursor).toBeUndefined();
-        expect(darkTerminalTheme.cursorAccent).toBeUndefined();
+    it('浅色终端光标使用黑色', () => {
+        expect(lightTerminalTheme.cursor).toBe('#000000');
+        expect(lightTerminalTheme.cursorAccent).toBe('#ffffff');
     });
 });
 

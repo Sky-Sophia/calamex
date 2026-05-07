@@ -43,11 +43,13 @@ use crate::wsl_link::{
     },
     terminal_client::{
         open_interactive_terminal_over_wsl_link, run_terminal_script_over_wsl_link,
-        signal_terminal_process_over_wsl_link, WslLinkInteractiveTerminalHandle,
+        signal_terminal_process_over_wsl_link, write_terminal_run_input_over_wsl_link,
+        WslLinkInteractiveTerminalHandle,
     },
     terminal_exec::{
-        WslLinkTerminalOpenInteractiveRequest, WslLinkTerminalRunScriptRequest,
-        WslLinkTerminalServerPayload, WslLinkTerminalSignalProcess,
+        WslLinkTerminalOpenInteractiveRequest, WslLinkTerminalRunInput,
+        WslLinkTerminalRunScriptRequest, WslLinkTerminalServerPayload,
+        WslLinkTerminalSignalProcess,
     },
 };
 
@@ -70,6 +72,7 @@ struct TerminalActiveRun {
 enum ActiveRunInputTarget {
     None,
     Pending,
+    Run(String),
 }
 
 struct TerminalActiveRunGuard {
@@ -207,6 +210,22 @@ pub fn write_terminal_input(
     match get_active_terminal_run_input_target(&terminal_state)? {
         ActiveRunInputTarget::Pending => {
             return Ok(());
+        }
+        ActiveRunInputTarget::Run(run_id) => {
+            let desktop_material = KeyringWslLinkNoiseMaterialStore
+                .load_desktop_material()
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| {
+                    "WSL Link Noise 桌面密钥材料不存在，请先安装并启动 WSL Link agent。".to_string()
+                })?;
+            return tauri::async_runtime::block_on(write_terminal_run_input_over_wsl_link(
+                &desktop_material,
+                WslLinkTerminalRunInput {
+                    run_id,
+                    data: payload.data,
+                },
+            ))
+            .map_err(|error| error.to_string());
         }
         ActiveRunInputTarget::None => {}
     }
@@ -512,10 +531,13 @@ fn get_active_terminal_run_input_target(
     let Some(active_run) = active_run.as_ref() else {
         return Ok(ActiveRunInputTarget::None);
     };
-    if active_run.wsl_link_pid.is_some() {
-        return Ok(ActiveRunInputTarget::Pending);
+    match crate::terminal::registry::registry().current_state() {
+        TerminalState::Running => Ok(ActiveRunInputTarget::Run(active_run.run_id.clone())),
+        TerminalState::SwitchingToRun | TerminalState::SwitchingToIdle => {
+            Ok(ActiveRunInputTarget::Pending)
+        }
+        _ => Ok(ActiveRunInputTarget::None),
     }
-    Ok(ActiveRunInputTarget::Pending)
 }
 
 fn should_skip_snapshot_for_interactive_resize_repaint(
@@ -622,7 +644,14 @@ fn mark_terminal_interactive_ready(app: &AppHandle) {
     }
 }
 
-fn mark_terminal_interactive_exited(app: &AppHandle, payload: TerminalExitEvent) {
+fn mark_terminal_interactive_exited(
+    app: &AppHandle,
+    state: &TerminalSessionState,
+    payload: TerminalExitEvent,
+) {
+    if let Ok(mut active_run) = state.active_run.lock() {
+        *active_run = None;
+    }
     if crate::terminal::registry::registry().current_state() == TerminalState::IdleInteractive {
         let _ = transition_terminal_state(app, TerminalState::Booting);
     }
@@ -817,6 +846,7 @@ fn handle_wsl_link_interactive_terminal_event(
             remove_interactive_terminal_after_exit(state, session_id);
             mark_terminal_interactive_exited(
                 app,
+                state,
                 TerminalExitEvent {
                     session_id: session_id.to_string(),
                     exit_code: payload.exit_code,
@@ -837,6 +867,7 @@ fn handle_wsl_link_interactive_terminal_event(
             remove_interactive_terminal_after_exit(state, session_id);
             mark_terminal_interactive_exited(
                 app,
+                state,
                 TerminalExitEvent {
                     session_id: session_id.to_string(),
                     exit_code: payload.exit_code,
@@ -996,15 +1027,24 @@ mod tests {
     };
     use std::{fs, time::Duration};
 
+    fn set_test_terminal_state(state: TerminalState) {
+        let mut machine_state = crate::terminal::registry::registry()
+            .state
+            .write()
+            .expect("terminal state lock should be healthy");
+        *machine_state = state;
+    }
+
     #[test]
     fn wsl_link_active_run_is_serialized() {
         let state = TerminalSessionState::default();
+        set_test_terminal_state(TerminalState::IdleInteractive);
 
         assert!(try_mark_active_terminal_run(&state, "run-1").is_ok());
         assert!(try_mark_active_terminal_run(&state, "run-2").is_err());
         assert!(matches!(
             get_active_terminal_run_input_target(&state),
-            Ok(ActiveRunInputTarget::Pending)
+            Ok(ActiveRunInputTarget::None)
         ));
 
         clear_active_terminal_run(&state, "run-1");
@@ -1013,6 +1053,36 @@ mod tests {
             Ok(ActiveRunInputTarget::None)
         ));
         assert!(try_mark_active_terminal_run(&state, "run-2").is_ok());
+    }
+
+    #[test]
+    fn active_run_does_not_block_input_outside_switching_states() {
+        let state = TerminalSessionState::default();
+
+        try_mark_active_terminal_run(&state, "run-1").expect("active run should mark");
+
+        set_test_terminal_state(TerminalState::IdleInteractive);
+
+        assert!(matches!(
+            get_active_terminal_run_input_target(&state),
+            Ok(ActiveRunInputTarget::None)
+        ));
+
+        set_test_terminal_state(TerminalState::SwitchingToRun);
+
+        assert!(matches!(
+            get_active_terminal_run_input_target(&state),
+            Ok(ActiveRunInputTarget::Pending)
+        ));
+
+        set_test_terminal_state(TerminalState::Running);
+
+        assert!(matches!(
+            get_active_terminal_run_input_target(&state),
+            Ok(ActiveRunInputTarget::Run(run_id)) if run_id == "run-1"
+        ));
+
+        set_test_terminal_state(TerminalState::IdleInteractive);
     }
 
     #[test]

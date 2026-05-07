@@ -181,6 +181,8 @@ interface IMastraTextStreamSummary {
     visibleText: string;
 }
 
+type TRuntimeEventFactory = (draft: TAgentRuntimeEventDraft) => TAgentRuntimeOutputEvent;
+
 interface IMastraDurableAgentLike {
     stream(
         messages: TMastraChatMessage[],
@@ -588,6 +590,24 @@ const getChunkRunId = (chunk: unknown): string | null => {
     return typeof runId === 'string' && runId.trim().length > 0 ? runId : null;
 };
 
+const getStringField = (
+    record: Record<string, unknown> | null,
+    fields: readonly string[],
+): string | null => {
+    if (!record) {
+        return null;
+    }
+
+    for (const field of fields) {
+        const value = record[field];
+        if (typeof value === 'string' && value.length > 0) {
+            return value;
+        }
+    }
+
+    return null;
+};
+
 const isApprovedDecision = (decision: string): boolean => {
     const normalizedDecision = decision.trim().toLowerCase();
 
@@ -603,6 +623,23 @@ const isApprovedDecision = (decision: string): boolean => {
 };
 
 const getTextDelta = (payload: TextDeltaPayload): string => payload.text;
+
+const getReasoningDelta = (chunk: unknown): string | null => {
+    const record = toRecord(chunk);
+    const chunkType = getStringField(record, ['type']);
+
+    if (
+        chunkType !== 'reasoning'
+        && chunkType !== 'reasoning-delta'
+        && chunkType !== 'reasoning_delta'
+    ) {
+        return null;
+    }
+
+    return getStringField(record, ['textDelta', 'text', 'reasoning'])
+        ?? getStringField(toRecord(record?.payload), ['textDelta', 'text', 'reasoning'])
+        ?? getStringField(toRecord(record?.delta), ['textDelta', 'text', 'reasoning']);
+};
 
 const isChunkWithType = <TType extends string>(
     chunk: unknown,
@@ -808,6 +845,7 @@ export class MastraRuntime {
         stream: IMastraAgentStreamLike,
         events: TAgentRuntimeOutputEvent[],
         options: IAgentRuntimeRunOptions,
+        createRuntimeEvent?: TRuntimeEventFactory,
     ): Promise<IMastraTextStreamSummary> {
         let visibleText = '';
         let emittedVisibleText = '';
@@ -816,6 +854,19 @@ export class MastraRuntime {
         let releaseResources = true;
 
         for await (const chunk of stream.fullStream) {
+            const reasoningDelta = getReasoningDelta(chunk);
+            if (reasoningDelta) {
+                if (createRuntimeEvent) {
+                    pushUiEvent(events, createRuntimeEvent({
+                        type: 'agent.reasoning.delta',
+                        visibility: 'user',
+                        level: 'info',
+                        text: reasoningDelta,
+                    }), options);
+                }
+                continue;
+            }
+
             if (isTextDeltaChunk(chunk)) {
                 const nextText = getTextDelta(chunk.payload);
                 if (!nextText) {
@@ -990,6 +1041,12 @@ export class MastraRuntime {
             const stream = await agent.stream(buildMastraMessages(normalizedInput), {
                 ...streamOptions,
             });
+            const createRuntimeEvent = createRuntimeEventFactory({
+                runId: stream.runId ?? options.context?.requestId ?? sessionId,
+                sessionId,
+                agentId: DEFAULT_EXECUTION_AGENT_ID,
+                ...(this.now ? { now: this.now } : {}),
+            });
             const streamSummary = await this.consumeTextStream(
                 agent,
                 mcpBundle,
@@ -997,6 +1054,7 @@ export class MastraRuntime {
                 stream,
                 events,
                 options,
+                createRuntimeEvent,
             );
             shouldDisconnectBundle = streamSummary.releaseResources;
 
@@ -1204,6 +1262,7 @@ export class MastraRuntime {
                 stream,
                 events,
                 options,
+                createCheckpointEvent,
             );
             shouldDisconnectBundle = streamSummary.releaseResources;
 
@@ -1302,6 +1361,12 @@ export class MastraRuntime {
                 stream,
                 events,
                 options,
+                createRuntimeEventFactory({
+                    runId: stream.runId ?? decodedRequest.runId,
+                    sessionId,
+                    agentId: DEFAULT_EXECUTION_AGENT_ID,
+                    ...(this.now ? { now: this.now } : {}),
+                }),
             );
             shouldDisconnectBundle = streamSummary.releaseResources;
 

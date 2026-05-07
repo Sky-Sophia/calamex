@@ -12,6 +12,9 @@ import AiProviderIcon from '@/components/business/ai/AiProviderIcon.vue';
 import AiProviderSettings from '@/components/business/ai/AiProviderSettings.vue';
 import AiToolConfirmationCard from '@/components/business/ai/AiToolConfirmationCard.vue';
 import AiWebSourcesPanel from '@/components/business/ai/AiWebSourcesPanel.vue';
+import DropdownMenu from '@/components/ui/dropdown-menu/DropdownMenu.vue';
+import DropdownMenuContent from '@/components/ui/dropdown-menu/DropdownMenuContent.vue';
+import DropdownMenuTrigger from '@/components/ui/dropdown-menu/DropdownMenuTrigger.vue';
 import { useAiAgentNetwork } from '@/composables/useAiAgentNetwork';
 import { useAiAgentRun } from '@/composables/useAiAgentRun';
 import { useAiAssistant, type IAiConversationCheckpoint } from '@/composables/useAiAssistant';
@@ -38,15 +41,10 @@ import type {
 import type { IGitDiffPreviewPayload, IGitRepositoryStatusPayload } from '@/types/git';
 import { cloneAiConfigPayload } from '@/utils/ai-config';
 import { toErrorMessage } from '@/utils/error';
-import { SquarePen } from 'lucide-vue-next';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, type CSSProperties } from 'vue';
+import { SquarePen, Trash2 } from 'lucide-vue-next';
+import { computed, onMounted, ref } from 'vue';
 
 const MAX_HISTORY_MESSAGES = 20;
-const HISTORY_POPOVER_WIDTH = 332;
-const HISTORY_POPOVER_MAX_HEIGHT = 452;
-const HISTORY_POPOVER_MIN_HEIGHT = 220;
-const HISTORY_POPOVER_VIEWPORT_MARGIN = 12;
-const HISTORY_POPOVER_TRIGGER_GAP = 8;
 const props = defineProps<{
   document: IEditorDocument;
   activeRun: IActiveRunSummary | null;
@@ -84,9 +82,6 @@ const settingsDraft = ref<IAiConfigPayload>(cloneAiConfigPayload(assistant.confi
 const settingsApiKey = ref('');
 const isAgentRunActionPending = ref(false);
 const isHistoryOpen = ref(false);
-const historyButtonRef = ref<HTMLButtonElement | null>(null);
-const historyPopoverRef = ref<HTMLElement | null>(null);
-const historyPopoverStyle = ref<CSSProperties>({});
 const currentServicePlatform = computed(() =>
   findAiServicePlatformByModel(assistant.config.value.selectedModel),
 );
@@ -101,12 +96,7 @@ const aiModelName = computed(() => {
 
   return selectedModel.split('/').filter(Boolean).at(-1) ?? selectedModel;
 });
-const aiProviderSummaryTitle = computed(() => {
-  const selectedModel = assistant.config.value.selectedModel?.trim();
-  return `${aiIconTitle.value} · ${selectedModel || '未选择模型'}`;
-});
 const historyThreads = computed(() => assistant.historyThreads.value.slice(-MAX_HISTORY_MESSAGES).reverse());
-const historyCountLabel = computed(() => `最近 ${historyThreads.value.length} 组`);
 const conversationCheckpointByMessageId = computed<Record<string, IAiConversationCheckpoint>>(() => {
   const checkpointMap: Record<string, IAiConversationCheckpoint> = {};
 
@@ -317,92 +307,6 @@ const openSettings = (): void => {
   isHistoryOpen.value = false;
   assistant.isSettingsOpen.value = true;
   assistant.loadProviderProfiles().catch(() => undefined);
-};
-
-const updateHistoryPopoverPosition = (): void => {
-  if (!historyButtonRef.value || typeof window === 'undefined') {
-    return;
-  }
-
-  const triggerRect = historyButtonRef.value.getBoundingClientRect();
-  const viewportWidth = window.innerWidth;
-  const viewportHeight = window.innerHeight;
-  const width = Math.min(
-    HISTORY_POPOVER_WIDTH,
-    Math.max(0, viewportWidth - HISTORY_POPOVER_VIEWPORT_MARGIN * 2),
-  );
-  const preferredRight = viewportWidth - triggerRect.right;
-  const right = Math.min(
-    Math.max(preferredRight, HISTORY_POPOVER_VIEWPORT_MARGIN),
-    Math.max(HISTORY_POPOVER_VIEWPORT_MARGIN, viewportWidth - width - HISTORY_POPOVER_VIEWPORT_MARGIN),
-  );
-  const availableBelow = viewportHeight -
-    triggerRect.bottom -
-    HISTORY_POPOVER_TRIGGER_GAP -
-    HISTORY_POPOVER_VIEWPORT_MARGIN;
-  const availableAbove = triggerRect.top -
-    HISTORY_POPOVER_TRIGGER_GAP -
-    HISTORY_POPOVER_VIEWPORT_MARGIN;
-  const shouldOpenAbove = availableBelow < HISTORY_POPOVER_MIN_HEIGHT && availableAbove > availableBelow;
-  const availableHeight = shouldOpenAbove ? availableAbove : availableBelow;
-  const maxHeight = Math.min(
-    HISTORY_POPOVER_MAX_HEIGHT,
-    Math.max(HISTORY_POPOVER_MIN_HEIGHT, availableHeight),
-  );
-  const top = shouldOpenAbove
-    ? Math.max(
-      HISTORY_POPOVER_VIEWPORT_MARGIN,
-      triggerRect.top - HISTORY_POPOVER_TRIGGER_GAP - maxHeight,
-    )
-    : Math.min(
-      triggerRect.bottom + HISTORY_POPOVER_TRIGGER_GAP,
-      viewportHeight - HISTORY_POPOVER_VIEWPORT_MARGIN - maxHeight,
-    );
-
-  historyPopoverStyle.value = {
-    top: `${top}px`,
-    right: `${right}px`,
-    width: `${width}px`,
-    maxHeight: `${maxHeight}px`,
-  };
-};
-
-const handleToggleHistoryPopover = async (): Promise<void> => {
-  if (isHistoryOpen.value) {
-    isHistoryOpen.value = false;
-    return;
-  }
-
-  updateHistoryPopoverPosition();
-  isHistoryOpen.value = true;
-  await nextTick();
-  updateHistoryPopoverPosition();
-};
-
-const handleHistoryViewportChange = (): void => {
-  if (!isHistoryOpen.value) {
-    return;
-  }
-
-  updateHistoryPopoverPosition();
-};
-
-const handleHistoryDocumentMouseDown = (event: MouseEvent): void => {
-  if (!isHistoryOpen.value) {
-    return;
-  }
-
-  const target = event.target;
-
-  if (!(target instanceof Node)) {
-    return;
-  }
-
-  if (historyPopoverRef.value?.contains(target) || historyButtonRef.value?.contains(target)) {
-    return;
-  }
-
-  isHistoryOpen.value = false;
 };
 
 const startNewConversation = (): void => {
@@ -718,34 +622,14 @@ onMounted(() => {
   }).catch(() => undefined);
   assistant.loadTools().catch(() => undefined);
   assistant.loadProviderProfiles().catch(() => undefined);
-
-  if (typeof window !== 'undefined') {
-    window.addEventListener('resize', handleHistoryViewportChange);
-  }
-
-  if (typeof document !== 'undefined') {
-    document.addEventListener('mousedown', handleHistoryDocumentMouseDown);
-  }
-});
-
-onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') {
-    window.removeEventListener('resize', handleHistoryViewportChange);
-  }
-
-  if (typeof document !== 'undefined') {
-    document.removeEventListener('mousedown', handleHistoryDocumentMouseDown);
-  }
 });
 </script>
 
 <template>
   <section class="ai-assistant-panel" aria-label="AI 助手面板">
     <header class="ai-panel-header">
-      <div class="ai-provider-mark" :title="aiProviderSummaryTitle" aria-label="当前 AI 平台和模型">
-        <AiProviderIcon
-class="ai-provider-mark__icon" :platform-id="aiIconPlatformId" :title="aiIconTitle"
-          decorative />
+      <div class="ai-provider-mark" aria-label="当前 AI 平台和模型">
+        <AiProviderIcon class="ai-provider-mark__icon" :platform-id="aiIconPlatformId" decorative />
         <span class="ai-provider-mark__copy">
           <span class="ai-provider-mark__label">{{ aiModelName }}</span>
         </span>
@@ -762,38 +646,63 @@ class="ai-provider-mark__icon" :platform-id="aiIconPlatformId" :title="aiIconTit
             <circle cx="7" cy="7" r="3" />
           </svg>
         </button>
-        <div class="ai-history-anchor">
-          <button
-ref="historyButtonRef" type="button" class="ai-icon-button" aria-label="对话记录" aria-haspopup="dialog"
-            :aria-expanded="isHistoryOpen" @click="handleToggleHistoryPopover">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-              <path d="M3 3v5h5" />
-              <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
-              <path d="M12 7v5l4 2" />
-            </svg>
-          </button>
-        </div>
+        <DropdownMenu v-model:open="isHistoryOpen">
+          <DropdownMenuTrigger as-child>
+            <button type="button" class="ai-icon-button" aria-label="对话记录" aria-haspopup="dialog"
+              :aria-expanded="isHistoryOpen">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="M3 3v5h5" />
+                <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
+                <path d="M12 7v5l4 2" />
+              </svg>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent class="ai-history-popover border-0! outline-none! ring-0!" align="end" side="bottom"
+            :side-offset="8" :collision-padding="12">
+            <header class="ai-history-header">
+              <div class="ai-history-title-group">
+                <strong>对话记录</strong>
+              </div>
+              <button v-if="assistant.messages.value.length" type="button" class="ai-history-clear-icon"
+                aria-label="清空当前对话" @click="assistant.isClearDialogOpen.value = true; isHistoryOpen = false">
+                <Trash2 aria-hidden="true" />
+              </button>
+            </header>
+            <div v-if="historyThreads.length" class="ai-history-scroll-area">
+              <div class="ai-history-list">
+                <article v-for="thread in historyThreads" :key="thread.id" class="ai-history-item"
+                  :class="{ 'is-active': thread.id === assistant.activeConversationId.value }">
+                  <button type="button" class="ai-history-button" @click="openHistoryThread(thread.id)">
+                    <div class="ai-history-meta">
+                      <strong class="ai-history-title">{{ thread.title }}</strong>
+                      <time>{{ getHistoryTimeLabel(thread.updatedAt) }}</time>
+                    </div>
+                    <div class="ai-history-subtitle">{{ getHistoryMessageCountLabel(thread.messages) }}</div>
+                  </button>
+                </article>
+              </div>
+            </div>
+            <div v-else class="ai-history-empty">暂无对话记录</div>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <slot name="header-actions-after" />
       </div>
     </header>
 
-    <AiChatThread
-:messages="threadMessages" :is-typing="assistant.isSending.value" :platform-id="aiIconPlatformId"
+    <AiChatThread :messages="threadMessages" :is-typing="assistant.isSending.value" :platform-id="aiIconPlatformId"
       :provider-label="aiIconTitle">
       <template #empty>
-        <AiFloatingSuggestions
-:suggestions="suggestionPool.suggestions.value" :disabled="assistant.isSending.value"
+        <AiFloatingSuggestions :suggestions="suggestionPool.suggestions.value" :disabled="assistant.isSending.value"
           @select="handleSuggestionSelect" />
       </template>
       <template #after-message="{ message }">
         <Checkpoint v-if="getConversationCheckpoint(message.id)" class="ai-conversation-checkpoint">
-          <CheckpointTrigger
-class="ai-conversation-checkpoint__trigger" :disabled="isConversationCheckpointDisabled"
+          <CheckpointTrigger class="ai-conversation-checkpoint__trigger" :disabled="isConversationCheckpointDisabled"
             :tooltip="getConversationCheckpointTooltip(message.id)"
             @click="handleRestoreConversationCheckpoint(message.id)">
             <CheckpointIcon class="ai-conversation-checkpoint__icon" aria-hidden="true" />
             <span>{{ getConversationCheckpointLabel(message.id) }}</span>
-            <Loader
-v-if="isConversationCheckpointRestoring(message.id)" class="ai-conversation-checkpoint__loader"
+            <Loader v-if="isConversationCheckpointRestoring(message.id)" class="ai-conversation-checkpoint__loader"
               :size="12" />
           </CheckpointTrigger>
         </Checkpoint>
@@ -801,8 +710,7 @@ v-if="isConversationCheckpointRestoring(message.id)" class="ai-conversation-chec
     </AiChatThread>
     <div v-if="fileRollbackPrompt" class="ai-file-rollback-entry" :class="`is-${fileRollbackPrompt.status}`">
       <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
-      <button
-type="button" class="ai-file-rollback-entry__button" :disabled="isFileRollbackDisabled"
+      <button type="button" class="ai-file-rollback-entry__button" :disabled="isFileRollbackDisabled"
         :aria-label="fileRollbackLabel" @click="assistant.rollbackLatestFileChange">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
           <path d="M3 7v5h5" />
@@ -812,8 +720,7 @@ type="button" class="ai-file-rollback-entry__button" :disabled="isFileRollbackDi
       </button>
       <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
     </div>
-    <AiPatchPreview
-:patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
+    <AiPatchPreview :patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
       :workspace-root-path="workspaceRootPath" @apply="assistant.applyProposedPatch"
       @close="assistant.proposedPatch.value = null" @open-diff="emit('open-patch-diff', $event)" />
     <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
@@ -829,14 +736,12 @@ type="button" class="ai-file-rollback-entry__button" :disabled="isFileRollbackDi
       </button>
       <span class="ai-patch-entry__line" aria-hidden="true"></span>
     </div>
-    <AiWebSourcesPanel
-v-if="webSourcesVisible" :sources="webSources.sources.value"
+    <AiWebSourcesPanel v-if="webSourcesVisible" :sources="webSources.sources.value"
       :activity="planVisible ? null : webSources.activity.value" :error-message="webSources.errorMessage.value"
       :is-searching="webSources.isSearching.value" :network-permission="networkPermission"
       @search="handleSearchWebSources" @fetch-source="handleFetchWebSource" @clear="webSources.clear" />
     <div class="ai-composer-shell" :class="{ 'has-plan': planVisible }">
-      <AiPlanModePanel
-v-if="planVisible" :goal="planActiveGoal" :steps="planSteps"
+      <AiPlanModePanel v-if="planVisible" :goal="planActiveGoal" :steps="planSteps"
         :classification-reason="planClassificationReason" :error-message="planErrorMessage"
         :is-classifying="planIsClassifying" :is-planning="planIsPlanning" :is-approving="planIsApproving"
         :approved-at="planApprovedAt" :active-run="planActiveRun" :is-run-action-pending="isAgentRunActionPending"
@@ -846,12 +751,10 @@ v-if="planVisible" :goal="planActiveGoal" :steps="planSteps"
         @reset="handleResetPlan" @run-step="handleRunStep" @pause-run="handlePauseRun" @resume-run="handleResumeRun"
         @cancel-run="handleCancelRun" @resolve-tool-confirmation="handleResolveToolConfirmation" />
       <div v-if="directToolConfirmationVisible && planPendingToolConfirmation" class="ai-direct-tool-confirmation">
-        <AiToolConfirmationCard
-:confirmation="planPendingToolConfirmation" :disabled="isAgentRunActionPending"
+        <AiToolConfirmationCard :confirmation="planPendingToolConfirmation" :disabled="isAgentRunActionPending"
           @resolve="handleResolveToolConfirmation" />
       </div>
-      <AiPromptInput
-v-model="assistant.draft.value" v-model:active-mode="assistant.activeMode.value"
+      <AiPromptInput v-model="assistant.draft.value" v-model:active-mode="assistant.activeMode.value"
         :disabled="assistant.isSending.value" :error-message="assistant.errorMessage.value" :submit-label="submitLabel"
         :provider-label="aiIconTitle" :attachments="assistant.attachedFiles.value"
         :has-attachments="assistant.attachedFiles.value.length > 0" @submit="assistant.sendMessage"
@@ -859,48 +762,14 @@ v-model="assistant.draft.value" v-model:active-mode="assistant.activeMode.value"
         @remove-file="assistant.removeAttachedFile" />
     </div>
 
-    <AiProviderSettings
-v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
+    <AiProviderSettings v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
       :open="assistant.isSettingsOpen.value" :config="assistant.config.value"
       :profiles="assistant.providerProfiles.value" :load-profile-detail="assistant.getProviderProfileDetail"
       @close="assistant.isSettingsOpen.value = false" @save="saveSettings" @save-credentials="saveCredentials"
       @test-provider="testProvider" @switch-profile="switchProviderProfile" />
 
     <Teleport to="body">
-      <section
-v-if="isHistoryOpen" ref="historyPopoverRef" class="ai-history-popover" :style="historyPopoverStyle"
-        role="dialog" aria-label="最近 20 组对话记录">
-        <header class="ai-history-header">
-          <div class="ai-history-title-group">
-            <strong>对话记录</strong>
-            <span>{{ historyCountLabel }}</span>
-          </div>
-        </header>
-        <div v-if="historyThreads.length" class="ai-history-list">
-          <article
-v-for="thread in historyThreads" :key="thread.id" class="ai-history-item"
-            :class="{ 'is-active': thread.id === assistant.activeConversationId.value }">
-            <button type="button" class="ai-history-button" @click="openHistoryThread(thread.id)">
-              <div class="ai-history-meta">
-                <strong class="ai-history-title">{{ thread.title }}</strong>
-                <time>{{ getHistoryTimeLabel(thread.updatedAt) }}</time>
-              </div>
-              <div class="ai-history-subtitle">{{ getHistoryMessageCountLabel(thread.messages) }}</div>
-            </button>
-          </article>
-        </div>
-        <div v-else class="ai-history-empty">最近 20 组对话会显示在这里</div>
-        <footer v-if="assistant.messages.value.length" class="ai-history-footer">
-          <button type="button" @click="assistant.isClearDialogOpen.value = true; isHistoryOpen = false">
-            清空当前对话
-          </button>
-        </footer>
-      </section>
-    </Teleport>
-
-    <Teleport to="body">
-      <div
-v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop"
+      <div v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop"
         @click.self="assistant.isClearDialogOpen.value = false">
         <section class="ai-dialog is-compact" role="alertdialog" aria-modal="true">
           <div class="ai-dialog-copy">
@@ -908,8 +777,7 @@ v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop"
             <p>这只会清空面板里的临时对话记录，不会删除任何文件。</p>
           </div>
           <div class="ai-dialog-actions">
-            <button
-type="button" class="ai-button is-ghost"
+            <button type="button" class="ai-button is-ghost"
               @click="assistant.isClearDialogOpen.value = false">取消</button>
             <button type="button" class="ai-button is-danger" @click="assistant.clearConversation">清空</button>
           </div>
@@ -1022,17 +890,17 @@ type="button" class="ai-button is-ghost"
   place-items: center;
 }
 
-.ai-history-popover {
-  position: fixed;
-  z-index: 1200;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+:deep(.ai-history-popover) {
+  display: flex;
+  flex-direction: column;
   width: 332px;
-  max-height: 452px;
+  max-width: min(332px, calc(100vw - 24px));
+  max-height: min(560px, calc(100vh - 24px));
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--shell-divider) 100%, rgba(255, 255, 255, 0.1));
+  border: 1px solid #F0F0F2 !important;
   border-radius: 12px;
-  background: color-mix(in srgb, var(--panel-bg) 97%, var(--sidebar-bg));
+  background: #ffffff;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06) !important;
 }
 
 .ai-history-header {
@@ -1040,7 +908,6 @@ type="button" class="ai-button is-ghost"
   align-items: center;
   justify-content: space-between;
   min-height: 40px;
-  border-bottom: 1px solid var(--shell-divider);
   padding: 0 12px;
 }
 
@@ -1052,16 +919,45 @@ type="button" class="ai-button is-ghost"
 }
 
 .ai-history-title-group strong {
-  color: var(--text-primary);
+  color: #0f172a;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 
-.ai-history-title-group span {
-  color: var(--text-quaternary);
-  font-size: 11px;
-  line-height: 16px;
+.ai-history-clear-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  padding: 0;
+}
+
+.ai-history-clear-icon:hover {
+  color: #0f172a;
+}
+
+.ai-history-clear-icon svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.9;
+}
+
+.ai-history-scroll-area {
+  max-height: calc((6 * 60px) + (5 * 8px) + 16px);
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.ai-history-scroll-area::-webkit-scrollbar {
+  display: none;
 }
 
 .ai-history-list {
@@ -1069,43 +965,28 @@ type="button" class="ai-button is-ghost"
   min-height: 0;
   flex-direction: column;
   gap: 8px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding: 8px;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--shell-divider) 88%, transparent) transparent;
-  -webkit-overflow-scrolling: touch;
-}
-
-.ai-history-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-.ai-history-list::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: padding-box;
-  background-color: color-mix(in srgb, var(--shell-divider) 88%, transparent);
 }
 
 .ai-history-item {
   display: block;
   flex: 0 0 auto;
   min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--shell-divider) 78%, transparent);
+  border: 0;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-soft) 72%, transparent);
+  background: #ffffff;
+  box-shadow: none;
   overflow: hidden;
 }
 
 .ai-history-item:hover {
-  border-color: color-mix(in srgb, var(--shell-divider) 100%, rgba(255, 255, 255, 0.12));
-  background: color-mix(in srgb, var(--surface-soft) 100%, transparent);
+  background: #f8fafc;
+  box-shadow: none;
 }
 
 .ai-history-item.is-active {
-  border-color: color-mix(in srgb, var(--accent-strong) 34%, var(--shell-divider));
-  background: color-mix(in srgb, var(--accent-strong) 8%, var(--surface-soft));
+  background: color-mix(in srgb, var(--accent-strong) 12%, #ffffff);
+  box-shadow: none;
 }
 
 .ai-history-button {
@@ -1129,7 +1010,7 @@ type="button" class="ai-button is-ghost"
 .ai-history-title {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-primary);
+  color: #0f172a;
   font-size: 12px;
   font-weight: 600;
   line-height: 16px;
@@ -1138,41 +1019,21 @@ type="button" class="ai-button is-ghost"
 }
 
 .ai-history-meta time {
-  color: var(--text-quaternary);
+  color: #64748b;
 }
 
 .ai-history-subtitle {
-  color: var(--text-quaternary);
+  color: #64748b;
   font-size: 11px;
   line-height: 16px;
 }
 
 .ai-history-empty {
-  color: var(--text-quaternary);
+  color: #64748b;
   font-size: 12px;
   line-height: 18px;
   padding: 20px 16px;
   text-align: center;
-}
-
-.ai-history-footer {
-  display: flex;
-  justify-content: flex-end;
-  border-top: 1px solid var(--shell-divider);
-  padding: 8px;
-}
-
-.ai-history-footer button {
-  height: 26px;
-  border-radius: 6px;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  padding: 0 9px;
-}
-
-.ai-history-footer button:hover {
-  background: var(--surface-soft);
-  color: var(--text-primary);
 }
 
 .ai-patch-entry,

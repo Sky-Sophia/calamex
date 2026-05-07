@@ -39,6 +39,17 @@ const isExpectedCancellationError = (error: unknown): boolean => {
   );
 };
 
+const isBenignResizeObserverError = (error: unknown): boolean => {
+  const errorMessage = readErrorLikeField(error, 'message') ?? '';
+  const errorName = readErrorLikeField(error, 'name') ?? '';
+  const mergedText = `${errorName}\n${errorMessage}\n${String(error)}`.toLowerCase();
+
+  return (
+    mergedText.includes('resizeobserver loop completed with undelivered notifications') ||
+    mergedText.includes('resizeobserver loop limit exceeded')
+  );
+};
+
 const normalizeErrorDetail = (error: unknown): string => {
   if (error instanceof Error) {
     return error.stack ?? error.message;
@@ -88,11 +99,24 @@ export const registerRuntimeDiagnostics = (): void => {
   disposeRuntimeDiagnostics();
 
   const handleError = (event: ErrorEvent): void => {
+    if (
+      isBenignResizeObserverError(event.error) ||
+      isBenignResizeObserverError(event.message)
+    ) {
+      event.preventDefault();
+      return;
+    }
+
     setRuntimeError('应用运行时错误', event.error ?? event.message);
   };
 
   const handleUnhandledRejection = (event: PromiseRejectionEvent): void => {
     if (isExpectedCancellationError(event.reason)) {
+      event.preventDefault();
+      return;
+    }
+
+    if (isBenignResizeObserverError(event.reason)) {
       event.preventDefault();
       return;
     }

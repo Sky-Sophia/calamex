@@ -13,8 +13,9 @@ use super::{
         decode_terminal_server_payload, encode_terminal_client_payload,
         WslLinkTerminalClientPayload, WslLinkTerminalExecError, WslLinkTerminalInteractiveClose,
         WslLinkTerminalInteractiveInput, WslLinkTerminalInteractiveResize,
-        WslLinkTerminalOpenInteractiveRequest, WslLinkTerminalRunScriptRequest,
-        WslLinkTerminalServerPayload, WslLinkTerminalSignalProcess,
+        WslLinkTerminalOpenInteractiveRequest, WslLinkTerminalRunInput,
+        WslLinkTerminalRunScriptRequest, WslLinkTerminalServerPayload,
+        WslLinkTerminalSignalProcess,
     },
     types::now_unix_ms,
 };
@@ -265,6 +266,53 @@ pub async fn signal_terminal_process_over_wsl_link(
         session_id: session_id.clone(),
         request_id: format!("terminal-signal-{client_seq}"),
         idempotency_key: format!("terminal-signal-{client_seq}"),
+        client_seq,
+        ack_server_seq: supervisor.last_ack_server_seq(),
+        payload,
+        trace_id,
+    };
+
+    let response = connection
+        .client
+        .duplex(Request::new(tokio_stream::iter([frame])))
+        .await?;
+    let mut stream = response.into_inner();
+    while let Some(frame) = stream.message().await? {
+        if frame.session_id != session_id {
+            return Err(WslLinkTerminalClientError::SessionMismatch);
+        }
+        let payload = decode_terminal_server_payload(&frame.payload)?;
+        if matches!(
+            payload,
+            WslLinkTerminalServerPayload::InteractiveAck(_)
+                | WslLinkTerminalServerPayload::InteractiveError(_)
+        ) {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn write_terminal_run_input_over_wsl_link(
+    desktop_material: &WslLinkDesktopNoiseMaterial,
+    request: WslLinkTerminalRunInput,
+) -> Result<(), WslLinkTerminalClientError> {
+    request.validate()?;
+    let mut supervisor = WslLinkPrimarySupervisor::new(
+        "calamex-desktop-terminal-run-input",
+        WslLinkTransportConfig::default(),
+    );
+    let mut connection = supervisor.open_noise_connection(desktop_material).await?;
+    let session_id = connection.session.session_id.clone();
+    let client_seq = supervisor.allocate_client_seq();
+    let trace_id = format!("wsl-link-terminal-run-input-{}", now_unix_ms());
+    let payload =
+        encode_terminal_client_payload(&WslLinkTerminalClientPayload::RunInput(request.clone()))?;
+    let frame = ClientFrame {
+        session_id: session_id.clone(),
+        request_id: format!("terminal-run-input-{}-{client_seq}", request.run_id),
+        idempotency_key: format!("terminal-run-input-{client_seq}"),
         client_seq,
         ack_server_seq: supervisor.last_ack_server_seq(),
         payload,

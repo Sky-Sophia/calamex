@@ -98,7 +98,7 @@ const isHtmlTextInputElement = (element: Element | null): element is HTMLInputEl
 
 const isTextEditableElement = (
   element: Element | null,
-): element is HTMLInputElement | HTMLTextAreaElement | HTMLElement =>
+): boolean =>
   isHtmlTextInputElement(element) ||
   element instanceof HTMLTextAreaElement ||
   (element instanceof HTMLElement && element.isContentEditable);
@@ -517,7 +517,7 @@ export const useBrowserContextMenu = () => {
 
     nextGroups.push({
       key: 'clipboard-actions',
-      
+
       items: [
         {
           key: 'cut',
@@ -744,7 +744,7 @@ export const useBrowserContextMenu = () => {
     let hasTerminalSelection = false;
     if (target.isTerminalSurface) {
       const terminalControls = await getTerminalControls();
-      hasTerminalSelection = terminalControls?.getSelectionText().length > 0;
+      hasTerminalSelection = (terminalControls?.getSelectionText()?.length ?? 0) > 0;
     }
 
     openMenu(event, target, hasTerminalSelection);

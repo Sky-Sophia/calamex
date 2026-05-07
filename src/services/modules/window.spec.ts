@@ -1,7 +1,12 @@
 import { AppError } from '@/types/app-error';
 import { invoke } from '@tauri-apps/api/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SetWindowBackgroundInput, setWindowBackground } from './window';
+import {
+  SetWindowBackgroundInput,
+  WindowStageInput,
+  applyWindowStage,
+  setWindowBackground,
+} from './window';
 
 declare global {
   interface Window {
@@ -55,6 +60,11 @@ describe('services/modules/window', () => {
     ).toThrow();
   });
 
+  it('Zod 窗口阶段只允许主窗口阶段', () => {
+    expect(WindowStageInput.parse({ stage: 'main' })).toEqual({ stage: 'main' });
+    expect(() => WindowStageInput.parse({ stage: 'bootstrap' })).toThrow();
+  });
+
   it('成功路径通过统一 IPC 层传递 input 与 traceId', async () => {
     invokeMock.mockResolvedValue(null);
 
@@ -99,6 +109,16 @@ describe('services/modules/window', () => {
     expect(caughtError).toBeInstanceOf(AppError);
     expect(caughtError).toMatchObject({
       scope: 'ipc',
+    });
+  });
+
+  it('窗口阶段通过统一 IPC 层传递 stage', async () => {
+    invokeMock.mockResolvedValue(null);
+
+    await expect(applyWindowStage({ stage: 'main' })).resolves.toBeUndefined();
+
+    expect(invokeMock).toHaveBeenCalledWith('apply_window_stage', {
+      stage: 'main',
     });
   });
 });

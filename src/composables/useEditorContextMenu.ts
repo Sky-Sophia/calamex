@@ -6,6 +6,7 @@ import type {
 import type { IAiCodeActionRequest } from '@/types/ai';
 import { tryReadClipboardText, writeClipboardText } from '@/utils/clipboard';
 import { monaco } from '@/utils/monaco';
+import type * as Monaco from 'monaco-editor';
 import { onBeforeUnmount, reactive, ref } from 'vue';
 
 const MENU_WIDTH = 224;
@@ -41,6 +42,7 @@ const createShortcutMap = (): Record<TEditorContextMenuAction, string[]> => {
   const labels = resolveShortcutModifierLabels();
 
   return {
+    'open-terminal': [],
     undo: [labels.primary, 'Z'],
     redo: [labels.primary, labels.shift, 'Z'],
     'format-with-shfmt': [labels.alt, labels.shift, 'F'],
@@ -53,14 +55,18 @@ const createShortcutMap = (): Record<TEditorContextMenuAction, string[]> => {
     copy: [labels.primary, 'C'],
     paste: [labels.primary, 'V'],
     'select-all': [labels.primary, 'A'],
+    'ai-explain-selection': [],
+    'ai-fix-diagnostic': [],
+    'ai-generate-tests': [],
   };
 };
 
 const SHORTCUT_MAP = createShortcutMap();
 
 interface IUseEditorContextMenuOptions {
-  getEditor: () => monaco.editor.IStandaloneCodeEditor | null;
+  getEditor: () => Monaco.editor.IStandaloneCodeEditor | null;
   canRunCurrentScript: () => boolean;
+  onOpenTerminalRequest?: () => void;
   onFormatRequest: () => void;
   onCommandPaletteRequest: () => void;
   onRunCurrentScriptRequest: () => void;
@@ -86,7 +92,7 @@ const clampMenuPosition = (clientX: number, clientY: number) => ({
 });
 
 const updateSelectionForContextMenu = (
-  editor: monaco.editor.IStandaloneCodeEditor,
+  editor: Monaco.editor.IStandaloneCodeEditor,
   targetPosition: TEditorContextMenuPosition,
 ): void => {
   if (!targetPosition) {
@@ -109,7 +115,7 @@ const updateSelectionForContextMenu = (
 };
 
 const runMonacoAction = async (
-  editor: monaco.editor.IStandaloneCodeEditor,
+  editor: Monaco.editor.IStandaloneCodeEditor,
   actionId: string,
 ): Promise<void> => {
   const action = editor.getAction(actionId);
@@ -120,24 +126,24 @@ const runMonacoAction = async (
   await action.run();
 };
 
-const isSelectionEmpty = (selection: monaco.Selection): boolean =>
+const isSelectionEmpty = (selection: Monaco.Selection): boolean =>
   selection.startLineNumber === selection.endLineNumber &&
   selection.startColumn === selection.endColumn;
 
 const resolvePrimarySelection = (
-  editor: monaco.editor.IStandaloneCodeEditor,
-): monaco.Selection | null => editor.getSelection();
+  editor: Monaco.editor.IStandaloneCodeEditor,
+): Monaco.Selection | null => editor.getSelection();
 
 const resolveTextSelections = (
-  editor: monaco.editor.IStandaloneCodeEditor,
-): monaco.Selection[] => {
+  editor: Monaco.editor.IStandaloneCodeEditor,
+): Monaco.Selection[] => {
   const selections = editor.getSelections() ?? [];
   return selections.filter((selection) => !isSelectionEmpty(selection));
 };
 
 const resolveCurrentLineRange = (
-  editor: monaco.editor.IStandaloneCodeEditor,
-): monaco.Range | null => {
+  editor: Monaco.editor.IStandaloneCodeEditor,
+): Monaco.Range | null => {
   const model = editor.getModel();
   const position = editor.getPosition();
 
@@ -154,7 +160,7 @@ const resolveCurrentLineRange = (
 };
 
 const resolveEditorSelectionText = (
-  editor: monaco.editor.IStandaloneCodeEditor,
+  editor: Monaco.editor.IStandaloneCodeEditor,
 ): string | null => {
   const model = editor.getModel();
   if (!model) {
@@ -172,12 +178,12 @@ const resolveEditorSelectionText = (
   return lineRange ? model.getValueInRange(lineRange) : null;
 };
 
-const pushEditorUndoBoundary = (editor: monaco.editor.IStandaloneCodeEditor): void => {
+const pushEditorUndoBoundary = (editor: Monaco.editor.IStandaloneCodeEditor): void => {
   editor.pushUndoStop();
 };
 
 const copyEditorSelection = async (
-  editor: monaco.editor.IStandaloneCodeEditor,
+  editor: Monaco.editor.IStandaloneCodeEditor,
 ): Promise<void> => {
   const text = resolveEditorSelectionText(editor);
   if (text === null) {
@@ -193,7 +199,7 @@ const copyEditorSelection = async (
 };
 
 const cutEditorSelection = async (
-  editor: monaco.editor.IStandaloneCodeEditor,
+  editor: Monaco.editor.IStandaloneCodeEditor,
 ): Promise<void> => {
   const model = editor.getModel();
   if (!model) {
@@ -201,7 +207,7 @@ const cutEditorSelection = async (
   }
 
   const textSelections = resolveTextSelections(editor);
-  const targetRanges: monaco.Selection[] | monaco.Range[] =
+  const targetRanges: Monaco.Selection[] | Monaco.Range[] =
     textSelections.length > 0
       ? textSelections
       : (() => {
@@ -235,7 +241,7 @@ const cutEditorSelection = async (
 };
 
 const pasteIntoEditor = async (
-  editor: monaco.editor.IStandaloneCodeEditor,
+  editor: Monaco.editor.IStandaloneCodeEditor,
 ): Promise<void> => {
   const clipboardText = await tryReadClipboardText();
   if (clipboardText === null) {
@@ -259,7 +265,7 @@ const pasteIntoEditor = async (
   pushEditorUndoBoundary(editor);
 };
 
-const selectAllEditorText = (editor: monaco.editor.IStandaloneCodeEditor): void => {
+const selectAllEditorText = (editor: Monaco.editor.IStandaloneCodeEditor): void => {
   const model = editor.getModel();
   if (!model) {
     return;
@@ -269,7 +275,7 @@ const selectAllEditorText = (editor: monaco.editor.IStandaloneCodeEditor): void 
 };
 
 const triggerEditorCommand = (
-  editor: monaco.editor.IStandaloneCodeEditor,
+  editor: Monaco.editor.IStandaloneCodeEditor,
   commandId: string,
 ): void => {
   editor.trigger('context-menu', commandId, null);
@@ -311,7 +317,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
   };
 
   const supportsAction = (
-    editor: monaco.editor.IStandaloneCodeEditor,
+    editor: Monaco.editor.IStandaloneCodeEditor,
     actionId: string,
   ): boolean => {
     const action = editor.getAction(actionId);
@@ -319,7 +325,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
   };
 
   const buildMenuGroups = (
-    editor: monaco.editor.IStandaloneCodeEditor,
+    editor: Monaco.editor.IStandaloneCodeEditor,
   ): IEditorContextMenuGroup[] => {
     const isReadOnly = editor.getOption(monaco.editor.EditorOption.readOnly);
     const supportsFind = supportsAction(editor, 'actions.find');
@@ -334,21 +340,21 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
       {
         key: 'ai-explain-selection',
         label: 'AI 解释选区',
-        icon: 'command',
+        icon: 'search',
         action: 'ai-explain-selection',
         disabled: !canRunAiAction,
       },
       {
         key: 'ai-fix-diagnostic',
         label: 'AI 修复诊断',
-        icon: 'command',
+        icon: 'wrench',
         action: 'ai-fix-diagnostic',
         disabled: !canRunAiAction,
       },
       {
         key: 'ai-generate-tests',
         label: 'AI 生成测试',
-        icon: 'command',
+        icon: 'flask',
         action: 'ai-generate-tests',
         disabled: !canRunAiAction,
       },
@@ -397,6 +403,14 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
         key: 'run-actions',
 
         items: [
+          {
+            key: 'open-terminal',
+            label: '打开终端',
+            icon: 'command',
+            shortcut: SHORTCUT_MAP['open-terminal'],
+            action: 'open-terminal',
+            disabled: false,
+          },
           {
             key: 'run-current-script',
             label: '运行当前脚本',
@@ -490,7 +504,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
   };
 
   const openMenu = (
-    editor: monaco.editor.IStandaloneCodeEditor,
+    editor: Monaco.editor.IStandaloneCodeEditor,
     browserEvent: MouseEvent,
   ): void => {
     const nextPosition = clampMenuPosition(browserEvent.clientX, browserEvent.clientY);
@@ -506,7 +520,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
         : 'right';
   };
 
-  const handleEditorMouseDown = (event: monaco.editor.IEditorMouseEvent): void => {
+  const handleEditorMouseDown = (event: Monaco.editor.IEditorMouseEvent): void => {
     if (!event.event.rightButton) {
       return;
     }
@@ -514,7 +528,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
     handleBrowserContextMenu(event.event.browserEvent, event.target.position);
   };
 
-  const handleEditorContextMenu = (event: monaco.editor.IEditorMouseEvent): void => {
+  const handleEditorContextMenu = (event: Monaco.editor.IEditorMouseEvent): void => {
     handleBrowserContextMenu(event.event.browserEvent, event.target.position);
   };
 
@@ -593,6 +607,9 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
         return;
       case 'run-current-script':
         options.onRunCurrentScriptRequest();
+        return;
+      case 'open-terminal':
+        options.onOpenTerminalRequest?.();
         return;
       case 'cut':
         await cutEditorSelection(editor);

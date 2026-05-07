@@ -10,7 +10,7 @@ use std::{
 };
 
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tonic::{Request, Response, Status};
 
 use super::{
@@ -32,9 +32,9 @@ use super::{
         WslLinkTerminalInteractiveError, WslLinkTerminalInteractiveInput,
         WslLinkTerminalInteractiveOpened, WslLinkTerminalInteractiveResize,
         WslLinkTerminalOpenInteractiveRequest, WslLinkTerminalRunChunk,
-        WslLinkTerminalRunCompleted, WslLinkTerminalRunError, WslLinkTerminalRunScriptRequest,
-        WslLinkTerminalRunStarted, WslLinkTerminalServerPayload, WslLinkTerminalSignalProcess,
-        WslLinkUtf8ChunkDecoder,
+        WslLinkTerminalRunCompleted, WslLinkTerminalRunError, WslLinkTerminalRunInput,
+        WslLinkTerminalRunScriptRequest, WslLinkTerminalRunStarted, WslLinkTerminalServerPayload,
+        WslLinkTerminalSignalProcess, WslLinkUtf8ChunkDecoder,
     },
     types::{noise_server_proof_payload, now_unix_ms, DEFAULT_PROTOCOL_VERSION},
 };
@@ -132,6 +132,7 @@ struct AgentState {
     next_session_seq: u64,
     sessions: HashMap<String, AgentSession>,
     interactive_sessions: HashMap<String, Arc<AgentInteractivePty>>,
+    active_run_inputs: HashMap<String, tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 impl AgentState {
@@ -453,6 +454,13 @@ async fn handle_terminal_duplex_frame(
             }
             true
         }
+        WslLinkTerminalClientPayload::RunInput(request) => {
+            let result = write_terminal_run_input_frame(state, frame, request, tx).await;
+            if let Err(error) = result {
+                let _ = tx.send(Err(error)).await;
+            }
+            true
+        }
         WslLinkTerminalClientPayload::OpenInteractive(request) => {
             let result = open_interactive_terminal_frame(state, frame, request, tx).await;
             if let Err(error) = result {
@@ -525,7 +533,7 @@ async fn run_terminal_script_frame(
         .arg("--norc")
         .arg(&request.execution_path)
         .current_dir(working_directory)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -533,6 +541,11 @@ async fn run_terminal_script_frame(
         .spawn()
         .map_err(|error| Status::internal(format!("启动 WSL Link 脚本失败：{error}")))?;
     let pid = child.id().unwrap_or(0);
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| Status::internal("WSL Link 脚本 stdin 不可用。"))?;
+    let (input_tx, input_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     send_terminal_event(
         state,
         &meta,
@@ -544,8 +557,15 @@ async fn run_terminal_script_frame(
         tx,
     )
     .await?;
+    register_terminal_run_input(state, &request.run_id, input_tx)?;
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<TerminalProcessEvent>(32);
+    tokio::spawn(write_process_stdin(
+        request.run_id.clone(),
+        stdin,
+        input_rx,
+        event_tx.clone(),
+    ));
     if let Some(stdout) = child.stdout.take() {
         tokio::spawn(read_process_stream(stdout, event_tx.clone()));
     }
@@ -586,6 +606,7 @@ async fn run_terminal_script_frame(
         }
     }
 
+    remove_terminal_run_input(state, &request.run_id);
     cleanup_terminal_run_files(&request.cleanup_paths).await;
 
     if let Some(error) = wait_error {
@@ -611,6 +632,38 @@ async fn run_terminal_script_frame(
             run_id: request.run_id,
             exit_code,
             finished_at_unix_ms: now_unix_ms_i64(),
+        }),
+        tx,
+    )
+    .await
+}
+
+async fn write_terminal_run_input_frame(
+    state: &Arc<Mutex<AgentState>>,
+    frame: ClientFrame,
+    request: WslLinkTerminalRunInput,
+    tx: &tokio::sync::mpsc::Sender<Result<ServerFrame, Status>>,
+) -> Result<(), Status> {
+    request
+        .validate()
+        .map_err(|error| Status::invalid_argument(error.to_string()))?;
+    let session_id = frame.session_id.clone();
+    let client_seq = frame.client_seq;
+    let meta = begin_terminal_control_frame(state, frame)?;
+    let Some(meta) = meta else {
+        return replay_cached_terminal_frames(state, &session_id, client_seq, tx).await;
+    };
+
+    let input = get_terminal_run_input(state, &request.run_id)?;
+    input
+        .send(request.data)
+        .map_err(|_| Status::failed_precondition("WSL Link 脚本输入通道已关闭。"))?;
+    send_terminal_event(
+        state,
+        &meta,
+        WslLinkTerminalServerPayload::InteractiveAck(WslLinkTerminalInteractiveAck {
+            session_id: None,
+            action: "run_input".to_string(),
         }),
         tx,
     )
@@ -1062,6 +1115,38 @@ fn get_interactive_pty(
         .ok_or_else(|| Status::not_found("交互终端 session 不存在。"))
 }
 
+fn register_terminal_run_input(
+    state: &Arc<Mutex<AgentState>>,
+    run_id: &str,
+    input: tokio::sync::mpsc::UnboundedSender<String>,
+) -> Result<(), Status> {
+    let mut state = state
+        .lock()
+        .map_err(|_| Status::internal("WSL Link agent 状态锁已损坏。"))?;
+    state.active_run_inputs.insert(run_id.to_string(), input);
+    Ok(())
+}
+
+fn get_terminal_run_input(
+    state: &Arc<Mutex<AgentState>>,
+    run_id: &str,
+) -> Result<tokio::sync::mpsc::UnboundedSender<String>, Status> {
+    let state = state
+        .lock()
+        .map_err(|_| Status::internal("WSL Link agent 状态锁已损坏。"))?;
+    state
+        .active_run_inputs
+        .get(run_id)
+        .cloned()
+        .ok_or_else(|| Status::not_found("目标脚本运行不存在或已结束。"))
+}
+
+fn remove_terminal_run_input(state: &Arc<Mutex<AgentState>>, run_id: &str) {
+    if let Ok(mut state) = state.lock() {
+        state.active_run_inputs.remove(run_id);
+    }
+}
+
 fn terminal_session_key(wsl_link_session_id: &str, terminal_session_id: &str) -> String {
     format!("{wsl_link_session_id}:{terminal_session_id}")
 }
@@ -1186,6 +1271,30 @@ fn spawn_interactive_waiter(
 enum TerminalProcessEvent {
     Chunk(String),
     Exit(Result<Option<i32>, String>),
+}
+
+async fn write_process_stdin<W>(
+    run_id: String,
+    mut stdin: W,
+    mut input_rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+    tx: tokio::sync::mpsc::Sender<TerminalProcessEvent>,
+) where
+    W: AsyncWrite + Unpin + Send + 'static,
+{
+    while let Some(input) = input_rx.recv().await {
+        let result = match stdin.write_all(input.as_bytes()).await {
+            Ok(()) => stdin.flush().await,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = result {
+            let _ = tx
+                .send(TerminalProcessEvent::Chunk(format!(
+                    "写入 WSL Link 脚本输入失败（{run_id}）：{error}\n"
+                )))
+                .await;
+            break;
+        }
+    }
 }
 
 async fn read_process_stream<R>(mut reader: R, tx: tokio::sync::mpsc::Sender<TerminalProcessEvent>)

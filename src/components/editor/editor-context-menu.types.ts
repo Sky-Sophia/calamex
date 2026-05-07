@@ -17,6 +17,8 @@ export type TEditorContextMenuIcon = Extract<
   | 'goto'
   | 'undo'
   | 'redo'
+  | 'wrench'
+  | 'flask'
   | 'command'
 >;
 
@@ -24,6 +26,7 @@ export type TEditorContextMenuAction =
   | 'ai-explain-selection'
   | 'ai-fix-diagnostic'
   | 'ai-generate-tests'
+  | 'open-terminal'
   | 'undo'
   | 'redo'
   | 'format-with-shfmt'

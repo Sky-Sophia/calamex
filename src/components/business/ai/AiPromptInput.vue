@@ -160,7 +160,7 @@ v-model="modelValue" class="ai-prompt-textarea" placeholder="输入消息" aria-
                 <InputGroupAddon align="block-end" class="ai-toolbar-row">
                     <InputGroupButton
 type="button" variant="outline" class="ai-attachment-button rounded-full"
-                        size="icon-xs" :disabled="disabled" aria-label="添加附件" title="添加附件"
+                        size="icon-xs" :disabled="disabled" aria-label="添加附件"
                         @click="handleOpenFileDialog">
                         <PlusIcon class="size-4" />
                     </InputGroupButton>
@@ -182,14 +182,14 @@ aria-label="选择模式"
 
                     <InputGroupButton
 v-if="disabled" type="button" variant="outline"
-                        class="ai-send-button rounded-full ml-auto" size="icon-xs" aria-label="停止" title="停止"
+                        class="ai-send-button rounded-full ml-auto" size="icon-xs" aria-label="停止"
                         @click="handleStop">
                         <SquareIcon class="size-4" />
                         <span class="sr-only">Stop</span>
                     </InputGroupButton>
                     <InputGroupButton
 v-else type="submit" variant="default" class="ai-send-button rounded-full ml-auto"
-                        size="icon-xs" :disabled="!canSubmit" :aria-label="submitLabel" :title="submitLabel">
+                        size="icon-xs" :disabled="!canSubmit" :aria-label="submitLabel">
                         <ArrowUpIcon class="size-4" />
                         <span class="sr-only">Send</span>
                     </InputGroupButton>
@@ -299,7 +299,7 @@ v-else type="submit" variant="default" class="ai-send-button rounded-full ml-aut
 }
 
 .ai-prompt-textarea::placeholder {
-    color: #5f7088;
+    color: #9aa9bc;
     opacity: 1;
 }
 

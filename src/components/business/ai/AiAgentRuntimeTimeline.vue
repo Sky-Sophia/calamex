@@ -7,6 +7,7 @@ import {
   ChainOfThoughtSearchResults,
   ChainOfThoughtStep,
 } from '@/components/ai-elements/chain-of-thought';
+import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Task, TaskContent, TaskItem } from '@/components/ai-elements/task';
 import {
   classifyRuntimeToolKind,
@@ -493,10 +494,10 @@ const parsePreviewValue = (value: string | undefined): string[] => {
 const describeRunEvent = (event: TAgentRuntimeEvent): string | null => {
   switch (event.type) {
     case 'agent.run.started':
-      return '已开始执行 Agent 流程';
+      return null;
 
     case 'agent.run.completed':
-      return event.stopReason ? `Agent 执行完成（${event.stopReason}）` : 'Agent 执行完成';
+      return null;
 
     case 'agent.run.error':
       return `Agent 执行失败：${event.errorMessage}`;
@@ -578,6 +579,43 @@ const buildTimelineItems = (events: readonly TAgentRuntimeEvent[]): TTimelineIte
   let reasoningBuffer = '';
   let reasoningBufferId = '';
 
+  const getReasoningOverlapLength = (previous: string, incoming: string): number => {
+    const maxLength = Math.min(previous.length, incoming.length);
+
+    for (let length = maxLength; length > 0; length -= 1) {
+      if (previous.slice(-length) === incoming.slice(0, length)) {
+        return length;
+      }
+    }
+
+    return 0;
+  };
+
+  const appendReasoningText = (incomingText: string): void => {
+    if (!incomingText) {
+      return;
+    }
+
+    if (!reasoningBuffer) {
+      reasoningBuffer = incomingText;
+      return;
+    }
+
+    if (incomingText.startsWith(reasoningBuffer)) {
+      // Some providers stream cumulative snapshots (full text so far).
+      reasoningBuffer = incomingText;
+      return;
+    }
+
+    if (reasoningBuffer.startsWith(incomingText)) {
+      // Ignore stale/shorter snapshot.
+      return;
+    }
+
+    const overlapLength = getReasoningOverlapLength(reasoningBuffer, incomingText);
+    reasoningBuffer += incomingText.slice(overlapLength);
+  };
+
   const flushReasoningLine = (): void => {
     if (!reasoningBufferId || reasoningBuffer.length === 0) {
       return;
@@ -604,7 +642,7 @@ const buildTimelineItems = (events: readonly TAgentRuntimeEvent[]): TTimelineIte
         reasoningBufferId = createEventKey(event, eventIndex);
       }
 
-      reasoningBuffer += event.text;
+      appendReasoningText(event.text);
       return;
     }
 
@@ -643,6 +681,12 @@ const buildTimelineItems = (events: readonly TAgentRuntimeEvent[]): TTimelineIte
 
 const timelineItems = computed(() => buildTimelineItems(props.events));
 
+const shouldRenderTimeline = computed(() =>
+  timelineItems.value.length > 0 || props.isStreaming,
+);
+
+const chainHeaderLabel = computed(() => props.isStreaming ? '正在思考' : '思考完成');
+
 const getTaskIcon = (node: ITaskNodeItem): Component =>
   TASK_ICON_MAP[node.icon];
 
@@ -663,94 +707,66 @@ const shouldShowTaskStatus = (node: ITaskNodeItem): boolean =>
 </script>
 
 <template>
-  <ChainOfThought
-    v-if="timelineItems.length > 0"
-    class="ai-runtime-timeline"
-    default-open
-    aria-label="Agent Chain of Thought"
-  >
-    <ChainOfThoughtHeader class="ai-runtime-chain-header" />
+  <ChainOfThought v-if="shouldRenderTimeline" class="ai-runtime-timeline" default-open
+    aria-label="Agent Chain of Thought">
+    <ChainOfThoughtHeader class="ai-runtime-chain-header">
+      <Shimmer v-if="isStreaming" as="span" class="ai-runtime-chain-label ai-runtime-chain-label--thinking">
+        {{ chainHeaderLabel }}
+      </Shimmer>
+      <span v-else class="ai-runtime-chain-label ai-runtime-chain-label--done">
+        {{ chainHeaderLabel }}
+      </span>
+    </ChainOfThoughtHeader>
 
     <ChainOfThoughtContent class="ai-runtime-chain-content">
       <template v-for="item in timelineItems" :key="item.id">
-        <ChainOfThoughtStep
-          v-if="item.type === 'reasoning'"
-          class="ai-runtime-step is-reasoning"
-          label="Reasoning"
-          status="complete"
-        >
+        <ChainOfThoughtStep v-if="item.type === 'reasoning'" class="ai-runtime-step is-reasoning" label="Reasoning"
+          status="complete">
           <template #icon>
             <Dot class="ai-runtime-step-icon" aria-hidden="true" />
           </template>
 
           <div class="agent-line">
-            <p
-              v-for="(segment, segmentIndex) in (
-                isReasoningCollapsed(item.id)
-                  ? item.segments.slice(0, 1)
-                  : item.segments
-              )"
-              :key="`${item.id}:segment:${segmentIndex}`"
-              class="agent-line__segment"
-            >
+            <p v-for="(segment, segmentIndex) in (
+              isReasoningCollapsed(item.id)
+                ? item.segments.slice(0, 1)
+                : item.segments
+            )" :key="`${item.id}:segment:${segmentIndex}`" class="agent-line__segment">
               {{ segment }}
             </p>
 
-            <button
-              v-if="item.isLong"
-              type="button"
-              class="agent-line__toggle"
-              @click="toggleReasoningCollapsed(item.id)"
-            >
+            <button v-if="item.isLong" type="button" class="agent-line__toggle"
+              @click="toggleReasoningCollapsed(item.id)">
               {{ isReasoningCollapsed(item.id) ? '展开全部推理' : '收起长推理' }}
             </button>
           </div>
         </ChainOfThoughtStep>
 
-        <ChainOfThoughtStep
-          v-else-if="item.type === 'event'"
-          class="ai-runtime-step is-event"
-          :label="item.text"
-          status="complete"
-        >
+        <ChainOfThoughtStep v-else-if="item.type === 'event'" class="ai-runtime-step is-event" :label="item.text"
+          status="complete">
           <template #icon>
             <Activity class="ai-runtime-step-icon" aria-hidden="true" />
           </template>
         </ChainOfThoughtStep>
 
-        <ChainOfThoughtStep
-          v-else
-          class="ai-runtime-step is-task"
-          :label="item.node.action"
-          :status="getTaskStepStatus(item.node)"
-        >
+        <ChainOfThoughtStep v-else class="ai-runtime-step is-task" :label="item.node.action"
+          :status="getTaskStepStatus(item.node)">
           <template #icon>
-            <component
-              :is="getTaskIcon(item.node)"
-              class="ai-runtime-step-icon"
-              :class="`is-icon-${item.node.icon}`"
-              aria-hidden="true"
-            />
+            <component :is="getTaskIcon(item.node)" class="ai-runtime-step-icon" :class="`is-icon-${item.node.icon}`"
+              aria-hidden="true" />
           </template>
 
           <Task v-if="item.node.tags.length || item.node.tail" class="ai-runtime-task">
             <TaskContent v-if="item.node.tags.length || item.node.tail" class="ai-runtime-task-content">
               <ChainOfThoughtSearchResults v-if="item.node.tags.length" class="ai-runtime-task-search-results">
-                <ChainOfThoughtSearchResult
-                  v-for="tag in item.node.tags"
-                  :key="`${item.node.id}:tag:${tag}`"
-                  class="ai-runtime-task-file"
-                  :title="tag"
-                >
+                <ChainOfThoughtSearchResult v-for="tag in item.node.tags" :key="`${item.node.id}:tag:${tag}`"
+                  class="ai-runtime-task-file" :title="tag">
                   {{ tag }}
                 </ChainOfThoughtSearchResult>
               </ChainOfThoughtSearchResults>
 
-              <TaskItem
-                v-if="shouldShowTaskStatus(item.node) && item.node.tail"
-                class="ai-runtime-task-item"
-                :class="`is-${item.node.status}`"
-              >
+              <TaskItem v-if="shouldShowTaskStatus(item.node) && item.node.tail" class="ai-runtime-task-item"
+                :class="`is-${item.node.status}`">
                 {{ item.node.tail }}
               </TaskItem>
             </TaskContent>
@@ -779,6 +795,20 @@ const shouldShowTaskStatus = (node: ITaskNodeItem): boolean =>
 
 .ai-runtime-chain-header:hover {
   color: var(--text-primary);
+}
+
+.ai-runtime-chain-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.ai-runtime-chain-label--thinking {
+  font-weight: 500;
+}
+
+.ai-runtime-chain-label--done {
+  color: inherit;
 }
 
 .ai-runtime-chain-content {
@@ -811,7 +841,7 @@ const shouldShowTaskStatus = (node: ITaskNodeItem): boolean =>
   margin: 0;
 }
 
-.agent-line__segment + .agent-line__segment {
+.agent-line__segment+.agent-line__segment {
   margin-top: 6px;
 }
 
@@ -865,5 +895,4 @@ const shouldShowTaskStatus = (node: ITaskNodeItem): boolean =>
   unicode-bidi: plaintext;
   white-space: nowrap;
 }
-
 </style>

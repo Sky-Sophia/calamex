@@ -7,6 +7,29 @@ v-for="handle in resizeHandles" :key="handle.direction" class="window-resize-han
                     :class="handle.className" @mousedown.prevent.stop="startWindowResize(handle.direction, $event)" />
             </template>
 
+            <div v-if="isDesktopRuntime" class="app-window-controls" data-no-window-drag>
+                <button class="app-window-control-button" type="button" aria-label="最小化" @click="handleMinimize">
+                    <svg viewBox="0 0 12 12" aria-hidden="true">
+                        <path d="M2.25 6h7.5" fill="none" stroke="currentColor" stroke-linecap="round" />
+                    </svg>
+                </button>
+                <button
+                    class="app-window-control-button" type="button" :aria-label="isMaximized ? '向下还原' : '最大化'"
+                    @click="handleToggleMaximize">
+                    <svg v-if="!isMaximized" viewBox="0 0 12 12" aria-hidden="true">
+                        <rect x="3" y="2" width="7" height="7" rx="1.2" fill="none" stroke="currentColor" />
+                    </svg>
+                    <svg v-else viewBox="0 0 12 12" aria-hidden="true">
+                        <path d="M4.5 2h5v5M7.5 5h-5v5h5z" fill="none" stroke="currentColor" stroke-linejoin="round" />
+                    </svg>
+                </button>
+                <button class="app-window-control-button is-close" type="button" aria-label="关闭" @click="emit('close-request')">
+                    <svg viewBox="0 0 12 12" aria-hidden="true">
+                        <path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-linecap="round" />
+                    </svg>
+                </button>
+            </div>
+
             <slot name="titlebar" />
 
             <div class="relative flex min-h-0 flex-1 overflow-hidden bg-(--app-bg)">
@@ -38,7 +61,7 @@ import {
     SHELL_WINDOW_RESIZE_END_EVENT,
     SHELL_WINDOW_RESIZE_START_EVENT,
 } from '@/utils/window-resize-events';
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 type TResizeDirection =
     | 'North'
@@ -67,6 +90,14 @@ const props = withDefaults(
     },
 );
 
+const emit = defineEmits<{
+    'close-request': [];
+}>();
+
+const isMaximized = ref(false);
+let isLayoutUnmounted = false;
+let unlistenWindowResized: (() => void) | null = null;
+
 const resizeHandles: Array<{ direction: TResizeDirection; className: string }> = [
     { direction: 'North', className: 'is-top' },
     { direction: 'South', className: 'is-bottom' },
@@ -92,10 +123,13 @@ const shellThemeStyle = computed(() => ({
     '--app-bg': '#fafafa',
     '--titlebar-bg': '#fafafa',
     '--sidebar-bg': '#fafafa',
-    '--panel-bg': '#fafafa',
+    '--panel-bg': '#ffffff',
+    '--tabbar-bg': '#ffffff',
+    '--tab-active-bg': '#ffffff',
     '--statusbar-bg': '#fafafa',
-    '--editor-bg': '#f6f8fa',
-    '--editor-surface': '#f6f8fa',
+    '--editor-bg': '#ffffff',
+    '--editor-gutter-bg': '#ffffff',
+    '--editor-surface': '#ffffff',
     '--shell-divider': '#d1d9e0b3',
     '--border-strong': '#d1d9e0',
     '--border-subtle': '#d1d9e0b3',
@@ -107,6 +141,47 @@ const shellThemeStyle = computed(() => ({
     '--surface-soft': '#818b981f',
     '--surface-soft-strong': '#d1d9e0b3',
 }));
+
+const getAppWindow = async () => {
+    if (!props.isDesktopRuntime) {
+        return null;
+    }
+
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    return getCurrentWindow();
+};
+
+const syncWindowState = async (): Promise<void> => {
+    const appWindow = await getAppWindow();
+    if (!appWindow || isLayoutUnmounted) {
+        return;
+    }
+
+    try {
+        isMaximized.value = await appWindow.isMaximized();
+    } catch (error) {
+        console.warn('读取窗口最大化状态失败', error);
+    }
+};
+
+const handleMinimize = async (): Promise<void> => {
+    const appWindow = await getAppWindow();
+    if (!appWindow) {
+        return;
+    }
+
+    await appWindow.minimize();
+};
+
+const handleToggleMaximize = async (): Promise<void> => {
+    const appWindow = await getAppWindow();
+    if (!appWindow) {
+        return;
+    }
+
+    await appWindow.toggleMaximize();
+    await syncWindowState();
+};
 
 const startWindowResize = async (direction: TResizeDirection, event: MouseEvent): Promise<void> => {
     if (!props.isDesktopRuntime || event.button !== 0) {
@@ -123,4 +198,30 @@ const startWindowResize = async (direction: TResizeDirection, event: MouseEvent)
         console.warn('窗口边缘拉伸失败', error);
     }
 };
+
+onMounted(async () => {
+    isLayoutUnmounted = false;
+    const appWindow = await getAppWindow();
+    if (!appWindow || isLayoutUnmounted) {
+        return;
+    }
+
+    await syncWindowState();
+    const unlisten = await appWindow.onResized(() => {
+        void syncWindowState();
+    });
+
+    if (isLayoutUnmounted) {
+        unlisten();
+        return;
+    }
+
+    unlistenWindowResized = unlisten;
+});
+
+onBeforeUnmount(() => {
+    isLayoutUnmounted = true;
+    unlistenWindowResized?.();
+    unlistenWindowResized = null;
+});
 </script>

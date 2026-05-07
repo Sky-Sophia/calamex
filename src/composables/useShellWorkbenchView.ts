@@ -11,6 +11,7 @@ import type {
 } from '@/types/editor';
 import type { ITerminalRunCompletedPayload } from '@/types/terminal';
 import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
+import { createStartupShellState } from '@/utils/startup-shell';
 import { consumeProgrammaticWindowCloseAllowance } from '@/utils/window-close';
 import {
   SHELL_WINDOW_RESIZE_END_EVENT,
@@ -86,7 +87,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   const workbench = useWorkbench();
   const gitStore = useGitStore();
 
-  const isTerminalVisible = ref(true);
+  const isTerminalVisible = ref(workbench.editorStore.sessionSnapshot.workbench.isTerminalVisible);
   const isSidebarVisible = ref(true);
   const aiPanelWidth = ref(AI_PANEL_DEFAULT_WIDTH);
   const isDiagnosticsPanelVisible = ref(false);
@@ -94,9 +95,12 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   const terminalHeight = ref(236);
   const terminalHeightBeforeMaximize = ref(236);
   const isTerminalMaximized = ref(false);
-  const activeSidebarView = ref<TWorkbenchSidebarView>('explorer');
+  const activeSidebarView = ref<TWorkbenchSidebarView>(
+    workbench.editorStore.sessionSnapshot.workbench.activeSidebarView,
+  );
   const startupWorkspaceRoot = ref<IWorkspaceDirectoryPayload | null>(null);
   const hasEmittedReady = ref(false);
+  const isStartupShellPrimed = ref(false);
   const isRestoringWorkbenchSession = ref(false);
   const documentBackStack = ref<string[]>([]);
   const documentForwardStack = ref<string[]>([]);
@@ -108,6 +112,19 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   let globalKeydownCleanup: (() => void) | null = null;
 
   const sidebarWidth = computed(() => DASHBOARD_SIDEBAR_WIDTH);
+  const startupShellState = computed(() =>
+    createStartupShellState(workbench.editorStore.sessionSnapshot),
+  );
+  const isStartupShellVisible = computed(
+    () =>
+      isStartupShellPrimed.value &&
+      !workbench.editorStore.hasActiveDocument,
+  );
+  const visibleWorkspaceRootPath = computed(() =>
+    isStartupShellVisible.value
+      ? startupShellState.value?.workspaceRoot ?? workbench.editorStore.workspaceRootPath
+      : workbench.editorStore.workspaceRootPath,
+  );
 
   const clampAiPanelWidth = (value: number): number =>
     Math.min(AI_PANEL_MAX_WIDTH, Math.max(AI_PANEL_MIN_WIDTH, Math.round(value)));
@@ -319,6 +336,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
       isSidebarVisible.value = true;
       isTerminalVisible.value = false;
       activePrimaryMode.value = 'ai';
+      workbench.editorStore.setWorkbenchSessionState({ isTerminalVisible: false });
       closeDiagnosticsPanel();
       return;
     }
@@ -389,6 +407,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
 
     if (!isTerminalVisible.value) {
       isTerminalVisible.value = true;
+      workbench.editorStore.setWorkbenchSessionState({ isTerminalVisible: true });
     }
 
     if (isTerminalMaximized.value) {
@@ -466,9 +485,9 @@ export const useShellWorkbenchView = (onReady: () => void) => {
   };
 
   const showSidebarView = (view: TWorkbenchSidebarView): void => {
-    openEditorMode();
     activeSidebarView.value = view;
     isSidebarVisible.value = true;
+    workbench.editorStore.setWorkbenchSessionState({ activeSidebarView: view });
     scheduleEditorLayoutAfterSidebarChange();
   };
 
@@ -483,6 +502,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
 
   const hideTerminal = (): void => {
     isTerminalVisible.value = false;
+    workbench.editorStore.setWorkbenchSessionState({ isTerminalVisible: false });
   };
 
   const clearTerminalLogs = (): void => {
@@ -521,6 +541,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
       );
     } finally {
       isRestoringWorkbenchSession.value = false;
+      isStartupShellPrimed.value = false;
     }
   };
 
@@ -531,6 +552,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     }
 
     startupWorkspaceRoot.value = result.startupWorkspaceDirectory;
+    isStartupShellPrimed.value = true;
     await emitWorkbenchReady();
 
     if (isUnmounted) {
@@ -572,7 +594,18 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     openEditorMode();
     closeDiagnosticsPanel();
     isTerminalVisible.value = true;
+    workbench.editorStore.setWorkbenchSessionState({ isTerminalVisible: true });
     await workbench.runScript();
+  };
+
+  const handleExplorerSessionStateChange = (payload: {
+    expandedPaths: string[];
+    selectedPath: string | null;
+  }): void => {
+    workbench.editorStore.setWorkbenchSessionState({
+      explorerExpandedPaths: payload.expandedPaths,
+      explorerSelectedPath: payload.selectedPath,
+    });
   };
 
   const handleIntegratedTerminalRunCompleted = (payload: ITerminalRunCompletedPayload): void => {
@@ -686,6 +719,9 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     isTerminalMaximized,
     activeSidebarView,
     sidebarWidth,
+    startupShellState,
+    isStartupShellVisible,
+    visibleWorkspaceRootPath,
     diagnosticsTransitionsEnabled,
     startupWorkspaceRoot,
     canNavigateDocumentBack,
@@ -715,6 +751,7 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     handleRequestCloseApplication,
     toggleDiagnosticsPanel,
     handleSelectSidebarView,
+    handleExplorerSessionStateChange,
     hideTerminal,
     openTerminal,
     clearTerminalLogs,

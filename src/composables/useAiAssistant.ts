@@ -214,7 +214,7 @@ const createScopedId = (prefix: string): string =>
 const createMessageId = (role: IAiChatMessage['role']): string => createScopedId(role);
 
 const buildInitialAgentActivityText = (): string =>
-  '正在加载';
+  '';
 
 const appendActivityTrail = (
   currentTrail: readonly string[] | undefined,
@@ -650,6 +650,15 @@ const createSidecarLiveEventBuffer = (
       return events;
     },
     push: (event) => {
+      if (event.type === 'message_delta') {
+        pendingEvents.push(event);
+        cancelUiFlush(scheduledFlush);
+        scheduledFlush = null;
+        isFlushScheduled = false;
+        flush();
+        return;
+      }
+
       pendingEvents.push(event);
 
       if (isFlushScheduled) {
@@ -1339,6 +1348,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       state.sourceText = sourceText;
       runWithSuppressedSidecarAnswerSync(() => {
         sidecarAnswerStream.append(delta);
+        sidecarAnswerStream.flushNow();
       });
 
       return sidecarAnswerStream.content.value;
@@ -1351,6 +1361,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     state.sourceText = sourceText;
     runWithSuppressedSidecarAnswerSync(() => {
       sidecarAnswerStream.append(sourceText);
+      sidecarAnswerStream.flushNow();
     });
 
     return sidecarAnswerStream.content.value;
@@ -2010,6 +2021,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       stream: {
         status: 'streaming',
         activityText: initialActivityText,
+        runtimeEvents: [],
       },
     };
 

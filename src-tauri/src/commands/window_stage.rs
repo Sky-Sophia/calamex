@@ -28,6 +28,7 @@ fn show_main_window(window: &WebviewWindow) -> Result<(), String> {
     window
         .show()
         .map_err(|error| format!("failed to show main window: {error}"))?;
+    let _ = window.set_focus();
 
     Ok(())
 }

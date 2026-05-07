@@ -11,7 +11,9 @@ const {
     setAiPanelWidthMock,
     setTerminalPanelHeightMock,
     setWorkbenchPrimaryModeMock,
+    setWorkbenchSessionStateMock,
     appStoreState,
+    sessionSnapshotState,
     waitForDesktopRuntimeMock,
     shortcutState,
 } =
@@ -29,10 +31,42 @@ const {
         setWorkbenchPrimaryModeMock: vi.fn((value: 'editor' | 'ai') => {
             appStoreState.workbenchPrimaryMode = value;
         }),
+        setWorkbenchSessionStateMock: vi.fn((patch: {
+            activeSidebarView?: 'explorer' | 'search' | 'source-control' | 'run' | 'ai' | 'extensions';
+            explorerExpandedPaths?: string[];
+            explorerSelectedPath?: string | null;
+            isTerminalVisible?: boolean;
+        }) => {
+            sessionSnapshotState.workbench = {
+                ...sessionSnapshotState.workbench,
+                ...patch,
+            };
+        }),
         appStoreState: {
             aiPanelWidth: 450,
             terminalPanelHeight: 236,
             workbenchPrimaryMode: 'editor' as 'editor' | 'ai',
+        },
+        sessionSnapshotState: {
+            schemaVersion: 1 as const,
+            workspaceRoot: null as string | null,
+            openTabs: [] as Array<{
+                path: string;
+                pinned: boolean;
+                order: number;
+                kind?: 'text' | 'image';
+            }>,
+            activeTabPath: null as string | null,
+            viewStates: [],
+            workbench: {
+                activeSidebarView: 'explorer' as 'explorer' | 'search' | 'source-control' | 'run' | 'ai' | 'extensions',
+                explorerExpandedPaths: [] as string[],
+                explorerSelectedPath: null as string | null,
+                isTerminalVisible: true,
+            },
+            recentWorkspaces: [],
+            recentFiles: [],
+            savedAt: '2026-05-07T00:00:00.000Z',
         },
         waitForDesktopRuntimeMock: vi.fn(),
         shortcutState: {
@@ -87,6 +121,8 @@ vi.mock('@/composables/useWorkbench', () => ({
             activeSelectionSummary: null,
             workspaceRootPath: null,
             activeRunSummary: null,
+            documents: [],
+            sessionSnapshot: sessionSnapshotState,
             cursorLine: 1,
             cursorColumn: 1,
             setCursorPosition: vi.fn(),
@@ -94,6 +130,7 @@ vi.mock('@/composables/useWorkbench', () => ({
             setDocumentAnalysis: vi.fn(),
             clearLogs: vi.fn(),
             appendLog: appendLogMock,
+            setWorkbenchSessionState: setWorkbenchSessionStateMock,
         },
         isDesktopRuntime: {
             get value() {
@@ -179,6 +216,9 @@ const TestHost = defineComponent({
             terminalHeight,
             openEditorMode,
             openTerminal,
+            startupShellState,
+            isStartupShellVisible,
+            visibleWorkspaceRootPath,
         } = useShellWorkbenchView(props.onReady);
         return {
             editorViewportRef,
@@ -194,6 +234,9 @@ const TestHost = defineComponent({
             terminalHeight,
             openEditorMode,
             openTerminal,
+            startupShellState,
+            isStartupShellVisible,
+            visibleWorkspaceRootPath,
         };
     },
     template: '<div ref="editorViewportRef"></div>',
@@ -210,9 +253,23 @@ describe('useShellWorkbenchView', () => {
         setAiPanelWidthMock.mockClear();
         setTerminalPanelHeightMock.mockClear();
         setWorkbenchPrimaryModeMock.mockClear();
+        setWorkbenchSessionStateMock.mockClear();
         appStoreState.aiPanelWidth = 450;
         appStoreState.terminalPanelHeight = 236;
         appStoreState.workbenchPrimaryMode = 'editor';
+        sessionSnapshotState.workspaceRoot = null;
+        sessionSnapshotState.openTabs = [];
+        sessionSnapshotState.activeTabPath = null;
+        sessionSnapshotState.viewStates = [];
+        sessionSnapshotState.workbench = {
+            activeSidebarView: 'explorer',
+            explorerExpandedPaths: [],
+            explorerSelectedPath: null,
+            isTerminalVisible: true,
+        };
+        sessionSnapshotState.recentWorkspaces = [];
+        sessionSnapshotState.recentFiles = [];
+        sessionSnapshotState.savedAt = '2026-05-07T00:00:00.000Z';
         shortcutState.canSave = false;
         shortcutState.isDesktopRuntime = true;
 
@@ -264,6 +321,63 @@ describe('useShellWorkbenchView', () => {
 
         restoreDeferred.resolve();
         await flushPromises();
+
+        wrapper.unmount();
+    });
+
+    it('ready 前会把结构化会话状态作为启动骨架首帧', async () => {
+        const restoreDeferred = createDeferred();
+        restoreSessionMock.mockReturnValue(restoreDeferred.promise);
+        sessionSnapshotState.workspaceRoot = '/workspace';
+        sessionSnapshotState.openTabs = [
+            { path: '/workspace/a.sh', pinned: false, order: 0, kind: 'text' },
+        ];
+        sessionSnapshotState.activeTabPath = '/workspace/a.sh';
+        sessionSnapshotState.workbench = {
+            activeSidebarView: 'source-control',
+            explorerExpandedPaths: ['/workspace', '/workspace/src'],
+            explorerSelectedPath: '/workspace/src/a.sh',
+            isTerminalVisible: false,
+        };
+
+        const onReady = vi.fn();
+        const wrapper = mount(TestHost, {
+            props: { onReady },
+        });
+        await flushPromises();
+
+        expect(onReady).toHaveBeenCalledOnce();
+        expect(wrapper.vm.isStartupShellVisible).toBe(true);
+        expect(wrapper.vm.visibleWorkspaceRootPath).toBe('/workspace');
+        expect(wrapper.vm.startupShellState?.openTabs[0]?.title).toBe('a.sh');
+        expect(wrapper.vm.activeSidebarView).toBe('source-control');
+        expect(wrapper.vm.isTerminalVisible).toBe(false);
+
+        restoreDeferred.resolve();
+        await flushPromises();
+
+        expect(wrapper.vm.isStartupShellVisible).toBe(false);
+
+        wrapper.unmount();
+    });
+
+    it('没有历史会话时也会显示默认启动骨架', async () => {
+        const restoreDeferred = createDeferred();
+        restoreSessionMock.mockReturnValue(restoreDeferred.promise);
+
+        const wrapper = mount(TestHost, {
+            props: { onReady: vi.fn() },
+        });
+        await flushPromises();
+
+        expect(wrapper.vm.isStartupShellVisible).toBe(true);
+        expect(wrapper.vm.startupShellState?.openTabs).toEqual([]);
+        expect(wrapper.vm.startupShellState?.workspaceRoot).toBeNull();
+
+        restoreDeferred.resolve();
+        await flushPromises();
+
+        expect(wrapper.vm.isStartupShellVisible).toBe(false);
 
         wrapper.unmount();
     });
@@ -401,6 +515,25 @@ describe('useShellWorkbenchView', () => {
         await wrapper.vm.openTerminal();
 
         expect(wrapper.vm.isTerminalVisible).toBe(true);
+
+        wrapper.unmount();
+    });
+
+    it('AI 主界面下切换侧栏不会切回编辑区', async () => {
+        const wrapper = mount(TestHost, {
+            props: { onReady: vi.fn() },
+        });
+        await flushPromises();
+
+        await wrapper.vm.handleSelectSidebarView('ai');
+        expect(wrapper.vm.isAiMode).toBe(true);
+        expect(wrapper.vm.isEditorMode).toBe(false);
+
+        await wrapper.vm.handleSelectSidebarView('source-control');
+
+        expect(wrapper.vm.activeSidebarView).toBe('source-control');
+        expect(wrapper.vm.isAiMode).toBe(true);
+        expect(wrapper.vm.isEditorMode).toBe(false);
 
         wrapper.unmount();
     });

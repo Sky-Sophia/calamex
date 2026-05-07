@@ -46,10 +46,10 @@ export function buildTerminalTheme(roles: IRoles): IXtermTheme {
     const t = roles.terminal;
 
     return {
-        background: '#f6f8fa',
-        foreground: '#000000',
-        // cursor / cursorAccent 不设置，让 xterm.js 使用其内置默认值
-        // （前景色块光标），行为与 Linux 标准终端一致，且不随主题切换变化
+        background: t.background,
+        foreground: t.foreground,
+        cursor: t.cursor,
+        cursorAccent: t.cursorAccent,
         selectionBackground: t.selectionBackground,
         scrollbarSliderBackground: t.scrollbarBackground,
         scrollbarSliderHoverBackground: t.scrollbarHoverBackground,

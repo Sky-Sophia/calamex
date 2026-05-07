@@ -1536,7 +1536,8 @@ describe('useAiAssistant streaming integration', () => {
             content: '',
             stream: {
                 status: 'streaming',
-                activityText: '正在加载',
+                activityText: '',
+                runtimeEvents: [],
             },
         });
 
@@ -1545,7 +1546,7 @@ describe('useAiAssistant streaming integration', () => {
 
         expect(assistant.messages.value[1]?.content).toBe('已整理今日热点新闻。');
         expect(assistant.messages.value[1]?.stream?.status).toBe('completed');
-        expect(assistant.messages.value[1]?.stream?.activityText).toBe('正在加载');
+        expect(assistant.messages.value[1]?.stream?.activityText).toBe('请求处理中');
     });
 
     it('streams sidecar tool activity into the assistant message before the final response resolves', async () => {
@@ -1671,7 +1672,7 @@ describe('useAiAssistant streaming integration', () => {
         expect(assistant.messages.value[1]?.stream?.activityTrail).toBeUndefined();
     });
 
-    it('batches synchronous sidecar live events into a single frame commit without changing the final result', async () => {
+    it('sidecar message_delta 即时冲刷，保持真实到达节奏且不改变最终结果', async () => {
         const { assistant } = createAssistantHarnessContext();
         const conversationStore = useAiConversationStore();
         const replaceMessagesSpy = vi.spyOn(conversationStore, 'replaceMessages');
@@ -1756,66 +1757,20 @@ describe('useAiAssistant streaming integration', () => {
             await Promise.resolve();
         }
 
-        const replaceCallCountBeforeFrame = replaceMessagesSpy.mock.calls.length;
-
-        expect(queuedFrames.size).toBe(1);
-        expect(assistant.messages.value[1]?.content).toBe('');
-        expect(assistant.messages.value[1]?.toolCalls ?? []).toHaveLength(0);
-
-        const pendingFrames = [...queuedFrames.values()];
-        queuedFrames.clear();
-
-        for (const callback of pendingFrames) {
-            callback(16);
-        }
-
-        await flushMicrotasks();
-
-        expect(replaceMessagesSpy).toHaveBeenCalledTimes(replaceCallCountBeforeFrame);
-        expect(assistant.messages.value[1]?.content).toBe('');
+        expect(queuedFrames.size).toBe(0);
+        expect(assistant.messages.value[1]?.content).toBe(expectedLiveText);
         expect(assistant.messages.value[1]?.toolCalls?.[0]).toMatchObject({
             name: 'search_project_files',
             status: 'running',
         });
-        expect(queuedFrames.size).toBe(1);
-
-        const smoothFrame = [...queuedFrames.entries()][0];
-        if (!smoothFrame) {
-            throw new Error('缺少 sidecar 回答平滑帧');
-        }
-
-        queuedFrames.delete(smoothFrame[0]);
-        smoothFrame[1](32);
-        await flushMicrotasks();
-
-        const streamingContent = assistant.messages.value[1]?.content ?? '';
-        expect(streamingContent).toBe(expectedLiveText);
 
         sidecarGate.resolve(undefined);
-
-        let isSendSettled = false;
-        void sendPromise.then(() => {
-            isSendSettled = true;
-        });
-
-        for (let attempt = 0; attempt < 16 && !isSendSettled; attempt += 1) {
-            const frame = [...queuedFrames.entries()][0];
-
-            if (!frame) {
-                await flushMicrotasks();
-                continue;
-            }
-
-            queuedFrames.delete(frame[0]);
-            frame[1](64 + attempt * 16);
-            await flushMicrotasks();
-        }
 
         await sendPromise;
 
         expect(assistant.messages.value[1]?.content).toBe('批量刷新完成');
         expect(assistant.messages.value[1]?.stream?.status).toBe('completed');
-        expect(replaceMessagesSpy.mock.calls.length).toBeGreaterThan(replaceCallCountBeforeFrame);
+        expect(replaceMessagesSpy.mock.calls.length).toBeGreaterThan(0);
     });
 
     it('没有实时回答 delta 时直接提交 sidecar 最终结果，避免长文本被慢放', async () => {

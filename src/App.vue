@@ -1,7 +1,56 @@
 <script setup lang="ts">
 import AppDialogHost from '@/components/common/AppDialogHost.vue';
 import BrowserContextMenuHost from '@/components/common/BrowserContextMenuHost.vue';
+import { applyWindowStage } from '@/services/modules/window';
 import { runtimeErrorState } from '@/utils/runtime-diagnostics';
+import { watch } from 'vue';
+
+interface ITauriInternals {
+  invoke?: unknown;
+}
+
+let hasAppliedMainWindowStage = false;
+let isApplyingMainWindowStage = false;
+
+const canApplyNativeWindowStage = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const internals = (window as Window & { __TAURI_INTERNALS__?: ITauriInternals })
+    .__TAURI_INTERNALS__;
+  return typeof internals?.invoke === 'function';
+};
+
+const revealMainWindow = async (): Promise<void> => {
+  if (hasAppliedMainWindowStage || isApplyingMainWindowStage || !canApplyNativeWindowStage()) {
+    return;
+  }
+
+  isApplyingMainWindowStage = true;
+  try {
+    await applyWindowStage({ stage: 'main' });
+    hasAppliedMainWindowStage = true;
+  } catch (error) {
+    console.error('主窗口显示阶段应用失败', error);
+  } finally {
+    isApplyingMainWindowStage = false;
+  }
+};
+
+const handleWorkbenchReady = (): void => {
+  void revealMainWindow();
+};
+
+watch(
+  runtimeErrorState,
+  (state) => {
+    if (state) {
+      void revealMainWindow();
+    }
+  },
+  { flush: 'post' },
+);
 </script>
 
 <template>
@@ -16,7 +65,7 @@ import { runtimeErrorState } from '@/utils/runtime-diagnostics';
       </div>
     </section>
     <router-view v-else v-slot="{ Component: RouteComponent, route: routeRecord }">
-      <component :is="RouteComponent" :key="routeRecord.fullPath" />
+      <component :is="RouteComponent" :key="routeRecord.fullPath" @ready="handleWorkbenchReady" />
     </router-view>
   </div>
 </template>

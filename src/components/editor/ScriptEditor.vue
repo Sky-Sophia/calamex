@@ -85,6 +85,7 @@ const emit = defineEmits<{
   'format-request': [];
   'command-palette-request': [];
   'run-request': [];
+  'open-terminal-request': [];
 }>();
 
 let editorInstance: monaco.editor.IStandaloneCodeEditor | null = null;
@@ -115,6 +116,9 @@ const {
   },
   onRunCurrentScriptRequest: () => {
     emit('run-request');
+  },
+  onOpenTerminalRequest: () => {
+    emit('open-terminal-request');
   },
   onAiCodeActionRequest: async (kind, selection) => {
     await runAiCodeAction(kind, selection);

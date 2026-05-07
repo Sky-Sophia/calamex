@@ -16,7 +16,7 @@ import type {
   TRunLogScope,
 } from '@/types/editor';
 import type { IGitDiffPreviewPayload } from '@/types/git';
-import type { TSessionSnapshot } from '@/types/session';
+import type { TSessionSnapshot, TSessionWorkbenchState } from '@/types/session';
 import { formatFileSystemTextForDisplay, normalizeFileSystemPath } from '@/utils/path';
 import { DEFAULT_EXECUTOR, DEFAULT_SCRIPT } from '@/utils/templates';
 import { defineStore } from 'pinia';
@@ -30,6 +30,7 @@ const MAX_OPEN_TABS = 30;
 const MAX_RECENT_WORKSPACES = 10;
 const MAX_RECENT_FILES = 50;
 const MAX_VIEW_STATE_ENTRIES = 30;
+const MAX_EXPLORER_EXPANDED_PATHS = 120;
 
 const countCharacters = (content: string): number => Array.from(content).length;
 
@@ -108,6 +109,12 @@ const createEmptySessionSnapshot = (): TSessionSnapshot => ({
   openTabs: [],
   activeTabPath: null,
   viewStates: [],
+  workbench: {
+    activeSidebarView: 'explorer',
+    explorerExpandedPaths: [],
+    explorerSelectedPath: null,
+    isTerminalVisible: true,
+  },
   recentWorkspaces: [],
   recentFiles: [],
   savedAt: new Date().toISOString(),
@@ -339,6 +346,27 @@ export const useEditorStore = defineStore('editor', () => {
       (entry) => normalizeFileSystemPath(entry.path) === normalized,
     );
     return item?.viewState ?? null;
+  };
+
+  const setWorkbenchSessionState = (patch: Partial<TSessionWorkbenchState>): void => {
+    const explorerExpandedPaths = patch.explorerExpandedPaths
+      ?.map((path) => normalizeFileSystemPath(path))
+      .filter(Boolean)
+      .slice(0, MAX_EXPLORER_EXPANDED_PATHS);
+
+    sessionSnapshot.value.workbench = {
+      ...sessionSnapshot.value.workbench,
+      ...patch,
+      ...(explorerExpandedPaths ? { explorerExpandedPaths } : {}),
+      ...(patch.explorerSelectedPath !== undefined
+        ? {
+            explorerSelectedPath: patch.explorerSelectedPath
+              ? normalizeFileSystemPath(patch.explorerSelectedPath)
+              : null,
+          }
+        : {}),
+    };
+    touchSessionSnapshot();
   };
 
   const getTerminalOutputSnapshot = (): string => terminalOutputChunks.value.join('');
@@ -736,6 +764,8 @@ export const useEditorStore = defineStore('editor', () => {
     clearDocuments();
     workspaceRootPath.value = null;
     sessionSnapshot.value.workspaceRoot = null;
+    sessionSnapshot.value.workbench.explorerExpandedPaths = [];
+    sessionSnapshot.value.workbench.explorerSelectedPath = null;
     clearLogs();
     activeRunSummary.value = null;
     isRunning.value = false;
@@ -779,6 +809,7 @@ export const useEditorStore = defineStore('editor', () => {
     findDocumentByPath,
     getEditorViewState,
     saveEditorViewState,
+    setWorkbenchSessionState,
     setActiveDocument,
     createDocumentTab,
     openDocumentTab,

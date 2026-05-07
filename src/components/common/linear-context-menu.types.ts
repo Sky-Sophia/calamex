@@ -21,7 +21,9 @@ export type TLinearContextMenuIcon =
   | 'open-external'
   | 'rename'
   | 'upload'
-  | 'download';
+  | 'download'
+  | 'wrench'
+  | 'flask';
 
 export interface ILinearContextMenuItem {
   key: string;

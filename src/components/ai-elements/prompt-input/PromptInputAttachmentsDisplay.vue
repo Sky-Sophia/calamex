@@ -31,7 +31,7 @@ const handleRemove = (id: string): void => {
             <span v-if="attachment.kind !== 'image' && attachment.detailLabel" class="prompt-input-attachment-detail">
                 {{ attachment.detailLabel }}
             </span>
-            <button type="button" aria-label="移除附件" title="移除附件" @click="handleRemove(attachment.id)">
+            <button type="button" aria-label="移除附件" @click="handleRemove(attachment.id)">
                 <X aria-hidden="true" />
             </button>
         </span>

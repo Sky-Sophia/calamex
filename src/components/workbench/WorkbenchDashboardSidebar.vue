@@ -10,6 +10,13 @@ import type {
     TExecutorKind,
 } from '@/types/editor';
 import type { IGitDiffPreviewRequest } from '@/types/git';
+import {
+    FolderTree,
+    GitBranch,
+    Play,
+    Search,
+    TerminalSquare,
+} from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import appBrandIcon from '../../../assets/brand/1.svg';
 
@@ -29,6 +36,8 @@ const props = defineProps<{
     isDesktopRuntime: boolean;
     workspaceRootPath: string | null;
     preloadedWorkspaceRoot: IWorkspaceDirectoryPayload | null;
+    startupExplorerExpandedPaths: string[];
+    startupExplorerSelectedPath: string | null;
     canRun: boolean;
     isRunning: boolean;
     hasRunArtifacts: boolean;
@@ -48,6 +57,7 @@ const emit = defineEmits<{
     'open-terminal': [];
     'insert-template': [template: ICommandTemplate];
     'clear-run-history': [];
+    'explorer-state-change': [payload: { expandedPaths: string[]; selectedPath: string | null }];
 }>();
 
 const sidebarTabs: readonly ISidebarTabItem[] = [
@@ -81,10 +91,8 @@ watch(
 <template>
     <aside class="workbench-dashboard-sidebar flex h-full min-h-0 flex-col overflow-hidden bg-(--sidebar-bg)">
         <div class="workbench-dashboard-sidebar__brand-slot">
-            <button type="button" class="workbench-dashboard-sidebar__brand-button app-tooltip-target"
-                :title="props.isAiMode ? '切换到编辑区' : '切换到 AI 界面'" :aria-label="props.isAiMode ? '切换到编辑区' : '切换到 AI 界面'"
-                :data-tooltip="props.isAiMode ? '切换到编辑区' : '切换到 AI 界面'" data-tooltip-placement="bottom"
-                data-tooltip-lock-placement="true" @click="emit('toggle-primary-mode')">
+            <button type="button" class="workbench-dashboard-sidebar__brand-button"
+                :aria-label="props.isAiMode ? '切换到编辑区' : '切换到 AI 界面'" @click="emit('toggle-primary-mode')">
                 <img class="workbench-dashboard-sidebar__brand-icon" :src="appBrandIcon" alt="软件图标">
             </button>
         </div>
@@ -92,46 +100,15 @@ watch(
         <header class="workbench-dashboard-sidebar__toolbar-shell border-b border-(--shell-divider) px-3 py-3">
             <nav class="workbench-dashboard-sidebar__toolbar" aria-label="工作台侧边栏切换">
                 <button v-for="item in sidebarTabs" :key="item.view" type="button"
-                    class="workbench-dashboard-sidebar__toolbar-button app-tooltip-target"
-                    :class="{ 'is-active': props.activeView === item.view }" :title="item.label"
-                    :aria-label="item.label" :aria-pressed="props.activeView === item.view" :data-tooltip="item.label"
-                    data-tooltip-placement="bottom" data-tooltip-lock-placement="true"
-                    @click="emit('select-view', item.view)">
+                    class="workbench-dashboard-sidebar__toolbar-button"
+                    :class="{ 'is-active': props.activeView === item.view }" :aria-label="item.label"
+                    :aria-pressed="props.activeView === item.view" @click="emit('select-view', item.view)">
                     <span class="workbench-dashboard-sidebar__toolbar-icon" aria-hidden="true">
-                        <svg v-if="item.view === 'explorer'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
-                            <path d="M14 3v5h5" />
-                        </svg>
-
-                        <svg v-else-if="item.view === 'search'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="11" cy="11" r="6.5" />
-                            <path d="M20 20l-3.5-3.5" />
-                        </svg>
-
-                        <svg v-else-if="item.view === 'source-control'" viewBox="0 0 24 24" fill="none"
-                            stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="6" cy="6" r="2.5" />
-                            <circle cx="18" cy="4" r="2.5" />
-                            <circle cx="18" cy="18" r="2.5" />
-                            <path d="M8.5 6h3a4 4 0 0 1 4 4v5.5" />
-                            <path d="M15.5 6.5V9" />
-                        </svg>
-
-                        <svg v-else-if="item.view === 'run'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="3.5" y="5" width="17" height="14" rx="2" />
-                            <path d="M7 9l3 3-3 3" />
-                            <path d="M12.5 15h4.5" />
-                        </svg>
-
-                        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
-                            stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="3.5" y="4" width="17" height="16" rx="2.5" />
-                            <path d="M8 9l4 4-4 4" />
-                            <path d="M13.5 17h2.5" />
-                        </svg>
+                        <FolderTree v-if="item.view === 'explorer'" />
+                        <Search v-else-if="item.view === 'search'" />
+                        <GitBranch v-else-if="item.view === 'source-control'" />
+                        <Play v-else-if="item.view === 'run'" />
+                        <TerminalSquare v-else />
                     </span>
 
                     <span class="workbench-dashboard-sidebar__toolbar-label-wrap" aria-hidden="true">
@@ -148,13 +125,16 @@ watch(
             <Transition name="workbench-sidebar-panel">
                 <AppSidebar :key="props.activeView" :document="props.document" :view="props.activeView"
                     :is-desktop-runtime="props.isDesktopRuntime" :workspace-root-path="props.workspaceRootPath"
-                    :preloaded-workspace-root="props.preloadedWorkspaceRoot" :can-run="props.canRun"
+                    :preloaded-workspace-root="props.preloadedWorkspaceRoot"
+                    :startup-explorer-expanded-paths="props.startupExplorerExpandedPaths"
+                    :startup-explorer-selected-path="props.startupExplorerSelectedPath" :can-run="props.canRun"
                     :is-running="props.isRunning" :has-run-artifacts="props.hasRunArtifacts"
                     :active-run="props.activeRun" :run-history="props.runHistory"
                     :command-templates="props.commandTemplates" :executor="props.executor"
                     @open-file="emit('open-file', $event)" @open-git-diff="emit('open-git-diff', $event)"
                     @run="emit('run')" @create-document="emit('create-document')" @open-terminal="emit('open-terminal')"
-                    @insert-template="emit('insert-template', $event)" @clear-run-history="emit('clear-run-history')" />
+                    @insert-template="emit('insert-template', $event)" @clear-run-history="emit('clear-run-history')"
+                    @explorer-state-change="emit('explorer-state-change', $event)" />
             </Transition>
         </div>
     </aside>

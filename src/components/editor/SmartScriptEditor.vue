@@ -1,9 +1,8 @@
 <template>
-  <ScriptEditor
-ref="innerEditorRef" :document-path="documentPath" :model-value="modelValue" :theme="theme" :can-run="canRun"
-    :analysis="analysisState" :editor-settings="editorSettings"
+  <ScriptEditor ref="innerEditorRef" :document-path="documentPath" :model-value="modelValue" :theme="theme"
+    :can-run="canRun" :analysis="analysisState" :editor-settings="editorSettings"
     @update:model-value="handleModelValueChange" @cursor-position-change="handleCursorPositionChange"
-    @selection-change="emit('selection-change', $event)"
+    @selection-change="emit('selection-change', $event)" @open-terminal-request="emit('open-terminal-request')"
     @format-request="emit('format-request')" @command-palette-request="emit('command-palette-request')"
     @run-request="emit('run-request')" />
 </template>
@@ -11,9 +10,9 @@ ref="innerEditorRef" :document-path="documentPath" :model-value="modelValue" :th
 <script setup lang="ts">
 import ScriptEditor from '@/components/editor/ScriptEditor.vue';
 import { tauriService } from '@/services/tauri';
+import type { IAiCodeActionRequest } from '@/types/ai';
 import type { TThemeMode } from '@/types/app';
 import type { IAnalyzeScriptPayload, IEditorSelectionSummary } from '@/types/editor';
-import type { IAiCodeActionRequest } from '@/types/ai';
 import type { IEditorSettings } from '@/types/settings';
 import { waitForDesktopRuntime } from '@/utils/desktop-runtime';
 import { toErrorMessage } from '@/utils/error';
@@ -55,6 +54,7 @@ const emit = defineEmits<{
   'cursor-position-change': [line: number, column: number];
   'selection-change': [selection: IEditorSelectionSummary | null];
   'diagnostics-change': [documentId: string, payload: IAnalyzeScriptPayload];
+  'open-terminal-request': [];
   'format-request': [];
   'command-palette-request': [];
   'run-request': [];

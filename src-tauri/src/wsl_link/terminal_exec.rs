@@ -8,6 +8,7 @@ pub const TERMINAL_RUN_STARTED_KIND: &str = "terminal.runStarted.v1";
 pub const TERMINAL_RUN_CHUNK_KIND: &str = "terminal.runChunk.v1";
 pub const TERMINAL_RUN_COMPLETED_KIND: &str = "terminal.runCompleted.v1";
 pub const TERMINAL_RUN_ERROR_KIND: &str = "terminal.runError.v1";
+pub const TERMINAL_RUN_INPUT_KIND: &str = "terminal.runInput.v1";
 pub const TERMINAL_OPEN_INTERACTIVE_KIND: &str = "terminal.openInteractive.v1";
 pub const TERMINAL_INTERACTIVE_OPENED_KIND: &str = "terminal.interactiveOpened.v1";
 pub const TERMINAL_INTERACTIVE_INPUT_KIND: &str = "terminal.interactiveInput.v1";
@@ -89,6 +90,24 @@ impl WslLinkTerminalOpenInteractiveRequest {
             ));
         }
         validate_terminal_size(self.cols, self.rows)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WslLinkTerminalRunInput {
+    pub run_id: String,
+    pub data: String,
+}
+
+impl WslLinkTerminalRunInput {
+    pub fn validate(&self) -> Result<(), WslLinkTerminalExecError> {
+        if self.run_id.trim().is_empty() {
+            return Err(WslLinkTerminalExecError::Payload(
+                "run_id 不能为空。".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -247,6 +266,8 @@ pub struct WslLinkTerminalInteractiveError {
 pub enum WslLinkTerminalClientPayload {
     #[serde(rename = "terminal.runScript.v1")]
     RunScript(WslLinkTerminalRunScriptRequest),
+    #[serde(rename = "terminal.runInput.v1")]
+    RunInput(WslLinkTerminalRunInput),
     #[serde(rename = "terminal.openInteractive.v1")]
     OpenInteractive(WslLinkTerminalOpenInteractiveRequest),
     #[serde(rename = "terminal.interactiveInput.v1")]
@@ -412,6 +433,19 @@ mod tests {
                 session_id: "main-terminal".to_string(),
                 data: "printf '你好 🌟'\n".to_string(),
             });
+
+        let encoded = encode_terminal_client_payload(&payload).expect("payload should encode");
+        let decoded = decode_terminal_client_payload(&encoded).expect("payload should decode");
+
+        assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn run_input_payload_roundtrips_multilingual_input() {
+        let payload = WslLinkTerminalClientPayload::RunInput(WslLinkTerminalRunInput {
+            run_id: "run-交互-1".to_string(),
+            data: "你好 🌟\n".to_string(),
+        });
 
         let encoded = encode_terminal_client_payload(&payload).expect("payload should encode");
         let decoded = decode_terminal_client_payload(&encoded).expect("payload should decode");

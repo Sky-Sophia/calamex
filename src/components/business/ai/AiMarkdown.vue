@@ -2,6 +2,7 @@
 import 'katex/dist/katex.min.css';
 
 import AiMarkdownCodeBlock from '@/components/business/ai/AiMarkdownCodeBlock.vue';
+import AiMarkdownTable from '@/components/business/ai/AiMarkdownTable.vue';
 import type { IAiChatStreamRenderState } from '@/types/ai';
 import { normalizeAiMath } from '@/utils/normalize-ai-math';
 import type { CustomComponents } from 'markstream-vue';
@@ -44,6 +45,7 @@ const AI_MARKDOWN_I18N_MAP = {
 
 const AI_MARKDOWN_COMPONENTS = {
   code_block: AiMarkdownCodeBlock,
+  table: AiMarkdownTable,
 } satisfies Partial<CustomComponents>;
 
 if (!isKatexEnabled()) {
@@ -82,20 +84,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="ai-markdown">
-    <MarkdownRender
-      :content="renderContent"
-      :custom-id="rendererId"
-      :final="isFinal"
-      :defer-nodes-until-visible="false"
-      :max-live-nodes="320"
-      :live-node-buffer="80"
-      :initial-render-batch-size="64"
-      :render-batch-size="96"
-      :render-batch-delay="0"
-      :render-batch-budget-ms="8"
-      :show-tooltips="false"
-      :typewriter="false"
-    />
+    <MarkdownRender :content="renderContent" :custom-id="rendererId" :final="isFinal" :defer-nodes-until-visible="false"
+      :max-live-nodes="320" :live-node-buffer="80" :initial-render-batch-size="64" :render-batch-size="96"
+      :render-batch-delay="0" :render-batch-budget-ms="8" :show-tooltips="false" :typewriter="false" />
   </div>
 </template>
 
@@ -299,43 +290,6 @@ onBeforeUnmount(() => {
 
 .ai-markdown :global(.table-node-wrapper::-webkit-scrollbar) {
   height: 0;
-}
-
-.ai-markdown :global(.table-node) {
-  width: auto;
-  min-width: 100%;
-  table-layout: auto;
-  border-collapse: collapse;
-  border-color: var(--shell-divider);
-  box-shadow: none;
-}
-
-.ai-markdown :global(.table-node th),
-.ai-markdown :global(.table-node td) {
-  max-width: clamp(16ch, 48vw, 64ch);
-  border-color: var(--shell-divider);
-  overflow-wrap: anywhere;
-}
-
-.ai-markdown :global(.table-node :is(td, th) *) {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: normal;
-}
-
-.ai-markdown :global(.table-node :is(td, th) code) {
-  white-space: pre-wrap;
-}
-
-.ai-markdown :global(.table-node :is(td, th) pre) {
-  max-width: 100%;
-  overflow-x: auto;
-  white-space: pre;
-}
-
-.ai-markdown :global(.table-node :is(td, th) pre code) {
-  white-space: inherit;
-  overflow-wrap: normal;
 }
 
 @media (prefers-reduced-motion: reduce) {

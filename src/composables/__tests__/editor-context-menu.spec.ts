@@ -90,6 +90,7 @@ const mountContextMenu = (): IMountedEditorContextMenu => {
                 api = useEditorContextMenu({
                     getEditor: () => editor as never,
                     canRunCurrentScript: () => true,
+                    onOpenTerminalRequest: vi.fn(),
                     onFormatRequest: vi.fn(),
                     onCommandPaletteRequest: vi.fn(),
                     onRunCurrentScriptRequest: vi.fn(),
@@ -202,6 +203,9 @@ describe('useEditorContextMenu', () => {
             'ai-fix-diagnostic',
             'ai-generate-tests',
         ]);
+
+        const runActions = api.contextMenuGroups.value.find((group) => group.key === 'run-actions');
+        expect(runActions?.items.some((item) => item.key === 'open-terminal')).toBe(true);
 
         wrapper.unmount();
     });

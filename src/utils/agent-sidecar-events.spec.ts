@@ -381,4 +381,130 @@ describe('agent-sidecar-events', () => {
     });
     expect(projection.activityTrail).toEqual(['已搜索 7 个 AI 领域参与者']);
   });
+
+  it('把连续 reasoning delta 聚合进活动树，而不是当成最终回答文本', () => {
+    const reasoningText =
+      'The user wants raw reasoning inside the activity tree, preserving the natural sentence instead of rendering it as final answer content.';
+    const projection = projectSidecarEventsToActivityState({
+      assistantMessageId: 'assistant-reasoning-1',
+      fallbackActivityText: '检查工作区',
+      streamStatus: 'streaming',
+      events: [
+        {
+          type: 'agent_event',
+          event: {
+            id: 'reasoning-1',
+            type: 'agent.reasoning.delta',
+            runId: 'run-1',
+            sessionId: 'session-1',
+            agentId: 'agent-1',
+            timestamp: '2026-05-07T00:00:00.000Z',
+            seq: 1,
+            schemaVersion: 1,
+            redacted: true,
+            visibility: 'user',
+            level: 'info',
+            text: reasoningText.slice(0, 58),
+          },
+        },
+        {
+          type: 'agent_event',
+          event: {
+            id: 'reasoning-2',
+            type: 'agent.reasoning.delta',
+            runId: 'run-1',
+            sessionId: 'session-1',
+            agentId: 'agent-1',
+            timestamp: '2026-05-07T00:00:00.100Z',
+            seq: 2,
+            schemaVersion: 1,
+            redacted: true,
+            visibility: 'user',
+            level: 'info',
+            text: reasoningText.slice(58),
+          },
+        },
+        {
+          type: 'tool_start',
+          toolName: 'list_directory_with_sizes',
+          input: {
+            path: 'D:\\test',
+          },
+        },
+      ],
+    });
+
+    expect(projection.activityTrail).toEqual([reasoningText]);
+    expect(projection.activities.some((activity) =>
+      activity.kind === 'reasoning_summary' &&
+      activity.description === reasoningText
+    )).toBe(true);
+    expect(projection.toolCalls[0]).toMatchObject({
+      name: 'list_directory_with_sizes',
+      status: 'running',
+    });
+  });
+
+  it('兼容累计快照式 reasoning，活动轨只保留最新完整语句', () => {
+    const projection = projectSidecarEventsToActivityState({
+      assistantMessageId: 'assistant-reasoning-cumulative-1',
+      fallbackActivityText: '检查工作区',
+      streamStatus: 'streaming',
+      events: [
+        {
+          type: 'agent_event',
+          event: {
+            id: 'reasoning-cumulative-1',
+            type: 'agent.reasoning.delta',
+            runId: 'run-1',
+            sessionId: 'session-1',
+            agentId: 'agent-1',
+            timestamp: '2026-05-07T00:00:00.000Z',
+            seq: 1,
+            schemaVersion: 1,
+            redacted: true,
+            visibility: 'user',
+            level: 'info',
+            text: '用户',
+          },
+        },
+        {
+          type: 'agent_event',
+          event: {
+            id: 'reasoning-cumulative-2',
+            type: 'agent.reasoning.delta',
+            runId: 'run-1',
+            sessionId: 'session-1',
+            agentId: 'agent-1',
+            timestamp: '2026-05-07T00:00:00.050Z',
+            seq: 2,
+            schemaVersion: 1,
+            redacted: true,
+            visibility: 'user',
+            level: 'info',
+            text: '用户让我',
+          },
+        },
+        {
+          type: 'agent_event',
+          event: {
+            id: 'reasoning-cumulative-3',
+            type: 'agent.reasoning.delta',
+            runId: 'run-1',
+            sessionId: 'session-1',
+            agentId: 'agent-1',
+            timestamp: '2026-05-07T00:00:00.100Z',
+            seq: 3,
+            schemaVersion: 1,
+            redacted: true,
+            visibility: 'user',
+            level: 'info',
+            text: '用户让我自己选一个其他的意象。',
+          },
+        },
+      ],
+    });
+
+    expect(projection.activityTrail).toEqual(['用户让我自己选一个其他的意象。']);
+  });
 });

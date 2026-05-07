@@ -975,7 +975,8 @@ describe('AiAssistantPanel', () => {
         await wrapper.get('[aria-label="对话记录"]').trigger('click');
 
         expect(wrapper.findAll('.ai-history-item')).toHaveLength(20);
-        expect(wrapper.text()).toContain('最近 20 组');
+        expect(wrapper.text()).toContain('对话记录');
+        expect(wrapper.text()).not.toContain('最近 20 组');
         expect(wrapper.text()).toContain('第 25 组对话');
         expect(wrapper.text()).not.toContain('第 5 组对话');
         expect(wrapper.text()).not.toContain('请帮我分析第 25 个脚本');

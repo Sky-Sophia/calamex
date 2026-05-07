@@ -50,6 +50,11 @@ const bootstrap = async (): Promise<void> => {
     console.error(MESSAGES.bootstrapErrorLabel, error);
     setRuntimeError(MESSAGES.bootstrapErrorLabel, error);
     renderFatalBootstrapError(error);
+    await import('./services/modules/window').then(({ applyWindowStage }) =>
+      applyWindowStage({ stage: 'main' }),
+    ).catch((stageError: unknown) => {
+      console.error('Application error window reveal failed', stageError);
+    });
   }
 };
 

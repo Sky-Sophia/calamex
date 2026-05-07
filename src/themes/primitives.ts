@@ -37,6 +37,8 @@ export const P = {
     lightControlBgActive: '#e6eaef',        // --control-bgColor-active
 
     lightFgDefault: '#1f2328',              // --fgColor-default
+    lightTerminalForeground: '#1a1c1f',     // 终端默认前景色
+    lightTerminalCursor: '#000000',         // 终端光标色
     lightFgMuted: '#59636e',                // --fgColor-muted
     lightFgDisabled: '#818b98',             // --fgColor-disabled
     lightFgOnEmphasis: '#ffffff',           // --fgColor-onEmphasis
@@ -72,7 +74,7 @@ export const P = {
     darkBgDangerMuted: '#f851491a',         // --bgColor-danger-muted
     darkBgDoneEmphasis: '#8957e5',          // --bgColor-done-emphasis
     darkBgDoneMuted: '#ab7df826',           // --bgColor-done-muted
-    darkControlBgRest: '#212830',           // --control-bgColor-rest
+    darkControlBgRest: '#FAFAFA',           // --control-bgColor-rest
     darkControlBgHover: '#262c36',          // --control-bgColor-hover
     darkControlBgActive: '#2a313c',         // --control-bgColor-active
 

@@ -26,6 +26,8 @@ const mountSidebar = () => {
             isDesktopRuntime: true,
             workspaceRootPath: 'D:/repo',
             preloadedWorkspaceRoot: null,
+            startupExplorerExpandedPaths: [],
+            startupExplorerSelectedPath: null,
             canRun: true,
             isRunning: false,
             hasRunArtifacts: false,

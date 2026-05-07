@@ -1260,7 +1260,7 @@ const buildSidecarLiveActivityText = (
     return buildToolActivityText(completedToolCall);
   }
 
-  return fallback || '正在加载';
+  return fallback || '';
 };
 
 const buildCompletedSidecarActivityText = (
@@ -1288,6 +1288,18 @@ const appendActivityTrail = (
 
   if (!normalized) {
     return currentTrail?.length ? [...currentTrail] : [];
+  }
+
+  const previous = currentTrail?.[currentTrail.length - 1] ?? '';
+
+  if (previous) {
+    if (normalized.startsWith(previous)) {
+      return [...(currentTrail ?? []).slice(0, -1), normalized].slice(-AGENT_ACTIVITY_TRAIL_LIMIT);
+    }
+
+    if (previous.startsWith(normalized)) {
+      return [...(currentTrail ?? [])].slice(-AGENT_ACTIVITY_TRAIL_LIMIT);
+    }
   }
 
   const nextTrail = [...(currentTrail ?? []), normalized];
@@ -1382,21 +1394,80 @@ const getRuntimeActivityText = (event: TAgentRuntimeEvent): string | null => {
   }
 };
 
+const appendReasoningActivityTrail = (
+  currentTrail: readonly string[] | undefined,
+  reasoningText: string,
+): string[] => appendActivityTrail(currentTrail, reasoningText);
+
 const buildSidecarActivityTrail = (events: readonly TAgentUiEvent[]): string[] => {
   let trail: string[] = [];
+  let reasoningBuffer = '';
+
+  const getReasoningOverlapLength = (previous: string, incoming: string): number => {
+    const maxLength = Math.min(previous.length, incoming.length);
+
+    for (let length = maxLength; length > 0; length -= 1) {
+      if (previous.slice(-length) === incoming.slice(0, length)) {
+        return length;
+      }
+    }
+
+    return 0;
+  };
+
+  const appendReasoningText = (incomingText: string): void => {
+    if (!incomingText) {
+      return;
+    }
+
+    if (!reasoningBuffer) {
+      reasoningBuffer = incomingText;
+      return;
+    }
+
+    if (incomingText.startsWith(reasoningBuffer)) {
+      reasoningBuffer = incomingText;
+      return;
+    }
+
+    if (reasoningBuffer.startsWith(incomingText)) {
+      return;
+    }
+
+    const overlapLength = getReasoningOverlapLength(reasoningBuffer, incomingText);
+    reasoningBuffer += incomingText.slice(overlapLength);
+  };
+
+  const flushReasoningBuffer = (): void => {
+    if (!reasoningBuffer) {
+      return;
+    }
+
+    trail = appendReasoningActivityTrail(trail, reasoningBuffer);
+    reasoningBuffer = '';
+  };
 
   for (const event of events) {
     if (event.type === 'tool_start' || event.type === 'tool_result') {
+      flushReasoningBuffer();
       continue;
     }
 
     if (event.type === 'agent_event') {
+      if (event.event.type === 'agent.reasoning.delta' && event.event.visibility === 'user') {
+        appendReasoningText(event.event.text);
+        continue;
+      }
+
       const activityText = getRuntimeActivityText(event.event);
       if (activityText) {
+        flushReasoningBuffer();
         trail = appendActivityTrail(trail, activityText);
       }
     }
   }
+
+  flushReasoningBuffer();
 
   return trail;
 };

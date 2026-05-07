@@ -51,7 +51,7 @@ describe('AiAgentRuntimeTimeline', () => {
             },
         });
 
-        expect(wrapper.text()).toContain('Chain of Thought');
+        expect(wrapper.find('.ai-runtime-timeline').exists()).toBe(true);
         expect(wrapper.findAll('.agent-line')).toHaveLength(1);
         expect(wrapper.text()).toContain('我先确认 sidecar 是否是旧进程。');
         expect(wrapper.findAll('.ai-runtime-task')).toHaveLength(2);
@@ -146,6 +146,82 @@ describe('AiAgentRuntimeTimeline', () => {
 
         expect(wrapper.findAll('.agent-line')).toHaveLength(1);
         expect(wrapper.text()).toContain('Given the file extension is .sh');
+    });
+
+    it('兼容累计快照式 reasoning，避免前缀重复堆叠', () => {
+        const wrapper = mount(AiAgentRuntimeTimeline, {
+            props: {
+                events: [
+                    createEvent({
+                        id: 'reasoning-cumulative-1',
+                        type: 'agent.reasoning.delta',
+                        text: 'The',
+                    }),
+                    createEvent({
+                        id: 'reasoning-cumulative-2',
+                        type: 'agent.reasoning.delta',
+                        text: 'The user',
+                    }),
+                    createEvent({
+                        id: 'reasoning-cumulative-3',
+                        type: 'agent.reasoning.delta',
+                        text: 'The user is asking',
+                    }),
+                    createEvent({
+                        id: 'reasoning-cumulative-4',
+                        type: 'agent.reasoning.delta',
+                        text: 'The user is asking me to explain',
+                    }),
+                ],
+            },
+        });
+
+        expect(wrapper.findAll('.agent-line')).toHaveLength(1);
+        const renderedText = wrapper.find('.agent-line').text();
+        expect(renderedText).toContain('The user is asking me to explain');
+        expect(renderedText).not.toContain('TheThe user');
+    });
+
+    it('流式思考开始时立即显示带 shimmer 的折叠头', () => {
+        const wrapper = mount(AiAgentRuntimeTimeline, {
+            props: {
+                events: [],
+                isStreaming: true,
+            },
+        });
+
+        expect(wrapper.find('.ai-runtime-timeline').exists()).toBe(true);
+        expect(wrapper.text()).toContain('正在思考');
+        expect(wrapper.find('.ai-runtime-chain-label--thinking').exists()).toBe(true);
+        expect(wrapper.text()).not.toContain('思考过程');
+    });
+
+    it('思考完成后显示完成态头部，并隐藏 run 开始结束文案', () => {
+        const wrapper = mount(AiAgentRuntimeTimeline, {
+            props: {
+                events: [
+                    createEvent({
+                        id: 'run-start',
+                        type: 'agent.run.started',
+                    }),
+                    createEvent({
+                        id: 'reasoning-finished',
+                        type: 'agent.reasoning.delta',
+                        text: '我已经确认问题根因。',
+                    }),
+                    createEvent({
+                        id: 'run-completed',
+                        type: 'agent.run.completed',
+                        stopReason: 'end_turn',
+                    }),
+                ],
+            },
+        });
+
+        expect(wrapper.text()).toContain('思考完成');
+        expect(wrapper.text()).toContain('我已经确认问题根因。');
+        expect(wrapper.text()).not.toContain('已开始执行 Agent 流程');
+        expect(wrapper.text()).not.toContain('Agent 执行完成');
     });
 
     it('超长 reasoning 默认展开，并支持收起与再次展开', async () => {

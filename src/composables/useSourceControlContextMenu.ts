@@ -56,7 +56,7 @@ export const useSourceControlContextMenu = (options: IUseSourceControlContextMen
     const buildRepositoryMenuGroups = (): TSourceControlMenuGroup[] => [
         {
             key: 'repository',
-            title: 'Repository',
+
             items: [
                 createMenuItem({
                     key: 'refresh',
@@ -70,7 +70,7 @@ export const useSourceControlContextMenu = (options: IUseSourceControlContextMen
         },
         {
             key: 'changes',
-            title: 'Changes',
+
             items: [
                 createMenuItem({
                     key: 'stage-all',
@@ -97,7 +97,7 @@ export const useSourceControlContextMenu = (options: IUseSourceControlContextMen
         },
         {
             key: 'commit',
-            title: 'Commit',
+
             items: [
                 createMenuItem({
                     key: 'commit',

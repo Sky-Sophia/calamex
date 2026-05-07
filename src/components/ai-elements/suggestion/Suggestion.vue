@@ -33,7 +33,6 @@ const handleClick = (): void => {
     type="button"
     :class="cn('ai-suggestion-chip', props.class)"
     :disabled="props.disabled"
-    :title="props.suggestion"
     v-bind="$attrs"
     @click="handleClick"
   >

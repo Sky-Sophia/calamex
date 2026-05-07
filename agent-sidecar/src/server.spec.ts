@@ -436,6 +436,91 @@ describe('Mastra runtime chat', () => {
     assert.equal(disconnectCalls, 1);
   });
 
+  it('routes Mastra reasoning chunks into agent runtime events instead of final text', async () => {
+    let disconnectCalls = 0;
+    const runtime = new MastraRuntime({
+      now: () => '2026-05-07T00:00:00.000Z',
+      readModelConfig: () => ({
+        apiKey: 'test-key',
+        baseUrl: 'https://example.com/v1',
+        model: 'deepseek-chat',
+      }),
+      createMcpClientBundle: async () => ({
+        clients: [],
+        configs: [],
+        errors: [],
+        tools: [],
+        disconnectAll: async () => {
+          disconnectCalls += 1;
+        },
+      }),
+      createAgent: () => ({
+        stream: async () => ({
+          fullStream: (async function* () {
+            yield {
+              type: 'reasoning',
+              runId: 'run-reasoning',
+              textDelta: 'The user wants the raw reasoning in the activity tree.',
+            };
+            yield {
+              type: 'text-delta',
+              runId: 'run-reasoning',
+              payload: {
+                id: 'text-1',
+                text: '这是最终回答。',
+              },
+            };
+          })(),
+        }),
+        generate: async () => {
+          throw new Error('generate should not be used in Mastra reasoning test');
+        },
+      }),
+    });
+    const streamedEvents: unknown[] = [];
+    const abortController = new AbortController();
+
+    const response = await runtime.chat({
+      mode: 'ask',
+      goal: '测试 reasoning',
+      messages: [{ role: 'user', content: '测试 reasoning' }],
+      context: [],
+    }, {
+      context: {
+        requestId: 'req-reasoning',
+        signal: abortController.signal,
+        timeoutMs: 1_000,
+      },
+      onEvent: (event) => {
+        streamedEvents.push(event);
+      },
+    });
+    const reasoningEvent = streamedEvents[0];
+
+    assert.equal(typeof reasoningEvent, 'object');
+    assert.notEqual(reasoningEvent, null);
+    assert.equal((reasoningEvent as { type?: unknown }).type, 'agent_event');
+    assert.equal(
+      (reasoningEvent as { event?: { type?: unknown } }).event?.type,
+      'agent.reasoning.delta',
+    );
+    assert.equal(
+      (reasoningEvent as { event?: { text?: unknown } }).event?.text,
+      'The user wants the raw reasoning in the activity tree.',
+    );
+    assert.deepEqual(streamedEvents.filter((event) =>
+      (event as { type?: unknown }).type === 'message_delta'
+    ), [
+      {
+        type: 'message_delta',
+        text: '这是最终回答。',
+        phase: 'final',
+      },
+    ]);
+    assert.equal(response.result, '这是最终回答。');
+    assert.equal(disconnectCalls, 1);
+  });
+
   it('normalizes Mastra stream errors into the existing error event shape', async () => {
     let disconnectCalls = 0;
     const runtime = new MastraRuntime({
