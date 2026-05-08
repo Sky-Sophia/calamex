@@ -240,35 +240,6 @@ describe('AiAgentRuntimeTimeline', () => {
         expect(wrapper.text()).not.toContain('Searching for today sports news');
     });
 
-    it('tavily-search 结果包在嵌套 content 字符串里时也会渲染来源胶囊', () => {
-        const wrapper = mount(AiAgentRuntimeTimeline, {
-            props: {
-                events: [
-                    createEvent({
-                        id: 'tavily-nested-start',
-                        type: 'agent.tool.started',
-                        toolUseId: 'tavily-nested-1',
-                        toolName: 'tavily-search',
-                        inputPreview: '{"query":"latest sports"}',
-                    }),
-                    createEvent({
-                        id: 'tavily-nested-complete',
-                        type: 'agent.tool.completed',
-                        toolUseId: 'tavily-nested-1',
-                        toolName: 'tavily-search',
-                        ok: true,
-                        resultPreview: '{"toolResult":{"status":"success","content":"{\\"results\\":[{\\"title\\":\\"ESPN\\",\\"url\\":\\"https://www.espn.com/nba/\\"},{\\"title\\":\\"BBC Sport\\",\\"url\\":\\"https://www.bbc.com/sport\\"}]}","meta":{"provider":"tavily"}}}',
-                    }),
-                ],
-            },
-        });
-
-        expect(wrapper.text()).toContain('Complete Search');
-        expect(wrapper.text()).toContain('www.espn.com');
-        expect(wrapper.text()).toContain('www.bbc.com');
-        expect(wrapper.findAll('.ai-runtime-web-source-pill').length).toBeGreaterThanOrEqual(2);
-    });
-
     it('按具体工具名选择更贴合的图标，而不是只用通用分类图标', () => {
         const wrapper = mount(AiAgentRuntimeTimeline, {
             props: {

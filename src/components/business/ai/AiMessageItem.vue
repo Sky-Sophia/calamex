@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { Loader } from '@/components/ai-elements/loader';
 import {
-  Message,
-  MessageAction,
-  MessageActions,
-  MessageContent,
-  MessageToolbar,
+    Message,
+    MessageAction,
+    MessageActions,
+    MessageContent,
+    MessageToolbar,
 } from '@/components/ai-elements/message';
 import AiAgentRuntimeTimeline from '@/components/business/ai/AiAgentRuntimeTimeline.vue';
 import AiMarkdown from '@/components/business/ai/AiMarkdown.vue';

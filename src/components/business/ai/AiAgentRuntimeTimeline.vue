@@ -1,43 +1,43 @@
 <script setup lang="ts">
 import {
-  ChainOfThought,
-  ChainOfThoughtContent,
-  ChainOfThoughtHeader,
-  ChainOfThoughtSearchResult,
-  ChainOfThoughtSearchResults,
-  ChainOfThoughtStep,
+    ChainOfThought,
+    ChainOfThoughtContent,
+    ChainOfThoughtHeader,
+    ChainOfThoughtSearchResult,
+    ChainOfThoughtSearchResults,
+    ChainOfThoughtStep,
 } from '@/components/ai-elements/chain-of-thought';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Task, TaskContent, TaskItem } from '@/components/ai-elements/task';
 import {
-  classifyRuntimeToolKind,
-  normalizeRuntimeToolName,
-  type TAiRuntimeToolKind,
+    classifyRuntimeToolKind,
+    normalizeRuntimeToolName,
+    type TAiRuntimeToolKind,
 } from '@/constants/ai-runtime-tools';
 import type { TAgentRuntimeEvent } from '@/types/agent-sidecar';
 import {
-  Activity,
-  BookOpen,
-  Brain,
-  ChartColumn,
-  CircleAlert,
-  Clock3,
-  Coffee,
-  Dot,
-  FileCode,
-  FileText,
-  Files,
-  FolderTree,
-  GitBranch,
-  Globe,
-  HardDrive,
-  Image as ImageIcon,
-  ListTodo,
-  Pencil,
-  Play,
-  Search,
-  Terminal,
-  Workflow,
+    Activity,
+    BookOpen,
+    Brain,
+    ChartColumn,
+    CircleAlert,
+    Clock3,
+    Coffee,
+    Dot,
+    FileCode,
+    FileText,
+    Files,
+    FolderTree,
+    GitBranch,
+    Globe,
+    HardDrive,
+    Image as ImageIcon,
+    ListTodo,
+    Pencil,
+    Play,
+    Search,
+    Terminal,
+    Workflow,
 } from 'lucide-vue-next';
 import { computed, type Component } from 'vue';
 
@@ -642,118 +642,35 @@ const getDisplayWebSearchUrl = (url: string): string => {
 };
 
 const resolveWebSearchSources = (value: string | undefined): IWebSearchSourceChip[] => {
+  const parsed = parsePreviewJson(value);
+  const rawItems = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).results)
+      ? (parsed as Record<string, unknown>).results
+      : [];
+
   const seen = new Set<string>();
   const sources: IWebSearchSourceChip[] = [];
 
-  const appendSource = (url: string): void => {
-    const trimmedUrl = url.trim();
-    const host = getHostname(trimmedUrl);
-
-    if (!trimmedUrl || !host || seen.has(trimmedUrl)) {
-      return;
+  for (const item of rawItems) {
+    if (!item || typeof item !== 'object') {
+      continue;
     }
 
-    seen.add(trimmedUrl);
+    const record = item as Record<string, unknown>;
+    const url = isNonEmptyString(record.url) ? record.url.trim() : '';
+    const host = getHostname(url);
+
+    if (!url || !host || seen.has(url)) {
+      continue;
+    }
+
+    seen.add(url);
     sources.push({
-      url: trimmedUrl,
+      url,
       host,
-      displayUrl: getDisplayWebSearchUrl(trimmedUrl),
+      displayUrl: getDisplayWebSearchUrl(url),
     });
-  };
-
-  const parseStringAsJson = (text: string): unknown | null => {
-    const trimmed = text.trim();
-
-    if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) {
-      return null;
-    }
-
-    return parsePreviewJson(trimmed);
-  };
-
-  const collectWebSearchSources = (payload: unknown, depth = 0): void => {
-    if (depth > 6 || payload == null || sources.length >= 6) {
-      return;
-    }
-
-    if (isNonEmptyString(payload)) {
-      const parsedNested = parseStringAsJson(payload);
-
-      if (parsedNested) {
-        collectWebSearchSources(parsedNested, depth + 1);
-      }
-
-      const urlMatches = payload.match(/https?:\/\/[^\s"'<>]+/giu) ?? [];
-
-      for (const match of urlMatches) {
-        appendSource(match.replace(/[),.;]+$/u, ''));
-      }
-
-      return;
-    }
-
-    if (Array.isArray(payload)) {
-      for (const item of payload) {
-        collectWebSearchSources(item, depth + 1);
-
-        if (sources.length >= 6) {
-          return;
-        }
-      }
-
-      return;
-    }
-
-    if (typeof payload !== 'object') {
-      return;
-    }
-
-    const record = payload as Record<string, unknown>;
-
-    const directUrl = record.url ?? record.link ?? record.href;
-    if (isNonEmptyString(directUrl)) {
-      appendSource(directUrl);
-    }
-
-    const priorityKeys = [
-      'results',
-      'items',
-      'data',
-      'sources',
-      'source',
-      'toolResult',
-      'result',
-      'output',
-      'content',
-      'value',
-      'payload',
-    ];
-
-    for (const key of priorityKeys) {
-      if (!(key in record)) {
-        continue;
-      }
-
-      collectWebSearchSources(record[key], depth + 1);
-
-      if (sources.length >= 6) {
-        return;
-      }
-    }
-
-    for (const nestedValue of Object.values(record)) {
-      collectWebSearchSources(nestedValue, depth + 1);
-
-      if (sources.length >= 6) {
-        return;
-      }
-    }
-  };
-
-  collectWebSearchSources(parsePreviewJson(value));
-
-  if (!sources.length && isNonEmptyString(value)) {
-    collectWebSearchSources(value);
   }
 
   return sources.slice(0, 6);
