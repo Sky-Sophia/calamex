@@ -1055,12 +1055,12 @@ describe('useAiAssistant streaming integration', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:attachment-preview-2');
   });
 
-  it('clears the draft and shows the user message before context lookup finishes', async () => {
+  it('清空草稿并展示用户消息时，不再等待 @project 上下文查询', async () => {
     const { assistant } = createAssistantHarnessContext();
     const userQuestion = '@project 查一下发送流程';
-    const queryDeferred = createDeferred<Awaited<ReturnType<typeof aiServiceMock.queryIndex>>>();
+    const executeDeferred = createDeferred<Awaited<ReturnType<typeof aiServiceMock.sidecarExecute>>>();
 
-    aiServiceMock.queryIndex.mockReturnValueOnce(queryDeferred.promise);
+    aiServiceMock.sidecarExecute.mockReturnValueOnce(executeDeferred.promise);
 
     assistant.activeMode.value = 'agent';
     assistant.draft.value = userQuestion;
@@ -1074,11 +1074,21 @@ describe('useAiAssistant streaming integration', () => {
       content: userQuestion,
       references: [],
     });
-    expect(aiServiceMock.sidecarExecute).toHaveBeenCalledTimes(0);
+    expect(aiServiceMock.queryIndex).toHaveBeenCalledTimes(0);
 
-    queryDeferred.resolve({
-      rootPath: WORKSPACE_ROOT,
-      results: [],
+    await flushMicrotasks();
+
+    expect(aiServiceMock.sidecarExecute).toHaveBeenCalledTimes(1);
+
+    executeDeferred.resolve({
+      sessionId: 'sidecar-execute-session-1',
+      events: [
+        {
+          type: 'done',
+          result: '已收到请求。',
+        },
+      ],
+      result: '已收到请求。',
     });
     await sendPromise;
   });
@@ -1373,22 +1383,28 @@ describe('useAiAssistant streaming integration', () => {
     expect(assistant.attachedFiles.value).toHaveLength(0);
   });
 
-  it('鍙戦€佽鍒掕姹傚墠鎶婄己澶辩殑褰撳墠鏂囦欢璺緞褰掍竴涓?null锛岄伩鍏?IPC 鍏ュ弬鏍￠獙澶辫触', async () => {
-    const { assistant, document } = createAssistantHarnessContext();
+  it('plan 请求不再把 @current-file 写入消息上下文，仅作为工具上下文传给 sidecar', async () => {
+    const { assistant } = createAssistantHarnessContext();
 
-    Reflect.deleteProperty(document.value, 'path');
     assistant.activeMode.value = 'plan';
-    assistant.draft.value = '@current-file 淇敼瀹屽杽杩欎釜鏂囦欢';
+    assistant.draft.value = '@current-file 修改完善这个文件';
 
     await assistant.sendMessage();
 
     const planPayload = aiServiceMock.sidecarPlan.mock.calls[0]?.[0];
 
-    expect(planPayload?.context[0]).toMatchObject({
-      kind: 'current-file',
-      path: null,
-    });
-    expect(planPayload?.context[0]?.path).toBeNull();
+    expect(planPayload?.messages).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: '@current-file 修改完善这个文件',
+      }),
+    ]);
+    expect(planPayload?.context).toEqual([
+      expect.objectContaining({
+        kind: 'current-file',
+        path: 'src/app.ts',
+      }),
+    ]);
     expect(agentSidecarPlanRequestSchema.safeParse(planPayload).success).toBe(true);
   });
 
@@ -1399,7 +1415,7 @@ describe('useAiAssistant streaming integration', () => {
       createPlanStep('plan-step-2', '旧计划第二步'),
     ];
     const planStore = assistant.agentPlan.store;
-    const userQuestion = '@current-file 淇敼瀹屽杽杩欎釜鏂囦欢';
+    const userQuestion = '@current-file 修改完善这个文件';
 
     planStore.setPlan('旧计划', staleSteps);
     Reflect.set(planStore, 'approvedAt', '2026-04-29T00:00:00.000Z');
@@ -1896,6 +1912,78 @@ describe('useAiAssistant streaming integration', () => {
         }),
       ]),
     );
+  });
+
+  it('工具校验失败但 sidecar 返回 done 时不保持思考中', async () => {
+    const { assistant } = createAssistantHarnessContext();
+
+    aiServiceMock.sidecarExecute.mockResolvedValueOnce({
+      sessionId: 'sidecar-tool-validation-session',
+      events: [
+        {
+          type: 'agent_event',
+          event: {
+            id: 'runtime-time-tool-start',
+            type: 'agent.tool.started',
+            runId: 'run-time-tool',
+            sessionId: 'sidecar-tool-validation-session',
+            agentId: 'agent-time-tool',
+            timestamp: '2026-05-09T10:00:00.000Z',
+            seq: 0,
+            schemaVersion: 1,
+            redacted: true,
+            visibility: 'user',
+            level: 'info',
+            toolName: 'get_current_time',
+          },
+        },
+        {
+          type: 'agent_event',
+          event: {
+            id: 'runtime-time-tool-failed',
+            type: 'agent.tool.completed',
+            runId: 'run-time-tool',
+            sessionId: 'sidecar-tool-validation-session',
+            agentId: 'agent-time-tool',
+            timestamp: '2026-05-09T10:00:01.000Z',
+            seq: 1,
+            schemaVersion: 1,
+            redacted: true,
+            visibility: 'user',
+            level: 'error',
+            toolName: 'get_current_time',
+            ok: false,
+            errorMessage: 'Tool input validation failed for get_current_time.',
+          },
+        },
+        {
+          type: 'tool_result',
+          toolName: 'get_current_time',
+          output: {
+            error: 'Tool input validation failed for get_current_time.',
+          },
+        },
+        {
+          type: 'done',
+          result: '时间工具调用失败，请重试。',
+        },
+      ],
+      result: '时间工具调用失败，请重试。',
+    });
+
+    assistant.activeMode.value = 'agent';
+    assistant.draft.value = '网络搜索上周的新闻';
+
+    await assistant.sendMessage();
+
+    const assistantMessage = assistant.messages.value[1];
+
+    expect(assistantMessage?.content).toBe('时间工具调用失败，请重试。');
+    expect(assistantMessage?.stream?.status).toBe('completed');
+    expect(assistantMessage?.toolCalls?.[0]).toMatchObject({
+      name: 'get_current_time',
+      status: 'failed',
+    });
   });
 
   it('sidecar message_delta 合帧刷新，避免长回答逐 token 卡住且不改变最终结果', async () => {
@@ -2707,24 +2795,67 @@ describe('useAiAssistant streaming integration', () => {
     expect(assistant.errorMessage.value).toContain('未保存改动');
   });
 
-  it('passes UI context to Mastra sidecar agent mode as system context', async () => {
+  it('不再把 @current-file 解析成系统上下文，当前文件仅作为工具上下文传给 sidecar', async () => {
     const { assistant } = createAssistantHarnessContext();
 
     assistant.activeMode.value = 'agent';
-    assistant.draft.value = '@current-file 涓板瘜涓€涓嬬洰鍓嶇殑鑴氭湰鍐呭';
+    assistant.draft.value = '@current-file 丰富一下当前的脚本内容';
 
     await assistant.sendMessage();
 
     const request = aiServiceMock.sidecarExecute.mock.calls[0]?.[0];
 
-    expect(request?.messages[0]).toMatchObject({
-      role: 'system',
-    });
-    expect(request?.messages[0]?.content).toContain('当前 UI 已收集到这些上下文');
-    expect(request?.messages[0]?.content).toContain('src/app.ts');
-    expect(request?.messages.at(-1)).toMatchObject({
+    expect(request?.messages).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: '@current-file 丰富一下当前的脚本内容',
+      }),
+    ]);
+    expect(request?.context).toEqual([
+      expect.objectContaining({
+        kind: 'current-file',
+        path: 'src/app.ts',
+      }),
+    ]);
+  });
+
+  it('普通 Agent 请求不把当前文件写进消息上下文，只保留按需工具上下文', async () => {
+    const { assistant } = createAssistantHarnessContext();
+
+    assistant.activeMode.value = 'agent';
+    assistant.draft.value = '科学原理如何解释';
+
+    await assistant.sendMessage();
+
+    const request = aiServiceMock.sidecarExecute.mock.calls[0]?.[0];
+
+    expect(request?.messages).toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: '科学原理如何解释',
+      }),
+    ]);
+    expect(request?.context).toEqual([
+      expect.objectContaining({
+        kind: 'current-file',
+        path: 'src/app.ts',
+      }),
+    ]);
+  });
+
+  it('普通 Chat 请求不附加当前文件引用', async () => {
+    const { assistant } = createAssistantHarnessContext();
+
+    aiServiceMock.queueStreamResponse('这是普通回答。');
+    assistant.activeMode.value = 'chat';
+    assistant.draft.value = '科学原理如何解释';
+
+    await assistant.sendMessage();
+
+    expect(assistant.messages.value[0]).toMatchObject({
       role: 'user',
-      content: '@current-file 涓板瘜涓€涓嬬洰鍓嶇殑鑴氭湰鍐呭',
+      content: '科学原理如何解释',
+      references: [],
     });
   });
 

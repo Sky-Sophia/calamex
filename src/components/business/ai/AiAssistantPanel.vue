@@ -482,7 +482,7 @@ const handleRunStep = async (): Promise<void> => {
   await withAgentRunAction(
     (runId) => agentRun.runStepWithSidecar(runId, {
       goal: planActiveGoal.value,
-      context: assistant.currentReferences.value,
+      context: assistant.buildSidecarContextReferences(),
       workspaceRootPath: props.workspaceRootPath,
     }),
     '执行 Agent step 失败。',

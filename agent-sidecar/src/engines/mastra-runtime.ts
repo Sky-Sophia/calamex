@@ -25,6 +25,7 @@ import {
     type WorkspaceToolsConfig,
 } from '@mastra/core/workspace';
 import { LibSQLStore } from '@mastra/libsql';
+import { z } from 'zod';
 
 import {
     createDeepSeekModelConfigFromEnv,
@@ -52,6 +53,7 @@ import type {
     TAgentRuntimeOutputEvent,
 } from './runtime-contracts.js';
 import type {
+    IAgentContextReferenceInput,
     IAgentMessageInput,
     IAgentRuntimeInput,
     IApprovalResolutionInput,
@@ -675,22 +677,85 @@ const createMastraMcpTools = (
     })]),
 );
 
+const FILESYSTEM_MCP_TOOL_NAMES = new Set([
+    'read_file',
+    'read_text_file',
+    'read_media_file',
+    'read_multiple_files',
+    'write_file',
+    'edit_file',
+    'create_directory',
+    'list_directory',
+    'list_directory_with_sizes',
+    'directory_tree',
+    'move_file',
+    'search_files',
+    'get_file_info',
+    'list_allowed_directories',
+]);
+
+const filterMcpToolsForWorkspace = (
+    tools: readonly IMcpToolLike[],
+    workspace: AnyWorkspace | undefined,
+): IMcpToolLike[] => {
+    if (!workspace) {
+        return [...tools];
+    }
+
+    return tools.filter((tool) => !FILESYSTEM_MCP_TOOL_NAMES.has(tool.name));
+};
+
+const findCurrentFileReference = (
+    contextReferences: readonly IAgentContextReferenceInput[] = [],
+): IAgentContextReferenceInput | null =>
+    contextReferences.find((reference) => reference.kind === 'current-file') ?? null;
+
+const createUiContextTools = (
+    contextReferences: readonly IAgentContextReferenceInput[] = [],
+): Record<string, ReturnType<typeof createTool>> => {
+    const currentFile = findCurrentFileReference(contextReferences);
+
+    if (!currentFile) {
+        return {};
+    }
+
+    return {
+        read_current_file: createTool({
+            id: 'read_current_file',
+            description: 'Read the current editor file only when the user asks about the current file. Takes no arguments.',
+            inputSchema: z.object({}).passthrough(),
+            execute: async () => ({
+                path: currentFile.path,
+                label: currentFile.label,
+                range: currentFile.range,
+                redacted: currentFile.redacted,
+                content: currentFile.contentPreview,
+            }),
+        }),
+    };
+};
+
 const loadMastraMcpTools = async (
     createBundle: (
         options?: { workspaceRootPath?: string | null },
     ) => Promise<IMastraMcpBundle>,
     workspaceRootPath?: string,
     loggerRef?: IMastraLogToolsRef,
+    contextReferences: readonly IAgentContextReferenceInput[] = [],
 ): Promise<{
     bundle: IMastraMcpBundle;
     tools: ToolsInput;
     hasTools: boolean;
+    workspace: AnyWorkspace | undefined;
 }> => {
     const bundle = await createBundle(workspaceRootPath
         ? { workspaceRootPath }
         : {});
+    const workspace = createMastraWorkspace(workspaceRootPath);
+    const mcpTools = filterMcpToolsForWorkspace(bundle.tools, workspace);
     const tools: ToolsInput = {
-        ...createMastraMcpTools(bundle.tools),
+        ...createMastraMcpTools(mcpTools),
+        ...createUiContextTools(contextReferences),
         ...createMastraTimeTools(),
         ...(loggerRef ? createMastraLogTools(loggerRef) : {}),
     };
@@ -699,6 +764,7 @@ const loadMastraMcpTools = async (
         bundle,
         tools,
         hasTools: Object.keys(tools).length > 0,
+        workspace,
     };
 };
 
@@ -1315,8 +1381,13 @@ export class MastraRuntime {
             bundle: mcpBundle,
             tools: mastraTools,
             hasTools,
-        } = await loadMastraMcpTools(this.createMcpClientBundle, normalizedInput.workspaceRootPath, this.loggerRef);
-        const workspace = createMastraWorkspace(normalizedInput.workspaceRootPath);
+            workspace,
+        } = await loadMastraMcpTools(
+            this.createMcpClientBundle,
+            normalizedInput.workspaceRootPath,
+            this.loggerRef,
+            normalizedInput.context ?? [],
+        );
         const hasAgentTools = hasTools || Boolean(workspace);
         let shouldDisconnectBundle = true;
 
@@ -1431,8 +1502,13 @@ export class MastraRuntime {
             bundle: mcpBundle,
             tools: mastraTools,
             hasTools,
-        } = await loadMastraMcpTools(this.createMcpClientBundle, input.workspaceRootPath, this.loggerRef);
-        const workspace = createMastraWorkspace(input.workspaceRootPath);
+            workspace,
+        } = await loadMastraMcpTools(
+            this.createMcpClientBundle,
+            input.workspaceRootPath,
+            this.loggerRef,
+            input.context ?? [],
+        );
         const hasAgentTools = hasTools || Boolean(workspace);
 
         try {
@@ -1511,8 +1587,13 @@ export class MastraRuntime {
             bundle: mcpBundle,
             tools: mastraTools,
             hasTools,
-        } = await loadMastraMcpTools(this.createMcpClientBundle, normalizedInput.workspaceRootPath, this.loggerRef);
-        const workspace = createMastraWorkspace(normalizedInput.workspaceRootPath);
+            workspace,
+        } = await loadMastraMcpTools(
+            this.createMcpClientBundle,
+            normalizedInput.workspaceRootPath,
+            this.loggerRef,
+            normalizedInput.context ?? [],
+        );
         const hasAgentTools = hasTools || Boolean(workspace);
         const requestedRunId = options.context?.requestId ?? createSessionId('mastra-run');
         const createRequestedRunEvent = createRuntimeEventFactory({
@@ -1814,8 +1895,8 @@ export class MastraRuntime {
                 bundle: mcpBundle,
                 tools: mastraTools,
                 hasTools,
+                workspace,
             } = await loadMastraMcpTools(this.createMcpClientBundle, workspaceRootPath, this.loggerRef);
-            const workspace = createMastraWorkspace(workspaceRootPath);
 
             try {
                 const executionHandle = await this.createExecutionHandle({

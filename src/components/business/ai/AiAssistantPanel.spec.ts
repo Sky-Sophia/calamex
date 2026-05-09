@@ -183,6 +183,7 @@ const createAssistantMock = (
         switchConversation: vi.fn(),
         attachFile: vi.fn(),
         removeAttachedFile: vi.fn(),
+        buildSidecarContextReferences: vi.fn(() => currentReferences.value),
         clearConversation: vi.fn(),
     };
 };

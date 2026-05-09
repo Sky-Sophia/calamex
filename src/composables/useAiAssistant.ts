@@ -15,11 +15,7 @@ import { useSidecarChangedDocumentRefresh } from '@/composables/useSidecarChange
 import { DEFAULT_LITELLM_MODEL_ID } from '@/constants/ai-providers';
 import { aiService } from '@/services/modules/ai';
 import {
-  buildActiveRunReference,
   buildCurrentFileReference,
-  buildDiagnosticsReference,
-  buildGitDiffReference,
-  buildSelectionReference,
 } from '@/services/modules/ai-context';
 import { aiEditService } from '@/services/modules/ai-edit';
 import { useAiConversationStore } from '@/store/aiConversation';
@@ -164,12 +160,7 @@ const IMAGE_ATTACHMENT_PATTERN = /^image\//i;
 
 const IMAGE_ATTACHMENT_EXTENSION_PATTERN = /\.(avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i;
 
-const CONTEXT_TOKEN_PATTERN =
-  /(^|\s)@(file|current-file|selection|terminal|log|diagnostics|shellcheck|git-diff|git|project|folder|search|symbol)(?=\s|$)/gi;
-
 const CODE_BLOCK_PATTERN = /```[a-zA-Z0-9_-]*\n([\s\S]*?)```/;
-
-const PROJECT_SEARCH_TOKENS = ['project', 'folder', 'search', 'symbol'] as const;
 
 const MSG_STREAM_ERROR = 'AI 响应出错';
 const MSG_CALL_FAILED = 'AI 调用失败';
@@ -1619,7 +1610,9 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const buildSidecarContextMessage = (
     references: IAiContextReference[],
   ): IAgentSidecarMessage | null => {
-    if (!references.length) {
+    const visibleReferences = references.filter((reference) => reference.kind !== 'current-file');
+
+    if (!visibleReferences.length) {
       return null;
     }
 
@@ -1627,7 +1620,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       role: 'system',
       content: [
         '当前 UI 已收集到这些上下文，请在需要时结合它们判断任务：',
-        ...references.map((reference, index) =>
+        ...visibleReferences.map((reference, index) =>
           [
             `#${index + 1} ${reference.label}`,
             `类型：${reference.kind}`,
@@ -1694,6 +1687,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     activeAgentMessageId.value = assistantMessageId;
     activeAbortController.value = new AbortController();
     const sidecarSessionId = `sidecar:${assistantMessageId}`;
+    const sidecarContextReferences = buildSidecarContextReferences(references);
     const liveEventBuffer = createSidecarLiveEventBuffer((events, freshEvents) => {
       appendVisibleRuntimeTimelineEvents(extractVisibleAgentRuntimeEvents(freshEvents));
       applySidecarLiveEventsToAgentMessage(assistantMessageId, targetThreadId, '', events);
@@ -1713,7 +1707,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         goal: messageContent,
         messages: toSidecarMessages(visibleMessages, references),
         workspaceRootPath: options.workspaceRootPath.value,
-        context: references,
+        context: sidecarContextReferences,
       });
       liveEventBuffer.flush();
       unlistenSidecarStream?.();
@@ -1779,7 +1773,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
           turnId,
           baseMessages: visibleMessages,
           messageContent,
-          references,
+          references: sidecarContextReferences,
         };
         agentPlan.store.setPendingToolConfirmation(projection.pendingConfirmation);
         return;
@@ -2041,94 +2035,31 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     return `请按安全、参数可靠性、可维护性、边界条件和可验证性审查当前脚本。请只给出基于代码能确认的问题。\n\n${documentContext}`;
   };
 
-  const resolveContextTokens = (prompt: string): Set<string> => {
-    const tokens = new Set<string>();
+  const buildReferences = async (): Promise<IAiContextReference[]> =>
+    attachedFiles.value.map((file) => file.reference);
 
-    for (const match of prompt.matchAll(CONTEXT_TOKEN_PATTERN)) {
-      const token = match[2]?.toLowerCase();
-
-      if (token) {
-        tokens.add(token);
-      }
-    }
-
-    return tokens;
-  };
-
-  const shouldIncludeReference = (tokens: Set<string>, aliases: readonly string[]): boolean =>
-    tokens.size === 0 || aliases.some((alias) => tokens.has(alias));
-
-  const buildProjectSearchReference = async (
-    prompt: string,
-  ): Promise<IAiContextReference | null> => {
-    const tokens = resolveContextTokens(prompt);
-    const shouldSearchProject = PROJECT_SEARCH_TOKENS.some((item) => tokens.has(item));
-    const workspaceRootPath = options.workspaceRootPath.value;
-
-    if (!shouldSearchProject || !workspaceRootPath) {
-      return null;
-    }
-
-    const query = prompt
-      .replace(CONTEXT_TOKEN_PATTERN, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 120);
-
-    if (!query) {
-      return null;
-    }
-
-    const payload = await aiService.queryIndex({
-      workspaceRootPath,
-      query,
-      limit: 8,
-    });
-
-    if (payload.results.length === 0) {
-      return null;
-    }
-
-    return {
-      id: `search-result:${workspaceRootPath}:${query}`,
-      kind: 'search-result',
-      label: `项目搜索 · ${query}`,
-      path: workspaceRootPath,
-      range: null,
-      contentPreview: payload.results
-        .map(
-          (item) => `${item.path}${item.lineNumber ? `:${item.lineNumber}` : ''}\n${item.preview}`,
-        )
-        .join('\n---\n'),
-      redacted: false,
-    };
-  };
-
-  const buildReferences = async (prompt = ''): Promise<IAiContextReference[]> => {
-    const tokens = resolveContextTokens(prompt);
-
+  const buildSidecarToolReferences = (): IAiContextReference[] => {
     const currentFile = buildCurrentFileReference(options.document.value);
-    const selection = buildSelectionReference(options.selection.value, options.document.value);
-    const activeRun = buildActiveRunReference(options.activeRun.value);
-    const diagnostics = buildDiagnosticsReference(options.analysis.value, options.document.value);
-    const gitDiff = buildGitDiffReference(options.gitStatus.value);
-    const projectSearch = await buildProjectSearchReference(prompt).catch(() => null);
 
-    const candidates: ReadonlyArray<readonly [IAiContextReference | null, readonly string[]]> = [
-      [currentFile, ['file', 'current-file']],
-      [selection, ['selection']],
-      [activeRun, ['terminal', 'log']],
-      [diagnostics, ['diagnostics', 'shellcheck']],
-      [gitDiff, ['git-diff', 'git']],
-      [projectSearch, PROJECT_SEARCH_TOKENS],
-    ];
+    return currentFile ? [currentFile] : [];
+  };
 
-    const references = candidates
-      .filter(([, aliases]) => shouldIncludeReference(tokens, aliases))
-      .map(([reference]) => reference)
-      .filter((item): item is IAiContextReference => item !== null);
+  const buildSidecarContextReferences = (
+    references: IAiContextReference[] = currentReferences.value,
+  ): IAiContextReference[] => {
+    const seen = new Set<string>();
+    const merged: IAiContextReference[] = [];
 
-    return [...references, ...attachedFiles.value.map((file) => file.reference)];
+    for (const reference of [...references, ...buildSidecarToolReferences()]) {
+      if (seen.has(reference.id)) {
+        continue;
+      }
+
+      seen.add(reference.id);
+      merged.push(reference);
+    }
+
+    return merged;
   };
 
   // -----------------------------------------------------------------------
@@ -2250,7 +2181,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const applyQuickAction = (action: IAiQuickAction): void => {
     draft.value = buildQuickPrompt(action.id);
 
-    void buildReferences(draft.value).then((references) => {
+    void buildReferences().then((references) => {
       currentReferences.value = references;
     });
 
@@ -2298,7 +2229,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         reference,
       });
 
-      currentReferences.value = await buildReferences(draft.value);
+      currentReferences.value = await buildReferences();
       errorMessage.value = '';
 
       return;
@@ -2350,7 +2281,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         reference,
       });
 
-      currentReferences.value = await buildReferences(draft.value);
+      currentReferences.value = await buildReferences();
       errorMessage.value = '';
 
       return;
@@ -2373,7 +2304,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
 
     attachedFiles.value = remainingFiles;
 
-    void buildReferences(draft.value).then((references) => {
+    void buildReferences().then((references) => {
       currentReferences.value = references;
     });
   };
@@ -2637,7 +2568,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     let references: IAiContextReference[];
 
     try {
-      references = await buildReferences(messageContent);
+      references = await buildReferences();
     } catch (error) {
       const message = toErrorMessage(error, MSG_CALL_FAILED);
       errorMessage.value = message;
@@ -2694,7 +2625,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       try {
         const planResult = await agentPlan.createPlan(
           messageContent,
-          references,
+          buildSidecarContextReferences(references),
           options.workspaceRootPath.value,
         );
 
@@ -2997,6 +2928,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     applyQuickAction,
     attachFile,
     removeAttachedFile,
+    buildSidecarContextReferences,
     resolveSidecarToolConfirmation,
     sendMessage,
     stopCurrentRequest,

@@ -283,6 +283,41 @@ describe('Agent sidecar system prompt', () => {
     assert.match(prompt, /不要调用旧的 web_search \/ web_fetch/u);
     assert.match(prompt, /最终回答仍使用中文/u);
   });
+
+  it('tells Mastra not to read current files for general questions without an explicit path', () => {
+    const prompt = buildSystemPrompt({
+      mode: 'agent',
+      goal: '科学原理如何解释',
+      messages: [{ role: 'user', content: '科学原理如何解释' }],
+      context: [],
+    }, 'deepseek-v4-pro');
+
+    assert.match(prompt, /一般知识问答.*直接回答/u);
+    assert.match(prompt, /文件读取工具必须提供明确 path/u);
+    assert.match(prompt, /不要用空参数尝试读取“当前文件”/u);
+  });
+
+  it('keeps current-file tool context out of the system prompt', () => {
+    const prompt = buildSystemPrompt({
+      mode: 'agent',
+      goal: '解释当前文件',
+      messages: [{ role: 'user', content: '解释当前文件' }],
+      context: [
+        {
+          id: 'current-file:src/app.ts',
+          kind: 'current-file',
+          label: 'app.ts',
+          path: 'src/app.ts',
+          range: null,
+          contentPreview: 'const hidden = true;',
+          redacted: false,
+        },
+      ],
+    }, 'deepseek-v4-pro');
+
+    assert.doesNotMatch(prompt, /const hidden = true/u);
+    assert.doesNotMatch(prompt, /src\/app\.ts/u);
+  });
 });
 
 describe('Mastra memory helpers', () => {
@@ -680,6 +715,96 @@ describe('Mastra runtime chat', () => {
     }
   });
 
+  it('uses Workspace filesystem tools instead of exposing duplicate filesystem MCP tools', async () => {
+    const workspaceRoot = createTemporaryWorkspace();
+    let capturedToolNames: string[] = [];
+    const runtime = new MastraRuntime({
+      readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
+      createMcpClientBundle: async () => ({
+        clients: [],
+        configs: [],
+        errors: [],
+        tools: [
+          {
+            name: 'read_text_file',
+            description: '读取文本文件',
+            toolSpec: {
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  path: { type: 'string' },
+                },
+                required: ['path'],
+              },
+            },
+            mcpClient: {
+              callTool: async () => ({
+                content: [{ type: 'text', text: '不应被调用' }],
+                isError: false,
+              }),
+            },
+          },
+          {
+            name: 'tavily-search',
+            description: '联网搜索',
+            toolSpec: {
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  query: { type: 'string' },
+                },
+                required: ['query'],
+              },
+            },
+            mcpClient: {
+              callTool: async () => ({
+                content: [{ type: 'text', text: '搜索完成' }],
+                isError: false,
+              }),
+            },
+          },
+        ],
+        disconnectAll: async () => undefined,
+      }),
+      createAgent: (config) => {
+        capturedToolNames = Object.keys(config.tools ?? {});
+
+        return {
+          stream: async () => ({
+            fullStream: (async function* () {
+              yield {
+                type: 'text-delta',
+                runId: 'workspace-filter-run',
+                payload: {
+                  id: 'workspace-filter-text',
+                  text: '无需读取文件。',
+                },
+              };
+            })(),
+          }),
+          generate: async () => {
+            throw new Error('generate should not be used in workspace filesystem MCP filter test');
+          },
+        };
+      },
+    });
+
+    try {
+      await runtime.chat({
+        mode: 'ask',
+        goal: '科学原理如何解释',
+        messages: [{ role: 'user', content: '科学原理如何解释' }],
+        workspaceRootPath: workspaceRoot,
+        context: [],
+      });
+
+      assert.equal(capturedToolNames.includes('read_text_file'), false);
+      assert.equal(capturedToolNames.includes('tavily-search'), true);
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it('routes Mastra reasoning chunks into agent runtime events instead of final text', async () => {
     let disconnectCalls = 0;
     const runtime = new MastraRuntime({
@@ -962,6 +1087,79 @@ describe('Mastra native time tools', () => {
     });
   });
 
+  it('treats nested null timezone as omitted for get_current_time', async () => {
+    const tools = createMastraTimeTools({
+      now: () => new Date('2026-05-09T10:32:45.000Z'),
+      localTimezone: 'Asia/Shanghai',
+    });
+    const executeCurrentTime = tools.get_current_time.execute;
+
+    assert.equal(typeof executeCurrentTime, 'function');
+
+    if (!executeCurrentTime) {
+      throw new Error('get_current_time execute is not available.');
+    }
+
+    const result = await executeCurrentTime({ input: { timezone: null } }, {});
+
+    assert.deepEqual(result, {
+      timezone: 'Asia/Shanghai',
+      datetime: '2026-05-09T18:32:45+08:00',
+      day_of_week: 'Saturday',
+      is_dst: false,
+    });
+  });
+
+  it('accepts root and arguments null timezone before execute runs', async () => {
+    const tools = createMastraTimeTools({
+      now: () => new Date('2026-05-09T10:32:45.000Z'),
+      localTimezone: 'Asia/Shanghai',
+    });
+    const executeCurrentTime = tools.get_current_time.execute;
+
+    assert.equal(typeof executeCurrentTime, 'function');
+
+    if (!executeCurrentTime) {
+      throw new Error('get_current_time execute is not available.');
+    }
+
+    const rootNullResult = await executeCurrentTime({ timezone: null }, {});
+    const argumentsNullResult = await executeCurrentTime({ arguments: { timezone: null } }, {});
+
+    assert.deepEqual(rootNullResult, {
+      timezone: 'Asia/Shanghai',
+      datetime: '2026-05-09T18:32:45+08:00',
+      day_of_week: 'Saturday',
+      is_dst: false,
+    });
+    assert.deepEqual(argumentsNullResult, rootNullResult);
+  });
+
+  it('accepts wrapped convert_time timezone fields from model tool calls', async () => {
+    const tools = createMastraTimeTools({
+      now: () => new Date('2026-05-09T10:32:45.000Z'),
+      localTimezone: 'Asia/Shanghai',
+    });
+    const executeConvertTime = tools.convert_time.execute;
+
+    assert.equal(typeof executeConvertTime, 'function');
+
+    if (!executeConvertTime) {
+      throw new Error('convert_time execute is not available.');
+    }
+
+    const result = await executeConvertTime({
+      arguments: {
+        source_timezone: null,
+        time: '18:30',
+        target_timezone: 'America/New_York',
+      },
+    }, {});
+
+    assert.equal(result.target.timezone, 'America/New_York');
+    assert.equal(result.target.datetime, '2026-05-09T06:30:00-04:00');
+  });
+
   it('converts wall-clock time between timezones without relying on MCP time', async () => {
     const tools = createMastraTimeTools({
       now: () => new Date('2026-05-09T10:32:45.000Z'),
@@ -1042,8 +1240,64 @@ describe('Mastra runtime built-in tools', () => {
       context: [],
     });
 
-    assert.deepEqual(capturedToolNames, ['get_current_time', 'convert_time']);
+    assert.equal(capturedToolNames.includes('read_current_file'), false);
+    assert.equal(capturedToolNames.includes('get_current_time'), true);
+    assert.equal(capturedToolNames.includes('convert_time'), true);
     assert.equal(response.result, '现在可以继续。');
+  });
+
+  it('exposes read_current_file only when UI provides current-file tool context', async () => {
+    let capturedToolNames: string[] = [];
+    const runtime = new MastraRuntime({
+      readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
+      createMcpClientBundle: async () => ({
+        clients: [],
+        configs: [],
+        errors: [],
+        tools: [],
+        disconnectAll: async () => undefined,
+      }),
+      createAgent: (config) => {
+        capturedToolNames = Object.keys(config.tools ?? {});
+
+        return {
+          stream: async () => ({
+            fullStream: (async function* () {
+              yield {
+                type: 'text-delta',
+                runId: 'run-current-file-tool',
+                payload: {
+                  id: 'text-current-file-tool',
+                  text: '可以按需读取当前文件。',
+                },
+              };
+            })(),
+          }),
+          generate: async () => {
+            throw new Error('generate should not be used in current-file tool test');
+          },
+        };
+      },
+    });
+
+    await runtime.chat({
+      mode: 'ask',
+      goal: '解释当前文件',
+      messages: [{ role: 'user', content: '解释当前文件' }],
+      context: [
+        {
+          id: 'current-file:src/app.ts',
+          kind: 'current-file',
+          label: 'app.ts',
+          path: 'src/app.ts',
+          range: null,
+          contentPreview: 'const enabled = true;',
+          redacted: false,
+        },
+      ],
+    });
+
+    assert.equal(capturedToolNames.includes('read_current_file'), true);
   });
 });
 
@@ -1167,7 +1421,10 @@ describe('Mastra runtime execute', () => {
     assert.deepEqual(capturedMessages, [
       { role: 'user', content: '请直接执行' },
     ]);
-    assert.deepEqual(capturedToolNames, ['read_file', 'get_current_time', 'convert_time']);
+    assert.equal(capturedToolNames.includes('read_file'), true);
+    assert.equal(capturedToolNames.includes('read_current_file'), false);
+    assert.equal(capturedToolNames.includes('get_current_time'), true);
+    assert.equal(capturedToolNames.includes('convert_time'), true);
     const streamOptions = capturedStreamOptions as {
       runId?: unknown;
       maxSteps?: unknown;
@@ -1646,7 +1903,10 @@ describe('Mastra runtime plan', () => {
     assert.equal(typeof capturedModel, 'object');
     assert.equal((capturedModel as { provider?: unknown } | null)?.provider, 'deepseek.chat');
     assert.equal((capturedModel as { modelId?: unknown } | null)?.modelId, 'deepseek-chat');
-    assert.deepEqual(capturedToolNames, ['read_file', 'get_current_time', 'convert_time']);
+    assert.equal(capturedToolNames.includes('read_file'), true);
+    assert.equal(capturedToolNames.includes('read_current_file'), false);
+    assert.equal(capturedToolNames.includes('get_current_time'), true);
+    assert.equal(capturedToolNames.includes('convert_time'), true);
     assert.deepEqual(capturedMessages, [
       { role: 'user', content: '目标：完成迁移\n给我一个迁移计划' },
     ]);

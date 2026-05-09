@@ -643,11 +643,17 @@ const getDisplayWebSearchUrl = (url: string): string => {
 
 const resolveWebSearchSources = (value: string | undefined): IWebSearchSourceChip[] => {
   const parsed = parsePreviewJson(value);
-  const rawItems = Array.isArray(parsed)
-    ? parsed
-    : parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).results)
-      ? (parsed as Record<string, unknown>).results
-      : [];
+  let rawItems: unknown[] = [];
+
+  if (Array.isArray(parsed)) {
+    rawItems = parsed;
+  } else if (parsed && typeof parsed === 'object') {
+    const { results } = parsed as Record<string, unknown>;
+
+    if (Array.isArray(results)) {
+      rawItems = results;
+    }
+  }
 
   const seen = new Set<string>();
   const sources: IWebSearchSourceChip[] = [];
