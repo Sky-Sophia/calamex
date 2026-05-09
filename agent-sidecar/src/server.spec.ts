@@ -33,6 +33,7 @@ import {
   agentSidecarRollbackRestoreRequestSchema,
   createAgentSidecarServer,
 } from './server.js';
+import { createMastraTimeTools } from './tools/time.js';
 
 const unsupportedRuntimeResponse = async (
   ...args: Parameters<IAgentSidecarRuntime['chat']>
@@ -267,6 +268,20 @@ describe('Agent sidecar system prompt', () => {
     assert.match(prompt, /当前模型：anthropic\/claude-sonnet-4-6/);
     assert.match(prompt, /Anthropic/);
     assert.doesNotMatch(prompt, /当前模型不是|不要自称/);
+  });
+
+  it('prompts Mastra to use official Tavily MCP tools instead of legacy web wrappers', () => {
+    const prompt = buildSystemPrompt({
+      mode: 'agent',
+      goal: '网络搜索上周的北京天气新闻',
+      messages: [{ role: 'user', content: '网络搜索上周的北京天气新闻' }],
+      context: [],
+    }, 'deepseek-v4-pro');
+
+    assert.match(prompt, /tavily-search/);
+    assert.match(prompt, /tavily-extract/);
+    assert.match(prompt, /不要调用旧的 web_search \/ web_fetch/u);
+    assert.match(prompt, /最终回答仍使用中文/u);
   });
 });
 
@@ -542,8 +557,8 @@ describe('Mastra runtime chat', () => {
     assert.deepEqual(capturedStreamOptions, {
       abortSignal: abortController.signal,
       runId: 'req-123',
-      maxSteps: 1,
-      toolChoice: 'none',
+      maxSteps: 10,
+      toolChoice: 'auto',
       memory: {
         thread: chatMemoryScope.thread,
         resource: chatMemoryScope.resource,
@@ -900,6 +915,138 @@ describe('Mastra runtime chat', () => {
   });
 });
 
+describe('Mastra native time tools', () => {
+  it('defaults get_current_time to the configured local timezone', async () => {
+    const tools = createMastraTimeTools({
+      now: () => new Date('2026-05-09T10:32:45.000Z'),
+      localTimezone: 'Asia/Shanghai',
+    });
+    const executeCurrentTime = tools.get_current_time.execute;
+
+    assert.equal(typeof executeCurrentTime, 'function');
+
+    if (!executeCurrentTime) {
+      throw new Error('get_current_time execute is not available.');
+    }
+
+    const result = await executeCurrentTime({}, {});
+
+    assert.deepEqual(result, {
+      timezone: 'Asia/Shanghai',
+      datetime: '2026-05-09T18:32:45+08:00',
+      day_of_week: 'Saturday',
+      is_dst: false,
+    });
+  });
+
+  it('accepts wrapped empty input for get_current_time from model tool calls', async () => {
+    const tools = createMastraTimeTools({
+      now: () => new Date('2026-05-09T10:32:45.000Z'),
+      localTimezone: 'Asia/Shanghai',
+    });
+    const executeCurrentTime = tools.get_current_time.execute;
+
+    assert.equal(typeof executeCurrentTime, 'function');
+
+    if (!executeCurrentTime) {
+      throw new Error('get_current_time execute is not available.');
+    }
+
+    const result = await executeCurrentTime({ input: {} }, {});
+
+    assert.deepEqual(result, {
+      timezone: 'Asia/Shanghai',
+      datetime: '2026-05-09T18:32:45+08:00',
+      day_of_week: 'Saturday',
+      is_dst: false,
+    });
+  });
+
+  it('converts wall-clock time between timezones without relying on MCP time', async () => {
+    const tools = createMastraTimeTools({
+      now: () => new Date('2026-05-09T10:32:45.000Z'),
+      localTimezone: 'Asia/Shanghai',
+    });
+    const executeConvertTime = tools.convert_time.execute;
+
+    assert.equal(typeof executeConvertTime, 'function');
+
+    if (!executeConvertTime) {
+      throw new Error('convert_time execute is not available.');
+    }
+
+    const result = await executeConvertTime({
+      source_timezone: 'Asia/Shanghai',
+      time: '18:30',
+      target_timezone: 'America/New_York',
+    }, {});
+
+    assert.deepEqual(result, {
+      source: {
+        timezone: 'Asia/Shanghai',
+        datetime: '2026-05-09T18:30:00+08:00',
+        day_of_week: 'Saturday',
+        is_dst: false,
+      },
+      target: {
+        timezone: 'America/New_York',
+        datetime: '2026-05-09T06:30:00-04:00',
+        day_of_week: 'Saturday',
+        is_dst: true,
+      },
+      time_difference: '-12.0h',
+    });
+  });
+});
+
+describe('Mastra runtime built-in tools', () => {
+  it('keeps native time tools available even when no MCP tool is connected', async () => {
+    let capturedToolNames: string[] = [];
+    const runtime = new MastraRuntime({
+      readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
+      createMcpClientBundle: async () => ({
+        clients: [],
+        configs: [],
+        errors: [],
+        tools: [],
+        disconnectAll: async () => undefined,
+      }),
+      createAgent: (config) => {
+        capturedToolNames = Object.keys(config.tools ?? {});
+
+        return {
+          stream: async () => ({
+            fullStream: (async function* () {
+              yield {
+                type: 'text-delta',
+                runId: 'run-native-time-tools',
+                from: 'AGENT',
+                payload: {
+                  id: 'text-native-time-tools',
+                  text: '现在可以继续。',
+                },
+              };
+            })(),
+          }),
+          generate: async () => {
+            throw new Error('generate should not be used in built-in tool runtime test');
+          },
+        };
+      },
+    });
+
+    const response = await runtime.chat({
+      mode: 'ask',
+      goal: '继续',
+      messages: [{ role: 'user', content: '继续' }],
+      context: [],
+    });
+
+    assert.deepEqual(capturedToolNames, ['get_current_time', 'convert_time']);
+    assert.equal(response.result, '现在可以继续。');
+  });
+});
+
 describe('Mastra runtime execute', () => {
   it('exposes MCP tools to Mastra execute, keeps the sidecar event contract, and releases the bundle after the run', async () => {
     let capturedInstructions = '';
@@ -1020,7 +1167,7 @@ describe('Mastra runtime execute', () => {
     assert.deepEqual(capturedMessages, [
       { role: 'user', content: '请直接执行' },
     ]);
-    assert.deepEqual(capturedToolNames, ['read_file']);
+    assert.deepEqual(capturedToolNames, ['read_file', 'get_current_time', 'convert_time']);
     const streamOptions = capturedStreamOptions as {
       runId?: unknown;
       maxSteps?: unknown;
@@ -1499,7 +1646,7 @@ describe('Mastra runtime plan', () => {
     assert.equal(typeof capturedModel, 'object');
     assert.equal((capturedModel as { provider?: unknown } | null)?.provider, 'deepseek.chat');
     assert.equal((capturedModel as { modelId?: unknown } | null)?.modelId, 'deepseek-chat');
-    assert.deepEqual(capturedToolNames, ['read_file']);
+    assert.deepEqual(capturedToolNames, ['read_file', 'get_current_time', 'convert_time']);
     assert.deepEqual(capturedMessages, [
       { role: 'user', content: '目标：完成迁移\n给我一个迁移计划' },
     ]);

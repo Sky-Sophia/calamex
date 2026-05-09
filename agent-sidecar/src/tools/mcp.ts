@@ -55,7 +55,6 @@ const SIDECAR_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const PROJECT_ROOT = resolve(SIDECAR_ROOT, '..');
 const NODE_BIN_DIRECTORY = join(SIDECAR_ROOT, 'node_modules', '.bin');
 const DEFAULT_MEMORY_FILE_PATH = join(homedir(), '.xiaojianc', 'mcp-memory.jsonl');
-const DEFAULT_LOCAL_TIMEZONE = 'Asia/Shanghai';
 const DEFAULT_GITHUB_MCP_URL = 'https://api.githubcopilot.com/mcp/';
 const PROBE_MCP_NPX_SPEC = '@probelabs/probe@0.6.0-rc315';
 const MCP_LIST_TOOLS_TIMEOUT_MS = 10_000;
@@ -375,7 +374,6 @@ export const loadMcpServerConfigs = (
   const npxCommand = resolveNpxCommand(platform);
   const gitExecutable = resolveWindowsGitExecutable(env, platform);
   const memoryFilePath = resolve(trimToNull(env.AGENT_MCP_MEMORY_FILE_PATH) ?? DEFAULT_MEMORY_FILE_PATH);
-  const localTimezone = trimToNull(env.AGENT_MCP_LOCAL_TIMEZONE) ?? DEFAULT_LOCAL_TIMEZONE;
   const githubMcpPat = trimToNull(env.GITHUB_MCP_PAT);
   const githubMcpUrl = trimToNull(env.GITHUB_MCP_URL) ?? DEFAULT_GITHUB_MCP_URL;
   const sqliteDbPath = trimToNull(env.SQLITE_DB_PATH);
@@ -457,23 +455,6 @@ export const loadMcpServerConfigs = (
   );
   if (sequentialThinking) {
     configs.push(sequentialThinking);
-  }
-
-  if (uvxCommand) {
-    const time = uvxServerConfig(
-      'time',
-      uvxCommand,
-      'mcp-server-time==2026.1.26',
-      [`--local-timezone=${localTimezone}`],
-      workspaceRoot,
-      errors,
-      '未找到 Windows uvx.exe 绝对路径，已跳过 Time MCP。请设置 AGENT_MCP_UVX_PATH。',
-    );
-    if (time) {
-      configs.push(time);
-    }
-  } else {
-    errors.push('未找到 Windows uvx.exe 绝对路径，已跳过 Time MCP。请设置 AGENT_MCP_UVX_PATH。');
   }
 
   if (githubMcpPat) {

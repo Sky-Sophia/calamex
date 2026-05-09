@@ -32,7 +32,6 @@ const TOOL_KIND_MATCHERS: readonly IToolKindMatcher[] = [
             /search_symbols/u,
             /list_workspace_entries/u,
             /directory_tree/u,
-            /log_anomalies/u,
             /sequentialthinking/u,
         ],
     },
@@ -49,6 +48,7 @@ const TOOL_KIND_MATCHERS: readonly IToolKindMatcher[] = [
             /get_changed_files/u,
             /terminal_last_command/u,
             /terminal_selection/u,
+            /mastra_list_logs/u,
         ],
     },
     {
@@ -81,7 +81,6 @@ const TOOL_KIND_MATCHERS: readonly IToolKindMatcher[] = [
             /browser_evaluate/u,
             /fetch_webpage/u,
             /query-docs/u,
-            /tavily/u,
         ],
     },
     {
@@ -116,6 +115,8 @@ const TOOL_KIND_MATCHERS: readonly IToolKindMatcher[] = [
             /get_python_environment_details/u,
             /get_python_executable_details/u,
             /create_and_run_task/u,
+            /^web_(?:search|fetch)$/u,
+            /^tavily(?:-|_)/u,
         ],
     },
     {

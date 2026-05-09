@@ -1,7 +1,8 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -520,6 +521,7 @@ fn spawn_default_sidecar() -> Result<(), String> {
         .stderr(Stdio::null())
         .env("AGENT_SIDECAR_PORT", "39871");
 
+    inject_sidecar_dotenv_key_if_present(&mut command, &sidecar_root, "TAVILY_API_KEY");
     inject_user_env_if_present(&mut command, "TAVILY_API_KEY");
     inject_uvx_path(&mut command);
     inject_deepseek_env_from_ai_config(&mut command);
@@ -639,6 +641,38 @@ fn windows_uvx_candidates() -> Vec<PathBuf> {
 fn inject_user_env_if_present(command: &mut Command, key: &str) {
     if let Some(value) = env_or_user_env(key) {
         command.env(key, value);
+    }
+}
+
+fn inject_sidecar_dotenv_key_if_present(command: &mut Command, sidecar_root: &Path, key: &str) {
+    if env_or_user_env(key).is_some() {
+        return;
+    }
+
+    let Ok(content) = fs::read_to_string(sidecar_root.join(".env")) else {
+        return;
+    };
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let Some((name, raw_value)) = trimmed.split_once('=') else {
+            continue;
+        };
+
+        if name.trim() != key {
+            continue;
+        }
+
+        let value = raw_value.trim().trim_matches(['"', '\'']);
+        if !value.is_empty() {
+            command.env(key, value);
+        }
+        return;
     }
 }
 
@@ -811,10 +845,13 @@ pub async fn restore_checkpoint(
 mod tests {
     use super::{
         build_sidecar_url, classify_sidecar_health, drain_complete_sidecar_stream_lines,
-        has_non_whitespace_bytes, is_default_local_sidecar_url, normalize_base_url,
-        parse_netstat_listening_pids, strip_litellm_model_provider_prefix,
-        SidecarHealthProbePayload, SidecarHealthStatus, DEFAULT_SIDECAR_URL,
+        has_non_whitespace_bytes, inject_sidecar_dotenv_key_if_present,
+        is_default_local_sidecar_url, normalize_base_url, parse_netstat_listening_pids,
+        strip_litellm_model_provider_prefix, SidecarHealthProbePayload, SidecarHealthStatus,
+        DEFAULT_SIDECAR_URL,
     };
+    use std::fs;
+    use std::process::Command;
 
     #[test]
     fn normalize_base_url_uses_default_when_env_is_empty() {
@@ -900,6 +937,37 @@ mod tests {
             strip_litellm_model_provider_prefix("openai/gpt-5.5", "deepseek"),
             None
         );
+    }
+
+    #[test]
+    fn injects_tavily_key_from_sidecar_dotenv_when_user_env_is_missing() {
+        let sidecar_root = std::env::temp_dir().join(format!(
+            "xiaojianc-sidecar-env-test-{}",
+            std::process::id()
+        ));
+
+        fs::create_dir_all(&sidecar_root).expect("temp sidecar root should be created");
+        fs::write(
+            sidecar_root.join(".env"),
+            "# comment\nXIAOJIANC_TEST_TAVILY_KEY=tvly-test-from-dotenv\n",
+        )
+        .expect("dotenv should be written");
+
+        let mut command = Command::new("node");
+        inject_sidecar_dotenv_key_if_present(
+            &mut command,
+            &sidecar_root,
+            "XIAOJIANC_TEST_TAVILY_KEY",
+        );
+
+        let injected = command
+            .get_envs()
+            .find(|(key, _)| key.to_string_lossy() == "XIAOJIANC_TEST_TAVILY_KEY")
+            .and_then(|(_, value)| value.map(|item| item.to_string_lossy().to_string()));
+
+        assert_eq!(injected.as_deref(), Some("tvly-test-from-dotenv"));
+
+        fs::remove_dir_all(sidecar_root).expect("temp sidecar root should be removed");
     }
 
     #[test]

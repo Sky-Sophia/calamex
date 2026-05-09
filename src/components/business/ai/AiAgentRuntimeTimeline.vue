@@ -1,43 +1,43 @@
 <script setup lang="ts">
 import {
-    ChainOfThought,
-    ChainOfThoughtContent,
-    ChainOfThoughtHeader,
-    ChainOfThoughtSearchResult,
-    ChainOfThoughtSearchResults,
-    ChainOfThoughtStep,
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtSearchResult,
+  ChainOfThoughtSearchResults,
+  ChainOfThoughtStep,
 } from '@/components/ai-elements/chain-of-thought';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Task, TaskContent, TaskItem } from '@/components/ai-elements/task';
 import {
-    classifyRuntimeToolKind,
-    normalizeRuntimeToolName,
-    type TAiRuntimeToolKind,
+  classifyRuntimeToolKind,
+  normalizeRuntimeToolName,
+  type TAiRuntimeToolKind,
 } from '@/constants/ai-runtime-tools';
 import type { TAgentRuntimeEvent } from '@/types/agent-sidecar';
 import {
-    Activity,
-    BookOpen,
-    Brain,
-    ChartColumn,
-    CircleAlert,
-    Clock3,
-    Coffee,
-    Dot,
-    FileCode,
-    FileText,
-    Files,
-    FolderTree,
-    GitBranch,
-    Globe,
-    HardDrive,
-    Image as ImageIcon,
-    ListTodo,
-    Pencil,
-    Play,
-    Search,
-    Terminal,
-    Workflow,
+  Activity,
+  BookOpen,
+  Brain,
+  ChartColumn,
+  CircleAlert,
+  Clock3,
+  Coffee,
+  Dot,
+  FileCode,
+  FileText,
+  Files,
+  FolderTree,
+  GitBranch,
+  Globe,
+  HardDrive,
+  Image as ImageIcon,
+  ListTodo,
+  Pencil,
+  Play,
+  Search,
+  Terminal,
+  Workflow,
 } from 'lucide-vue-next';
 import { computed, type Component } from 'vue';
 
@@ -165,6 +165,7 @@ const TOOL_ICON_MATCHERS: readonly IToolIconMatcher[] = [
       /read_selected_text/u,
       /get_file_info/u,
       /open_nodes/u,
+      /mastra_list_logs/u,
     ],
   },
   {
@@ -254,7 +255,6 @@ const TOOL_ICON_MATCHERS: readonly IToolIconMatcher[] = [
   {
     icon: 'chart',
     patterns: [
-      /log_anomalies/u,
       /get_errors/u,
       /test_failure/u,
     ],

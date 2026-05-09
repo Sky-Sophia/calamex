@@ -374,16 +374,6 @@ const getConversationCheckpointLabel = (messageId: string): string => {
   return `恢复到 ${getHistoryTimeLabel(checkpoint.createdAt)} 检查点`;
 };
 
-const getConversationCheckpointTooltip = (messageId: string): string | undefined => {
-  const checkpoint = getConversationCheckpoint(messageId);
-
-  if (!checkpoint) {
-    return undefined;
-  }
-
-  return `恢复到 ${getHistoryTimeLabel(checkpoint.createdAt)} 的对话检查点，并丢弃其后的消息`;
-};
-
 const handleRestoreConversationCheckpoint = async (messageId: string): Promise<void> => {
   const checkpoint = getConversationCheckpoint(messageId);
 
@@ -705,7 +695,6 @@ onMounted(() => {
       <template #after-message="{ message }">
         <Checkpoint v-if="getConversationCheckpoint(message.id)" class="ai-conversation-checkpoint">
           <CheckpointTrigger class="ai-conversation-checkpoint__trigger" :disabled="isConversationCheckpointDisabled"
-            :tooltip="getConversationCheckpointTooltip(message.id)"
             @click="handleRestoreConversationCheckpoint(message.id)">
             <CheckpointIcon class="ai-conversation-checkpoint__icon" aria-hidden="true" />
             <span class="ai-conversation-checkpoint__label">{{ getConversationCheckpointLabel(message.id) }}</span>

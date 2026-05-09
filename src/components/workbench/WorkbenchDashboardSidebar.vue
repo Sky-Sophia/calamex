@@ -18,7 +18,7 @@ import {
     TerminalSquare,
 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
-import appBrandIcon from '../../../assets/brand/1.svg';
+import appBrandIcon from '../../../resources/logo.svg';
 
 type TPrimarySidebarView = Exclude<TWorkbenchSidebarView, 'ai'>;
 
@@ -160,10 +160,11 @@ watch(
 .workbench-dashboard-sidebar__brand-button {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     width: 28px;
     height: 28px;
     border-radius: 10px;
+    overflow: visible;
     color: var(--text-primary);
     transition:
         background-color 180ms ease,
@@ -186,9 +187,11 @@ watch(
 
 .workbench-dashboard-sidebar__brand-icon {
     display: block;
-    width: 20px;
-    height: 20px;
+    width: 70px;
+    height: auto;
+    max-width: none;
     flex-shrink: 0;
+    pointer-events: none;
 }
 
 .workbench-dashboard-sidebar__toolbar-shell {

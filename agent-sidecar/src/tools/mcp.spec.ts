@@ -14,6 +14,8 @@ const WORKSPACE_ROOT = resolve('D:/com.xiaojianc/my_desktop_app');
 const MEMORY_FILE_PATH = join(WORKSPACE_ROOT, 'tmp', 'mcp-memory-test.jsonl');
 const UVX_FIXTURE_PATH = join(tmpdir(), 'xiaojianc-mcp-fixtures', 'uvx.exe');
 const GIT_FIXTURE_PATH = join(tmpdir(), 'xiaojianc-mcp-fixtures', 'git.exe');
+const LOGOSCOPE_EXECUTABLE_PATH = resolve(WORKSPACE_ROOT, 'agent-sidecar', 'node_modules', '.bin', 'logoscope.CMD');
+const LOGOSCOPE_MISSING_ERROR = `MCP server 可执行文件不存在：${LOGOSCOPE_EXECUTABLE_PATH}`;
 
 mkdirSync(dirname(UVX_FIXTURE_PATH), { recursive: true });
 writeFileSync(UVX_FIXTURE_PATH, '', 'utf8');
@@ -29,14 +31,14 @@ const defaultEnv = {
 };
 
 describe('MCP sidecar config', () => {
-  it('loads the built-in Anthropic and Tavily MCP servers', () => {
+  it('loads the built-in MCP servers', () => {
     const loaded = loadMcpServerConfigs({
       workspaceRootPath: WORKSPACE_ROOT,
       env: defaultEnv,
       platform: 'win32',
     });
 
-    assert.deepEqual(loaded.errors, []);
+    assert.deepEqual(loaded.errors, [LOGOSCOPE_MISSING_ERROR]);
     assert.deepEqual(loaded.configs.map((config) => config.name), [
       'filesystem',
       'git',
@@ -44,23 +46,18 @@ describe('MCP sidecar config', () => {
       'probe',
       'memory',
       'sequential-thinking',
-      'time',
       'github',
       'context7',
-      'logoscope',
       'hooks-mcp',
       'sqlite-mcp',
       'tavily-mcp',
     ]);
   });
 
-  it('wires workspace, memory, time and Tavily settings into server configs', () => {
+  it('wires workspace, memory and Tavily settings into server configs', () => {
     const loaded = loadMcpServerConfigs({
       workspaceRootPath: WORKSPACE_ROOT,
-      env: {
-        ...defaultEnv,
-        AGENT_MCP_LOCAL_TIMEZONE: 'Asia/Shanghai',
-      },
+      env: defaultEnv,
       platform: 'win32',
     });
     const filesystem = loaded.configs.find((config) => config.name === 'filesystem');
@@ -68,10 +65,8 @@ describe('MCP sidecar config', () => {
     const playwright = loaded.configs.find((config) => config.name === 'playwright');
     const probe = loaded.configs.find((config) => config.name === 'probe');
     const memory = loaded.configs.find((config) => config.name === 'memory');
-    const time = loaded.configs.find((config) => config.name === 'time');
     const github = loaded.configs.find((config) => config.name === 'github');
     const context7 = loaded.configs.find((config) => config.name === 'context7');
-    const logoscope = loaded.configs.find((config) => config.name === 'logoscope');
     const hooksMcp = loaded.configs.find((config) => config.name === 'hooks-mcp');
     const sqliteMcp = loaded.configs.find((config) => config.name === 'sqlite-mcp');
     const tavily = loaded.configs.find((config) => config.name === 'tavily-mcp');
@@ -85,13 +80,10 @@ describe('MCP sidecar config', () => {
     assert.equal(probe?.command, 'npx.cmd');
     assert.deepEqual(probe?.args, ['-y', '@probelabs/probe@0.6.0-rc315', 'mcp']);
     assert.equal(memory?.env?.MEMORY_FILE_PATH, MEMORY_FILE_PATH);
-    assert.equal(time?.command, UVX_FIXTURE_PATH);
-    assert.deepEqual(time?.args, ['mcp-server-time==2026.1.26', '--local-timezone=Asia/Shanghai']);
     assert.equal(github?.transportType, 'http');
     assert.equal(github?.url, 'https://api.githubcopilot.com/mcp/');
     assert.match(github?.headers?.Authorization ?? '', /^Bearer\s+/u);
     assert.deepEqual(context7?.args, []);
-    assert.deepEqual(logoscope?.args, ['mcp']);
     assert.deepEqual(hooksMcp?.args, ['hooks-mcp==0.2.4', '--working-directory', WORKSPACE_ROOT]);
     assert.equal(sqliteMcp?.env?.SQLITE_DB_PATH, resolve(join(WORKSPACE_ROOT, 'tmp', 'agent-sidecar.sqlite')));
     assert.equal(sqliteMcp?.env?.SQLITE_READ_ONLY, 'true');
@@ -127,7 +119,6 @@ describe('MCP sidecar config', () => {
     assert.equal(loaded.configs.some((config) => config.name === 'github'), false);
     assert.equal(loaded.errors.some((error) => /GITHUB_MCP_PAT/u.test(error)), true);
   });
-
   it('skips sqlite MCP when database path is missing', () => {
     const loaded = loadMcpServerConfigs({
       workspaceRootPath: WORKSPACE_ROOT,
@@ -167,10 +158,8 @@ describe('MCP sidecar config', () => {
       'probe',
       'memory',
       'sequential-thinking',
-      'time',
       'github',
       'context7',
-      'logoscope',
       'hooks-mcp',
       'sqlite-mcp',
       'tavily-mcp',
@@ -203,7 +192,7 @@ describe('MCP sidecar config', () => {
       env: defaultEnv,
       platform: 'win32',
     }), {
-      configuredServers: 13,
+      configuredServers: 11,
       serverNames: [
         'filesystem',
         'git',
@@ -211,15 +200,13 @@ describe('MCP sidecar config', () => {
         'probe',
         'memory',
         'sequential-thinking',
-        'time',
         'github',
         'context7',
-        'logoscope',
         'hooks-mcp',
         'sqlite-mcp',
         'tavily-mcp',
       ],
-      errors: [],
+      errors: [LOGOSCOPE_MISSING_ERROR],
     });
   });
 
@@ -239,7 +226,7 @@ describe('MCP sidecar config', () => {
       assert.equal(typeof readFileTool.mcpClient.callTool, 'function');
       assert.equal(typeof readFileTool.toolSpec.inputSchema, 'object');
       assert.equal(
-        bundle.errors.some((error) => error.includes('git') || error.includes('time')),
+        bundle.errors.some((error) => error.includes('git')),
         true,
       );
     } finally {

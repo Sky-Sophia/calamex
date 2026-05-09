@@ -179,11 +179,13 @@ onBeforeUnmount(() => {
 }
 
 .ai-image-attachment-preview-card[data-variant='composer'] {
+  --ai-image-attachment-preview-radius: 9px;
   width: 112px;
   height: 76px;
 }
 
 .ai-image-attachment-preview-card[data-variant='message'] {
+  --ai-image-attachment-preview-radius: 12px;
   width: 148px;
   height: 104px;
   max-width: min(40vw, 148px);
@@ -194,16 +196,16 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: var(--ai-image-attachment-preview-radius, var(--image-attachment-preview-radius, 12px));
   background: var(--image-preview-frame-surface);
-  box-shadow: var(--image-preview-frame-shadow);
+  box-shadow: var(--image-attachment-preview-shadow, var(--image-preview-frame-shadow));
   transition:
     transform var(--motion-duration-normal) var(--motion-easing-emphasized),
     box-shadow var(--motion-duration-normal) var(--motion-easing-standard);
 }
 
 .ai-image-attachment-preview-link.is-openable {
-  cursor: zoom-in;
+  cursor: pointer;
 }
 
 .ai-image-attachment-preview-link:hover {
@@ -238,10 +240,21 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
   cursor: pointer;
   backdrop-filter: blur(10px);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.92);
   transition:
+    opacity var(--motion-duration-fast) var(--motion-easing-standard),
     background-color var(--motion-duration-fast) var(--motion-easing-standard),
     color var(--motion-duration-fast) var(--motion-easing-standard),
     transform var(--motion-duration-fast) var(--motion-easing-standard);
+}
+
+.ai-image-attachment-preview-card:hover .ai-image-attachment-preview-remove,
+.ai-image-attachment-preview-card:focus-within .ai-image-attachment-preview-remove {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
 }
 
 .ai-image-attachment-preview-remove:hover {
@@ -261,9 +274,9 @@ onBeforeUnmount(() => {
 }
 
 :global(.pswp--ai-attachment-preview .pswp__img) {
-  border-radius: 10px;
+  border-radius: var(--image-attachment-preview-radius, 12px);
   background: var(--image-preview-frame-surface);
-  box-shadow: var(--image-preview-frame-shadow);
+  box-shadow: var(--image-attachment-preview-shadow, var(--image-preview-frame-shadow));
 }
 
 @media (prefers-reduced-motion: reduce) {

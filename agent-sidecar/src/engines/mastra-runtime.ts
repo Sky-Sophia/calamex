@@ -37,7 +37,14 @@ import {
     type IAgentRuntimeEventContext,
     type TAgentRuntimeEventDraft,
 } from '../streaming/stream-types.js';
+import {
+    createMastraFileLogger,
+    createMastraLoggerRef,
+    createMastraLogTools,
+    type IMastraLogToolsRef,
+} from '../tools/log.js';
 import { createMastraMcpClientBundle } from '../tools/mcp.js';
+import { createMastraTimeTools } from '../tools/time.js';
 import { buildSystemPrompt } from './agent-runtime-helpers.js';
 import type {
     IAgentRuntimeResponse,
@@ -54,6 +61,7 @@ import type {
 
 const DEFAULT_MASTRA_STORAGE_DIRECTORY = '.agent-sidecar';
 const DEFAULT_MASTRA_STORAGE_URL = `file:./${DEFAULT_MASTRA_STORAGE_DIRECTORY}/mastra.db`;
+const DEFAULT_MASTRA_LOG_FILE = `./${DEFAULT_MASTRA_STORAGE_DIRECTORY}/mastra.log`;
 const DEFAULT_EXECUTION_AGENT_ID = 'calamex-agent-sidecar';
 const DEFAULT_EXECUTION_AGENT_NAME = 'Calamex Agent Sidecar';
 const RUNTIME_TOOL_PREVIEW_CHARS = 1200;
@@ -345,6 +353,23 @@ const createRuntimePreview = (
     return redactForStream(clipped);
 };
 
+const extractMcpErrorMessage = (value: unknown): string | null => {
+    const record = toRecord(value);
+
+    if (record?.isError !== true) {
+        return null;
+    }
+
+    const content = Array.isArray(record.content) ? record.content : [];
+    const text = content
+        .map((item) => toNonEmptyString(toRecord(item)?.text))
+        .filter((item): item is string => Boolean(item))
+        .join('\n')
+        .trim();
+
+    return text || 'MCP tool returned an error result.';
+};
+
 const pushUiEvent = (
     events: TAgentRuntimeOutputEvent[],
     event: TAgentRuntimeOutputEvent,
@@ -539,7 +564,14 @@ const defaultCreateStorage = (): IMastraStorageLike => new LibSQLStore({
 const defaultCreateExecutionHandle = async (
     config: IMastraAgentConfig,
     storage: IMastraStorageLike,
+    loggerRef?: IMastraLogToolsRef,
 ): Promise<IMastraExecutionHandle> => {
+    const fileLogger = createMastraFileLogger(
+        process.env.AGENT_SIDECAR_LOG_FILE ?? DEFAULT_MASTRA_LOG_FILE,
+    );
+    if (loggerRef) {
+        loggerRef.current = fileLogger;
+    }
     const baseAgent = new Agent({
         id: config.id,
         name: config.name,
@@ -555,6 +587,7 @@ const defaultCreateExecutionHandle = async (
         },
         ...(config.tools ? { tools: config.tools as never } : {}),
         storage: storage as never,
+        logger: fileLogger,
     });
     const registeredAgent = mastra.getAgentById(baseAgent.id) as unknown as IMastraDurableAgentLike;
 
@@ -630,7 +663,14 @@ const createMastraMcpTools = (
                 throw new Error(`MCP tool ${tool.name} 缺少客户端句柄。`);
             }
 
-            return toJsonValue(await client.callTool(tool, toJsonValue(inputData)));
+            const result = await client.callTool(tool, toJsonValue(inputData));
+            const errorMessage = extractMcpErrorMessage(result);
+
+            if (errorMessage) {
+                throw new Error(errorMessage);
+            }
+
+            return toJsonValue(result);
         },
     })]),
 );
@@ -640,6 +680,7 @@ const loadMastraMcpTools = async (
         options?: { workspaceRootPath?: string | null },
     ) => Promise<IMastraMcpBundle>,
     workspaceRootPath?: string,
+    loggerRef?: IMastraLogToolsRef,
 ): Promise<{
     bundle: IMastraMcpBundle;
     tools: ToolsInput;
@@ -648,7 +689,11 @@ const loadMastraMcpTools = async (
     const bundle = await createBundle(workspaceRootPath
         ? { workspaceRootPath }
         : {});
-    const tools = createMastraMcpTools(bundle.tools);
+    const tools: ToolsInput = {
+        ...createMastraMcpTools(bundle.tools),
+        ...createMastraTimeTools(),
+        ...(loggerRef ? createMastraLogTools(loggerRef) : {}),
+    };
 
     return {
         bundle,
@@ -984,6 +1029,8 @@ export class MastraRuntime {
 
     private readonly storage: IMastraStorageLike;
 
+    private readonly loggerRef: IMastraLogToolsRef;
+
     private readonly pendingApprovals = new Map<string, IMastraPendingApproval>();
 
     readonly name = 'mastra';
@@ -991,8 +1038,9 @@ export class MastraRuntime {
     constructor(deps: IMastraRuntimeDeps = {}) {
         this.createAgent = deps.createAgent ?? defaultCreateAgent;
         this.storage = deps.createStorage ? deps.createStorage() : defaultCreateStorage();
+        this.loggerRef = createMastraLoggerRef();
         this.createExecutionHandle = deps.createExecutionHandle
-            ?? ((config) => defaultCreateExecutionHandle(config, this.storage));
+            ?? ((config) => defaultCreateExecutionHandle(config, this.storage, this.loggerRef));
         this.loadExecutionSnapshot = deps.loadExecutionSnapshot
             ?? (async (workflowName, runId) => {
                 const workflowStore = await this.storage.getStore('workflows');
@@ -1267,7 +1315,7 @@ export class MastraRuntime {
             bundle: mcpBundle,
             tools: mastraTools,
             hasTools,
-        } = await loadMastraMcpTools(this.createMcpClientBundle, normalizedInput.workspaceRootPath);
+        } = await loadMastraMcpTools(this.createMcpClientBundle, normalizedInput.workspaceRootPath, this.loggerRef);
         const workspace = createMastraWorkspace(normalizedInput.workspaceRootPath);
         const hasAgentTools = hasTools || Boolean(workspace);
         let shouldDisconnectBundle = true;
@@ -1383,7 +1431,7 @@ export class MastraRuntime {
             bundle: mcpBundle,
             tools: mastraTools,
             hasTools,
-        } = await loadMastraMcpTools(this.createMcpClientBundle, input.workspaceRootPath);
+        } = await loadMastraMcpTools(this.createMcpClientBundle, input.workspaceRootPath, this.loggerRef);
         const workspace = createMastraWorkspace(input.workspaceRootPath);
         const hasAgentTools = hasTools || Boolean(workspace);
 
@@ -1463,7 +1511,7 @@ export class MastraRuntime {
             bundle: mcpBundle,
             tools: mastraTools,
             hasTools,
-        } = await loadMastraMcpTools(this.createMcpClientBundle, normalizedInput.workspaceRootPath);
+        } = await loadMastraMcpTools(this.createMcpClientBundle, normalizedInput.workspaceRootPath, this.loggerRef);
         const workspace = createMastraWorkspace(normalizedInput.workspaceRootPath);
         const hasAgentTools = hasTools || Boolean(workspace);
         const requestedRunId = options.context?.requestId ?? createSessionId('mastra-run');
@@ -1766,7 +1814,7 @@ export class MastraRuntime {
                 bundle: mcpBundle,
                 tools: mastraTools,
                 hasTools,
-            } = await loadMastraMcpTools(this.createMcpClientBundle, workspaceRootPath);
+            } = await loadMastraMcpTools(this.createMcpClientBundle, workspaceRootPath, this.loggerRef);
             const workspace = createMastraWorkspace(workspaceRootPath);
 
             try {

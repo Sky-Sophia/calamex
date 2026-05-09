@@ -1001,6 +1001,7 @@ describe('useAiAssistant streaming integration', () => {
     const sendPromise = assistant.sendMessage();
 
     await waitForStartedStream(() => assistant.messages.value.at(-1)?.id);
+    expect(assistant.attachedFiles.value).toHaveLength(0);
 
     expect(aiServiceMock.chatStream).toHaveBeenCalledTimes(1);
     expect(aiServiceMock.chatStream).toHaveBeenLastCalledWith(
@@ -2777,6 +2778,7 @@ describe('useAiAssistant streaming integration', () => {
 
     await assistant.sendMessage();
 
+    expect(assistant.attachedFiles.value).toHaveLength(0);
     expect(agentStore.pendingToolConfirmation).toMatchObject({
       id: 'approval-run-command',
       runId: 'sidecar:sidecar-confirmation-session',

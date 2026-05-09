@@ -2670,6 +2670,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     );
 
     messages.value = nextMessages;
+    clearAttachedFiles({ revokePreviews: false });
 
     if (activeMode.value === 'agent') {
       await executeSidecarAgentRequest(
