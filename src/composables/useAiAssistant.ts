@@ -1,4 +1,13 @@
-import { computed, ref, shallowRef, unref, watch, type Ref } from 'vue';
+import {
+  computed,
+  getCurrentScope,
+  onScopeDispose,
+  ref,
+  shallowRef,
+  unref,
+  watch,
+  type Ref,
+} from 'vue';
 
 import { useAiAgentPlan } from '@/composables/useAiAgentPlan';
 import { useAiStream } from '@/composables/useAiStream';
@@ -29,10 +38,13 @@ import type {
 } from '@/types/agent-sidecar';
 import type {
   IAiApplyPatchMetadata,
+  IAiAttachedFile,
   IAiChatMessage,
+  IAiChatStreamRenderState,
   IAiChatStreamEventPayload,
   IAiConfigPayload,
   IAiContextReference,
+  IAiImageAttachmentPreview,
   IAiPatchSet,
   IAiProviderConnectionRequest,
   IAiProviderProfileDetailPayload,
@@ -61,8 +73,6 @@ import { areFileSystemPathsEqual, normalizeFileSystemPath } from '@/utils/path';
 type TAiQuickActionId = 'explain' | 'fix' | 'review';
 
 type TAiAssistantMode = 'chat' | 'agent' | 'plan';
-
-type TAiAttachmentKind = 'text' | 'image';
 
 type TAiFileRollbackStatus = 'ready' | 'reverting' | 'reverted';
 
@@ -100,14 +110,7 @@ interface IActiveAgentPatchTarget {
   stepId: string;
 }
 
-export interface IAiAttachedFile {
-  id: string;
-  name: string;
-  sizeLabel: string;
-  kind: TAiAttachmentKind;
-  detailLabel?: string;
-  reference: IAiContextReference;
-}
+export type { IAiAttachedFile, IAiImageAttachmentPreview } from '@/types/ai';
 
 export interface IAiQuickAction {
   id: TAiQuickActionId;
@@ -159,8 +162,7 @@ const TEXT_ATTACHMENT_EXTENSION_PATTERN =
 
 const IMAGE_ATTACHMENT_PATTERN = /^image\//i;
 
-const IMAGE_ATTACHMENT_EXTENSION_PATTERN =
-  /\.(avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i;
+const IMAGE_ATTACHMENT_EXTENSION_PATTERN = /\.(avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i;
 
 const CONTEXT_TOKEN_PATTERN =
   /(^|\s)@(file|current-file|selection|terminal|log|diagnostics|shellcheck|git-diff|git|project|folder|search|symbol)(?=\s|$)/gi;
@@ -181,8 +183,7 @@ const createScopedId = (prefix: string): string =>
 
 const createMessageId = (role: IAiChatMessage['role']): string => createScopedId(role);
 
-const buildInitialAgentActivityText = (): string =>
-  '';
+const buildInitialAgentActivityText = (): string => '';
 
 const getRuntimeReasoningOverlapLength = (previous: string, incoming: string): number => {
   const maxLength = Math.min(previous.length, incoming.length);
@@ -214,9 +215,7 @@ const mergeRuntimeReasoningText = (previous: string, incoming: string): string =
   return previous + incoming.slice(overlapLength);
 };
 
-const compactRuntimeEvents = (
-  events: readonly TAgentRuntimeEvent[],
-): TAgentRuntimeEvent[] => {
+const compactRuntimeEvents = (events: readonly TAgentRuntimeEvent[]): TAgentRuntimeEvent[] => {
   const compacted: TAgentRuntimeEvent[] = [];
 
   for (const event of events) {
@@ -271,8 +270,7 @@ const mergeRuntimeEvents = (
 
 const isCheckpointCreatedRuntimeEvent = (
   event: TAgentRuntimeEvent,
-): event is IAgentCheckpointEvent =>
-  event.type === 'rollback.checkpoint.created';
+): event is IAgentCheckpointEvent => event.type === 'rollback.checkpoint.created';
 
 const buildConversationCheckpoints = (
   currentMessages: readonly IAiChatMessage[],
@@ -462,25 +460,92 @@ const formatImageDimensions = (dimensions: IAiImageDimensions | null): string | 
   return `${dimensions.width} × ${dimensions.height}`;
 };
 
-const readImageDimensions = async (file: File): Promise<IAiImageDimensions | null> => {
-  if (typeof globalThis.createImageBitmap !== 'function') {
+const canUseObjectUrl = (): boolean =>
+  typeof URL !== 'undefined' &&
+  typeof URL.createObjectURL === 'function' &&
+  typeof URL.revokeObjectURL === 'function';
+
+const readFileAsDataUrl = async (file: File): Promise<string | null> => {
+  if (typeof FileReader === 'undefined') {
     return null;
   }
 
-  try {
-    const bitmap = await globalThis.createImageBitmap(file);
+  return new Promise((resolve) => {
+    const reader = new FileReader();
 
-    const dimensions = {
-      width: bitmap.width,
-      height: bitmap.height,
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+    reader.onerror = () => resolve(null);
+
+    reader.readAsDataURL(file);
+  });
+};
+
+const createImagePreviewSource = async (file: File): Promise<string | null> => {
+  if (canUseObjectUrl()) {
+    return URL.createObjectURL(file);
+  }
+
+  return readFileAsDataUrl(file);
+};
+
+const readImageDimensionsFromSource = async (
+  source: string,
+): Promise<IAiImageDimensions | null> => {
+  if (typeof Image === 'undefined') {
+    return null;
+  }
+
+  return new Promise((resolve) => {
+    const image = new Image();
+
+    const cleanup = (): void => {
+      image.onload = null;
+      image.onerror = null;
     };
 
-    bitmap.close?.();
+    image.onload = () => {
+      cleanup();
+      resolve({
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+      });
+    };
 
-    return dimensions;
-  } catch {
+    image.onerror = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    image.src = source;
+  });
+};
+
+const readImageDimensions = async (
+  file: File,
+  fallbackSource?: string | null,
+): Promise<IAiImageDimensions | null> => {
+  if (typeof globalThis.createImageBitmap === 'function') {
+    try {
+      const bitmap = await globalThis.createImageBitmap(file);
+
+      const dimensions = {
+        width: bitmap.width,
+        height: bitmap.height,
+      };
+
+      bitmap.close?.();
+
+      return dimensions;
+    } catch {
+      // Ignore and continue with element-based fallback below.
+    }
+  }
+
+  if (!fallbackSource) {
     return null;
   }
+
+  return readImageDimensionsFromSource(fallbackSource);
 };
 
 const mapStreamStatus = (
@@ -497,6 +562,43 @@ const mapStreamStatus = (
   return 'streaming';
 };
 
+const isNonNegativeFiniteNumber = (value: number | null | undefined): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+const hasStreamTokenSnapshot = (event: IAiChatStreamEventPayload): boolean =>
+  isNonNegativeFiniteNumber(event.promptTokens) ||
+  isNonNegativeFiniteNumber(event.completionTokens) ||
+  isNonNegativeFiniteNumber(event.totalTokens) ||
+  (event.usage !== undefined && event.usage !== null);
+
+const mergeStreamTokenSnapshot = (
+  stream: IAiChatStreamRenderState | undefined,
+  event: IAiChatStreamEventPayload,
+): IAiChatStreamRenderState => {
+  const nextStream: IAiChatStreamRenderState = {
+    ...(stream ?? {}),
+    status: stream?.status ?? 'streaming',
+  };
+
+  if (isNonNegativeFiniteNumber(event.promptTokens)) {
+    nextStream.promptTokens = event.promptTokens;
+  }
+
+  if (isNonNegativeFiniteNumber(event.completionTokens)) {
+    nextStream.completionTokens = event.completionTokens;
+  }
+
+  if (isNonNegativeFiniteNumber(event.totalTokens)) {
+    nextStream.totalTokens = event.totalTokens;
+  }
+
+  if (event.usage !== undefined && event.usage !== null) {
+    nextStream.usage = event.usage;
+  }
+
+  return nextStream;
+};
+
 const hasMeaningfulAssistantText = (value: string | null | undefined): value is string =>
   typeof value === 'string' && value.trim().length > 0;
 
@@ -510,7 +612,6 @@ const getOperationAppliedTime = (operation: IAiEditOperation): number => {
 
   return Number.isFinite(timestamp) ? timestamp : 0;
 };
-
 
 interface ILatestSidecarLiveEvents {
   errorEvent: Extract<TAgentUiEvent, { type: 'error' }> | null;
@@ -544,9 +645,7 @@ interface ISidecarAnswerStreamState extends ISidecarAnswerStreamMetadata {
   sourceText: string;
 }
 
-const getLatestSidecarLiveEvents = (
-  events: readonly TAgentUiEvent[],
-): ILatestSidecarLiveEvents => {
+const getLatestSidecarLiveEvents = (events: readonly TAgentUiEvent[]): ILatestSidecarLiveEvents => {
   const latest: ILatestSidecarLiveEvents = {
     errorEvent: null,
     doneEvent: null,
@@ -579,12 +678,7 @@ const getLatestSidecarLiveEvents = (
       }
     }
 
-    if (
-      latest.errorEvent
-      && latest.doneEvent
-      && latest.messageEvent
-      && latest.finalMessageEvent
-    ) {
+    if (latest.errorEvent && latest.doneEvent && latest.messageEvent && latest.finalMessageEvent) {
       break;
     }
   }
@@ -650,11 +744,14 @@ const createSidecarLiveEventBuffer = (
     events.push(event);
   };
 
-  const retainPendingMessageDelta = (event: Extract<TAgentUiEvent, { type: 'message_delta' }>): void => {
+  const retainPendingMessageDelta = (
+    event: Extract<TAgentUiEvent, { type: 'message_delta' }>,
+  ): void => {
     const phase = event.phase ?? SIDECAR_MESSAGE_DELTA_PHASE_FALLBACK;
-    const existingIndex = pendingEvents.findIndex((pendingEvent) =>
-      pendingEvent.type === 'message_delta'
-      && (pendingEvent.phase ?? SIDECAR_MESSAGE_DELTA_PHASE_FALLBACK) === phase
+    const existingIndex = pendingEvents.findIndex(
+      (pendingEvent) =>
+        pendingEvent.type === 'message_delta' &&
+        (pendingEvent.phase ?? SIDECAR_MESSAGE_DELTA_PHASE_FALLBACK) === phase,
     );
 
     if (existingIndex >= 0) {
@@ -787,6 +884,49 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const displayMessages = shallowRef<IAiChatMessage[]>(unref(conversationStore.activeMessages));
   const pendingTitleThreadIds = new Set<string>();
 
+  const revokeAttachmentPreview = (file: IAiAttachedFile): void => {
+    const src = file.preview?.src;
+
+    if (
+      !src?.startsWith('blob:') ||
+      typeof URL === 'undefined' ||
+      typeof URL.revokeObjectURL !== 'function'
+    ) {
+      return;
+    }
+
+    URL.revokeObjectURL(src);
+  };
+
+  const clearAttachedFiles = (options?: { revokePreviews?: boolean }): void => {
+    if (options?.revokePreviews !== false) {
+      attachedFiles.value.forEach(revokeAttachmentPreview);
+    }
+
+    attachedFiles.value = [];
+  };
+
+  const replaceAttachedFile = (nextFile: IAiAttachedFile): void => {
+    const remainingFiles: IAiAttachedFile[] = [];
+
+    attachedFiles.value.forEach((file) => {
+      if (file.id === nextFile.id) {
+        revokeAttachmentPreview(file);
+        return;
+      }
+
+      remainingFiles.push(file);
+    });
+
+    attachedFiles.value = [...remainingFiles, nextFile];
+  };
+
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
+      clearAttachedFiles();
+    });
+  }
+
   const isConversationWriteBuffered = (): boolean =>
     isSending.value ||
     activeStreamId.value !== null ||
@@ -863,13 +1003,11 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
 
     current.content = aiStream.content.value;
     current.stream = {
+      ...(current.stream ?? {}),
       status: mapStreamStatus(aiStream.status.value),
     };
 
-    messages.value = [
-      ...activeAssistantBaseMessages.value,
-      { ...current },
-    ];
+    messages.value = [...activeAssistantBaseMessages.value, { ...current }];
   };
 
   watch(
@@ -970,13 +1108,11 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     return currentMessages.findIndex((message) => message.id === messageId);
   };
 
-  const findMessageById = (
-    messageId: string,
-  ): IAiChatMessage | null => {
+  const findMessageById = (messageId: string): IAiChatMessage | null => {
     const currentMessages = messages.value;
     const messageIndex = findMessageIndexById(currentMessages, messageId);
 
-    return messageIndex >= 0 ? currentMessages[messageIndex] ?? null : null;
+    return messageIndex >= 0 ? (currentMessages[messageIndex] ?? null) : null;
   };
 
   const replaceMessageById = (
@@ -1003,36 +1139,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     messages.value = nextMessages;
 
     return nextMessages;
-  };
-
-  const appendRuntimeEventsToMessage = (
-    messageId: string,
-    incomingRuntimeEvents: readonly TAgentRuntimeEvent[] | undefined,
-  ): void => {
-    if (!incomingRuntimeEvents?.length) {
-      return;
-    }
-
-    replaceMessageById(messageId, (message) => {
-      const nextRuntimeEvents = mergeRuntimeEvents(
-        message.stream?.runtimeEvents,
-        incomingRuntimeEvents,
-      );
-
-      if (!nextRuntimeEvents?.length) {
-        return message;
-      }
-
-      return {
-        ...message,
-        stream: {
-          status: message.stream?.status ?? 'completed',
-          ...(message.stream?.activityText ? { activityText: message.stream.activityText } : {}),
-          runtimeEvents: nextRuntimeEvents,
-          ...(message.stream?.finalAnswerStarted ? { finalAnswerStarted: true } : {}),
-        },
-      };
-    });
   };
 
   const updateAgentStep = (
@@ -1071,7 +1177,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     ];
   };
 
-
   const updateAgentExecutionMessage = (
     messageId: string,
     content: string,
@@ -1083,26 +1188,24 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   ): void => {
     replaceMessageById(messageId, (message) => {
       const nextActivityText = activityText ?? message.stream?.activityText;
-      const nextRuntimeEvents = mergeRuntimeEvents(
-        message.stream?.runtimeEvents,
-        runtimeEvents,
-      );
-      const nextFinalAnswerStarted = finalAnswerStarted
-        ?? message.stream?.finalAnswerStarted
-        ?? (streamStatus === 'completed' && hasMeaningfulAssistantText(content));
+      const nextRuntimeEvents = mergeRuntimeEvents(message.stream?.runtimeEvents, runtimeEvents);
+      const nextFinalAnswerStarted =
+        finalAnswerStarted ??
+        message.stream?.finalAnswerStarted ??
+        (streamStatus === 'completed' && hasMeaningfulAssistantText(content));
       const stream = streamStatus
         ? nextActivityText
           ? {
-            status: streamStatus,
-            activityText: nextActivityText,
-            ...(nextRuntimeEvents?.length ? { runtimeEvents: nextRuntimeEvents } : {}),
-            ...(nextFinalAnswerStarted ? { finalAnswerStarted: true } : {}),
-          }
+              status: streamStatus,
+              activityText: nextActivityText,
+              ...(nextRuntimeEvents?.length ? { runtimeEvents: nextRuntimeEvents } : {}),
+              ...(nextFinalAnswerStarted ? { finalAnswerStarted: true } : {}),
+            }
           : {
-            status: streamStatus,
-            ...(nextRuntimeEvents?.length ? { runtimeEvents: nextRuntimeEvents } : {}),
-            ...(nextFinalAnswerStarted ? { finalAnswerStarted: true } : {}),
-          }
+              status: streamStatus,
+              ...(nextRuntimeEvents?.length ? { runtimeEvents: nextRuntimeEvents } : {}),
+              ...(nextFinalAnswerStarted ? { finalAnswerStarted: true } : {}),
+            }
         : message.stream;
 
       return {
@@ -1129,12 +1232,13 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const resolveSidecarAnswerDisplayStatus = (
     metadata: ISidecarAnswerStreamMetadata,
   ): NonNullable<IAiChatMessage['stream']>['status'] => {
-    const hasActiveSource = sidecarAnswerStreamState?.messageId === metadata.messageId
-      && sidecarAnswerStreamState.sourceText.length > 0;
+    const hasActiveSource =
+      sidecarAnswerStreamState?.messageId === metadata.messageId &&
+      sidecarAnswerStreamState.sourceText.length > 0;
 
-    return metadata.streamStatus === 'completed'
-      && hasActiveSource
-      && sidecarAnswerStream.status.value !== 'completed'
+    return metadata.streamStatus === 'completed' &&
+      hasActiveSource &&
+      sidecarAnswerStream.status.value !== 'completed'
       ? 'streaming'
       : metadata.streamStatus;
   };
@@ -1198,9 +1302,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     return sidecarAnswerStreamState;
   };
 
-  const resetSidecarAnswerStreamContent = (
-    metadata: ISidecarAnswerStreamMetadata,
-  ): string => {
+  const resetSidecarAnswerStreamContent = (metadata: ISidecarAnswerStreamMetadata): string => {
     const state = ensureSidecarAnswerStreamState(metadata);
     state.sourceText = '';
     runWithSuppressedSidecarAnswerSync(() => {
@@ -1265,8 +1367,8 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   };
 
   const hasActiveSidecarAnswerStreamSource = (messageId: string): boolean =>
-    sidecarAnswerStreamState?.messageId === messageId
-    && sidecarAnswerStreamState.sourceText.length > 0;
+    sidecarAnswerStreamState?.messageId === messageId &&
+    sidecarAnswerStreamState.sourceText.length > 0;
 
   const completeSidecarAnswerStream = (
     finalText: string,
@@ -1346,11 +1448,11 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     }
 
     const operationPaths = [operation.path, operation.newPath].filter((path): path is string =>
-      Boolean(path?.trim())
+      Boolean(path?.trim()),
     );
 
     return operationPaths.some((operationPath) =>
-      changedFilePaths.some((changedPath) => areFileSystemPathsEqual(operationPath, changedPath))
+      changedFilePaths.some((changedPath) => areFileSystemPathsEqual(operationPath, changedPath)),
     );
   };
 
@@ -1428,27 +1530,22 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     events: readonly TAgentUiEvent[],
   ): void => {
     const currentMessage = findMessageById(assistantMessageId);
-    const {
-      errorEvent,
-      doneEvent,
-      messageEvent,
-      finalMessageEvent,
-    } = getLatestSidecarLiveEvents(events);
+    const { errorEvent, doneEvent, messageEvent, finalMessageEvent } =
+      getLatestSidecarLiveEvents(events);
     const doneResult = hasMeaningfulAssistantText(doneEvent?.result) ? doneEvent.result : null;
     const currentVisibleContent = hasMeaningfulAssistantText(currentMessage?.content)
       ? currentMessage?.content
       : null;
     const content = errorEvent
       ? `Agent 执行失败：${errorEvent.message}`
-      : doneResult ?? finalMessageEvent?.text ?? (messageEvent?.text === '' ? '' : currentVisibleContent ?? fallbackContent);
+      : (doneResult ??
+        finalMessageEvent?.text ??
+        (messageEvent?.text === '' ? '' : (currentVisibleContent ?? fallbackContent)));
     const streamStatus = errorEvent || doneEvent ? 'completed' : 'streaming';
     const finalAnswerStarted = Boolean(
-      doneResult
-      || finalMessageEvent
-      || (
-        currentMessage?.stream?.finalAnswerStarted
-        && messageEvent?.text !== ''
-      ),
+      doneResult ||
+      finalMessageEvent ||
+      (currentMessage?.stream?.finalAnswerStarted && messageEvent?.text !== ''),
     );
     const toolProjection = projectSidecarEventsToToolState({
       events,
@@ -1507,10 +1604,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     commitDisplayMessagesToStore(threadId);
   };
 
-
-  const appendVisibleRuntimeTimelineEvents = (
-    events: readonly TAgentRuntimeEvent[],
-  ): void => {
+  const appendVisibleRuntimeTimelineEvents = (events: readonly TAgentRuntimeEvent[]): void => {
     if (events.length === 0) {
       return;
     }
@@ -1518,9 +1612,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     runtimeTimelineEvents.value = mergeRuntimeEvents(runtimeTimelineEvents.value, events) ?? [];
   };
 
-  const appendRuntimeTimelineEvents = (
-    events: readonly TAgentUiEvent[],
-  ): void => {
+  const appendRuntimeTimelineEvents = (events: readonly TAgentUiEvent[]): void => {
     appendVisibleRuntimeTimelineEvents(extractVisibleAgentRuntimeEvents(events));
   };
 
@@ -1535,17 +1627,19 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       role: 'system',
       content: [
         '当前 UI 已收集到这些上下文，请在需要时结合它们判断任务：',
-        ...references.map((reference, index) => [
-          `#${index + 1} ${reference.label}`,
-          `类型：${reference.kind}`,
-          `路径：${reference.path ?? '无'}`,
-          reference.range
-            ? `范围：${reference.range.startLine}-${reference.range.endLine}`
-            : '范围：无',
-          `已脱敏：${reference.redacted ? '是' : '否'}`,
-          '内容：',
-          reference.contentPreview,
-        ].join('\n')),
+        ...references.map((reference, index) =>
+          [
+            `#${index + 1} ${reference.label}`,
+            `类型：${reference.kind}`,
+            `路径：${reference.path ?? '无'}`,
+            reference.range
+              ? `范围：${reference.range.startLine}-${reference.range.endLine}`
+              : '范围：无',
+            `已脱敏：${reference.redacted ? '是' : '否'}`,
+            '内容：',
+            reference.contentPreview,
+          ].join('\n'),
+        ),
       ].join('\n\n'),
     };
   };
@@ -1602,12 +1696,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     const sidecarSessionId = `sidecar:${assistantMessageId}`;
     const liveEventBuffer = createSidecarLiveEventBuffer((events, freshEvents) => {
       appendVisibleRuntimeTimelineEvents(extractVisibleAgentRuntimeEvents(freshEvents));
-      applySidecarLiveEventsToAgentMessage(
-        assistantMessageId,
-        targetThreadId,
-        '',
-        events,
-      );
+      applySidecarLiveEventsToAgentMessage(assistantMessageId, targetThreadId, '', events);
     });
     let unlistenSidecarStream: (() => void) | null = null;
 
@@ -1652,9 +1741,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       const displayContent = projection.errorMessage
         ? projection.assistantContent
         : completeSidecarAnswerStream(projection.assistantContent, streamMetadata);
-      const sidecarAnswerCompletion = projection.errorMessage || projection.pendingConfirmation
-        ? Promise.resolve()
-        : waitForSidecarAnswerStreamCompletion(assistantMessageId);
+      const sidecarAnswerCompletion =
+        projection.errorMessage || projection.pendingConfirmation
+          ? Promise.resolve()
+          : waitForSidecarAnswerStreamCompletion(assistantMessageId);
 
       for (const toolCall of toolProjection.toolCalls) {
         updateAgentStep(
@@ -1678,10 +1768,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         projection.changedFilePaths,
         projection.hasFileMutations,
       );
-      await updateFileRollbackPrompt(
-        projection.changedFilePaths,
-        projection.hasFileMutations,
-      );
+      await updateFileRollbackPrompt(projection.changedFilePaths, projection.hasFileMutations);
       await sidecarAnswerCompletion;
 
       if (projection.pendingConfirmation) {
@@ -1700,7 +1787,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
 
       agentPlan.store.clearPendingToolConfirmation();
       activeSidecarAgentSession.value = null;
-      attachedFiles.value = [];
+
+      if (!projection.errorMessage) {
+        clearAttachedFiles({ revokePreviews: false });
+      }
 
       if (projection.errorMessage) {
         errorMessage.value = projection.errorMessage;
@@ -1812,9 +1902,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       const displayContent = projection.errorMessage
         ? projection.assistantContent
         : completeSidecarAnswerStream(projection.assistantContent, streamMetadata);
-      const sidecarAnswerCompletion = projection.errorMessage || projection.pendingConfirmation
-        ? Promise.resolve()
-        : waitForSidecarAnswerStreamCompletion(session.assistantMessageId);
+      const sidecarAnswerCompletion =
+        projection.errorMessage || projection.pendingConfirmation
+          ? Promise.resolve()
+          : waitForSidecarAnswerStreamCompletion(session.assistantMessageId);
 
       updateAgentExecutionMessage(
         session.assistantMessageId,
@@ -1830,10 +1921,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         projection.changedFilePaths,
         projection.hasFileMutations,
       );
-      await updateFileRollbackPrompt(
-        projection.changedFilePaths,
-        projection.hasFileMutations,
-      );
+      await updateFileRollbackPrompt(projection.changedFilePaths, projection.hasFileMutations);
       await sidecarAnswerCompletion;
 
       if (projection.pendingConfirmation) {
@@ -1846,6 +1934,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       }
 
       activeSidecarAgentSession.value = null;
+
+      if (!projection.errorMessage) {
+        clearAttachedFiles({ revokePreviews: false });
+      }
 
       if (projection.errorMessage) {
         errorMessage.value = projection.errorMessage;
@@ -1893,9 +1985,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     const document = options.document.value;
 
     return Boolean(
-      document.path &&
-      document.kind === 'text' &&
-      latestAssistantCodeBlock.value.trim(),
+      document.path && document.kind === 'text' && latestAssistantCodeBlock.value.trim(),
     );
   });
 
@@ -1965,10 +2055,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     return tokens;
   };
 
-  const shouldIncludeReference = (
-    tokens: Set<string>,
-    aliases: readonly string[],
-  ): boolean =>
+  const shouldIncludeReference = (tokens: Set<string>, aliases: readonly string[]): boolean =>
     tokens.size === 0 || aliases.some((alias) => tokens.has(alias));
 
   const buildProjectSearchReference = async (
@@ -2009,8 +2096,9 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       path: workspaceRootPath,
       range: null,
       contentPreview: payload.results
-        .map((item) =>
-          `${item.path}${item.lineNumber ? `:${item.lineNumber}` : ''}\n${item.preview}`)
+        .map(
+          (item) => `${item.path}${item.lineNumber ? `:${item.lineNumber}` : ''}\n${item.preview}`,
+        )
         .join('\n---\n'),
       redacted: false,
     };
@@ -2022,10 +2110,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     const currentFile = buildCurrentFileReference(options.document.value);
     const selection = buildSelectionReference(options.selection.value, options.document.value);
     const activeRun = buildActiveRunReference(options.activeRun.value);
-    const diagnostics = buildDiagnosticsReference(
-      options.analysis.value,
-      options.document.value,
-    );
+    const diagnostics = buildDiagnosticsReference(options.analysis.value, options.document.value);
     const gitDiff = buildGitDiffReference(options.gitStatus.value);
     const projectSearch = await buildProjectSearchReference(prompt).catch(() => null);
 
@@ -2043,10 +2128,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       .map(([reference]) => reference)
       .filter((item): item is IAiContextReference => item !== null);
 
-    return [
-      ...references,
-      ...attachedFiles.value.map((file) => file.reference),
-    ];
+    return [...references, ...attachedFiles.value.map((file) => file.reference)];
   };
 
   // -----------------------------------------------------------------------
@@ -2065,9 +2147,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     providerProfiles.value = await aiService.listProviderProfiles();
   };
 
-  const getProviderProfileDetail = (
-    profileId: string,
-  ): Promise<IAiProviderProfileDetailPayload> =>
+  const getProviderProfileDetail = (profileId: string): Promise<IAiProviderProfileDetailPayload> =>
     aiService.getProviderProfileDetail({ profileId });
 
   const saveConfig = async (
@@ -2076,15 +2156,11 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   ): Promise<void> => {
     config.value = await aiService.saveConfig({
       role,
-      providerType: role === 'narrator'
-        ? nextConfig.narrator.providerType
-        : nextConfig.providerType,
-      selectedModel: role === 'narrator'
-        ? nextConfig.narrator.selectedModel
-        : nextConfig.selectedModel,
-      baseUrl: role === 'narrator'
-        ? nextConfig.narrator.baseUrl
-        : nextConfig.baseUrl,
+      providerType:
+        role === 'narrator' ? nextConfig.narrator.providerType : nextConfig.providerType,
+      selectedModel:
+        role === 'narrator' ? nextConfig.narrator.selectedModel : nextConfig.selectedModel,
+      baseUrl: role === 'narrator' ? nextConfig.narrator.baseUrl : nextConfig.baseUrl,
       inlineCompletionEnabled: nextConfig.inlineCompletionEnabled,
       chatEnabled: nextConfig.chatEnabled,
       agentEnabled: nextConfig.agentEnabled,
@@ -2109,15 +2185,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     role: TAiModelRole = 'main',
   ): IAiProviderConnectionRequest => ({
     role,
-    providerType: role === 'narrator'
-      ? nextConfig.narrator.providerType
-      : nextConfig.providerType,
-    selectedModel: role === 'narrator'
-      ? nextConfig.narrator.selectedModel
-      : nextConfig.selectedModel,
-    baseUrl: role === 'narrator'
-      ? nextConfig.narrator.baseUrl
-      : nextConfig.baseUrl,
+    providerType: role === 'narrator' ? nextConfig.narrator.providerType : nextConfig.providerType,
+    selectedModel:
+      role === 'narrator' ? nextConfig.narrator.selectedModel : nextConfig.selectedModel,
+    baseUrl: role === 'narrator' ? nextConfig.narrator.baseUrl : nextConfig.baseUrl,
     inlineCompletionEnabled: nextConfig.inlineCompletionEnabled,
     chatEnabled: nextConfig.chatEnabled,
     agentEnabled: nextConfig.agentEnabled,
@@ -2219,16 +2290,13 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         redacted: false,
       };
 
-      attachedFiles.value = [
-        ...attachedFiles.value.filter((item) => item.id !== id),
-        {
-          id,
-          name: normalizedName,
-          sizeLabel: formatBytes(file.size),
-          kind: 'text',
-          reference,
-        },
-      ];
+      replaceAttachedFile({
+        id,
+        name: normalizedName,
+        sizeLabel: formatBytes(file.size),
+        kind: 'text',
+        reference,
+      });
 
       currentReferences.value = await buildReferences(draft.value);
       errorMessage.value = '';
@@ -2242,9 +2310,18 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         return;
       }
 
-      const dimensions = await readImageDimensions(file);
+      const previewSource = await createImagePreviewSource(file);
+      const dimensions = await readImageDimensions(file, previewSource);
       const dimensionsLabel = formatImageDimensions(dimensions);
       const id = `attachment:${normalizedName}:${file.lastModified}:${file.size}`;
+      const preview: IAiImageAttachmentPreview | undefined = previewSource
+        ? {
+            src: previewSource,
+            width: dimensions?.width ?? null,
+            height: dimensions?.height ?? null,
+            mimeType: file.type || 'image/*',
+          }
+        : undefined;
 
       const reference: IAiContextReference = {
         id,
@@ -2260,19 +2337,18 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
           '说明：这是用户在 AI 输入框里粘贴或添加的图片附件。当前会把图片元信息作为上下文发送。',
         ].join('\n'),
         redacted: false,
+        attachmentPreview: preview,
       };
 
-      attachedFiles.value = [
-        ...attachedFiles.value.filter((item) => item.id !== id),
-        {
-          id,
-          name: normalizedName,
-          sizeLabel: formatBytes(file.size),
-          kind: 'image',
-          detailLabel: dimensionsLabel ?? undefined,
-          reference,
-        },
-      ];
+      replaceAttachedFile({
+        id,
+        name: normalizedName,
+        sizeLabel: formatBytes(file.size),
+        kind: 'image',
+        detailLabel: dimensionsLabel ?? undefined,
+        preview,
+        reference,
+      });
 
       currentReferences.value = await buildReferences(draft.value);
       errorMessage.value = '';
@@ -2284,7 +2360,18 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   };
 
   const removeAttachedFile = (id: string): void => {
-    attachedFiles.value = attachedFiles.value.filter((item) => item.id !== id);
+    const remainingFiles: IAiAttachedFile[] = [];
+
+    attachedFiles.value.forEach((file) => {
+      if (file.id === id) {
+        revokeAttachmentPreview(file);
+        return;
+      }
+
+      remainingFiles.push(file);
+    });
+
+    attachedFiles.value = remainingFiles;
 
     void buildReferences(draft.value).then((references) => {
       currentReferences.value = references;
@@ -2313,10 +2400,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       syncActiveAssistantMessage();
     };
 
-    const startAssistantStream = (
-      streamId: string,
-      assistantMessageId: string,
-    ): void => {
+    const startAssistantStream = (streamId: string, assistantMessageId: string): void => {
       if (hasStartedStream) {
         return;
       }
@@ -2329,9 +2413,19 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       syncActiveAssistantMessage();
     };
 
+    const applyStreamTokenSnapshot = (event: IAiChatStreamEventPayload): void => {
+      if (!hasStreamTokenSnapshot(event)) {
+        return;
+      }
+
+      assistantMessage.stream = mergeStreamTokenSnapshot(assistantMessage.stream, event);
+      syncActiveAssistantMessage();
+    };
+
     const handleEvent = (event: IAiChatStreamEventPayload): void => {
       if (!activeStreamId.value && event.kind === 'start') {
         startAssistantStream(event.streamId, event.assistantMessageId);
+        applyStreamTokenSnapshot(event);
         return;
       }
 
@@ -2343,8 +2437,13 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         return;
       }
 
-      if (event.kind === 'delta' && event.delta) {
-        aiStream.append(event.delta);
+      applyStreamTokenSnapshot(event);
+
+      if (event.kind === 'delta') {
+        if (event.delta) {
+          aiStream.append(event.delta);
+        }
+
         return;
       }
 
@@ -2353,7 +2452,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       if (event.kind === 'done') {
         aiStream.complete();
         syncActiveAssistantMessage();
-        attachedFiles.value = [];
+        clearAttachedFiles({ revokePreviews: false });
         settle();
         return;
       }
@@ -2414,10 +2513,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       activeStreamResolve.value?.();
     };
 
-    const pipeline = createStreamPipeline(
-      assistantMessage,
-      settle,
-    );
+    const pipeline = createStreamPipeline(assistantMessage, settle);
 
     try {
       unlisten = await aiService.onChatStream(pipeline.handleEvent);
@@ -2428,10 +2524,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         references,
       });
 
-      pipeline.startAssistantStream(
-        stream.streamId,
-        stream.assistantMessageId,
-      );
+      pipeline.startAssistantStream(stream.streamId, stream.assistantMessageId);
 
       await new Promise<void>((resolve) => {
         if (hasSettledStream) {
@@ -2480,54 +2573,11 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       return;
     }
 
-    const restoreSessionId = createScopedId('sidecar-restore');
-    const liveEventBuffer = createSidecarLiveEventBuffer((_events, freshEvents) => {
-      const visibleRuntimeEvents = extractVisibleAgentRuntimeEvents(freshEvents);
-
-      if (!visibleRuntimeEvents.length) {
-        return;
-      }
-
-      appendRuntimeEventsToMessage(checkpoint.messageId, visibleRuntimeEvents);
-      appendVisibleRuntimeTimelineEvents(visibleRuntimeEvents);
-    });
-    let unlistenSidecarStream: (() => void) | null = null;
-
     restoringCheckpointId.value = checkpointId;
     errorMessage.value = '';
 
     try {
-      unlistenSidecarStream = await aiService.onSidecarStream((payload) => {
-        if (payload.sessionId !== restoreSessionId) {
-          return;
-        }
-
-        liveEventBuffer.push(payload.event);
-      });
-
-      const payload = await aiService.sidecarRestoreCheckpoint({
-        sessionId: restoreSessionId,
-        runId: checkpoint.runId,
-        snapshotId: checkpoint.snapshotId,
-      });
-
-      liveEventBuffer.flush();
-      unlistenSidecarStream?.();
-      unlistenSidecarStream = null;
-
-      const visibleRuntimeEvents = extractVisibleAgentRuntimeEvents(payload.events);
-
-      if (visibleRuntimeEvents.length) {
-        appendRuntimeEventsToMessage(checkpoint.messageId, visibleRuntimeEvents);
-        appendRuntimeTimelineEvents(payload.events);
-      }
-
-      const restoreErrorEvent = payload.events.find((event) => event.type === 'error');
-
-      if (restoreErrorEvent?.type === 'error') {
-        throw new Error(restoreErrorEvent.message);
-      }
-
+      // 对话 checkpoint 只负责回到历史消息边界；文件改动回滚继续走 AED 操作入口。
       const nextMessages = messages.value.slice(0, targetMessageIndex + 1);
       messages.value = nextMessages;
       runtimeTimelineEvents.value = collectConversationRuntimeEvents(nextMessages);
@@ -2542,8 +2592,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     } catch (error) {
       errorMessage.value = toErrorMessage(error, '恢复回滚检查点失败');
     } finally {
-      liveEventBuffer.dispose();
-      unlistenSidecarStream?.();
       commitDisplayMessagesToStore();
       restoringCheckpointId.value = null;
     }
@@ -2615,9 +2663,9 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     const nextMessages = visibleMessages.map((message) =>
       message.id === userMessage.id
         ? {
-          ...message,
-          references,
-        }
+            ...message,
+            references,
+          }
         : message,
     );
 
@@ -2667,6 +2715,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
           },
         ];
 
+        clearAttachedFiles({ revokePreviews: false });
         commitDisplayMessagesToStore(titleThreadId);
         clearActiveBufferedThread(titleThreadId);
         isSending.value = false;
@@ -2696,12 +2745,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     }
 
     try {
-      await executeAiRequest(
-        nextMessages,
-        nextMessages,
-        references,
-        titleThreadId,
-      );
+      await executeAiRequest(nextMessages, nextMessages, references, titleThreadId);
       if (!errorMessage.value) {
         void maybeGenerateConversationTitle(titleThreadId);
       }
@@ -2724,7 +2768,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
 
     agentPlan.resetPlan();
 
-    attachedFiles.value = [];
+    clearAttachedFiles();
     errorMessage.value = '';
     activeAssistantMessage.value = null;
     activeAssistantBaseMessages.value = [];
@@ -2860,9 +2904,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   };
 
   const stopCurrentRequest = (): void => {
-    const targetThreadId = activeSidecarAgentSession.value?.threadId
-      ?? activeBufferedThreadId.value
-      ?? unref(conversationStore.activeThreadId);
+    const targetThreadId =
+      activeSidecarAgentSession.value?.threadId ??
+      activeBufferedThreadId.value ??
+      unref(conversationStore.activeThreadId);
     const streamId = activeStreamId.value;
 
     if (streamId) {
@@ -2881,14 +2926,12 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
 
     if (activeAssistantMessage.value) {
       activeAssistantMessage.value.stream = {
+        ...(activeAssistantMessage.value.stream ?? {}),
         status: 'cancelled',
       };
       activeAssistantMessage.value.content = aiStream.content.value;
 
-      messages.value = [
-        ...activeAssistantBaseMessages.value,
-        { ...activeAssistantMessage.value },
-      ];
+      messages.value = [...activeAssistantBaseMessages.value, { ...activeAssistantMessage.value }];
     }
 
     if (activeAgentMessageId.value) {

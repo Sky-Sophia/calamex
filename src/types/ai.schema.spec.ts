@@ -64,6 +64,32 @@ describe('AI schema', () => {
     expect(parsed.references[0]?.kind).toBe('current-file');
   });
 
+  it('允许图片附件引用携带预览元数据', () => {
+    const parsed = aiChatRequestSchema.parse({
+      threadId: null,
+      messages: [message],
+      references: [
+        {
+          id: 'attachment:screenshot.png:1:4096',
+          kind: 'image-attachment',
+          label: '图片附件 · screenshot.png',
+          path: 'screenshot.png',
+          range: null,
+          contentPreview: '图片附件',
+          redacted: false,
+          attachmentPreview: {
+            src: 'blob:attachment-preview',
+            width: 1280,
+            height: 720,
+            mimeType: 'image/png',
+          },
+        },
+      ],
+    });
+
+    expect(parsed.references[0]?.attachmentPreview?.mimeType).toBe('image/png');
+  });
+
   it('拒绝未知 Provider', () => {
     expect(() =>
       aiConfigPayloadSchema.parse({

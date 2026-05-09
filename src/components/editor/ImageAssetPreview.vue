@@ -6,41 +6,48 @@
           图片预览
         </p>
         <p class="mt-1 truncate text-[13px] font-medium text-(--text-primary)">
-          props.name
+          {{ props.name }}
         </p>
       </div>
       <div class="flex items-center gap-2 text-[11px] text-(--text-quaternary)">
-        <span v-if="assetMeta"> assetMeta.mimeType </span>
-        <span v-if="assetMeta"> formatBytes(assetMeta.byteSize) </span>
-        <span v-if="imageSizeLabel"> imageSizeLabel </span>
+        <span v-if="assetMeta">{{ assetMeta.mimeType }}</span>
+        <span v-if="assetMeta">{{ formatBytes(assetMeta.byteSize) }}</span>
+        <span v-if="imageSizeLabel">{{ imageSizeLabel }}</span>
       </div>
     </div>
 
     <div class="min-h-0 flex-1 overflow-auto p-5">
       <div
-v-if="isLoading"
-        class="flex h-full min-h-60 items-center justify-center rounded-xl border border-white/6 bg-white/2 text-[12px] text-(--text-quaternary)">
+        v-if="isLoading"
+        class="flex h-full min-h-60 items-center justify-center rounded-xl border border-white/6 bg-white/2 text-[12px] text-(--text-quaternary)"
+      >
         正在加载图片资源…
       </div>
 
       <div
-v-else-if="errorMessage"
-        class="flex h-full min-h-60 items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/6 px-6 text-center">
+        v-else-if="errorMessage"
+        class="flex h-full min-h-60 items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/6 px-6 text-center"
+      >
         <div class="max-w-md space-y-2">
           <p class="text-[13px] font-medium text-rose-200">图片预览失败</p>
           <p class="text-[12px] leading-6 text-(--text-secondary)">
-            errorMessage
+            {{ errorMessage }}
           </p>
         </div>
       </div>
 
       <div
-v-else
-        class="flex min-h-full items-center justify-center rounded-[20px] border border-white/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.015))] p-6">
+        v-else
+        class="flex min-h-full items-center justify-center rounded-[20px] border border-white/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.015))] p-6"
+      >
         <div class="image-preview-frame">
           <img
-v-if="assetMeta" :src="assetMeta.dataUrl" :alt="props.name" class="image-preview-asset"
-            @load="handleImageLoad" />
+            v-if="assetMeta"
+            :src="assetMeta.dataUrl"
+            :alt="props.name"
+            class="image-preview-asset"
+            @load="handleImageLoad"
+          />
         </div>
       </div>
     </div>
@@ -51,6 +58,7 @@ v-if="assetMeta" :src="assetMeta.dataUrl" :alt="props.name" class="image-preview
 import { tauriService } from '@/services/tauri';
 import type { IImageAssetPayload } from '@/types/editor';
 import { toErrorMessage } from '@/utils/error';
+import { formatBytes } from '@/utils/file-assets';
 import { computed, onMounted, ref, watch } from 'vue';
 
 const props = defineProps<{

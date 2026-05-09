@@ -69,11 +69,11 @@ pub(super) async fn chat_stream_with_litellm_fallback<F, C>(
     api_key: &str,
     model: &str,
     request: AiProviderChatRequest,
-    mut on_delta: F,
+    mut on_event: F,
     is_cancelled: C,
 ) -> Result<(), String>
 where
-    F: FnMut(String) -> Result<(), String>,
+    F: FnMut(openai_compatible::AiProviderStreamEvent) -> Result<(), String>,
     C: Fn() -> bool,
 {
     match openai_compatible::chat_stream(
@@ -81,7 +81,7 @@ where
         api_key,
         model,
         request.clone(),
-        |delta| on_delta(delta),
+        |event| on_event(event),
         || is_cancelled(),
     )
     .await
@@ -99,7 +99,7 @@ where
                 api_key,
                 &endpoint.model,
                 request,
-                |delta| on_delta(delta),
+                |event| on_event(event),
                 || is_cancelled(),
             )
             .await

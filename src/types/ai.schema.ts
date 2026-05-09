@@ -65,11 +65,16 @@ import {
   aiWebSourceTypeSchema,
 } from '@/types/ai-web.schema';
 
-export const aiProviderTypeSchema = z.enum([
-  'litellm',
-]);
+export const aiProviderTypeSchema = z.enum(['litellm']);
 export const aiModelRoleSchema = z.enum(['main', 'narrator']);
-export const activityNoteToneSchema = z.enum(['plan', 'progress', 'decision', 'repair', 'warning', 'summary']);
+export const activityNoteToneSchema = z.enum([
+  'plan',
+  'progress',
+  'decision',
+  'repair',
+  'warning',
+  'summary',
+]);
 export const activityNoteTriggerSchema = z.enum([
   'run_started',
   'plan_ready',
@@ -106,29 +111,63 @@ export const aiAgentConfirmationStateSchema = z.object({
   status: z.enum(['pending', 'running']),
 });
 
+export const aiLanguageModelUsageSchema = z
+  .object({
+    inputTokens: z.number().nonnegative(),
+    inputTokenDetails: z
+      .object({
+        noCacheTokens: z.number().nonnegative(),
+        cacheReadTokens: z.number().nonnegative(),
+        cacheWriteTokens: z.number().nonnegative(),
+      })
+      .optional(),
+    outputTokens: z.number().nonnegative(),
+    outputTokenDetails: z
+      .object({
+        textTokens: z.number().nonnegative(),
+        reasoningTokens: z.number().nonnegative(),
+      })
+      .optional(),
+    totalTokens: z.number().nonnegative(),
+    cachedInputTokens: z.number().nonnegative().optional(),
+    reasoningTokens: z.number().nonnegative().optional(),
+    raw: z.unknown().optional(),
+  })
+  .passthrough();
+
 export const aiChatMessageSchema = z.object({
   id: z.string().min(1),
   role: z.enum(['user', 'assistant', 'system', 'tool']),
   content: z.string(),
   createdAt: z.string().min(1),
   references: z.array(aiContextReferenceSchema),
-  toolCalls: z.array(z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    status: z.enum(['pending', 'running', 'succeeded', 'failed', 'denied']),
-    summary: z.string(),
-    targetPreview: z.string().min(1).optional(),
-    detailItems: z.array(z.string().min(1)).optional(),
-    elapsedMs: z.number().nonnegative().optional(),
-  })).optional(),
+  toolCalls: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        status: z.enum(['pending', 'running', 'succeeded', 'failed', 'denied']),
+        summary: z.string(),
+        targetPreview: z.string().min(1).optional(),
+        detailItems: z.array(z.string().min(1)).optional(),
+        elapsedMs: z.number().nonnegative().optional(),
+      }),
+    )
+    .optional(),
   actions: z.array(aiChatMessageActionSchema).optional(),
   agentConfirmation: aiAgentConfirmationStateSchema.optional(),
-  stream: z.object({
-    status: z.enum(['streaming', 'completed', 'cancelled']),
-    activityText: z.string().min(1).optional(),
-    runtimeEvents: z.array(agentRuntimeEventSchema).optional(),
-    finalAnswerStarted: z.boolean().optional(),
-  }).optional(),
+  stream: z
+    .object({
+      status: z.enum(['streaming', 'completed', 'cancelled']),
+      activityText: z.string().min(1).optional(),
+      runtimeEvents: z.array(agentRuntimeEventSchema).optional(),
+      finalAnswerStarted: z.boolean().optional(),
+      promptTokens: z.number().nonnegative().optional(),
+      completionTokens: z.number().nonnegative().optional(),
+      totalTokens: z.number().nonnegative().optional(),
+      usage: aiLanguageModelUsageSchema.optional(),
+    })
+    .optional(),
 });
 
 export const aiModelEndpointConfigPayloadSchema = z.object({
@@ -187,6 +226,7 @@ export const aiChatPayloadSchema = z.object({
   message: aiChatMessageSchema,
   providerType: aiProviderTypeSchema,
   model: z.string(),
+  usage: aiLanguageModelUsageSchema.nullable().optional(),
 });
 
 export const aiConversationTitleRequestSchema = z.object({
@@ -308,6 +348,10 @@ export const aiChatStreamEventPayloadSchema = z.object({
   delta: z.string().nullable(),
   message: z.string().nullable(),
   model: z.string().nullable(),
+  promptTokens: z.number().nonnegative().nullable().optional(),
+  completionTokens: z.number().nonnegative().nullable().optional(),
+  totalTokens: z.number().nonnegative().nullable().optional(),
+  usage: aiLanguageModelUsageSchema.nullable().optional(),
 });
 
 export const aiToolDefinitionPayloadSchema = z.union([
@@ -317,17 +361,19 @@ export const aiToolDefinitionPayloadSchema = z.union([
     destructive: z.boolean(),
     requiresConfirmation: z.boolean(),
   }),
-  z.object({
-    name: z.string().min(1),
-    read_only: z.boolean(),
-    destructive: z.boolean(),
-    requires_confirmation: z.boolean(),
-  }).transform((value) => ({
-    name: value.name,
-    readOnly: value.read_only,
-    destructive: value.destructive,
-    requiresConfirmation: value.requires_confirmation,
-  })),
+  z
+    .object({
+      name: z.string().min(1),
+      read_only: z.boolean(),
+      destructive: z.boolean(),
+      requires_confirmation: z.boolean(),
+    })
+    .transform((value) => ({
+      name: value.name,
+      readOnly: value.read_only,
+      destructive: value.destructive,
+      requiresConfirmation: value.requires_confirmation,
+    })),
 ]);
 
 export const aiSaveCredentialsRequestSchema = z.object({
@@ -360,17 +406,21 @@ export const aiProviderConnectionPayloadSchema = z.object({
 
 export const aiPatchSetSchema = z.object({
   summary: z.string(),
-  files: z.array(z.object({
-    path: z.string(),
-    originalHash: z.string(),
-    hunks: z.array(z.object({
-      oldStart: z.number().int().nonnegative(),
-      oldLines: z.number().int().nonnegative(),
-      newStart: z.number().int().nonnegative(),
-      newLines: z.number().int().nonnegative(),
-      lines: z.array(z.string()),
-    })),
-  })),
+  files: z.array(
+    z.object({
+      path: z.string(),
+      originalHash: z.string(),
+      hunks: z.array(
+        z.object({
+          oldStart: z.number().int().nonnegative(),
+          oldLines: z.number().int().nonnegative(),
+          newStart: z.number().int().nonnegative(),
+          newLines: z.number().int().nonnegative(),
+          lines: z.array(z.string()),
+        }),
+      ),
+    }),
+  ),
 });
 
 export const aiApplyPatchMetadataSchema = z.object({
@@ -410,40 +460,58 @@ export const aiCodeActionPayloadSchema = z.object({
 
 export {
   aiAgentApprovePlanPayloadSchema,
-  aiAgentApprovePlanRequestSchema, aiAgentChangedFileSchema,
-  aiAgentChangedFileStatusSchema, aiAgentClassifyTaskPayloadSchema,
-  aiAgentClassifyTaskRequestSchema, aiAgentListRunsPayloadSchema, aiAgentNetworkPermissionPayloadSchema,
-  aiAgentNetworkPermissionSchema, aiAgentPatchSummarySchema, aiAgentPermissionLevelSchema,
+  aiAgentApprovePlanRequestSchema,
+  aiAgentChangedFileSchema,
+  aiAgentChangedFileStatusSchema,
+  aiAgentClassifyTaskPayloadSchema,
+  aiAgentClassifyTaskRequestSchema,
+  aiAgentListRunsPayloadSchema,
+  aiAgentNetworkPermissionPayloadSchema,
+  aiAgentNetworkPermissionSchema,
+  aiAgentPatchSummarySchema,
+  aiAgentPermissionLevelSchema,
   aiAgentPermissionScopeSchema,
-  aiAgentPermissionStateSchema, aiAgentPlanPayloadSchema,
+  aiAgentPermissionStateSchema,
+  aiAgentPlanPayloadSchema,
   aiAgentPlanReferenceSchema,
   aiAgentPlanReferenceTypeSchema,
   aiAgentPlanRequestSchema,
   aiAgentPlanRiskLevelSchema,
   aiAgentPlanStepKindSchema,
-  aiAgentPlanStepStatusSchema, aiAgentResolveToolConfirmationRequestSchema, aiAgentRunIdRequestSchema,
+  aiAgentPlanStepStatusSchema,
+  aiAgentResolveToolConfirmationRequestSchema,
+  aiAgentRunIdRequestSchema,
   aiAgentRunPayloadSchema,
   aiAgentRunPlanRequestSchema,
   aiAgentRunSchema,
   aiAgentRunStatusSchema,
-  aiAgentRunStepRequestSchema, aiAgentSetNetworkPermissionRequestSchema, aiAgentStepDetailSchema,
+  aiAgentRunStepRequestSchema,
+  aiAgentSetNetworkPermissionRequestSchema,
+  aiAgentStepDetailSchema,
   aiAgentStepToolResultSummarySchema,
-  aiAgentStepWebSourceSummarySchema, aiAgentTaskClassificationSchema,
+  aiAgentStepWebSourceSummarySchema,
+  aiAgentTaskClassificationSchema,
   aiAgentTimelineItemSchema,
   aiAgentTimelineItemStatusSchema,
   aiAgentTimelineItemTypeSchema,
   aiAgentToolNameSchema,
   aiContextKindSchema,
   aiContextRangeSchema,
-  aiContextReferenceSchema, aiDiffEditorPreviewSchema, aiDiffHunkPreviewSchema, aiDiffPreviewLineKindSchema,
+  aiContextReferenceSchema,
+  aiDiffEditorPreviewSchema,
+  aiDiffHunkPreviewSchema,
+  aiDiffPreviewLineKindSchema,
   aiDiffPreviewLineSchema,
-  aiTaskPlanStepSchema, aiWebActivityStateSchema, aiWebFetchInputSchema,
+  aiTaskPlanStepSchema,
+  aiWebActivityStateSchema,
+  aiWebFetchInputSchema,
   aiWebFetchPayloadSchema,
-  aiWebFetchResultSchema, aiWebSearchInputSchema,
+  aiWebFetchResultSchema,
+  aiWebSearchInputSchema,
   aiWebSearchIntentSchema,
   aiWebSearchPayloadSchema,
   aiWebSearchRecencySchema,
   aiWebSearchResultSchema,
   aiWebSourceEntryStatusSchema,
-  aiWebSourceTypeSchema
+  aiWebSourceTypeSchema,
 };

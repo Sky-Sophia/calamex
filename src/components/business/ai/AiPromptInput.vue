@@ -1,15 +1,12 @@
 <script setup lang="ts">
-import type { IAiTokenContextProps } from '@/composables/useAiTokenContext';
 import {
     Context,
-    ContextCacheUsage,
     ContextContent,
     ContextContentBody,
     ContextContentFooter,
     ContextContentHeader,
     ContextInputUsage,
     ContextOutputUsage,
-    ContextReasoningUsage,
     ContextTrigger,
 } from '@/components/ai-elements/context';
 import { PromptInputAttachmentsDisplay } from '@/components/ai-elements/prompt-input';
@@ -27,6 +24,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import type { IAiTokenContextProps } from '@/composables/useAiTokenContext';
+import type { IAiAttachedFile } from '@/types/ai';
 import { ArrowUpIcon, PlusIcon, SquareIcon } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
@@ -47,13 +46,7 @@ const props = defineProps<{
     disabled: boolean;
     errorMessage: string;
     submitLabel: string;
-    attachments: readonly {
-        id: string;
-        name: string;
-        sizeLabel: string;
-        kind: 'text' | 'image';
-        detailLabel?: string;
-    }[];
+    attachments: readonly IAiAttachedFile[];
     hasAttachments: boolean;
     tokenContext?: IAiTokenContextProps;
 }>();
@@ -184,10 +177,10 @@ const handleStop = (): void => {
         <p v-if="errorMessage" class="ai-error" v-text="errorMessage" />
         <form class="ai-composer-surface" @submit.prevent="handleSubmit">
             <input ref="fileInputRef" type="file" class="hidden" multiple @change="handleFileChange" />
+            <div v-if="attachments.length" class="ai-attachments">
+                <PromptInputAttachmentsDisplay :attachments="attachments" @remove="handleRemoveAttachment" />
+            </div>
             <InputGroup class="ai-prompt-shell">
-                <div v-if="attachments.length" class="ai-attachments">
-                    <PromptInputAttachmentsDisplay :attachments="attachments" @remove="handleRemoveAttachment" />
-                </div>
                 <InputGroupTextarea
 v-model="modelValue" class="ai-prompt-textarea" placeholder="输入消息" aria-label="输入消息"
                     :disabled="disabled" @keydown="handleKeyDown" @paste="handlePaste"
@@ -195,8 +188,7 @@ v-model="modelValue" class="ai-prompt-textarea" placeholder="输入消息" aria-
                 <InputGroupAddon align="block-end" class="ai-toolbar-row">
                     <InputGroupButton
 type="button" variant="outline" class="ai-attachment-button rounded-full"
-                        size="icon-xs" :disabled="disabled" aria-label="添加附件"
-                        @click="handleOpenFileDialog">
+                        size="icon-xs" :disabled="disabled" aria-label="添加附件" @click="handleOpenFileDialog">
                         <PlusIcon class="size-4" />
                     </InputGroupButton>
 
@@ -218,22 +210,21 @@ aria-label="选择模式"
                     <Context v-bind="resolvedTokenContext">
                         <ContextTrigger class="ai-token-trigger ml-auto" aria-label="Token 消耗" />
 
-                        <ContextContent side="top" align="end" :side-offset="8" class="ai-token-content">
+                        <ContextContent
+side="top" align="end" :side-offset="8"
+                            class="ai-token-content border border-[#f1f2f4] divide-[#f1f2f4] bg-[#ffffff] !shadow-[0_0_0_1px_rgba(15,23,42,0.02),0_8px_20px_rgba(15,23,42,0.05)]">
                             <ContextContentHeader />
                             <ContextContentBody>
                                 <ContextInputUsage />
                                 <ContextOutputUsage />
-                                <ContextReasoningUsage />
-                                <ContextCacheUsage />
                             </ContextContentBody>
-                            <ContextContentFooter />
+                            <ContextContentFooter class="bg-[#f4f4f5]" />
                         </ContextContent>
                     </Context>
 
                     <InputGroupButton
 v-if="disabled" type="button" variant="outline"
-                        class="ai-send-button rounded-full" size="icon-xs" aria-label="停止"
-                        @click="handleStop">
+                        class="ai-send-button rounded-full" size="icon-xs" aria-label="停止" @click="handleStop">
                         <SquareIcon class="size-4" />
                         <span class="sr-only">Stop</span>
                     </InputGroupButton>
@@ -273,6 +264,8 @@ v-else type="submit" variant="default" class="ai-send-button rounded-full"
 .ai-composer-surface {
     width: 100%;
     min-width: 0;
+    display: grid;
+    gap: 8px;
 }
 
 .ai-prompt-shell {
@@ -303,8 +296,8 @@ v-else type="submit" variant="default" class="ai-send-button rounded-full"
 }
 
 .ai-attachments {
-    padding: 10px 14px 0;
-    background: #ffffff;
+    min-width: 0;
+    padding: 0 2px;
 }
 
 .ai-prompt-textarea {
@@ -373,11 +366,12 @@ v-else type="submit" variant="default" class="ai-send-button rounded-full"
 }
 
 .ai-token-trigger {
-    min-width: 64px;
+    width: 28px;
     height: 24px;
-    gap: 6px;
+    min-width: 28px;
+    gap: 0;
     border-radius: 999px;
-    padding: 0 8px;
+    padding: 0;
     color: var(--text-secondary);
     font-size: 12px;
     line-height: 1;

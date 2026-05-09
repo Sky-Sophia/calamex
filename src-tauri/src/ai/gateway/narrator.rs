@@ -110,7 +110,12 @@ pub async fn narrate_activity_stream(
                 &api_key,
                 &task_model,
                 request,
-                |delta| {
+                |event| {
+                    let openai_compatible::AiProviderStreamEvent::Delta { delta, .. } = event
+                    else {
+                        return Ok(());
+                    };
+
                     if delta.is_empty() {
                         return Ok(());
                     }

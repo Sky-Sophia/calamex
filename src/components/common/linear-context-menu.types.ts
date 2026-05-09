@@ -23,7 +23,10 @@ export type TLinearContextMenuIcon =
   | 'upload'
   | 'download'
   | 'wrench'
-  | 'flask';
+  | 'flask'
+  | 'terminal'
+  | 'play'
+  | 'sparkles';
 
 export interface ILinearContextMenuItem {
   key: string;

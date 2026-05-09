@@ -406,7 +406,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
           {
             key: 'open-terminal',
             label: '打开终端',
-            icon: 'command',
+            icon: 'terminal',
             shortcut: SHORTCUT_MAP['open-terminal'],
             action: 'open-terminal',
             disabled: false,
@@ -414,7 +414,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
           {
             key: 'run-current-script',
             label: '运行当前脚本',
-            icon: 'command',
+            icon: 'play',
             shortcut: SHORTCUT_MAP['run-current-script'],
             action: 'run-current-script',
             disabled: !canRunCurrentScript,
@@ -450,7 +450,7 @@ export const useEditorContextMenu = (options: IUseEditorContextMenuOptions) => {
           {
             key: 'ai-tools',
             label: 'AI',
-            icon: 'command',
+            icon: 'sparkles',
             children: aiChildren,
             disabled: aiChildren.every((item) => item.disabled),
           },

@@ -1,8 +1,8 @@
 import type { TAgentRuntimeEvent } from '@/types/agent-sidecar';
-import type { IAiContextReference } from '@/types/ai-context';
+import type { IAiContextReference, IAiImageAttachmentPreview } from '@/types/ai-context';
+import type { LanguageModelUsage } from 'ai';
 
-export type TAiProviderType =
-  | 'litellm';
+export type TAiProviderType = 'litellm';
 export type TAiModelRole = 'main' | 'narrator';
 export type TAiStatus = 'idle' | 'generating' | 'streaming' | 'error';
 export type TAiChatRole = 'user' | 'assistant' | 'system' | 'tool';
@@ -32,25 +32,34 @@ export type TActivityNoteTrigger =
 export type {
   IAiContextRange,
   IAiContextReference,
-  TAiContextKind
+  IAiImageAttachmentPreview,
+  TAiContextKind,
 } from '@/types/ai-context';
 
 export type {
-  IAiWebActivity, IAiWebFetchInput,
+  IAiWebActivity,
+  IAiWebFetchInput,
   IAiWebFetchPayload,
-  IAiWebFetchResult, IAiWebSearchInput,
+  IAiWebFetchResult,
+  IAiWebSearchInput,
   IAiWebSearchPayload,
   IAiWebSearchResult,
-  IAiWebSourceEntry, TAiWebActivityState, TAiWebSearchIntent,
-  TAiWebSearchRecency, TAiWebSourceEntryStatus,
-  TAiWebSourceType
+  IAiWebSourceEntry,
+  TAiWebActivityState,
+  TAiWebSearchIntent,
+  TAiWebSearchRecency,
+  TAiWebSourceEntryStatus,
+  TAiWebSourceType,
 } from '@/types/ai-web';
 
 export type {
   IAiAgentChangedFile,
-  IAiAgentPatchSummary, IAiDiffEditorPreview, IAiDiffHunkPreview, IAiDiffPreviewLine,
+  IAiAgentPatchSummary,
+  IAiDiffEditorPreview,
+  IAiDiffHunkPreview,
+  IAiDiffPreviewLine,
   TAiAgentChangedFileStatus,
-  TAiDiffPreviewLineKind
+  TAiDiffPreviewLineKind,
 } from '@/types/ai-patch';
 
 export type {
@@ -58,27 +67,34 @@ export type {
   IAiToolActivityInline,
   TAiAgentStreamEndReason,
   TAiAgentStreamEvent,
-  TAiToolActivityState
+  TAiToolActivityState,
 } from '@/types/ai-stream';
 
 export type {
   IAiAgentApprovePlanPayload,
   IAiAgentApprovePlanRequest,
   IAiAgentClassifyTaskPayload,
-  IAiAgentClassifyTaskRequest, IAiAgentListRunsPayload, IAiAgentNetworkPermissionPayload,
+  IAiAgentClassifyTaskRequest,
+  IAiAgentListRunsPayload,
+  IAiAgentNetworkPermissionPayload,
   IAiAgentPermissionState,
   IAiAgentPlanPayload,
   IAiAgentPlanReference,
-  IAiAgentPlanRequest, IAiAgentResolveToolConfirmationRequest, IAiAgentRun,
+  IAiAgentPlanRequest,
+  IAiAgentResolveToolConfirmationRequest,
+  IAiAgentRun,
   IAiAgentRunIdRequest,
   IAiAgentRunPayload,
   IAiAgentRunPlanRequest,
-  IAiAgentRunStepRequest, IAiAgentSetNetworkPermissionRequest,
+  IAiAgentRunStepRequest,
+  IAiAgentSetNetworkPermissionRequest,
   IAiAgentStepDetail,
   IAiAgentStepFinalAnswer,
   IAiAgentStepToolResultSummary,
   IAiAgentStepWebSourceSummary,
-  IAiAgentTimelineItem, IAiTaskPlanStep, IAiToolConfirmationOption,
+  IAiAgentTimelineItem,
+  IAiTaskPlanStep,
+  IAiToolConfirmationOption,
   IAiToolConfirmationRequest,
   TAiAgentNetworkPermission,
   TAiAgentPlanRiskLevel,
@@ -90,7 +106,7 @@ export type {
   TAiAgentTimelineItemType,
   TAiToolConfirmationDecision,
   TAiToolConfirmationOptionId,
-  TAiToolConfirmationOptionTone
+  TAiToolConfirmationOptionTone,
 } from '@/types/ai-agent';
 
 export interface IAiChatStreamRenderState {
@@ -98,6 +114,10 @@ export interface IAiChatStreamRenderState {
   activityText?: string;
   runtimeEvents?: TAgentRuntimeEvent[];
   finalAnswerStarted?: boolean;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  usage?: LanguageModelUsage;
 }
 
 export type TAiChatMessageActionId = 'allow-agent-execution';
@@ -112,6 +132,16 @@ export interface IAiAgentConfirmationState {
   goal: string;
   references: IAiContextReference[];
   status: 'pending' | 'running';
+}
+
+export interface IAiAttachedFile {
+  id: string;
+  name: string;
+  sizeLabel: string;
+  kind: 'text' | 'image';
+  detailLabel?: string;
+  preview?: IAiImageAttachmentPreview;
+  reference: IAiContextReference;
 }
 
 export interface IAiChatMessage {
@@ -202,6 +232,7 @@ export interface IAiChatPayload {
   message: IAiChatMessage;
   providerType: TAiProviderType;
   model: string;
+  usage?: LanguageModelUsage | null;
 }
 
 export interface IAiConversationTitleRequest {
@@ -323,6 +354,10 @@ export interface IAiChatStreamEventPayload {
   delta: string | null;
   message: string | null;
   model: string | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  usage?: LanguageModelUsage | null;
 }
 
 export interface IAiCancelRequest {
@@ -412,15 +447,15 @@ export interface IAiCodeActionResult {
 
 export interface IAiCodeActionRequest {
   kind:
-  | 'explain_selection'
-  | 'rewrite_selection'
-  | 'generate_tests'
-  | 'fix_diagnostic'
-  | 'extract_function'
-  | 'add_error_handling'
-  | 'add_docs'
-  | 'simplify_code'
-  | 'convert_style';
+    | 'explain_selection'
+    | 'rewrite_selection'
+    | 'generate_tests'
+    | 'fix_diagnostic'
+    | 'extract_function'
+    | 'add_error_handling'
+    | 'add_docs'
+    | 'simplify_code'
+    | 'convert_style';
   filePath: string | null;
   language: string;
   selection: string;

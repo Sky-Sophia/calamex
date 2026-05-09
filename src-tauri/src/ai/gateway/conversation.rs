@@ -111,6 +111,11 @@ pub async fn chat_stream(
         &model,
     );
     let request = AiProviderChatRequest::new(messages);
+    let prompt_token_estimate =
+        token_budget::estimate_chat_prompt_tokens_if_supported(&model, &request)?;
+    let prompt_tokens = prompt_token_estimate
+        .as_ref()
+        .map(|estimate| estimate.input_tokens);
 
     stream_manager::register(&stream_id);
 
@@ -128,41 +133,68 @@ pub async fn chat_stream(
                 delta: None,
                 message: None,
                 model: Some(task_model.clone()),
+                prompt_tokens,
+                completion_tokens: None,
+                total_tokens: prompt_tokens,
+                usage: None,
             },
         );
 
         let result = async {
             let base_url = resolve_base_url(&task_config)?.to_string();
             let api_key = get_api_key_for_config(&task_config)?;
+            let mut final_usage = None;
+            let mut latest_completion_tokens = None;
 
             connection::chat_stream_with_litellm_fallback(
                 &base_url,
                 &api_key,
                 &task_model,
                 request,
-                |delta| {
-                    emit_stream_event(
-                        &app,
-                        AiChatStreamEventPayload {
-                            stream_id: task_stream_id.clone(),
-                            assistant_message_id: task_assistant_message_id.clone(),
-                            kind: "delta".to_string(),
-                            delta: Some(delta),
-                            message: None,
-                            model: Some(task_model.clone()),
-                        },
-                    );
+                |event| {
+                    match event {
+                        openai_compatible::AiProviderStreamEvent::Delta {
+                            delta,
+                            completion_tokens_estimate,
+                        } => {
+                            latest_completion_tokens = completion_tokens_estimate;
+                            emit_stream_event(
+                                &app,
+                                AiChatStreamEventPayload {
+                                    stream_id: task_stream_id.clone(),
+                                    assistant_message_id: task_assistant_message_id.clone(),
+                                    kind: "delta".to_string(),
+                                    delta: Some(delta),
+                                    message: None,
+                                    model: Some(task_model.clone()),
+                                    prompt_tokens,
+                                    completion_tokens: completion_tokens_estimate,
+                                    total_tokens: prompt_tokens
+                                        .zip(completion_tokens_estimate)
+                                        .map(|(input_tokens, output_tokens)| {
+                                            input_tokens + output_tokens
+                                        }),
+                                    usage: None,
+                                },
+                            );
+                        }
+                        openai_compatible::AiProviderStreamEvent::Usage { usage } => {
+                            final_usage = Some(usage);
+                        }
+                    }
 
                     Ok(())
                 },
                 || stream_manager::is_cancelled(&task_stream_id),
             )
-            .await
+            .await?;
+
+            Ok::<_, String>((final_usage, latest_completion_tokens))
         }
         .await;
 
         match result {
-            Ok(()) => {
+            Ok((final_usage, completion_tokens_estimate)) => {
                 if stream_manager::is_cancelled(&task_stream_id) {
                     emit_stream_event(
                         &app,
@@ -173,10 +205,32 @@ pub async fn chat_stream(
                             delta: None,
                             message: Some("AI 请求已取消。".to_string()),
                             model: Some(task_model.clone()),
+                            prompt_tokens,
+                            completion_tokens: completion_tokens_estimate,
+                            total_tokens: prompt_tokens
+                                .zip(completion_tokens_estimate)
+                                .map(|(input_tokens, output_tokens)| input_tokens + output_tokens),
+                            usage: final_usage,
                         },
                     );
                 } else {
                     audit::emit(AiAuditEventKind::ChatCompleted);
+                    let final_prompt_tokens = final_usage
+                        .as_ref()
+                        .map(|usage| usage.input_tokens)
+                        .or(prompt_tokens);
+                    let final_completion_tokens = final_usage
+                        .as_ref()
+                        .map(|usage| usage.output_tokens)
+                        .or(completion_tokens_estimate);
+                    let final_total_tokens = final_usage
+                        .as_ref()
+                        .map(|usage| usage.total_tokens)
+                        .or_else(|| {
+                            final_prompt_tokens
+                                .zip(final_completion_tokens)
+                                .map(|(input_tokens, output_tokens)| input_tokens + output_tokens)
+                        });
 
                     emit_stream_event(
                         &app,
@@ -187,6 +241,10 @@ pub async fn chat_stream(
                             delta: None,
                             message: None,
                             model: Some(task_model.clone()),
+                            prompt_tokens: final_prompt_tokens,
+                            completion_tokens: final_completion_tokens,
+                            total_tokens: final_total_tokens,
+                            usage: final_usage,
                         },
                     );
                 }
@@ -209,6 +267,10 @@ pub async fn chat_stream(
                         delta: None,
                         message: Some(error),
                         model: Some(task_model.clone()),
+                        prompt_tokens,
+                        completion_tokens: None,
+                        total_tokens: prompt_tokens,
+                        usage: None,
                     },
                 );
             }
@@ -341,7 +403,10 @@ fn collect_messages(
     let mut result = Vec::new();
 
     for (index, message) in messages.into_iter().enumerate() {
-        if message.role != "user" && message.role != "assistant" && message.role != "system" {
+        if !matches!(
+            message.role.as_str(),
+            "user" | "assistant" | "system" | "tool"
+        ) {
             continue;
         }
 

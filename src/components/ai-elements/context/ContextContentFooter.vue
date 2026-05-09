@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { HTMLAttributes } from 'vue';
 import { cn } from '@/lib/utils';
-import { getUsage } from 'tokenlens';
+import type { HTMLAttributes } from 'vue';
 import { computed } from 'vue';
 import { useContextValue } from './context';
+import { computeDeepSeekCostBreakdown, formatCnyCost } from './deepseek-pricing';
 
 const props = defineProps<{
   class?: HTMLAttributes['class'];
@@ -12,40 +12,23 @@ const props = defineProps<{
 const { modelId, usage } = useContextValue();
 
 const totalCost = computed(() => {
-  if (!modelId.value) {
+  const pricing = computeDeepSeekCostBreakdown(modelId.value, usage.value);
+
+  if (!pricing) {
     return '暂无价格';
   }
 
-  const costUSD = getUsage({
-    modelId: modelId.value,
-    usage: {
-      input: usage.value?.inputTokens ?? 0,
-      output: usage.value?.outputTokens ?? 0,
-      reasoningTokens: usage.value?.outputTokenDetails.reasoningTokens ?? usage.value?.reasoningTokens ?? 0,
-      cacheReads: usage.value?.inputTokenDetails.cacheReadTokens ?? usage.value?.cachedInputTokens ?? 0,
-    },
-  }).costUSD?.totalUSD;
-
-  if (typeof costUSD !== 'number') {
-    return '暂无价格';
-  }
-
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(costUSD);
+  return formatCnyCost(pricing.totalCostCny);
 });
 </script>
 
 <template>
-  <div
-    :class="cn('flex w-full items-center justify-between gap-3 bg-[var(--surface-soft)] p-3 text-xs', props.class)"
-  >
+  <div :class="cn('flex w-full items-center justify-between gap-3 bg-[var(--surface-soft)] p-3 text-xs', props.class)">
     <slot v-if="$slots.default" />
 
     <template v-else>
-      <span class="text-[var(--text-secondary)]">总费用</span>
-      <span>{{ totalCost }}</span>
+      <span class="text-[var(--text-secondary)]">总成本</span>
+      <span class="text-[#09090b]">{{ totalCost }}</span>
     </template>
   </div>
 </template>

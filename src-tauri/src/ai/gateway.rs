@@ -2,9 +2,12 @@ use super::audit::{self, AiAuditEventKind};
 use super::credential::CredentialStore;
 use super::errors;
 use super::openai_compatible;
-use super::provider::{AiProviderChatRequest, AiProviderMessage, AiProviderResponse};
+use super::provider::{
+    AiProviderChatRequest, AiProviderMessage, AiProviderResponse, AiProviderUsage,
+};
 use super::redaction::redact_text;
 use super::stream_manager;
+use super::token_budget;
 use crate::ai_agent::planner::AgentPlanner;
 use crate::commands::contracts::{
     AiAgentClassifyTaskPayload, AiAgentClassifyTaskRequest, AiChatRequest, AiCodeActionPayload,
@@ -162,6 +165,10 @@ pub struct AiChatStreamEventPayload {
     pub delta: Option<String>,
     pub message: Option<String>,
     pub model: Option<String>,
+    pub prompt_tokens: Option<u64>,
+    pub completion_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
+    pub usage: Option<AiProviderUsage>,
 }
 
 #[derive(Debug, Clone, Serialize)]

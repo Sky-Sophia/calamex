@@ -19,6 +19,9 @@ export type TEditorContextMenuIcon = Extract<
   | 'redo'
   | 'wrench'
   | 'flask'
+  | 'terminal'
+  | 'play'
+  | 'sparkles'
   | 'command'
 >;
 

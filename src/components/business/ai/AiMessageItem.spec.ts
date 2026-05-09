@@ -11,6 +11,32 @@ const { successMock, errorMock, warningMock, tryWriteClipboardTextMock } = vi.ho
   tryWriteClipboardTextMock: vi.fn(),
 }));
 
+const lightboxMock = vi.hoisted(() => {
+  const instances: Array<{
+    options: Record<string, unknown>;
+    init: ReturnType<typeof vi.fn>;
+    destroy: ReturnType<typeof vi.fn>;
+    loadAndOpen: ReturnType<typeof vi.fn>;
+  }> = [];
+
+  const ctor = vi.fn(function MockPhotoSwipeLightbox(
+    this: Record<string, unknown>,
+    options: Record<string, unknown>,
+  ) {
+    const instance = {
+      options,
+      init: vi.fn(),
+      destroy: vi.fn(),
+      loadAndOpen: vi.fn(() => true),
+    };
+
+    instances.push(instance);
+    Object.assign(this, instance);
+  });
+
+  return { ctor, instances };
+});
+
 vi.mock('@/composables/useMessage', () => ({
   useMessage: () => ({
     success: successMock,
@@ -23,6 +49,10 @@ vi.mock('@/utils/clipboard', () => ({
   tryWriteClipboardText: tryWriteClipboardTextMock,
 }));
 
+vi.mock('photoswipe/lightbox', () => ({
+  default: lightboxMock.ctor,
+}));
+
 const createMessage = (overrides: Partial<IAiChatMessage>): IAiChatMessage => ({
   id: 'assistant-message',
   role: 'assistant',
@@ -32,21 +62,22 @@ const createMessage = (overrides: Partial<IAiChatMessage>): IAiChatMessage => ({
   ...overrides,
 });
 
-const createRuntimeEvent = (overrides: Partial<TAgentRuntimeEvent>): TAgentRuntimeEvent => ({
-  id: overrides.id ?? 'runtime-event-1',
-  type: overrides.type ?? 'agent.reasoning.delta',
-  runId: overrides.runId ?? 'run-1',
-  sessionId: overrides.sessionId ?? 'session-1',
-  agentId: overrides.agentId ?? 'agent-1',
-  timestamp: overrides.timestamp ?? '2026-05-03T10:00:00.000Z',
-  seq: overrides.seq ?? 1,
-  schemaVersion: 1,
-  redacted: true,
-  visibility: overrides.visibility ?? 'user',
-  level: overrides.level ?? 'info',
-  text: '我先确认真实工具列表。',
-  ...(overrides as object),
-}) as TAgentRuntimeEvent;
+const createRuntimeEvent = (overrides: Partial<TAgentRuntimeEvent>): TAgentRuntimeEvent =>
+  ({
+    id: overrides.id ?? 'runtime-event-1',
+    type: overrides.type ?? 'agent.reasoning.delta',
+    runId: overrides.runId ?? 'run-1',
+    sessionId: overrides.sessionId ?? 'session-1',
+    agentId: overrides.agentId ?? 'agent-1',
+    timestamp: overrides.timestamp ?? '2026-05-03T10:00:00.000Z',
+    seq: overrides.seq ?? 1,
+    schemaVersion: 1,
+    redacted: true,
+    visibility: overrides.visibility ?? 'user',
+    level: overrides.level ?? 'info',
+    text: '我先确认真实工具列表。',
+    ...(overrides as object),
+  }) as TAgentRuntimeEvent;
 
 describe('AiMessageItem', () => {
   beforeEach(() => {
@@ -55,6 +86,8 @@ describe('AiMessageItem', () => {
     warningMock.mockReset();
     tryWriteClipboardTextMock.mockReset();
     tryWriteClipboardTextMock.mockResolvedValue(true);
+    lightboxMock.instances.length = 0;
+    lightboxMock.ctor.mockClear();
   });
 
   it('空的流式助手消息渲染单条加载行', () => {
@@ -80,6 +113,30 @@ describe('AiMessageItem', () => {
     expect(wrapper.text()).toContain('今天有什么新闻');
     expect(wrapper.find('.ai-runtime-timeline').exists()).toBe(false);
     expect(wrapper.find('.ai-message-bubble').exists()).toBe(false);
+  });
+
+  it('流式生成时显示输出 token 进度', () => {
+    const wrapper = mount(AiMessageItem, {
+      props: {
+        message: createMessage({
+          content: '你好',
+          stream: {
+            status: 'streaming',
+            completionTokens: 387,
+          },
+        }),
+        platformId: 'deepseek',
+        providerLabel: 'DeepSeek',
+      },
+      global: {
+        stubs: {
+          AiMarkdown: { template: '<div class="markdown-stub" />' },
+        },
+      },
+    });
+
+    expect(wrapper.find('.ai-message-token-progress').exists()).toBe(true);
+    expect(wrapper.text()).toContain('已生成 387 token');
   });
 
   it('sidecar 占位流开始时立即显示新 runtime 时间线，不显示加载行', () => {
@@ -128,7 +185,9 @@ describe('AiMessageItem', () => {
       },
       global: {
         stubs: {
-          AiMarkdown: { template: '<div class="markdown-stub">好的，我先检查当前 sidecar 状态。</div>' },
+          AiMarkdown: {
+            template: '<div class="markdown-stub">好的，我先检查当前 sidecar 状态。</div>',
+          },
         },
       },
     });
@@ -211,8 +270,10 @@ describe('AiMessageItem', () => {
     expect(messageBubble.exists()).toBe(true);
     expect(wrapper.text()).toContain('我先确认真实工具列表。');
     expect(wrapper.text()).toContain('grep_search');
-    expect(runtimeTimeline.element.compareDocumentPosition(messageBubble.element) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
+    expect(
+      runtimeTimeline.element.compareDocumentPosition(messageBubble.element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('不渲染空的非流式助手占位消息', () => {
@@ -412,17 +473,21 @@ describe('AiMessageItem', () => {
       props: {
         message: createMessage({
           content: '是否允许 AI 开始执行这个任务？',
-          actions: [{
-            id: 'allow-agent-execution',
-            label: '允许执行',
-          }],
+          actions: [
+            {
+              id: 'allow-agent-execution',
+              label: '允许执行',
+            },
+          ],
         }),
         platformId: 'deepseek',
         providerLabel: 'DeepSeek',
       },
       global: {
         stubs: {
-          AiMarkdown: { template: '<div class="markdown-stub">是否允许 AI 开始执行这个任务？</div>' },
+          AiMarkdown: {
+            template: '<div class="markdown-stub">是否允许 AI 开始执行这个任务？</div>',
+          },
         },
       },
     });
@@ -475,5 +540,52 @@ describe('AiMessageItem', () => {
     expect(wrapper.findAll('.ai-message-attachment-chip')).toHaveLength(1);
     expect(wrapper.text()).toContain('README.md');
     expect(wrapper.find('.ai-message-attachment-chip svg').exists()).toBe(true);
+  });
+
+  it('在用户消息气泡上方显示可点击放大的已发送图片预览', async () => {
+    const wrapper = mount(AiMessageItem, {
+      props: {
+        message: createMessage({
+          id: 'user-image-message',
+          role: 'user',
+          content: '请看这张图',
+          references: [
+            {
+              id: 'attachment:screenshot.png:1:4096',
+              kind: 'image-attachment',
+              label: '图片附件 · screenshot.png',
+              path: 'screenshot.png',
+              range: null,
+              contentPreview: '图片附件',
+              redacted: false,
+              attachmentPreview: {
+                src: 'blob:attachment-preview-message',
+                width: 1280,
+                height: 720,
+                mimeType: 'image/png',
+              },
+            },
+          ],
+        }),
+        platformId: 'deepseek',
+        providerLabel: 'DeepSeek',
+      },
+      global: {
+        stubs: {
+          AiMarkdown: { template: '<div class="markdown-stub">请看这张图</div>' },
+        },
+      },
+    });
+
+    await wrapper.vm.$nextTick();
+    expect(lightboxMock.ctor).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('.ai-message-image-attachments').exists()).toBe(true);
+    expect(wrapper.get('.ai-image-attachment-preview-link img').attributes('src')).toBe(
+      'blob:attachment-preview-message',
+    );
+
+    await wrapper.get('.ai-image-attachment-preview-link').trigger('click');
+
+    expect(lightboxMock.instances[0]?.loadAndOpen).toHaveBeenCalledWith(0);
   });
 });

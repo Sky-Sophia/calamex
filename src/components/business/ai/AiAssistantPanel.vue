@@ -73,10 +73,6 @@ const assistant = useAiAssistant({
   gitStatus: gitStatusRef,
   workspaceRootPath: workspaceRootPathRef,
 });
-const tokenContext = useAiTokenContext({
-  modelId: computed(() => assistant.config.value.selectedModel),
-  runtimeEvents: computed(() => assistant.runtimeTimelineEvents.value),
-});
 const agentRun = useAiAgentRun();
 const agentNetwork = useAiAgentNetwork();
 const webSources = useAiWebSources();
@@ -275,6 +271,12 @@ const threadMessages = computed<IAiChatMessage[]>(() => {
     ...assistant.messages.value.filter((message) => message.id !== flowMessage.id),
     flowMessage,
   ];
+});
+const { contextProps: tokenContextProps } = useAiTokenContext({
+  modelId: computed(() => assistant.config.value.selectedModel),
+  runtimeEvents: computed(() => assistant.runtimeTimelineEvents.value),
+  messages: threadMessages,
+  draft: computed(() => assistant.draft.value),
 });
 const submitLabel = computed(() => {
   if (assistant.activeMode.value === 'plan') {
@@ -706,9 +708,10 @@ onMounted(() => {
             :tooltip="getConversationCheckpointTooltip(message.id)"
             @click="handleRestoreConversationCheckpoint(message.id)">
             <CheckpointIcon class="ai-conversation-checkpoint__icon" aria-hidden="true" />
-            <span>{{ getConversationCheckpointLabel(message.id) }}</span>
+            <span class="ai-conversation-checkpoint__label">{{ getConversationCheckpointLabel(message.id) }}</span>
             <Loader v-if="isConversationCheckpointRestoring(message.id)" class="ai-conversation-checkpoint__loader"
               :size="12" />
+            <span v-else class="ai-conversation-checkpoint__spacer" aria-hidden="true"></span>
           </CheckpointTrigger>
         </Checkpoint>
       </template>
@@ -762,9 +765,8 @@ onMounted(() => {
       <AiPromptInput v-model="assistant.draft.value" v-model:active-mode="assistant.activeMode.value"
         :disabled="assistant.isSending.value" :error-message="assistant.errorMessage.value" :submit-label="submitLabel"
         :provider-label="aiIconTitle" :attachments="assistant.attachedFiles.value"
-        :has-attachments="assistant.attachedFiles.value.length > 0" :token-context="tokenContext.contextProps"
-        @submit="assistant.sendMessage"
-        @stop="assistant.stopCurrentRequest" @file-selected="assistant.attachFile"
+        :has-attachments="assistant.attachedFiles.value.length > 0" :token-context="tokenContextProps"
+        @submit="assistant.sendMessage" @stop="assistant.stopCurrentRequest" @file-selected="assistant.attachFile"
         @remove-file="assistant.removeAttachedFile" />
     </div>
 
@@ -1052,21 +1054,27 @@ onMounted(() => {
 }
 
 .ai-conversation-checkpoint {
-  padding-left: 42px;
+  padding-left: 0px;
   color: var(--text-quaternary);
 }
 
 .ai-conversation-checkpoint__trigger {
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 6px;
   height: auto;
   border: 0;
-  padding: 0;
+  padding: 0 2px;
   color: inherit;
   font-size: 11px;
   font-weight: 500;
   line-height: 16px;
+  white-space: nowrap;
+}
+
+.ai-conversation-checkpoint__label {
+  text-align: center;
 }
 
 .ai-conversation-checkpoint__trigger:hover {
@@ -1079,7 +1087,8 @@ onMounted(() => {
 }
 
 .ai-conversation-checkpoint__icon,
-.ai-conversation-checkpoint__loader {
+.ai-conversation-checkpoint__loader,
+.ai-conversation-checkpoint__spacer {
   width: 12px;
   height: 12px;
   flex: 0 0 auto;

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import type { HTMLAttributes } from 'vue';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
+import type { HTMLAttributes } from 'vue';
 import { computed } from 'vue';
 import { useContextValue } from './context';
+import { formatTokensInK } from './token-format';
 
 const props = defineProps<{
   class?: HTMLAttributes['class'];
@@ -12,8 +13,6 @@ const props = defineProps<{
 const PERCENT_MAX = 100;
 
 const { usedTokens, maxTokens } = useContextValue();
-
-const compactFormatter = new Intl.NumberFormat('zh-CN', { notation: 'compact' });
 
 const usedPercent = computed(() => {
   if (maxTokens.value <= 0) {
@@ -30,8 +29,8 @@ const displayPercent = computed(() =>
   }).format(usedPercent.value),
 );
 
-const used = computed(() => compactFormatter.format(usedTokens.value));
-const total = computed(() => (maxTokens.value > 0 ? compactFormatter.format(maxTokens.value) : '未知'));
+const used = computed(() => formatTokensInK(usedTokens.value));
+const total = computed(() => (maxTokens.value > 0 ? formatTokensInK(maxTokens.value) : '未知'));
 </script>
 
 <template>
@@ -40,12 +39,22 @@ const total = computed(() => (maxTokens.value > 0 ? compactFormatter.format(maxT
 
     <template v-else>
       <div class="flex items-center justify-between gap-3 text-xs">
-        <p>{{ displayPercent }}</p>
+        <p class="text-[#09090b]">{{ displayPercent }}</p>
         <p class="font-mono text-[var(--text-secondary)]">
           {{ used }} / {{ total }}
         </p>
       </div>
-      <Progress class="bg-[var(--border-subtle)]" :model-value="usedPercent * PERCENT_MAX" />
+      <Progress class="context-token-progress" :model-value="usedPercent * PERCENT_MAX" />
     </template>
   </div>
 </template>
+
+<style scoped>
+.context-token-progress[data-slot='progress'] {
+  background: #f4f4f5;
+}
+
+.context-token-progress :deep([data-slot='progress-indicator']) {
+  background: #18181b;
+}
+</style>

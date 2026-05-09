@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Agent, type ToolsInput } from '@mastra/core/agent';
 import { createDurableAgent, DurableStepIds } from '@mastra/core/agent/durable';
 import type { MastraModelConfig } from '@mastra/core/llm';
+import { ModelRouterLanguageModel } from '@mastra/core/llm';
 import { Mastra } from '@mastra/core/mastra';
 import { RequestContext } from '@mastra/core/request-context';
 import { toStandardSchema } from '@mastra/core/schema';
@@ -17,8 +18,8 @@ import { createTool } from '@mastra/core/tools';
 import {
     LocalFilesystem,
     LocalSandbox,
-    WORKSPACE_TOOLS,
     Workspace,
+    WORKSPACE_TOOLS,
     type AnyWorkspace,
     type LSPConfig,
     type WorkspaceToolsConfig,
@@ -27,16 +28,15 @@ import { LibSQLStore } from '@mastra/libsql';
 
 import {
     createDeepSeekModelConfigFromEnv,
-    type IDeepSeekModelConfig,
 } from '../models/deepseek-model.js';
 import type { TJsonValue } from '../schemas/events.js';
 import { agentPlanSchema, type TAgentPlan } from '../schemas/plan.js';
+import { redactForStream } from '../streaming/stream-redaction.js';
 import {
     createAgentRuntimeEvent,
     type IAgentRuntimeEventContext,
     type TAgentRuntimeEventDraft,
 } from '../streaming/stream-types.js';
-import { redactForStream } from '../streaming/stream-redaction.js';
 import { createMastraMcpClientBundle } from '../tools/mcp.js';
 import { buildSystemPrompt } from './agent-runtime-helpers.js';
 import type {
@@ -69,71 +69,6 @@ const DEFAULT_ROLLBACK_STEP: TRollbackStepPath = [
 
 type TMastraRequestContextValues = Record<string, unknown>;
 type TMastraRequestContext = RequestContext<TMastraRequestContextValues>;
-type TDeepSeekFetch = typeof fetch;
-type TDeepSeekLanguageModelFinishReason =
-    | 'stop'
-    | 'length'
-    | 'content-filter'
-    | 'tool-calls'
-    | 'error'
-    | 'other'
-    | 'unknown';
-type TDeepSeekLanguageModelUsage = {
-    inputTokens: number | undefined;
-    outputTokens: number | undefined;
-    totalTokens: number | undefined;
-    reasoningTokens?: number | undefined;
-    cachedInputTokens?: number | undefined;
-};
-type TDeepSeekLanguageModelContent =
-    | { type: 'text'; text: string }
-    | { type: 'reasoning'; text: string }
-    | { type: 'tool-call'; toolCallId: string; toolName: string; input: string };
-type TDeepSeekLanguageModelStreamPart =
-    | { type: 'stream-start'; warnings: [] }
-    | { type: 'response-metadata'; id?: string; modelId?: string; timestamp?: Date }
-    | { type: 'reasoning-start'; id: string }
-    | { type: 'reasoning-delta'; id: string; delta: string }
-    | { type: 'reasoning-end'; id: string }
-    | { type: 'text-start'; id: string }
-    | { type: 'text-delta'; id: string; delta: string }
-    | { type: 'text-end'; id: string }
-    | { type: 'tool-input-start'; id: string; toolName: string }
-    | { type: 'tool-input-delta'; id: string; delta: string }
-    | { type: 'tool-input-end'; id: string }
-    | { type: 'tool-call'; toolCallId: string; toolName: string; input: string }
-    | { type: 'finish'; finishReason: TDeepSeekLanguageModelFinishReason; usage: TDeepSeekLanguageModelUsage; providerMetadata: { deepseek: Record<string, never> } }
-    | { type: 'raw'; rawValue: unknown }
-    | { type: 'error'; error: unknown };
-type TDeepSeekLanguageModelGenerateResult = {
-    content: TDeepSeekLanguageModelContent[];
-    finishReason: TDeepSeekLanguageModelFinishReason;
-    usage: TDeepSeekLanguageModelUsage;
-    providerMetadata: { deepseek: Record<string, never> };
-    request: { body: IDeepSeekRequestBody };
-    response: {
-        headers: Record<string, string>;
-        body: Record<string, unknown>;
-        id?: string;
-        modelId?: string;
-        timestamp?: Date;
-    };
-    warnings: [];
-};
-type TDeepSeekLanguageModelStreamResult = {
-    stream: ReadableStream<TDeepSeekLanguageModelStreamPart>;
-    request: { body: IDeepSeekRequestBody };
-    response: { headers: Record<string, string> };
-};
-interface IDeepSeekReasoningLanguageModel {
-    readonly specificationVersion: 'v2';
-    readonly provider: string;
-    readonly modelId: string;
-    supportedUrls: Record<string, RegExp[]>;
-    supportsStructuredOutputs: true;
-    doGenerate(options: unknown): Promise<TDeepSeekLanguageModelGenerateResult>;
-    doStream(options: unknown): Promise<TDeepSeekLanguageModelStreamResult>;
-}
 
 type TMastraChatMessage = {
     role: 'user' | 'assistant';
@@ -245,12 +180,11 @@ interface IMastraRuntimeDeps {
         workflowName: string,
         runId: string,
     ) => Promise<IMastraWorkflowSnapshotLike | null>;
-    readModelConfig?: () => IDeepSeekModelConfig | null;
+    readModelConfig?: () => ModelRouterLanguageModel | null;
     createMcpClientBundle?: (
         options?: { workspaceRootPath?: string | null },
     ) => Promise<IMastraMcpBundle>;
     now?: () => string;
-    fetch?: TDeepSeekFetch;
 }
 
 interface IMastraPendingApproval {
@@ -519,26 +453,18 @@ const createWorkspaceToolsConfig = (): WorkspaceToolsConfig => ({
     requireApproval: false,
     [WORKSPACE_TOOLS.FILESYSTEM.READ_FILE]: {
         enabled: true,
+        name: 'view',
         maxOutputTokens: 6_000,
     },
-    [WORKSPACE_TOOLS.FILESYSTEM.LIST_FILES]: {
+    [WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE]: {
         enabled: true,
-        maxOutputTokens: 3_000,
-    },
-    [WORKSPACE_TOOLS.FILESYSTEM.FILE_STAT]: {
-        enabled: true,
-    },
-    [WORKSPACE_TOOLS.FILESYSTEM.GREP]: {
-        enabled: true,
-        maxOutputTokens: 6_000,
-    },
-    [WORKSPACE_TOOLS.FILESYSTEM.AST_EDIT]: {
-        enabled: true,
+        name: 'string_replace_lsp',
         requireReadBeforeWrite: true,
     },
-    [WORKSPACE_TOOLS.LSP.LSP_INSPECT]: {
+    [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: {
         enabled: true,
-        maxOutputTokens: 6_000,
+        name: 'write_file',
+        requireReadBeforeWrite: true,
     },
 });
 
@@ -577,9 +503,8 @@ const destroyMastraWorkspace = async (workspace: AnyWorkspace | undefined): Prom
 };
 
 const createMastraModelConfig = (
-    modelConfig: IDeepSeekModelConfig,
-    fetchFn: TDeepSeekFetch,
-): MastraModelConfig => createDeepSeekReasoningLanguageModel(modelConfig, fetchFn);
+    model: ModelRouterLanguageModel,
+): MastraModelConfig => model;
 
 const defaultCreateAgent = (config: IMastraAgentConfig): IMastraAgentLike => {
     const agent = new Agent({
@@ -979,1051 +904,6 @@ const isErrorChunk = (
     return payload !== null && 'error' in payload;
 };
 
-interface IDeepSeekToolFunction {
-    name: string;
-    arguments: string;
-}
-
-interface IDeepSeekToolCall {
-    id: string;
-    type: 'function';
-    function: IDeepSeekToolFunction;
-}
-
-interface IDeepSeekPendingToolCall {
-    index: number;
-    id: string;
-    functionName: string;
-    argumentsText: string;
-    started: boolean;
-    emitted: boolean;
-}
-
-type TDeepSeekChatMessage =
-    | { role: 'system' | 'user'; content: string }
-    | {
-        role: 'assistant';
-        content: string;
-        reasoning_content?: string;
-        tool_calls?: IDeepSeekToolCall[];
-    }
-    | { role: 'tool'; tool_call_id: string; content: string };
-
-interface IDeepSeekToolDefinition {
-    type: 'function';
-    function: {
-        name: string;
-        description: string;
-        parameters: { [key: string]: TJsonValue };
-    };
-}
-
-interface IDeepSeekModelCallOptions {
-    prompt?: unknown;
-    maxOutputTokens?: unknown;
-    temperature?: unknown;
-    topP?: unknown;
-    frequencyPenalty?: unknown;
-    presencePenalty?: unknown;
-    stopSequences?: unknown;
-    responseFormat?: unknown;
-    seed?: unknown;
-    tools?: unknown;
-    toolChoice?: unknown;
-    includeRawChunks?: unknown;
-    abortSignal?: AbortSignal | undefined;
-    headers?: unknown;
-    providerOptions?: unknown;
-}
-
-interface IDeepSeekUsage {
-    prompt_tokens?: number | null;
-    completion_tokens?: number | null;
-    total_tokens?: number | null;
-    prompt_tokens_details?: {
-        cached_tokens?: number | null;
-    } | null;
-    completion_tokens_details?: {
-        reasoning_tokens?: number | null;
-        accepted_prediction_tokens?: number | null;
-        rejected_prediction_tokens?: number | null;
-    } | null;
-}
-
-interface IDeepSeekRequestBody {
-    model: string;
-    messages: TDeepSeekChatMessage[];
-    stream?: boolean;
-    max_tokens?: number | undefined;
-    temperature?: number | undefined;
-    top_p?: number | undefined;
-    frequency_penalty?: number | undefined;
-    presence_penalty?: number | undefined;
-    stop?: string[] | undefined;
-    seed?: number | undefined;
-    response_format?: TJsonValue | undefined;
-    tools?: IDeepSeekToolDefinition[] | undefined;
-    tool_choice?: 'auto' | 'none' | 'required' | {
-        type: 'function';
-        function: {
-            name: string;
-        };
-    } | undefined;
-}
-
-interface IDeepSeekFetchResult {
-    response: Response;
-    body: IDeepSeekRequestBody;
-}
-
-const normalizeDeepSeekModelId = (model: string): string => {
-    const normalized = model.trim();
-    return normalized.startsWith('deepseek/')
-        ? normalized.slice('deepseek/'.length)
-        : normalized;
-};
-
-const buildDeepSeekChatCompletionsUrl = (baseUrl: string): string => {
-    const normalized = baseUrl.trim().replace(/\/+$/u, '');
-    return normalized.endsWith('/chat/completions')
-        ? normalized
-        : `${normalized}/chat/completions`;
-};
-
-const toDeepSeekToolParameters = (schema: unknown): { [key: string]: TJsonValue } => {
-    const normalized = toJsonValue(schema ?? DEFAULT_TOOL_INPUT_SCHEMA);
-    return toRecord(normalized) as { [key: string]: TJsonValue } | null
-        ?? DEFAULT_TOOL_INPUT_SCHEMA;
-};
-
-const createDeepSeekToolDefinitions = (
-    tools: unknown,
-): IDeepSeekToolDefinition[] => {
-    if (!Array.isArray(tools)) {
-        return [];
-    }
-
-    return tools.flatMap((tool): IDeepSeekToolDefinition[] => {
-        const record = toRecord(tool);
-        if (record?.type !== 'function') {
-            return [];
-        }
-
-        const name = getStringField(record, ['name']);
-        if (!name) {
-            return [];
-        }
-
-        return [{
-            type: 'function',
-            function: {
-                name,
-                description: getStringField(record, ['description']) ?? '',
-                parameters: toDeepSeekToolParameters(record.inputSchema),
-            },
-        }];
-    });
-};
-
-const appendDeepSeekSseDataLines = (
-    eventText: string,
-    chunks: string[],
-): void => {
-    for (const line of eventText.split(/\r?\n/u)) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) {
-            continue;
-        }
-
-        const data = trimmed.slice('data:'.length).trim();
-        if (data && data !== '[DONE]') {
-            chunks.push(data);
-        }
-    }
-};
-
-async function* readDeepSeekSseData(response: Response): AsyncIterable<string> {
-    const reader = response.body?.getReader();
-    if (!reader) {
-        return;
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-                break;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const parts = buffer.split(/\r?\n\r?\n/u);
-            buffer = parts.pop() ?? '';
-
-            const chunks: string[] = [];
-            parts.forEach((part) => appendDeepSeekSseDataLines(part, chunks));
-            for (const chunk of chunks) {
-                yield chunk;
-            }
-        }
-
-        buffer += decoder.decode();
-        const chunks: string[] = [];
-        appendDeepSeekSseDataLines(buffer, chunks);
-        for (const chunk of chunks) {
-            yield chunk;
-        }
-    } finally {
-        reader.releaseLock();
-    }
-}
-
-const parseJsonRecord = (value: string): Record<string, unknown> | null => {
-    try {
-        return toRecord(JSON.parse(value));
-    } catch {
-        return null;
-    }
-};
-
-const parseDeepSeekJsonResponse = async (response: Response): Promise<Record<string, unknown>> => {
-    const text = await response.text();
-    const parsed = parseJsonRecord(text);
-
-    if (!parsed) {
-        throw new Error('DeepSeek 返回了无法解析的 JSON 响应。');
-    }
-
-    return parsed;
-};
-
-const getArrayField = (
-    record: Record<string, unknown> | null,
-    field: string,
-): unknown[] => {
-    const value = record?.[field];
-    return Array.isArray(value) ? value : [];
-};
-
-const getNumberField = (
-    record: Record<string, unknown> | null,
-    field: string,
-): number | null => {
-    const value = record?.[field];
-    return typeof value === 'number' && Number.isInteger(value) ? value : null;
-};
-
-const getBooleanField = (
-    record: Record<string, unknown> | null,
-    field: string,
-): boolean | null => {
-    const value = record?.[field];
-    return typeof value === 'boolean' ? value : null;
-};
-
-const serializeDeepSeekToolResult = (value: unknown): string =>
-    stringifyJsonValue(toJsonValue(value));
-
-const serializeDeepSeekToolInput = (value: unknown): string => (
-    typeof value === 'string'
-        ? value
-        : stringifyJsonValue(toJsonValue(value))
-);
-
-const mergeDeepSeekToolCallDelta = (
-    toolCalls: Map<number, IDeepSeekPendingToolCall>,
-    value: unknown,
-): void => {
-    const record = toRecord(value);
-    const index = getNumberField(record, 'index');
-    if (index === null) {
-        return;
-    }
-
-    const existing = toolCalls.get(index) ?? {
-        index,
-        id: '',
-        functionName: '',
-        argumentsText: '',
-        started: false,
-        emitted: false,
-    };
-    const functionRecord = toRecord(record?.function);
-    const id = getStringField(record, ['id']);
-    const name = getStringField(functionRecord, ['name']);
-    const argumentsText = getStringField(functionRecord, ['arguments']);
-
-    toolCalls.set(index, {
-        ...existing,
-        ...(id ? { id } : {}),
-        ...(name ? { functionName: `${existing.functionName}${name}` } : {}),
-        ...(argumentsText ? { argumentsText: `${existing.argumentsText}${argumentsText}` } : {}),
-    });
-};
-
-const isDeepSeekToolCallReady = (toolCall: IDeepSeekPendingToolCall): boolean =>
-    Boolean(toolCall.id && toolCall.functionName);
-
-const isJsonObjectText = (value: string): boolean => {
-    if (!value.trim()) {
-        return true;
-    }
-
-    return parseJsonRecord(value) !== null;
-};
-
-const createDeepSeekHeaders = (
-    modelConfig: IDeepSeekModelConfig,
-    callHeaders: unknown,
-): Record<string, string> => {
-    const headers: Record<string, string> = {
-        authorization: `Bearer ${modelConfig.apiKey}`,
-        'content-type': 'application/json',
-    };
-    const extraHeaders = toRecord(callHeaders);
-
-    if (extraHeaders) {
-        Object.entries(extraHeaders).forEach(([key, value]) => {
-            if (typeof value === 'string' && value.length > 0) {
-                headers[key.toLowerCase()] = value;
-            }
-        });
-    }
-
-    return headers;
-};
-
-const getDeepSeekResponseHeaders = (headers: Headers): Record<string, string> =>
-    Object.fromEntries(headers.entries());
-
-const toDeepSeekTextContent = (content: unknown): string => {
-    if (typeof content === 'string') {
-        return content;
-    }
-
-    if (!Array.isArray(content)) {
-        return '';
-    }
-
-    return content
-        .map((part) => {
-            const record = toRecord(part);
-            return record?.type === 'text'
-                ? getStringField(record, ['text']) ?? ''
-                : '';
-        })
-        .join('');
-};
-
-const toDeepSeekToolResultContent = (output: unknown): string => {
-    const record = toRecord(output);
-    const type = getStringField(record, ['type']);
-
-    if (type === 'text' || type === 'error-text') {
-        return getStringField(record, ['value']) ?? '';
-    }
-
-    if ('value' in (record ?? {})) {
-        return serializeDeepSeekToolResult(record?.value);
-    }
-
-    return serializeDeepSeekToolResult(output);
-};
-
-const appendDeepSeekAssistantMessage = (
-    messages: TDeepSeekChatMessage[],
-    content: unknown,
-): void => {
-    if (!Array.isArray(content)) {
-        return;
-    }
-
-    let text = '';
-    let reasoningContent = '';
-    const toolCalls: IDeepSeekToolCall[] = [];
-
-    content.forEach((part) => {
-        const record = toRecord(part);
-        const type = getStringField(record, ['type']);
-
-        if (type === 'text') {
-            text += getStringField(record, ['text']) ?? '';
-            return;
-        }
-
-        if (type === 'reasoning') {
-            reasoningContent += getStringField(record, ['text', 'reasoning']) ?? '';
-            return;
-        }
-
-        if (type === 'tool-call') {
-            const toolCallId = getStringField(record, ['toolCallId']);
-            const toolName = getStringField(record, ['toolName']);
-
-            if (!toolCallId || !toolName) {
-                return;
-            }
-
-            toolCalls.push({
-                id: toolCallId,
-                type: 'function',
-                function: {
-                    name: toolName,
-                    arguments: serializeDeepSeekToolInput(record?.input),
-                },
-            });
-        }
-    });
-
-    messages.push({
-        role: 'assistant',
-        content: text,
-        ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
-        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-    });
-};
-
-const appendDeepSeekToolMessages = (
-    messages: TDeepSeekChatMessage[],
-    content: unknown,
-): void => {
-    if (!Array.isArray(content)) {
-        return;
-    }
-
-    content.forEach((part) => {
-        const record = toRecord(part);
-        if (record?.type !== 'tool-result') {
-            return;
-        }
-
-        const toolCallId = getStringField(record, ['toolCallId']);
-        if (!toolCallId) {
-            return;
-        }
-
-        messages.push({
-            role: 'tool',
-            tool_call_id: toolCallId,
-            content: toDeepSeekToolResultContent(record.output),
-        });
-    });
-};
-
-const shouldMoveReasoningToToolCall = (
-    candidate: TDeepSeekChatMessage,
-): candidate is Extract<TDeepSeekChatMessage, { role: 'assistant' }> => (
-    candidate.role === 'assistant'
-    && Boolean(candidate.reasoning_content)
-    && !candidate.tool_calls?.length
-    && candidate.content.length === 0
-);
-
-const attachDeepSeekReasoningToPreviousToolCall = (
-    messages: TDeepSeekChatMessage[],
-    reasoningIndex: number,
-): boolean => {
-    const reasoningMessage = messages[reasoningIndex];
-    if (!reasoningMessage || !shouldMoveReasoningToToolCall(reasoningMessage)) {
-        return false;
-    }
-
-    for (let index = reasoningIndex - 1; index >= 0; index -= 1) {
-        const candidate = messages[index];
-        if (!candidate) {
-            continue;
-        }
-
-        if (candidate.role === 'tool') {
-            continue;
-        }
-
-        if (candidate.role !== 'assistant' || !candidate.tool_calls?.length) {
-            return false;
-        }
-
-        candidate.reasoning_content = [
-            candidate.reasoning_content ?? '',
-            reasoningMessage.reasoning_content ?? '',
-        ].join('');
-        messages.splice(reasoningIndex, 1);
-        return true;
-    }
-
-    return false;
-};
-
-const normalizeDeepSeekToolReasoningMessages = (
-    messages: TDeepSeekChatMessage[],
-): TDeepSeekChatMessage[] => {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        attachDeepSeekReasoningToPreviousToolCall(messages, index);
-    }
-
-    return messages;
-};
-
-const convertDeepSeekPromptMessages = (prompt: unknown): TDeepSeekChatMessage[] => {
-    if (!Array.isArray(prompt)) {
-        return [];
-    }
-
-    const messages: TDeepSeekChatMessage[] = [];
-
-    prompt.forEach((message) => {
-        const record = toRecord(message);
-        const role = getStringField(record, ['role']);
-
-        if (role === 'system') {
-            messages.push({
-                role,
-                content: toDeepSeekTextContent(record?.content),
-            });
-            return;
-        }
-
-        if (role === 'user') {
-            messages.push({
-                role,
-                content: toDeepSeekTextContent(record?.content),
-            });
-            return;
-        }
-
-        if (role === 'assistant') {
-            appendDeepSeekAssistantMessage(messages, record?.content);
-            return;
-        }
-
-        if (role === 'tool') {
-            appendDeepSeekToolMessages(messages, record?.content);
-        }
-    });
-
-    return normalizeDeepSeekToolReasoningMessages(messages);
-};
-
-const toDeepSeekToolChoice = (
-    toolChoice: unknown,
-): IDeepSeekRequestBody['tool_choice'] | undefined => {
-    const record = toRecord(toolChoice);
-    const type = getStringField(record, ['type']);
-
-    if (type === 'auto' || type === 'none' || type === 'required') {
-        return type;
-    }
-
-    if (type === 'tool') {
-        const toolName = getStringField(record, ['toolName']);
-        return toolName
-            ? {
-                type: 'function',
-                function: {
-                    name: toolName,
-                },
-            }
-            : undefined;
-    }
-
-    return undefined;
-};
-
-const toDeepSeekResponseFormat = (responseFormat: unknown): TJsonValue | undefined => {
-    const record = toRecord(responseFormat);
-    const type = getStringField(record, ['type']);
-
-    if (type !== 'json') {
-        return undefined;
-    }
-
-    const schema = toRecord(record?.schema);
-    if (!schema) {
-        return {
-            type: 'json_object',
-        };
-    }
-
-    return {
-        type: 'json_schema',
-        json_schema: {
-            name: getStringField(record, ['name']) ?? 'response',
-            ...(getStringField(record, ['description'])
-                ? { description: getStringField(record, ['description']) }
-                : {}),
-            schema: toJsonValue(schema),
-        },
-    };
-};
-
-const getNumberOption = (
-    options: IDeepSeekModelCallOptions,
-    key: keyof IDeepSeekModelCallOptions,
-): number | undefined => {
-    const value = options[key];
-    return typeof value === 'number' ? value : undefined;
-};
-
-const getStringArrayOption = (
-    value: unknown,
-): string[] | undefined => {
-    if (!Array.isArray(value)) {
-        return undefined;
-    }
-
-    const strings = value.filter((item): item is string => typeof item === 'string');
-    return strings.length > 0 ? strings : undefined;
-};
-
-const getDeepSeekProviderOptions = (
-    providerOptions: unknown,
-): Record<string, TJsonValue> => {
-    const record = toRecord(providerOptions);
-    const deepseekOptions = toRecord(record?.deepseek);
-
-    if (!deepseekOptions) {
-        return {};
-    }
-
-    return Object.fromEntries(
-        Object.entries(deepseekOptions).map(([key, value]) => [key, toJsonValue(value)]),
-    );
-};
-
-const buildDeepSeekRequestBody = (
-    modelConfig: IDeepSeekModelConfig,
-    options: IDeepSeekModelCallOptions,
-    stream: boolean,
-): IDeepSeekRequestBody => {
-    const tools = createDeepSeekToolDefinitions(options.tools);
-    const toolChoice = toDeepSeekToolChoice(options.toolChoice);
-    const responseFormat = toDeepSeekResponseFormat(options.responseFormat);
-
-    return {
-        model: normalizeDeepSeekModelId(modelConfig.model),
-        messages: convertDeepSeekPromptMessages(options.prompt),
-        stream,
-        ...(getNumberOption(options, 'maxOutputTokens') !== undefined
-            ? { max_tokens: getNumberOption(options, 'maxOutputTokens') }
-            : {}),
-        ...(getNumberOption(options, 'temperature') !== undefined
-            ? { temperature: getNumberOption(options, 'temperature') }
-            : {}),
-        ...(getNumberOption(options, 'topP') !== undefined ? { top_p: getNumberOption(options, 'topP') } : {}),
-        ...(getNumberOption(options, 'frequencyPenalty') !== undefined
-            ? { frequency_penalty: getNumberOption(options, 'frequencyPenalty') }
-            : {}),
-        ...(getNumberOption(options, 'presencePenalty') !== undefined
-            ? { presence_penalty: getNumberOption(options, 'presencePenalty') }
-            : {}),
-        ...(getStringArrayOption(options.stopSequences) ? { stop: getStringArrayOption(options.stopSequences) } : {}),
-        ...(getNumberOption(options, 'seed') !== undefined ? { seed: getNumberOption(options, 'seed') } : {}),
-        ...(responseFormat ? { response_format: responseFormat } : {}),
-        ...(tools.length > 0 ? { tools } : {}),
-        ...(toolChoice ? { tool_choice: toolChoice } : {}),
-        ...getDeepSeekProviderOptions(options.providerOptions),
-    };
-};
-
-const toDeepSeekCallOptions = (options: unknown): IDeepSeekModelCallOptions => {
-    const record = toRecord(options) ?? {};
-    return {
-        prompt: record.prompt,
-        maxOutputTokens: record.maxOutputTokens,
-        temperature: record.temperature,
-        topP: record.topP,
-        frequencyPenalty: record.frequencyPenalty,
-        presencePenalty: record.presencePenalty,
-        stopSequences: record.stopSequences,
-        responseFormat: record.responseFormat,
-        seed: record.seed,
-        tools: record.tools,
-        toolChoice: record.toolChoice,
-        includeRawChunks: record.includeRawChunks,
-        abortSignal: record.abortSignal instanceof AbortSignal ? record.abortSignal : undefined,
-        headers: record.headers,
-        providerOptions: record.providerOptions,
-    };
-};
-
-const postDeepSeekChatCompletions = async (
-    modelConfig: IDeepSeekModelConfig,
-    fetchFn: TDeepSeekFetch,
-    options: IDeepSeekModelCallOptions,
-    stream: boolean,
-): Promise<IDeepSeekFetchResult> => {
-    const body = buildDeepSeekRequestBody(modelConfig, options, stream);
-    const response = await fetchFn(buildDeepSeekChatCompletionsUrl(modelConfig.baseUrl), {
-        method: 'POST',
-        headers: createDeepSeekHeaders(modelConfig, options.headers),
-        body: JSON.stringify(body),
-        ...(options.abortSignal ? { signal: options.abortSignal } : {}),
-    });
-
-    if (!response.ok) {
-        throw new Error(`DeepSeek 请求失败：HTTP ${response.status} ${await response.text()}`);
-    }
-
-    return {
-        response,
-        body,
-    };
-};
-
-const getDeepSeekFinishReason = (value: string | null): TDeepSeekLanguageModelFinishReason => {
-    switch (value) {
-        case 'stop':
-            return 'stop';
-        case 'length':
-            return 'length';
-        case 'content_filter':
-            return 'content-filter';
-        case 'function_call':
-        case 'tool_calls':
-            return 'tool-calls';
-        default:
-            return 'unknown';
-    }
-};
-
-const getDeepSeekUsage = (usage: IDeepSeekUsage | null | undefined): TDeepSeekLanguageModelUsage => ({
-    inputTokens: usage?.prompt_tokens ?? undefined,
-    outputTokens: usage?.completion_tokens ?? undefined,
-    totalTokens: usage?.total_tokens ?? undefined,
-    reasoningTokens: usage?.completion_tokens_details?.reasoning_tokens ?? undefined,
-    cachedInputTokens: usage?.prompt_tokens_details?.cached_tokens ?? undefined,
-});
-
-const getDeepSeekResponseMetadata = (record: Record<string, unknown> | null): {
-    id?: string;
-    modelId?: string;
-    timestamp?: Date;
-} => {
-    const metadata: {
-        id?: string;
-        modelId?: string;
-        timestamp?: Date;
-    } = {};
-    const id = getStringField(record, ['id']);
-    const modelId = getStringField(record, ['model']);
-
-    if (id) {
-        metadata.id = id;
-    }
-
-    if (modelId) {
-        metadata.modelId = modelId;
-    }
-
-    if (typeof record?.created === 'number') {
-        metadata.timestamp = new Date(record.created * 1000);
-    }
-
-    return metadata;
-};
-
-const getDeepSeekChoice = (record: Record<string, unknown> | null): Record<string, unknown> | null =>
-    toRecord(getArrayField(record, 'choices')[0]);
-
-const getDeepSeekUsageRecord = (record: Record<string, unknown> | null): IDeepSeekUsage | null =>
-    toRecord(record?.usage) as IDeepSeekUsage | null;
-
-const createDeepSeekGeneratedContent = (
-    message: Record<string, unknown> | null,
-): TDeepSeekLanguageModelContent[] => {
-    const content: TDeepSeekLanguageModelContent[] = [];
-    const text = getStringField(message, ['content']);
-    const reasoning = getStringField(message, ['reasoning_content', 'reasoning']);
-
-    if (text) {
-        content.push({
-            type: 'text',
-            text,
-        });
-    }
-
-    if (reasoning) {
-        content.push({
-            type: 'reasoning',
-            text: reasoning,
-        });
-    }
-
-    getArrayField(message, 'tool_calls').forEach((toolCall) => {
-        const record = toRecord(toolCall);
-        const functionRecord = toRecord(record?.function);
-        const toolCallId = getStringField(record, ['id']);
-        const toolName = getStringField(functionRecord, ['name']);
-
-        if (!toolCallId || !toolName) {
-            return;
-        }
-
-        content.push({
-            type: 'tool-call',
-            toolCallId,
-            toolName,
-            input: getStringField(functionRecord, ['arguments']) ?? '{}',
-        });
-    });
-
-    return content;
-};
-
-const emitDeepSeekToolCall = (
-    controller: ReadableStreamDefaultController<TDeepSeekLanguageModelStreamPart>,
-    toolCall: IDeepSeekPendingToolCall,
-): void => {
-    if (!isDeepSeekToolCallReady(toolCall) || toolCall.emitted) {
-        return;
-    }
-
-    if (!toolCall.started) {
-        controller.enqueue({
-            type: 'tool-input-start',
-            id: toolCall.id,
-            toolName: toolCall.functionName,
-        });
-        toolCall.started = true;
-    }
-
-    controller.enqueue({
-        type: 'tool-input-end',
-        id: toolCall.id,
-    });
-    controller.enqueue({
-        type: 'tool-call',
-        toolCallId: toolCall.id,
-        toolName: toolCall.functionName,
-        input: toolCall.argumentsText || '{}',
-    });
-    toolCall.emitted = true;
-};
-
-const streamDeepSeekResponse = async (
-    response: Response,
-    includeRawChunks: boolean,
-    controller: ReadableStreamDefaultController<TDeepSeekLanguageModelStreamPart>,
-): Promise<void> => {
-    const pendingToolCalls = new Map<number, IDeepSeekPendingToolCall>();
-    let finishReason: TDeepSeekLanguageModelFinishReason = 'unknown';
-    let usage: IDeepSeekUsage | null = null;
-    let isReasoningActive = false;
-    let isTextActive = false;
-    let hasMetadata = false;
-
-    for await (const data of readDeepSeekSseData(response)) {
-        const record = parseJsonRecord(data);
-
-        if (!record) {
-            continue;
-        }
-
-        if (includeRawChunks) {
-            controller.enqueue({
-                type: 'raw',
-                rawValue: record,
-            });
-        }
-
-        if (!hasMetadata) {
-            hasMetadata = true;
-            controller.enqueue({
-                type: 'response-metadata',
-                ...getDeepSeekResponseMetadata(record),
-            });
-        }
-
-        usage = getDeepSeekUsageRecord(record) ?? usage;
-
-        const choice = getDeepSeekChoice(record);
-        const nextFinishReason = getStringField(choice, ['finish_reason']);
-        if (nextFinishReason) {
-            finishReason = getDeepSeekFinishReason(nextFinishReason);
-        }
-
-        const delta = toRecord(choice?.delta);
-        if (!delta) {
-            continue;
-        }
-
-        const reasoningContent = getStringField(delta, ['reasoning_content', 'reasoning']);
-        if (reasoningContent) {
-            if (!isReasoningActive) {
-                controller.enqueue({
-                    type: 'reasoning-start',
-                    id: 'reasoning-0',
-                });
-                isReasoningActive = true;
-            }
-
-            controller.enqueue({
-                type: 'reasoning-delta',
-                id: 'reasoning-0',
-                delta: reasoningContent,
-            });
-        }
-
-        const textContent = getStringField(delta, ['content']);
-        if (textContent) {
-            if (!isTextActive) {
-                controller.enqueue({
-                    type: 'text-start',
-                    id: 'text-0',
-                });
-                isTextActive = true;
-            }
-
-            controller.enqueue({
-                type: 'text-delta',
-                id: 'text-0',
-                delta: textContent,
-            });
-        }
-
-        getArrayField(delta, 'tool_calls').forEach((toolCallDelta) => {
-            mergeDeepSeekToolCallDelta(pendingToolCalls, toolCallDelta);
-            const record = toRecord(toolCallDelta);
-            const index = getNumberField(record, 'index');
-            const pendingToolCall = index === null ? null : pendingToolCalls.get(index);
-
-            if (!pendingToolCall) {
-                return;
-            }
-
-            if (!pendingToolCall.started && pendingToolCall.id && pendingToolCall.functionName) {
-                controller.enqueue({
-                    type: 'tool-input-start',
-                    id: pendingToolCall.id,
-                    toolName: pendingToolCall.functionName,
-                });
-                pendingToolCall.started = true;
-            }
-
-            const functionRecord = toRecord(record?.function);
-            const argumentsText = getStringField(functionRecord, ['arguments']);
-            if (argumentsText) {
-                controller.enqueue({
-                    type: 'tool-input-delta',
-                    id: pendingToolCall.id,
-                    delta: argumentsText,
-                });
-            }
-
-            if (isJsonObjectText(pendingToolCall.argumentsText)) {
-                emitDeepSeekToolCall(controller, pendingToolCall);
-            }
-        });
-    }
-
-    if (isReasoningActive) {
-        controller.enqueue({
-            type: 'reasoning-end',
-            id: 'reasoning-0',
-        });
-    }
-
-    if (isTextActive) {
-        controller.enqueue({
-            type: 'text-end',
-            id: 'text-0',
-        });
-    }
-
-    pendingToolCalls.forEach((toolCall) => emitDeepSeekToolCall(controller, toolCall));
-    controller.enqueue({
-        type: 'finish',
-        finishReason,
-        usage: getDeepSeekUsage(usage),
-        providerMetadata: {
-            deepseek: {},
-        },
-    });
-};
-
-const doDeepSeekGenerate = async (
-    modelConfig: IDeepSeekModelConfig,
-    fetchFn: TDeepSeekFetch,
-    rawOptions: unknown,
-): Promise<TDeepSeekLanguageModelGenerateResult> => {
-    const options = toDeepSeekCallOptions(rawOptions);
-    const { response, body } = await postDeepSeekChatCompletions(modelConfig, fetchFn, options, false);
-    const responseBody = await parseDeepSeekJsonResponse(response);
-    const choice = getDeepSeekChoice(responseBody);
-    const message = toRecord(choice?.message);
-
-    return {
-        content: createDeepSeekGeneratedContent(message),
-        finishReason: getDeepSeekFinishReason(getStringField(choice, ['finish_reason'])),
-        usage: getDeepSeekUsage(getDeepSeekUsageRecord(responseBody)),
-        providerMetadata: {
-            deepseek: {},
-        },
-        request: {
-            body,
-        },
-        response: {
-            ...getDeepSeekResponseMetadata(responseBody),
-            headers: getDeepSeekResponseHeaders(response.headers),
-            body: responseBody,
-        },
-        warnings: [],
-    };
-};
-
-const doDeepSeekStream = async (
-    modelConfig: IDeepSeekModelConfig,
-    fetchFn: TDeepSeekFetch,
-    rawOptions: unknown,
-): Promise<TDeepSeekLanguageModelStreamResult> => {
-    const options = toDeepSeekCallOptions(rawOptions);
-    const { response, body } = await postDeepSeekChatCompletions(modelConfig, fetchFn, options, true);
-    const includeRawChunks = getBooleanField(toRecord(rawOptions), 'includeRawChunks') ?? false;
-
-    return {
-        stream: new ReadableStream<TDeepSeekLanguageModelStreamPart>({
-            start: async (controller) => {
-                controller.enqueue({
-                    type: 'stream-start',
-                    warnings: [],
-                });
-
-                try {
-                    await streamDeepSeekResponse(response, includeRawChunks, controller);
-                    controller.close();
-                } catch (error) {
-                    controller.enqueue({
-                        type: 'error',
-                        error,
-                    });
-                    controller.close();
-                }
-            },
-        }),
-        request: {
-            body,
-        },
-        response: {
-            headers: getDeepSeekResponseHeaders(response.headers),
-        },
-    };
-};
-
-function createDeepSeekReasoningLanguageModel(
-    modelConfig: IDeepSeekModelConfig,
-    fetchFn: TDeepSeekFetch,
-): IDeepSeekReasoningLanguageModel {
-    return {
-        specificationVersion: 'v2' as const,
-        provider: 'deepseek.chat',
-        modelId: normalizeDeepSeekModelId(modelConfig.model),
-        supportedUrls: {},
-        supportsStructuredOutputs: true,
-        doGenerate: (options: unknown) => doDeepSeekGenerate(modelConfig, fetchFn, options),
-        doStream: (options: unknown) => doDeepSeekStream(modelConfig, fetchFn, options),
-    };
-}
 
 const createApprovalRequest = (payload: ToolCallPayload, runId?: string | null) => ({
     id: runId ? encodeApprovalRequestId(runId, payload.toolCallId) : payload.toolCallId,
@@ -2094,15 +974,13 @@ export class MastraRuntime {
         runId: string,
     ) => Promise<IMastraWorkflowSnapshotLike | null>;
 
-    private readonly readModelConfig: () => IDeepSeekModelConfig | null;
+    private readonly readModelConfig: () => ModelRouterLanguageModel | null;
 
     private readonly createMcpClientBundle: (
         options?: { workspaceRootPath?: string | null },
     ) => Promise<IMastraMcpBundle>;
 
     private readonly now: (() => string) | undefined;
-
-    private readonly fetch: TDeepSeekFetch;
 
     private readonly storage: IMastraStorageLike;
 
@@ -2123,7 +1001,6 @@ export class MastraRuntime {
         this.readModelConfig = deps.readModelConfig ?? createDeepSeekModelConfigFromEnv;
         this.createMcpClientBundle = deps.createMcpClientBundle ?? createMastraMcpClientBundle;
         this.now = deps.now;
-        this.fetch = deps.fetch ?? globalThis.fetch.bind(globalThis);
     }
 
     private registerPendingApproval(
@@ -2399,8 +1276,8 @@ export class MastraRuntime {
             const agent = this.createAgent({
                 id: 'calamex-agent-sidecar',
                 name: 'Calamex Agent Sidecar',
-                instructions: buildSystemPrompt(normalizedInput, modelConfig.model),
-                model: createMastraModelConfig(modelConfig, this.fetch),
+                instructions: buildSystemPrompt(normalizedInput, modelConfig.modelId),
+                model: createMastraModelConfig(modelConfig),
                 ...(hasTools ? { tools: mastraTools } : {}),
                 ...(workspace ? { workspace } : {}),
             });
@@ -2517,8 +1394,8 @@ export class MastraRuntime {
                 instructions: buildSystemPrompt({
                     ...input,
                     mode: 'plan',
-                }, modelConfig.model),
-                model: createMastraModelConfig(modelConfig, this.fetch),
+                }, modelConfig.modelId),
+                model: createMastraModelConfig(modelConfig),
                 ...(hasTools ? { tools: mastraTools } : {}),
                 ...(workspace ? { workspace } : {}),
             });
@@ -2596,7 +1473,7 @@ export class MastraRuntime {
             agentId: DEFAULT_EXECUTION_AGENT_ID,
             ...(this.now ? { now: this.now } : {}),
         });
-        const systemPrompt = buildSystemPrompt(normalizedInput, modelConfig.model);
+        const systemPrompt = buildSystemPrompt(normalizedInput, modelConfig.modelId);
         let shouldDisconnectBundle = true;
         let streamCleanup: (() => void) | undefined;
 
@@ -2606,7 +1483,7 @@ export class MastraRuntime {
                 id: DEFAULT_EXECUTION_AGENT_ID,
                 name: DEFAULT_EXECUTION_AGENT_NAME,
                 instructions: systemPrompt,
-                model: createMastraModelConfig(modelConfig, this.fetch),
+                model: createMastraModelConfig(modelConfig),
                 ...(hasTools ? { tools: mastraTools } : {}),
                 ...(workspace ? { workspace } : {}),
             });
@@ -2897,7 +1774,7 @@ export class MastraRuntime {
                     id: DEFAULT_EXECUTION_AGENT_ID,
                     name: DEFAULT_EXECUTION_AGENT_NAME,
                     instructions: systemPrompt,
-                    model: createMastraModelConfig(modelConfig, this.fetch),
+                    model: createMastraModelConfig(modelConfig),
                     ...(hasTools ? { tools: mastraTools } : {}),
                     ...(workspace ? { workspace } : {}),
                 });

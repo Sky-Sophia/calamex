@@ -1,45 +1,47 @@
 <!doctype html>
-<html lang="zh-CN" class="dark" data-theme="dark">
+<html lang="zh-CN" class="light" data-theme="light">
 
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="color-scheme" content="dark" />
+  <meta name="color-scheme" content="light" />
   <title>Calamex</title>
   <style>
     :root {
       --startup-bg: #fafafa;
       --startup-fg: #111827;
-      --startup-panel: #ffffff;
       --startup-sidebar: #fafafa;
+      --startup-main: #ffffff;
       --startup-border: #d1d9e0b3;
-      --startup-skeleton: #e6e8eb;
-      --startup-skeleton-soft: #f0f1f3;
-      --startup-sidebar-width: clamp(240px, 20vw, 320px);
-      --startup-toolbar-height: 58px;
-      --startup-input-width: min(42vw, 640px);
+      --startup-border-strong: #d1d9e0;
+      --startup-skeleton: #e5e8ec;
+      --startup-skeleton-strong: #cfd6de;
+      --startup-skeleton-soft: #f2f3f5;
+      --startup-selected: transparent;
+      --startup-accent: #5e6ad2;
+      --startup-radius: 12px;
+      --startup-top-offset: 40px;
+      --startup-sidebar-width: 288px;
+      --startup-composer-width: min(44vw, 600px);
+      --startup-font:
+        'Inter', 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+        'Microsoft YaHei', sans-serif;
     }
 
     .light,
-    [data-theme='light'] {
-      --startup-bg: #fafafa;
-      --startup-fg: #111827;
-      --startup-panel: #ffffff;
-      --startup-sidebar: #fafafa;
-      --startup-border: #d1d9e0b3;
-      --startup-skeleton: #e6e8eb;
-      --startup-skeleton-soft: #f0f1f3;
-    }
-
+    [data-theme='light'],
     .dark,
     [data-theme='dark'] {
-      --startup-bg: #0f1011;
-      --startup-fg: #f4f4f5;
-      --startup-panel: #151618;
-      --startup-sidebar: #101113;
-      --startup-border: #2a2b2f;
-      --startup-skeleton: #292b30;
-      --startup-skeleton-soft: #1d1f23;
+      --startup-bg: #fafafa;
+      --startup-fg: #111827;
+      --startup-sidebar: #fafafa;
+      --startup-main: #ffffff;
+      --startup-border: #d1d9e0b3;
+      --startup-border-strong: #d1d9e0;
+      --startup-skeleton: #e5e8ec;
+      --startup-skeleton-strong: #cfd6de;
+      --startup-skeleton-soft: #f2f3f5;
+      --startup-selected: transparent;
     }
 
     html,
@@ -51,92 +53,536 @@
       margin: 0;
       background-color: var(--startup-bg);
       color: var(--startup-fg);
-      font-family: 'Inter', 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+      font-family: var(--startup-font);
     }
 
     body {
       overflow: hidden;
     }
 
-    #app:empty::before {
+    .startup-shell {
       position: fixed;
       inset: 0;
-      content: '';
-      background:
-        linear-gradient(var(--startup-panel), var(--startup-panel))
-          calc(var(--startup-sidebar-width) + 1px) 0 / calc(100% - var(--startup-sidebar-width) - 1px) 100% no-repeat,
-        linear-gradient(var(--startup-sidebar), var(--startup-sidebar))
-          0 0 / var(--startup-sidebar-width) 100% no-repeat,
-        linear-gradient(var(--startup-border), var(--startup-border))
-          var(--startup-sidebar-width) 0 / 1px 100% no-repeat,
-        linear-gradient(var(--startup-border), var(--startup-border))
-          var(--startup-sidebar-width) var(--startup-toolbar-height) / calc(100% - var(--startup-sidebar-width)) 1px no-repeat,
-        linear-gradient(var(--startup-border), var(--startup-border))
-          var(--startup-sidebar-width) calc(100% - 112px) / calc(100% - var(--startup-sidebar-width)) 1px no-repeat,
-        var(--startup-bg);
+      display: flex;
+      overflow: hidden;
+      border: 1px solid var(--startup-border);
+      background: var(--startup-bg);
+      color: var(--startup-fg);
+      pointer-events: none;
+      user-select: none;
     }
 
-    #app:empty::after {
-      position: fixed;
-      inset: 0;
-      content: '';
-      background:
-        radial-gradient(circle at 32px 28px, var(--startup-skeleton) 0 10px, transparent 10.5px),
-        linear-gradient(90deg, var(--startup-skeleton), var(--startup-skeleton))
-          58px 21px / min(150px, calc(var(--startup-sidebar-width) - 92px)) 14px no-repeat,
-        linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-          24px 78px / calc(var(--startup-sidebar-width) - 48px) 34px no-repeat,
-        linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-          24px 126px / calc(var(--startup-sidebar-width) - 72px) 14px no-repeat,
-        linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-          24px 156px / calc(var(--startup-sidebar-width) - 96px) 14px no-repeat,
-        linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-          24px 218px / calc(var(--startup-sidebar-width) - 68px) 34px no-repeat,
-        linear-gradient(90deg, var(--startup-skeleton), var(--startup-skeleton))
-          calc(var(--startup-sidebar-width) + 28px) 22px / min(180px, 24vw) 14px no-repeat,
-        linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-          calc(var(--startup-sidebar-width) + 28px) 112px / min(46vw, 680px) 16px no-repeat,
-        linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-          calc(var(--startup-sidebar-width) + 28px) 150px / min(62vw, 860px) 12px no-repeat,
-        linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-          calc(var(--startup-sidebar-width) + 28px) 180px / min(54vw, 760px) 12px no-repeat,
-        linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-          calc(50% - var(--startup-input-width) / 2) calc(100% - 62px) / var(--startup-input-width) 44px no-repeat;
-      background-repeat: no-repeat;
-      border-radius: 0;
+    .startup-sidebar {
+      display: flex;
+      width: var(--startup-sidebar-width);
+      min-width: var(--startup-sidebar-width);
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--startup-sidebar);
     }
 
-    @media (prefers-reduced-motion: no-preference) {
-      #app:empty::after {
-        animation: startup-pulse 1500ms ease-in-out infinite;
-      }
+    .startup-brand-row {
+      display: flex;
+      height: var(--startup-top-offset);
+      align-items: center;
+      padding: 0 18px;
+    }
+
+    .startup-brand-mark {
+      display: inline-flex;
+      width: 24px;
+      height: 24px;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+    }
+
+    .startup-brand-mark span {
+      width: 3px;
+      height: 13px;
+      border-radius: 999px;
+      background: var(--startup-accent);
+      transform: rotate(18deg);
+    }
+
+    .startup-brand-mark span:nth-child(2) {
+      height: 10px;
+      opacity: .78;
+    }
+
+    .startup-brand-mark span:nth-child(3) {
+      height: 7px;
+      opacity: .56;
+    }
+
+    .startup-toolbar {
+      display: flex;
+      height: 52px;
+      align-items: center;
+      gap: 18px;
+      border-bottom: 1px solid var(--startup-border);
+      padding: 0 12px 0 16px;
+    }
+
+    .startup-toolbar-pill {
+      display: flex;
+      height: 34px;
+      min-width: 68px;
+      align-items: center;
+      gap: 7px;
+      border-radius: 999px;
+      background: var(--startup-skeleton-soft);
+      padding: 0 12px;
+    }
+
+    .startup-toolbar-icon,
+    .startup-action-icon,
+    .startup-header-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      background: var(--startup-skeleton);
+    }
+
+    .startup-toolbar-text {
+      width: 28px;
+      height: 11px;
+      border-radius: 999px;
+      background: var(--startup-skeleton-strong);
+    }
+
+    .startup-action-icon {
+      border-radius: 999px;
+      background: var(--startup-skeleton-strong);
+      opacity: .82;
+    }
+
+    .startup-header-icon {
+      border-radius: 6px;
+      background: var(--startup-skeleton-strong);
+      opacity: .82;
+    }
+
+    .startup-tree {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 9px;
+      padding: 15px 4px 0;
+    }
+
+    .startup-tree-row {
+      display: grid;
+      min-height: 26px;
+      align-items: center;
+      grid-template-columns: 14px 18px minmax(0, 1fr);
+      gap: 7px;
+      border-radius: 7px;
+      padding: 0 8px;
+    }
+
+    .startup-tree-row.is-nested {
+      margin-left: 24px;
+    }
+
+    /* 选中高亮已去除（保留类名以便后续启用） */
+    .startup-tree-row.is-selected {
+      background: transparent;
+    }
+
+    .startup-chevron {
+      width: 6px;
+      height: 6px;
+      border-right: 1.5px solid var(--startup-skeleton-strong);
+      border-bottom: 1.5px solid var(--startup-skeleton-strong);
+      opacity: .7;
+      transform: rotate(-45deg);
+    }
+
+    .startup-tree-row.is-open .startup-chevron {
+      transform: rotate(45deg);
+    }
+
+    .startup-folder,
+    .startup-file,
+    .startup-shell-file {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      background: #e7eaed;
+      opacity: 1;
+    }
+
+    .startup-tree-line {
+      height: 10px;
+      border-radius: 999px;
+      background: var(--startup-skeleton);
+    }
+
+    .startup-tree-row:nth-child(1) .startup-tree-line {
+      width: 56px;
+    }
+
+    .startup-tree-row:nth-child(2) .startup-tree-line {
+      width: 68px;
+    }
+
+    .startup-tree-row:nth-child(3) .startup-tree-line {
+      width: 118px;
+    }
+
+    .startup-tree-row:nth-child(4) .startup-tree-line {
+      width: 64px;
+    }
+
+    .startup-tree-row:nth-child(5) .startup-tree-line {
+      width: 76px;
+    }
+
+    .startup-tree-row:nth-child(6) .startup-tree-line {
+      width: 96px;
+    }
+
+    .startup-tree-row:nth-child(7) .startup-tree-line {
+      width: 112px;
+    }
+
+    .startup-tree-row:nth-child(8) .startup-tree-line {
+      width: 84px;
+    }
+
+    .startup-tree-row:nth-child(9) .startup-tree-line {
+      width: 104px;
+    }
+
+    .startup-main-region {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      flex-direction: column;
+      padding-top: var(--startup-top-offset);
+      background: var(--startup-bg);
+    }
+
+    .startup-window-controls {
+      position: absolute;
+      top: 0;
+      right: 0;
+      display: flex;
+      height: var(--startup-top-offset);
+      align-items: stretch;
+    }
+
+    .startup-window-control {
+      position: relative;
+      width: 36px;
+      height: 100%;
+    }
+
+    .startup-window-control::before,
+    .startup-window-control::after {
+      position: absolute;
+      content: '';
+      background: #1f2328;
+      opacity: .85;
+    }
+
+    .startup-window-control.is-minimize::before {
+      top: 19px;
+      left: 13px;
+      width: 10px;
+      height: 1.5px;
+      border-radius: 999px;
+    }
+
+    .startup-window-control.is-maximize::before {
+      top: 15px;
+      left: 13px;
+      width: 10px;
+      height: 10px;
+      box-sizing: border-box;
+      border: 1.5px solid #1f2328;
+      border-radius: 2.5px;
+      background: transparent;
+    }
+
+    .startup-window-control.is-close::before,
+    .startup-window-control.is-close::after {
+      top: 19px;
+      left: 12px;
+      width: 12px;
+      height: 1.5px;
+      border-radius: 999px;
+      transform-origin: 50% 50%;
+    }
+
+    .startup-window-control.is-close::before {
+      transform: rotate(45deg);
+    }
+
+    .startup-window-control.is-close::after {
+      transform: rotate(-45deg);
+    }
+
+    .startup-main-card {
+      position: relative;
+      flex: 1;
+      overflow: hidden;
+      border: 1px solid var(--startup-border);
+      border-right-width: 0;
+      border-bottom-width: 0;
+      border-radius: var(--startup-radius) 0 0 var(--startup-radius);
+      background: var(--startup-main);
+    }
+
+    .startup-main-header {
+      display: flex;
+      height: 56px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 26px 0 24px;
+    }
+
+    .startup-model {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .startup-model-name {
+      width: 156px;
+      height: 14px;
+      border-radius: 999px;
+      background: var(--startup-skeleton-strong);
+    }
+
+    .startup-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .startup-center {
+      position: absolute;
+      top: 19%;
+      left: 50%;
+      display: flex;
+      width: min(62vw, 860px);
+      max-width: calc(100% - 96px);
+      flex-direction: column;
+      align-items: center;
+      transform: translateX(-50%);
+    }
+
+    .startup-title {
+      width: min(330px, 72%);
+      height: 34px;
+      border-radius: 999px;
+      background: var(--startup-skeleton-strong);
+      opacity: .9;
+    }
+
+    .startup-suggestions {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 14px 16px;
+      margin-top: 34px;
+    }
+
+    .startup-chip {
+      height: 46px;
+      border-radius: 10px;
+      background: var(--startup-skeleton-soft);
+    }
+
+    .startup-chip:nth-child(1) {
+      width: 172px;
+    }
+
+    .startup-chip:nth-child(2) {
+      width: 196px;
+    }
+
+    .startup-chip:nth-child(3) {
+      width: 186px;
+    }
+
+    .startup-chip:nth-child(4) {
+      width: 216px;
+    }
+
+    .startup-chip:nth-child(5) {
+      width: 188px;
+    }
+
+    .startup-chip:nth-child(6) {
+      width: 220px;
+    }
+
+    .startup-chip:nth-child(7) {
+      width: 176px;
+    }
+
+    .startup-chip:nth-child(8) {
+      width: 206px;
+    }
+
+    .startup-chip:nth-child(9) {
+      width: 226px;
+    }
+
+    .startup-composer {
+      position: absolute;
+      left: 50%;
+      bottom: 16px;
+      display: flex;
+      width: var(--startup-composer-width);
+      min-width: 360px;
+      max-width: calc(100% - 96px);
+      height: 92px;
+      flex-direction: column;
+      justify-content: flex-end;
+      border: 1px solid var(--startup-border);
+      border-radius: 16px;
+      background: var(--startup-main);
+      padding: 14px 18px 12px;
+      transform: translateX(-50%);
+      box-shadow: 0 10px 30px -24px rgba(31, 35, 40, 0.28);
+    }
+
+    .startup-composer-footer {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+    }
+
+    .startup-plus {
+      position: relative;
+      width: 18px;
+      height: 18px;
+    }
+
+    .startup-plus::before,
+    .startup-plus::after {
+      position: absolute;
+      content: '';
+      border-radius: 999px;
+      background: var(--startup-skeleton-strong);
+    }
+
+    .startup-plus::before {
+      top: 8px;
+      left: 2px;
+      width: 14px;
+      height: 2px;
+    }
+
+    .startup-plus::after {
+      top: 2px;
+      left: 8px;
+      width: 2px;
+      height: 14px;
+    }
+
+    .startup-agent {
+      width: 72px;
+      height: 14px;
+      border-radius: 999px;
+      background: var(--startup-skeleton);
+    }
+
+    .startup-composer-spacer {
+      flex: 1;
+    }
+
+    /* 空心圆进一步缩小 */
+    .startup-submit-ghost {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--startup-skeleton);
+      border-radius: 999px;
+    }
+
+    .startup-submit {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: #aee9df;
+    }
+
+    .startup-skeleton {
+      animation: startup-pulse 1500ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+
+    .startup-skeleton:nth-of-type(2n) {
+      animation-delay: 120ms;
+    }
+
+    .startup-skeleton:nth-of-type(3n) {
+      animation-delay: 240ms;
     }
 
     @media (max-width: 820px) {
       :root {
-        --startup-sidebar-width: clamp(0px, 34vw, 240px);
+        --startup-sidebar-width: 0px;
+        --startup-composer-width: calc(100vw - 40px);
       }
 
-      #app:empty::after {
-        background:
-          linear-gradient(90deg, var(--startup-skeleton), var(--startup-skeleton))
-            20px 22px / 112px 14px no-repeat,
-          linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-            20px 92px / min(78vw, 520px) 16px no-repeat,
-          linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-            20px 130px / min(86vw, 640px) 12px no-repeat,
-          linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-            20px 160px / min(62vw, 460px) 12px no-repeat,
-          linear-gradient(90deg, var(--startup-skeleton-soft), var(--startup-skeleton-soft))
-            20px calc(100% - 62px) / calc(100vw - 40px) 44px no-repeat;
-        background-repeat: no-repeat;
+      .startup-sidebar {
+        display: none;
+      }
+
+      .startup-main-region {
+        padding-top: 18px;
+      }
+
+      .startup-window-controls {
+        display: none;
+      }
+
+      .startup-main-card {
+        border-radius: var(--startup-radius) var(--startup-radius) 0 0;
+      }
+
+      .startup-center {
+        top: 18%;
+        width: calc(100vw - 32px);
+        max-width: calc(100vw - 32px);
+      }
+
+      .startup-title {
+        width: 240px;
+        height: 28px;
+      }
+
+      .startup-chip {
+        height: 38px;
+      }
+
+      .startup-chip:nth-child(n + 6) {
+        display: none;
+      }
+
+      .startup-composer {
+        min-width: 0;
+        max-width: calc(100vw - 32px);
+        height: 84px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .startup-skeleton {
+        animation: none;
       }
     }
 
     @keyframes startup-pulse {
+
       0%,
       100% {
-        opacity: 0.54;
+        opacity: .58;
       }
 
       50% {
@@ -147,15 +593,9 @@
   <script>
     (function () {
       var markStartup = function (name) {
-        try {
-          performance.mark('calamex:startup:' + name);
-        } catch (_) {
-          // 忽略打点失败，避免影响主题预设。
-        }
+        try { performance.mark('calamex:startup:' + name); } catch (_) { }
       };
-
       markStartup('index-theme-start');
-
       try {
         var saved = localStorage.getItem('ide.theme');
         if (saved === 'dark' || saved === 'light') {
@@ -165,7 +605,6 @@
           markStartup('index-theme-ready');
           return;
         }
-
         var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         document.documentElement.dataset.theme = systemDark ? 'dark' : 'light';
         document.documentElement.classList.toggle('dark', systemDark);
@@ -182,7 +621,123 @@
 </head>
 
 <body>
-  <div id="app"></div>
+  <div id="app">
+    <section class="startup-shell" aria-hidden="true">
+      <aside class="startup-sidebar">
+        <div class="startup-brand-row">
+          <div class="startup-brand-mark">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+
+        <div class="startup-toolbar">
+          <div class="startup-toolbar-pill startup-skeleton">
+            <span class="startup-toolbar-icon"></span>
+            <span class="startup-toolbar-text"></span>
+          </div>
+          <span class="startup-action-icon startup-skeleton"></span>
+          <span class="startup-action-icon startup-skeleton"></span>
+          <span class="startup-action-icon startup-skeleton"></span>
+          <span class="startup-action-icon startup-skeleton"></span>
+        </div>
+
+        <div class="startup-tree">
+          <div class="startup-tree-row is-open">
+            <span class="startup-chevron"></span>
+            <span class="startup-folder"></span>
+            <span class="startup-tree-line startup-skeleton"></span>
+          </div>
+          <div class="startup-tree-row is-nested">
+            <span class="startup-chevron"></span>
+            <span class="startup-folder"></span>
+            <span class="startup-tree-line startup-skeleton"></span>
+          </div>
+          <div class="startup-tree-row is-nested">
+            <span class="startup-chevron"></span>
+            <span class="startup-folder"></span>
+            <span class="startup-tree-line startup-skeleton"></span>
+          </div>
+          <div class="startup-tree-row is-nested">
+            <span class="startup-chevron"></span>
+            <span class="startup-folder"></span>
+            <span class="startup-tree-line startup-skeleton"></span>
+          </div>
+          <div class="startup-tree-row is-nested">
+            <span></span>
+            <span class="startup-file"></span>
+            <span class="startup-tree-line startup-skeleton"></span>
+          </div>
+          <div class="startup-tree-row is-nested">
+            <span></span>
+            <span class="startup-file"></span>
+            <span class="startup-tree-line startup-skeleton"></span>
+          </div>
+          <div class="startup-tree-row is-nested">
+            <span></span>
+            <span class="startup-file"></span>
+            <span class="startup-tree-line startup-skeleton"></span>
+          </div>
+          <div class="startup-tree-row is-nested is-selected">
+            <span></span>
+            <span class="startup-file startup-shell-file"></span>
+            <span class="startup-tree-line startup-skeleton"></span>
+          </div>
+          <div class="startup-tree-row is-nested">
+            <span></span>
+            <span class="startup-file startup-shell-file"></span>
+            <span class="startup-tree-line startup-skeleton"></span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="startup-main-region">
+        <div class="startup-window-controls">
+          <span class="startup-window-control is-minimize"></span>
+          <span class="startup-window-control is-maximize"></span>
+          <span class="startup-window-control is-close"></span>
+        </div>
+
+        <section class="startup-main-card">
+          <header class="startup-main-header">
+            <div class="startup-model">
+              <span class="startup-model-name startup-skeleton"></span>
+            </div>
+            <div class="startup-header-actions">
+              <span class="startup-header-icon startup-skeleton"></span>
+              <span class="startup-header-icon startup-skeleton"></span>
+              <span class="startup-header-icon startup-skeleton"></span>
+              <span class="startup-header-icon startup-skeleton"></span>
+            </div>
+          </header>
+
+          <div class="startup-center">
+            <div class="startup-title startup-skeleton"></div>
+            <div class="startup-suggestions">
+              <span class="startup-chip startup-skeleton"></span>
+              <span class="startup-chip startup-skeleton"></span>
+              <span class="startup-chip startup-skeleton"></span>
+              <span class="startup-chip startup-skeleton"></span>
+              <span class="startup-chip startup-skeleton"></span>
+              <span class="startup-chip startup-skeleton"></span>
+              <span class="startup-chip startup-skeleton"></span>
+              <span class="startup-chip startup-skeleton"></span>
+              <span class="startup-chip startup-skeleton"></span>
+            </div>
+          </div>
+
+          <div class="startup-composer">
+            <div class="startup-composer-footer">
+              <span class="startup-plus"></span>
+              <span class="startup-agent startup-skeleton"></span>
+              <span class="startup-composer-spacer"></span>
+              <span class="startup-submit-ghost startup-skeleton"></span>
+              <span class="startup-submit"></span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </section>
+  </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
 

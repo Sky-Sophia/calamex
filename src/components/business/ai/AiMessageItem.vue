@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { Loader } from '@/components/ai-elements/loader';
 import {
-    Message,
-    MessageAction,
-    MessageActions,
-    MessageContent,
-    MessageToolbar,
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+  MessageToolbar,
 } from '@/components/ai-elements/message';
+import { AiImageAttachmentPreviewGrid } from '@/components/ai-elements/image';
 import AiAgentRuntimeTimeline from '@/components/business/ai/AiAgentRuntimeTimeline.vue';
 import AiMarkdown from '@/components/business/ai/AiMarkdown.vue';
 import { useMessage } from '@/composables/useMessage';
@@ -29,6 +30,7 @@ const emit = defineEmits<{
 const notifier = useMessage();
 const isCopied = ref(false);
 let copiedResetTimerId: number | null = null;
+const tokenNumberFormatter = new Intl.NumberFormat('zh-CN');
 
 const clearCopiedResetTimer = (): void => {
   if (copiedResetTimerId === null) {
@@ -56,14 +58,15 @@ const hasRuntimeTimeline = computed(() => Boolean(props.message.stream?.runtimeE
 
 const isAgentRuntimePending = computed(
   () =>
-    props.message.role === 'assistant'
-    && props.message.stream?.status === 'streaming'
-    && props.message.stream?.finalAnswerStarted !== true
-    && Array.isArray(props.message.stream?.runtimeEvents),
+    props.message.role === 'assistant' &&
+    props.message.stream?.status === 'streaming' &&
+    props.message.stream?.finalAnswerStarted !== true &&
+    Array.isArray(props.message.stream?.runtimeEvents),
 );
 
 const shouldShowRuntimeTimeline = computed(
-  () => props.message.role === 'assistant' && (hasRuntimeTimeline.value || isAgentRuntimePending.value),
+  () =>
+    props.message.role === 'assistant' && (hasRuntimeTimeline.value || isAgentRuntimePending.value),
 );
 
 const hasStreamingRuntimeBeforeFinalAnswer = computed(
@@ -99,9 +102,7 @@ const isToolProgressContent = computed(() => {
 
 const shouldShowMessageBubble = computed(
   () =>
-    hasRenderableContent.value &&
-    !isToolProgressContent.value &&
-    canShowRuntimeMessageBubble.value,
+    hasRenderableContent.value && !isToolProgressContent.value && canShowRuntimeMessageBubble.value,
 );
 
 const copyableContent = computed(() => {
@@ -136,6 +137,20 @@ const inlineLoaderLabel = computed(
   () => props.message.stream?.activityText?.trim() || 'AI 正在生成回答',
 );
 
+const streamingCompletionTokens = computed(
+  () => props.message.stream?.completionTokens ?? props.message.stream?.usage?.outputTokens ?? 0,
+);
+
+const streamTokenProgressLabel = computed(() => {
+  const tokens = streamingCompletionTokens.value;
+
+  if (!Number.isFinite(tokens) || tokens <= 0) {
+    return '';
+  }
+
+  return `已生成 ${tokenNumberFormatter.format(tokens)} token`;
+});
+
 const shouldShowInlineLoader = computed(
   () =>
     props.message.role === 'assistant' &&
@@ -145,12 +160,20 @@ const shouldShowInlineLoader = computed(
     !shouldShowRuntimeTimeline.value,
 );
 
+const shouldShowStreamTokenProgress = computed(
+  () =>
+    props.message.role === 'assistant' &&
+    props.message.stream?.status === 'streaming' &&
+    streamTokenProgressLabel.value.length > 0,
+);
+
 const shouldRenderMessage = computed(
   () =>
     props.message.role === 'user' ||
     shouldShowMessageBubble.value ||
     shouldShowRuntimeTimeline.value ||
     shouldShowInlineLoader.value ||
+    shouldShowStreamTokenProgress.value ||
     hasMessageActions.value,
 );
 
@@ -162,8 +185,32 @@ const userAttachmentReferences = computed(() => {
   return props.message.references.filter(isAttachmentReference);
 });
 
+const userImageAttachmentReferences = computed(() =>
+  userAttachmentReferences.value.filter(hasImageAttachmentPreview),
+);
+
+const userFileAttachmentReferences = computed(() =>
+  userAttachmentReferences.value.filter((reference) => !hasImageAttachmentPreview(reference)),
+);
+
+const userImageAttachmentItems = computed(() =>
+  userImageAttachmentReferences.value.map((reference) => ({
+    id: reference.id,
+    name: resolveAttachmentLabel(reference),
+    preview: reference.attachmentPreview,
+  })),
+);
+
 function isAttachmentReference(reference: IAiContextReference): boolean {
   return reference.id.startsWith('attachment:');
+}
+
+function hasImageAttachmentPreview(
+  reference: IAiContextReference,
+): reference is IAiContextReference & {
+  attachmentPreview: NonNullable<IAiContextReference['attachmentPreview']>;
+} {
+  return Boolean(reference.attachmentPreview?.src);
 }
 
 function resolveAttachmentLabel(reference: IAiContextReference): string {
@@ -221,13 +268,20 @@ onBeforeUnmount(() => {
       :events="message.stream?.runtimeEvents ?? []"
       :is-streaming="message.stream?.status === 'streaming'"
     />
+    <AiImageAttachmentPreviewGrid
+      v-if="userImageAttachmentItems.length"
+      class="ai-message-image-attachments"
+      :items="userImageAttachmentItems"
+      aria-label="已发送图片附件"
+      variant="message"
+    />
     <div
-      v-if="userAttachmentReferences.length"
+      v-if="userFileAttachmentReferences.length"
       class="ai-message-attachments"
       aria-label="已发送附件"
     >
       <span
-        v-for="reference in userAttachmentReferences"
+        v-for="reference in userFileAttachmentReferences"
         :key="reference.id"
         class="ai-message-attachment-chip"
       >
@@ -241,8 +295,15 @@ onBeforeUnmount(() => {
       class="ai-message-bubble"
       :class="{ 'is-assistant-flat': message.role !== 'user' }"
     >
-      <AiMarkdown :message-id="message.id" :content="message.content" :stream-status="message.stream?.status" />
+      <AiMarkdown
+        :message-id="message.id"
+        :content="message.content"
+        :stream-status="message.stream?.status"
+      />
     </MessageContent>
+    <div v-if="shouldShowStreamTokenProgress" class="ai-message-token-progress" aria-live="polite">
+      {{ streamTokenProgressLabel }}
+    </div>
     <MessageActions v-if="hasMessageActions" class="ai-message-options" aria-label="AI 选项">
       <MessageAction
         v-for="action in message.actions"
@@ -302,20 +363,20 @@ onBeforeUnmount(() => {
   justify-content: center;
 }
 
-.ai-message.is-assistant>.ai-runtime-timeline {
+.ai-message.is-assistant > .ai-runtime-timeline {
   width: 100%;
   max-width: 100%;
   min-width: 0;
   overflow-x: hidden;
 }
 
-.ai-message.is-assistant> :not(.ai-runtime-timeline) {
+.ai-message.is-assistant > :not(.ai-runtime-timeline) {
   min-width: 0;
   max-width: 100%;
 }
 
-.ai-message>.ai-runtime-timeline+.ai-message-bubble,
-.ai-message>.ai-message-status-line+.ai-message-bubble {
+.ai-message > .ai-runtime-timeline + .ai-message-bubble,
+.ai-message > .ai-message-status-line + .ai-message-bubble {
   margin-top: 6px;
 }
 
@@ -324,6 +385,11 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 6px;
   padding-bottom: 6px;
+}
+
+.ai-message-image-attachments {
+  max-width: min(520px, 100%);
+  padding-bottom: 4px;
 }
 
 .ai-message.is-user .ai-message-attachments {
@@ -423,6 +489,12 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   align-self: center;
   color: var(--text-tertiary);
+}
+
+.ai-message-token-progress {
+  color: var(--text-quaternary);
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .ai-message.is-user .ai-message-attachment-chip {
@@ -558,7 +630,7 @@ onBeforeUnmount(() => {
 
 .ai-message-copy-button.is-copied {
   background: transparent;
-  color: color-mix(in srgb, var(--foreground) 80%, transparent);
+  color: var(--text-quaternary);
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);

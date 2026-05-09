@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { formatTokensInK } from './token-format';
 
 const props = defineProps<{
   tokens?: number;
@@ -11,15 +12,13 @@ const formattedTokens = computed(() => {
     return '-';
   }
 
-  return new Intl.NumberFormat('zh-CN', {
-    notation: 'compact',
-  }).format(props.tokens);
+  return formatTokensInK(props.tokens);
 });
 </script>
 
 <template>
   <span>
-    {{ formattedTokens }}
+    <span class="text-[var(--text-secondary)]">{{ formattedTokens }}</span>
     <span v-if="costText" class="ml-2 text-[var(--text-secondary)]">
       · {{ costText }}
     </span>

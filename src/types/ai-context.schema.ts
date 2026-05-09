@@ -19,6 +19,13 @@ export const aiContextRangeSchema = z.object({
   endLine: z.number().int().positive(),
 });
 
+export const aiImageAttachmentPreviewSchema = z.object({
+  src: z.string().min(1),
+  width: z.number().int().positive().nullable(),
+  height: z.number().int().positive().nullable(),
+  mimeType: z.string().min(1),
+});
+
 export const aiContextReferenceSchema = z.object({
   id: z.string().min(1),
   kind: aiContextKindSchema,
@@ -27,4 +34,5 @@ export const aiContextReferenceSchema = z.object({
   range: aiContextRangeSchema.nullable(),
   contentPreview: z.string(),
   redacted: z.boolean(),
+  attachmentPreview: aiImageAttachmentPreviewSchema.optional(),
 });

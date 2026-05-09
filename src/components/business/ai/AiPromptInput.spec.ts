@@ -10,6 +10,12 @@ interface IAiPromptInputTestAttachment {
   sizeLabel: string;
   kind: 'text' | 'image';
   detailLabel?: string;
+  preview?: {
+    src: string;
+    width: number | null;
+    height: number | null;
+    mimeType: string;
+  };
 }
 
 interface IAiPromptInputTestProps {
@@ -83,7 +89,7 @@ describe('AiPromptInput', () => {
     expect(wrapper.emitted('fileSelected')?.[0]?.[0]).toBe(file);
   });
 
-  it('hides image metadata inside attachment chips', () => {
+  it('renders image attachments as thumbnails and hides metadata text', () => {
     const wrapper = mountPromptInput({
       attachments: [
         {
@@ -92,12 +98,27 @@ describe('AiPromptInput', () => {
           kind: 'image',
           sizeLabel: '4.5 KB',
           detailLabel: '665 × 329',
+          preview: {
+            src: 'data:image/png;base64,ZmFrZQ==',
+            width: 665,
+            height: 329,
+            mimeType: 'image/png',
+          },
         },
       ],
       hasAttachments: true,
     });
 
-    expect(wrapper.text()).toContain('pasted-image.png');
+    expect(wrapper.get('.ai-attachments').element.closest('[data-slot="input-group"]')).toBeNull();
+    expect(
+      wrapper.get('.ai-attachments').element.compareDocumentPosition(
+        wrapper.get('.ai-prompt-shell').element,
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(wrapper.find('.ai-image-attachment-preview-link').exists()).toBe(true);
+    expect(wrapper.find('.ai-image-attachment-preview-link img').attributes('src')).toBe(
+      'data:image/png;base64,ZmFrZQ==',
+    );
     expect(wrapper.text()).not.toContain('665 × 329');
     expect(wrapper.text()).not.toContain('4.5 KB');
   });
@@ -179,9 +200,40 @@ describe('AiPromptInput', () => {
     const tokenTrigger = wrapper.get('[aria-label="Token 消耗"]');
     const sendButton = wrapper.get('[aria-label="发送"]');
 
-    expect(tokenTrigger.text()).toContain('25%');
+    expect(tokenTrigger.find('svg').exists()).toBe(true);
+    expect(tokenTrigger.text()).toBe('');
     expect(tokenTrigger.element.compareDocumentPosition(sendButton.element)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+  });
+
+  it('does not render token text when max context is unknown', () => {
+    const wrapper = mountPromptInput({
+      tokenContext: {
+        usedTokens: 0,
+        maxTokens: 0,
+        usage: {
+          inputTokens: 0,
+          inputTokenDetails: {
+            noCacheTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+          outputTokens: 0,
+          outputTokenDetails: {
+            textTokens: 0,
+            reasoningTokens: 0,
+          },
+          totalTokens: 0,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+        },
+      },
+    });
+
+    const tokenTrigger = wrapper.get('[aria-label="Token 消耗"]');
+
+    expect(tokenTrigger.find('svg').exists()).toBe(true);
+    expect(tokenTrigger.text()).toBe('');
   });
 });

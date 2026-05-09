@@ -12,7 +12,6 @@ vi.mock('@/services/modules/ai', () => ({
 import {
   AI_SUGGESTION_BATCH_SIZE,
   AI_SUGGESTION_POOL_SIZE,
-  AI_SUGGESTION_REFRESH_INTERVAL_MS,
 } from '@/constants/ai-suggestions';
 import { useAiSuggestionPool } from '@/composables/useAiSuggestionPool';
 import type { IAiSuggestionPoolPayload, IAiSuggestionPoolRequest } from '@/types/ai';
@@ -28,6 +27,15 @@ const createGeneratedPayload = (): IAiSuggestionPoolPayload => ({
   generatedAt: '2026-05-06T00:00:00.000Z',
 });
 
+const createTemplatePayload = (): IAiSuggestionPoolPayload => ({
+  suggestions: Array.from(
+    { length: AI_SUGGESTION_POOL_SIZE },
+    (_value, index) => `如何选择合适的运动方案${index + 1}`,
+  ),
+  model: 'zhipu/glm-4-flash',
+  generatedAt: '2026-05-06T00:00:00.000Z',
+});
+
 const createCachedPayload = (): IAiSuggestionPoolPayload => ({
   suggestions: Array.from(
     { length: AI_SUGGESTION_POOL_SIZE },
@@ -35,6 +43,11 @@ const createCachedPayload = (): IAiSuggestionPoolPayload => ({
   ),
   model: 'zhipu/glm-4-flash',
   generatedAt: '2026-05-06T00:10:00.000Z',
+});
+
+const createCachedPayloadAt = (generatedAt: string): IAiSuggestionPoolPayload => ({
+  ...createCachedPayload(),
+  generatedAt,
 });
 
 const mountSuggestionPool = (params: {
@@ -126,8 +139,30 @@ describe('useAiSuggestionPool', () => {
     expect(vm.suggestions.some((suggestion) => suggestion.startsWith('模型提示词'))).toBe(true);
   });
 
-  it('小模型启用后每 10 分钟后台刷新一次', async () => {
+  it('小模型返回同款句式时展示批次会混入兜底提示词', async () => {
+    const generateSuggestionPool = vi.fn<
+      (payload: IAiSuggestionPoolRequest) => Promise<IAiSuggestionPoolPayload>
+    >(async () => createTemplatePayload());
+    const wrapper = mountSuggestionPool({
+      isRefreshEnabled: ref(true),
+      generateSuggestionPool,
+    });
+
+    await flushPromises();
+
+    const vm = wrapper.vm as unknown as { suggestions: string[] };
+    const templateCount = vm.suggestions.filter((suggestion) =>
+      suggestion.startsWith('如何选择合适的'),
+    ).length;
+
+    expect(vm.suggestions).toHaveLength(AI_SUGGESTION_BATCH_SIZE);
+    expect(templateCount).toBeLessThanOrEqual(2);
+    expect(vm.suggestions.some((suggestion) => !suggestion.startsWith('如何选择合适的'))).toBe(true);
+  });
+
+  it('小模型启用后按现实时间下一个 10 分钟边界刷新', async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-06T00:07:00.000Z'));
 
     const generateSuggestionPool = vi.fn<
       (payload: IAiSuggestionPoolRequest) => Promise<IAiSuggestionPoolPayload>
@@ -140,9 +175,41 @@ describe('useAiSuggestionPool', () => {
     await flushPromises();
     expect(generateSuggestionPool).toHaveBeenCalledTimes(1);
 
-    vi.advanceTimersByTime(AI_SUGGESTION_REFRESH_INTERVAL_MS);
+    await vi.advanceTimersByTimeAsync(3 * 60 * 1000 - 1);
+    await flushPromises();
+
+    expect(generateSuggestionPool).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
     await flushPromises();
 
     expect(generateSuggestionPool).toHaveBeenCalledTimes(2);
+  });
+
+  it('当前现实 10 分钟窗口已有缓存时不立即刷新', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-06T00:07:00.000Z'));
+
+    const getSuggestionPoolCache = vi.fn(async () =>
+      createCachedPayloadAt('2026-05-06T00:04:00.000Z'),
+    );
+    const generateSuggestionPool = vi.fn<
+      (payload: IAiSuggestionPoolRequest) => Promise<IAiSuggestionPoolPayload>
+    >(async () => createGeneratedPayload());
+    mountSuggestionPool({
+      isRefreshEnabled: ref(true),
+      getSuggestionPoolCache,
+      generateSuggestionPool,
+    });
+
+    await flushPromises();
+
+    expect(getSuggestionPoolCache).toHaveBeenCalledTimes(1);
+    expect(generateSuggestionPool).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
+    await flushPromises();
+
+    expect(generateSuggestionPool).toHaveBeenCalledTimes(1);
   });
 });

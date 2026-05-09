@@ -179,6 +179,7 @@ pub async fn ai_chat(payload: AiChatRequest) -> Result<AiChatPayload, String> {
         },
         provider_type: gateway::get_config().provider_type,
         model: response.model,
+        usage: response.usage,
     })
 }
 

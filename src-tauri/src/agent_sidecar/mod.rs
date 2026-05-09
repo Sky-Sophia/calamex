@@ -908,7 +908,9 @@ mod tests {
             ok: true,
             _engine: Some("mastra".to_string()),
             protocol_version: Some("5".to_string()),
-            implementation_version: Some("deepseek-reasoning-transport-v4-workspace-tools".to_string()),
+            implementation_version: Some(
+                "deepseek-reasoning-transport-v4-workspace-tools".to_string(),
+            ),
         };
         let stale_payload = SidecarHealthProbePayload {
             ok: true,
@@ -920,7 +922,9 @@ mod tests {
             ok: false,
             _engine: Some("legacy-runtime".to_string()),
             protocol_version: Some("5".to_string()),
-            implementation_version: Some("deepseek-reasoning-transport-v4-workspace-tools".to_string()),
+            implementation_version: Some(
+                "deepseek-reasoning-transport-v4-workspace-tools".to_string(),
+            ),
         };
 
         assert_eq!(

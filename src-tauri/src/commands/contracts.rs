@@ -1,6 +1,7 @@
 use std::fmt;
 use std::ops::Deref;
 
+use crate::ai::provider::AiProviderUsage;
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -490,6 +491,7 @@ pub struct AiChatPayload {
     pub(crate) message: AiChatMessagePayload,
     pub(crate) provider_type: String,
     pub(crate) model: String,
+    pub(crate) usage: Option<AiProviderUsage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

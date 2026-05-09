@@ -143,6 +143,12 @@
   --surface-hover: var(--bg-h);
   --surface-soft: #388bfd1a;
   --surface-soft-strong: #388bfd66;
+  --image-preview-frame-surface: #ffffff;
+  --image-preview-frame-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 1px 2px rgba(17, 24, 39, 0.04),
+    0 8px 24px -8px rgba(17, 24, 39, 0.12),
+    0 24px 48px -16px rgba(17, 24, 39, 0.12);
   --border-subtle: #3d444db3;
   --border-strong: #3d444d;
   --shell-divider: #3d444db3;
@@ -243,6 +249,12 @@
   --surface-hover: #818b981f;
   --surface-soft: #818b981f;
   --surface-soft-strong: #d1d9e0b3;
+  --image-preview-frame-surface: #ffffff;
+  --image-preview-frame-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 1px 2px rgba(17, 24, 39, 0.04),
+    0 8px 24px -8px rgba(17, 24, 39, 0.12),
+    0 24px 48px -16px rgba(17, 24, 39, 0.12);
   --border-subtle: #d1d9e0b3;
   --border-strong: #d1d9e0;
   --shell-divider: #d1d9e0b3;
@@ -414,11 +426,11 @@ button:disabled,
 
 .app-window-controls {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: -1px;
+  right: -1px;
   z-index: var(--workbench-motion-layer-overlay);
   display: flex;
-  height: var(--workbench-content-top-offset);
+  height: calc(var(--workbench-content-top-offset) + 1px);
   align-items: stretch;
   background: transparent;
 }
@@ -452,7 +464,9 @@ button:disabled,
 }
 
 .app-window-control-button.is-close {
+  width: 49px;
   height: 100%;
+  margin-left: -1px;
   margin-bottom: 0;
 }
 
@@ -4024,11 +4038,10 @@ button:disabled,
   align-items: center;
   justify-content: center;
   max-width: min(100%, 1320px);
-  padding: 18px;
-  border: 1px solid var(--border-subtle);
+  padding: 0;
+  border: 0;
   border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01)), var(--bg-code);
+  background: transparent;
 }
 
 .image-preview-asset {
@@ -4038,7 +4051,9 @@ button:disabled,
   width: auto;
   height: auto;
   object-fit: contain;
-  border-radius: 12px;
+  border-radius: 10px;
+  background: var(--image-preview-frame-surface);
+  box-shadow: var(--image-preview-frame-shadow);
 }
 
 /* ============================================================

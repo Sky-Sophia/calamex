@@ -16,6 +16,13 @@ export interface IAiContextRange {
   endLine: number;
 }
 
+export interface IAiImageAttachmentPreview {
+  src: string;
+  width: number | null;
+  height: number | null;
+  mimeType: string;
+}
+
 export interface IAiContextReference {
   id: string;
   kind: TAiContextKind;
@@ -24,4 +31,5 @@ export interface IAiContextReference {
   range: IAiContextRange | null;
   contentPreview: string;
   redacted: boolean;
+  attachmentPreview?: IAiImageAttachmentPreview;
 }

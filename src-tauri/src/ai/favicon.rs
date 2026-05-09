@@ -423,8 +423,7 @@ fn find_html_icon_href(html: &str) -> Option<String> {
         let after = start + 5;
         // 确认 "<link" 是一个完整标签开头（后随空白/'>'/'/）
         let next_byte = lower.as_bytes().get(after).copied().unwrap_or(b' ');
-        let is_tag_start =
-            matches!(next_byte, b' ' | b'\t' | b'\n' | b'\r' | b'>' | b'/');
+        let is_tag_start = matches!(next_byte, b' ' | b'\t' | b'\n' | b'\r' | b'>' | b'/');
         if !is_tag_start {
             search_index = start + 5;
             continue;
@@ -439,9 +438,12 @@ fn find_html_icon_href(html: &str) -> Option<String> {
 
         if let Some(rel_value) = extract_html_attribute(tag, tag_lower, "rel") {
             let rel_lower = rel_value.to_ascii_lowercase();
-            let is_icon = rel_lower
-                .split(|c: char| c.is_whitespace())
-                .any(|tok| matches!(tok, "icon" | "shortcut" | "apple-touch-icon" | "mask-icon" | "fluid-icon"));
+            let is_icon = rel_lower.split(|c: char| c.is_whitespace()).any(|tok| {
+                matches!(
+                    tok,
+                    "icon" | "shortcut" | "apple-touch-icon" | "mask-icon" | "fluid-icon"
+                )
+            });
             if is_icon {
                 if let Some(href) = extract_html_attribute(tag, tag_lower, "href") {
                     let href_trim = href.trim().to_string();
@@ -621,7 +623,7 @@ fn is_blocked_ipv4(v: Ipv4Addr) -> bool {
         || o[0] >= 240                                  // 240/4 reserved
         || (o[0] == 100 && (o[1] & 0xc0) == 64)         // 100.64/10 CGNAT
         || (o[0] == 192 && o[1] == 0 && o[2] == 0)      // 192.0.0/24 IETF
-        || (o[0] == 198 && (o[1] == 18 || o[1] == 19))  // 198.18/15 benchmark
+        || (o[0] == 198 && (o[1] == 18 || o[1] == 19)) // 198.18/15 benchmark
 }
 
 fn is_blocked_ipv6(v: Ipv6Addr) -> bool {
@@ -649,7 +651,7 @@ fn is_blocked_ipv6(v: Ipv6Addr) -> bool {
         || v.is_multicast()
         || (s[0] & 0xfe00) == 0xfc00            // ULA fc00::/7
         || (s[0] & 0xffc0) == 0xfe80            // link-local fe80::/10
-        || (s[0] == 0x2001 && s[1] == 0x0db8)   // 2001:db8::/32 documentation
+        || (s[0] == 0x2001 && s[1] == 0x0db8) // 2001:db8::/32 documentation
 }
 
 // ─── responses ─────────────────────────────────────────────────────────────

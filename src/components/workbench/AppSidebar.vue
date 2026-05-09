@@ -246,7 +246,8 @@ type TExplorerContextMenuAction =
   | 'rename'
   | 'delete'
   | 'copy-path'
-  | 'refresh';
+  | 'refresh'
+  | 'open-folder';
 
 interface IExplorerContextMenuItem extends ILinearContextMenuItem {
   action: TExplorerContextMenuAction;
@@ -347,6 +348,12 @@ const explorerContextMenuGroups = computed<ILinearContextMenuGroup<IExplorerCont
           icon: 'refresh',
           shortcut: ['F5'],
           action: 'refresh',
+        },
+        {
+          key: 'open-folder',
+          label: '打开文件夹',
+          icon: 'open-external',
+          action: 'open-folder',
         },
       ],
     },
@@ -1032,6 +1039,9 @@ const handleExplorerContextMenuSelect = async (
       return;
     case 'refresh':
       await handleRefreshExplorer();
+      return;
+    case 'open-folder':
+      emit('open-folder');
       return;
     default:
       return;
