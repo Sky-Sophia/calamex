@@ -332,6 +332,19 @@ const openHistoryThread = (threadId: string): void => {
   isHistoryOpen.value = false;
 };
 
+const openClearConversationDialog = (): void => {
+  assistant.isClearDialogOpen.value = true;
+};
+
+const cancelClearConversation = (): void => {
+  assistant.isClearDialogOpen.value = false;
+};
+
+const confirmClearConversation = (): void => {
+  assistant.clearConversation();
+  isHistoryOpen.value = false;
+};
+
 const handleSuggestionSelect = async (suggestion: string): Promise<void> => {
   if (assistant.isSending.value) {
     return;
@@ -661,7 +674,7 @@ onMounted(() => {
                 <strong>对话记录</strong>
               </div>
               <button v-if="assistant.messages.value.length" type="button" class="ai-history-clear-icon"
-                aria-label="清空当前对话" @click="assistant.isClearDialogOpen.value = true; isHistoryOpen = false">
+                aria-label="清空当前对话" @click="openClearConversationDialog">
                 <Trash2 aria-hidden="true" />
               </button>
             </header>
@@ -766,17 +779,15 @@ onMounted(() => {
       @test-provider="testProvider" @switch-profile="switchProviderProfile" />
 
     <Teleport to="body">
-      <div v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop"
-        @click.self="assistant.isClearDialogOpen.value = false">
+      <div v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop" @click.self="cancelClearConversation">
         <section class="ai-dialog is-compact" role="alertdialog" aria-modal="true">
           <div class="ai-dialog-copy">
             <h3>清空当前对话？</h3>
             <p>这只会清空面板里的临时对话记录，不会删除任何文件。</p>
           </div>
           <div class="ai-dialog-actions">
-            <button type="button" class="ai-button is-ghost"
-              @click="assistant.isClearDialogOpen.value = false">取消</button>
-            <button type="button" class="ai-button is-danger" @click="assistant.clearConversation">清空</button>
+            <button type="button" class="ai-button is-ghost" @click="cancelClearConversation">取消</button>
+            <button type="button" class="ai-button is-danger" @click="confirmClearConversation">清空</button>
           </div>
         </section>
       </div>

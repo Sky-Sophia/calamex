@@ -94,7 +94,7 @@
           {{ currentDocumentLabel }}
         </span>
 
-        <div v-if="isDesktopRuntime" class="-mr-3 ml-1 flex h-10 items-stretch gap-0">
+        <div v-if="isDesktopRuntime" class="window-titlebar-controls -mr-3 ml-1 flex h-10 items-stretch gap-0">
           <button class="window-control-button" type="button" aria-label="最小化" @click="handleMinimize">
             <svg viewBox="0 0 10 10" aria-hidden="true" class="h-3.5 w-3.5">
               <path d="M1 5h8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.2" />

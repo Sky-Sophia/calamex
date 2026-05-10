@@ -5,6 +5,30 @@ import { nextTick } from 'vue';
 import PromptInputAttachmentsDisplay from '@/components/ai-elements/prompt-input/PromptInputAttachmentsDisplay.vue';
 import type { IAiAttachedFile } from '@/types/ai';
 
+type TLightboxZoomLevelResolver = (zoomLevel: {
+  fit: number;
+  elementSize: {
+    x: number;
+    y: number;
+  } | null;
+}) => number;
+
+const getLightboxZoomLevelResolver = (value: unknown): TLightboxZoomLevelResolver => {
+  if (typeof value !== 'function') {
+    throw new Error('PhotoSwipe 初始缩放配置缺失');
+  }
+
+  return (zoomLevel) => {
+    const result: unknown = value(zoomLevel);
+
+    if (typeof result !== 'number') {
+      throw new Error('PhotoSwipe 初始缩放配置必须返回数字');
+    }
+
+    return result;
+  };
+};
+
 const lightboxMock = vi.hoisted(() => {
   const instances: Array<{
     options: Record<string, unknown>;
@@ -88,6 +112,24 @@ describe('PromptInputAttachmentsDisplay', () => {
 
     expect(lightboxMock.ctor).toHaveBeenCalledTimes(1);
     expect(lightboxMock.instances[0]?.init).toHaveBeenCalledTimes(1);
+    expect(lightboxMock.instances[0]?.options).toMatchObject({
+      showHideAnimationType: 'none',
+      showAnimationDuration: 0,
+      hideAnimationDuration: 120,
+      zoomAnimationDuration: 160,
+    });
+    const resolveInitialZoom = getLightboxZoomLevelResolver(
+      lightboxMock.instances[0]?.options.initialZoomLevel,
+    );
+    expect(
+      resolveInitialZoom({
+        fit: 1,
+        elementSize: {
+          x: 1224,
+          y: 609,
+        },
+      }),
+    ).toBeCloseTo(960 / 1224);
     expect(wrapper.find('.ai-image-attachment-preview-link').exists()).toBe(true);
     expect(wrapper.get('.ai-image-attachment-preview-link').attributes('data-pswp-width')).toBe(
       '665',
@@ -115,7 +157,7 @@ describe('PromptInputAttachmentsDisplay', () => {
       },
     });
 
-    expect(wrapper.find('.prompt-input-attachment-chip').exists()).toBe(true);
+    expect(wrapper.find('.ai-attachment-card[data-variant="composer"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('README.md');
     expect(wrapper.find('.ai-image-attachment-preview-link').exists()).toBe(false);
     expect(lightboxMock.ctor).not.toHaveBeenCalled();

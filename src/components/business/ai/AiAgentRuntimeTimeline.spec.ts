@@ -187,16 +187,19 @@ describe('AiAgentRuntimeTimeline', () => {
 
         expect(wrapper.findAll('.ai-runtime-step.is-task')).toHaveLength(1);
         expect(wrapper.text()).toContain('Complete Search');
-        expect(wrapper.text()).not.toContain('Searching for profiles for Emmanuel Raymond');
+        expect(wrapper.text()).not.toContain('Search for profiles for Emmanuel Raymond');
 
         const pills = wrapper.findAll('.ai-runtime-web-source-pill');
         expect(pills).toHaveLength(3);
-        expect(wrapper.text()).toContain('www.x.com');
-        expect(wrapper.text()).toContain('www.instagram.com');
-        expect(wrapper.text()).toContain('www.github.com');
+        expect(wrapper.text()).toContain('x.com');
+        expect(wrapper.text()).toContain('instagram.com');
+        expect(wrapper.text()).toContain('github.com');
+        expect(wrapper.text()).not.toContain('https://x.com/emmanuelraymond');
+        expect(wrapper.findAll('.ai-runtime-web-source-icon')[0]?.attributes('src')).toBe('http://favicon.localhost/x.com');
+        expect(wrapper.findAll('.ai-runtime-web-source-icon')[1]?.attributes('src')).toBe('http://favicon.localhost/instagram.com');
     });
 
-    it('web_search 开始时显示 Searching for 查询文案', () => {
+    it('web_search 开始时显示 Search for 查询文案', () => {
         const wrapper = mount(AiAgentRuntimeTimeline, {
             props: {
                 events: [createEvent({
@@ -209,8 +212,53 @@ describe('AiAgentRuntimeTimeline', () => {
             },
         });
 
-        expect(wrapper.text()).toContain('Searching for recent work');
+        expect(wrapper.text()).toContain('Search for recent work');
         expect(wrapper.text()).not.toContain('Complete Search');
+    });
+
+    it('web_search 开始时如果带站点范围会立即显示来源胶囊', () => {
+        const wrapper = mount(AiAgentRuntimeTimeline, {
+            props: {
+                events: [createEvent({
+                    id: 'web-search-site-start',
+                    type: 'agent.tool.started',
+                    toolUseId: 'web-search-site-1',
+                    toolName: 'web_search',
+                    inputPreview: '{"query":"trending open source","site":"github.com"}',
+                })],
+            },
+        });
+
+        expect(wrapper.findAll('.ai-runtime-step.is-task')).toHaveLength(1);
+        expect(wrapper.text()).toContain('Search for trending open source');
+        expect(wrapper.text()).toContain('github.com');
+        expect(wrapper.text()).not.toContain('Complete Search');
+    });
+
+    it('web_search progress 出现 URL 时会在同一个节点实时补充来源胶囊', () => {
+        const wrapper = mount(AiAgentRuntimeTimeline, {
+            props: {
+                events: [
+                    createEvent({
+                        id: 'web-search-progress-start',
+                        type: 'agent.tool.started',
+                        toolUseId: 'web-search-progress-1',
+                        toolName: 'web_search',
+                        inputPreview: '{"query":"github trending"}',
+                    }),
+                    createEvent({
+                        id: 'web-search-progress-source',
+                        type: 'agent.tool.progress',
+                        dataPreview: '{"result":{"url":"https://github.com/trending"}}',
+                    }),
+                ],
+            },
+        });
+
+        expect(wrapper.findAll('.ai-runtime-step.is-task')).toHaveLength(1);
+        expect(wrapper.text()).toContain('Search for github trending');
+        expect(wrapper.text()).toContain('github.com');
+        expect(wrapper.text()).not.toContain('工具执行中');
     });
 
     it('tavily-search 完成后也会原地替换为 Complete Search', () => {
@@ -237,7 +285,154 @@ describe('AiAgentRuntimeTimeline', () => {
         });
 
         expect(wrapper.text()).toContain('Complete Search');
-        expect(wrapper.text()).not.toContain('Searching for today sports news');
+        expect(wrapper.text()).not.toContain('Search for today sports news');
+    });
+
+    it('web_search 完成结果为嵌套文本时也能提取完整 URL 来源胶囊', () => {
+        const wrapper = mount(AiAgentRuntimeTimeline, {
+            props: {
+                events: [
+                    createEvent({
+                        id: 'nested-web-start',
+                        type: 'agent.tool.started',
+                        toolUseId: 'nested-web-1',
+                        toolName: 'tavily-search',
+                        inputPreview: '{"query":"tauri release notes"}',
+                    }),
+                    createEvent({
+                        id: 'nested-web-complete',
+                        type: 'agent.tool.completed',
+                        toolUseId: 'nested-web-1',
+                        toolName: 'tavily-search',
+                        ok: true,
+                        resultPreview: '{"toolResult":{"content":[{"type":"text","text":"Title: Tauri releases\\nURL: https://tauri.app/release-notes/?utm_source=test"}]}}',
+                    }),
+                ],
+            },
+        });
+
+        const pills = wrapper.findAll('.ai-runtime-web-source-pill');
+        expect(pills).toHaveLength(1);
+        expect(wrapper.text()).toContain('tauri.app');
+        expect(wrapper.text()).not.toContain('https://tauri.app/release-notes/?utm_source=test');
+    });
+
+    it('web_search 来源胶囊按站点去重', () => {
+        const wrapper = mount(AiAgentRuntimeTimeline, {
+            props: {
+                events: [
+                    createEvent({
+                        id: 'same-site-web-start',
+                        type: 'agent.tool.started',
+                        toolUseId: 'same-site-web-1',
+                        toolName: 'web_search',
+                        inputPreview: '{"query":"github release"}',
+                    }),
+                    createEvent({
+                        id: 'same-site-web-complete',
+                        type: 'agent.tool.completed',
+                        toolUseId: 'same-site-web-1',
+                        toolName: 'web_search',
+                        ok: true,
+                        resultPreview: '[{"url":"https://www.github.com/openai/codex"},{"url":"https://github.com/openai/codex/releases"}]',
+                    }),
+                ],
+            },
+        });
+
+        const pills = wrapper.findAll('.ai-runtime-web-source-pill');
+        expect(pills).toHaveLength(1);
+        expect(pills[0]?.text()).toBe('github.com');
+    });
+
+    it('相邻多次 web_search 会合并为同一个搜索节点', () => {
+        const wrapper = mount(AiAgentRuntimeTimeline, {
+            props: {
+                events: [
+                    createEvent({
+                        id: 'web-search-a-start',
+                        type: 'agent.tool.started',
+                        toolUseId: 'web-search-a',
+                        toolName: 'tavily-search',
+                        inputPreview: '{"query":"mastra agent"}',
+                    }),
+                    createEvent({
+                        id: 'web-search-a-complete',
+                        type: 'agent.tool.completed',
+                        toolUseId: 'web-search-a',
+                        toolName: 'tavily-search',
+                        ok: true,
+                        resultPreview: '{"results":[{"url":"https://decisioncrafters.com/mastra"}]}',
+                    }),
+                    createEvent({
+                        id: 'web-search-b-start',
+                        type: 'agent.tool.started',
+                        toolUseId: 'web-search-b',
+                        toolName: 'tavily-search',
+                        inputPreview: '{"query":"mastra ecosystem"}',
+                    }),
+                    createEvent({
+                        id: 'web-search-b-complete',
+                        type: 'agent.tool.completed',
+                        toolUseId: 'web-search-b',
+                        toolName: 'tavily-search',
+                        ok: true,
+                        resultPreview: '{"results":[{"url":"https://xavidop.me/mastra"}]}',
+                    }),
+                ],
+            },
+        });
+
+        expect(wrapper.findAll('.ai-runtime-step.is-task')).toHaveLength(1);
+        expect(wrapper.findAll('.ai-runtime-web-source-pill')).toHaveLength(2);
+        expect(wrapper.text()).toContain('decisioncrafters.com');
+        expect(wrapper.text()).toContain('xavidop.me');
+    });
+
+    it('get_current_time 完成后原地改成当前时间读取完成', () => {
+        const wrapper = mount(AiAgentRuntimeTimeline, {
+            props: {
+                events: [
+                    createEvent({
+                        id: 'time-start',
+                        type: 'agent.tool.started',
+                        toolUseId: 'time-1',
+                        toolName: 'get_current_time',
+                        inputPreview: '{}',
+                    }),
+                    createEvent({
+                        id: 'time-complete',
+                        type: 'agent.tool.completed',
+                        toolUseId: 'time-1',
+                        toolName: 'get_current_time',
+                        ok: true,
+                        resultPreview: '{"timezone":"Asia/Shanghai","currentTime":"2026-05-09T22:00:00+08:00"}',
+                    }),
+                ],
+            },
+        });
+
+        expect(wrapper.findAll('.ai-runtime-step.is-task')).toHaveLength(1);
+        expect(wrapper.text()).toContain('当前时间读取完成');
+        expect(wrapper.text()).not.toContain('正在读取当前时间');
+        expect(wrapper.find('.ai-runtime-task-content').exists()).toBe(false);
+    });
+
+    it('get_current_time 开始时显示正在读取当前时间', () => {
+        const wrapper = mount(AiAgentRuntimeTimeline, {
+            props: {
+                events: [createEvent({
+                    id: 'time-only-start',
+                    type: 'agent.tool.started',
+                    toolUseId: 'time-2',
+                    toolName: 'get_current_time',
+                    inputPreview: '{}',
+                })],
+            },
+        });
+
+        expect(wrapper.text()).toContain('正在读取当前时间');
+        expect(wrapper.text()).not.toContain('当前时间读取完成');
     });
 
     it('按具体工具名选择更贴合的图标，而不是只用通用分类图标', () => {
@@ -443,5 +638,37 @@ describe('AiAgentRuntimeTimeline', () => {
         expect(wrapper.get('.agent-line__strong').text()).toBe('城市的时间层叠');
         expect(wrapper.get('.agent-line__code').text()).toBe('24h');
         expect(wrapper.get('.agent-line__emphasis').text()).toBe('开放');
+    });
+
+    it('对 reasoning 文本做轻量块级 Markdown 渲染', () => {
+        const wrapper = mount(AiAgentRuntimeTimeline, {
+            props: {
+                events: [createEvent({
+                    id: 'reasoning-markdown-blocks',
+                    type: 'agent.reasoning.delta',
+                    text: [
+                        'Key Facts:',
+                        '- GitHub Stars: ~23,600',
+                        '- Downloads: 1.8M/month',
+                        '',
+                        'Timeline:',
+                        '- Oct 2024: Initial open-source launch',
+                    ].join('\n'),
+                })],
+            },
+        });
+
+        const headings = wrapper.findAll('.agent-line__heading');
+        const lists = wrapper.findAll('ul.agent-line__list');
+        const listItems = wrapper.findAll('ul.agent-line__list li');
+
+        expect(headings.map((heading) => heading.text())).toEqual(['Key Facts:', 'Timeline:']);
+        expect(lists).toHaveLength(2);
+        expect(listItems.map((item) => item.text())).toEqual([
+            'GitHub Stars: ~23,600',
+            'Downloads: 1.8M/month',
+            'Oct 2024: Initial open-source launch',
+        ]);
+        expect(listItems.at(-1)?.text()).not.toContain('- Oct 2024');
     });
 });

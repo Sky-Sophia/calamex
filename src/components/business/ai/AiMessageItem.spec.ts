@@ -536,10 +536,11 @@ describe('AiMessageItem', () => {
       },
     });
 
-    expect(wrapper.find('.ai-message-attachments').exists()).toBe(true);
-    expect(wrapper.findAll('.ai-message-attachment-chip')).toHaveLength(1);
+    expect(wrapper.find('.ai-message-image-attachments').exists()).toBe(true);
+    expect(wrapper.findAll('.ai-attachment-card[data-variant="message"]')).toHaveLength(1);
     expect(wrapper.text()).toContain('README.md');
-    expect(wrapper.find('.ai-message-attachment-chip svg').exists()).toBe(true);
+    expect(wrapper.find('.ai-attachment-card[data-variant="message"] svg').exists()).toBe(true);
+    expect(wrapper.find('.ai-attachment-hover-card').exists()).toBe(false);
   });
 
   it('在用户消息气泡上方显示可点击放大的已发送图片预览', async () => {
@@ -583,6 +584,7 @@ describe('AiMessageItem', () => {
     expect(wrapper.get('.ai-image-attachment-preview-link img').attributes('src')).toBe(
       'blob:attachment-preview-message',
     );
+    expect(wrapper.find('.ai-attachment-hover-card').exists()).toBe(false);
 
     await wrapper.get('.ai-image-attachment-preview-link').trigger('click');
 

@@ -1,27 +1,60 @@
 <script setup lang="ts">
+import type { TAttachmentData, TAttachmentVariant } from '@/components/ai-elements/attachments';
+import {
+  Attachment,
+  AttachmentHoverCard,
+  AttachmentHoverCardContent,
+  AttachmentHoverCardTrigger,
+  AttachmentInfo,
+  AttachmentPreview,
+  AttachmentRemove,
+  Attachments,
+  getAttachmentLabel,
+  getAttachmentMediaLabel,
+  getMediaCategory,
+} from '@/components/ai-elements/attachments';
 import type { IAiImageAttachmentPreview } from '@/types/ai';
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import { X } from 'lucide-vue-next';
 import PhotoSwipeLightbox from 'photoswipe/lightbox';
 import 'photoswipe/style.css';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 type TAiImageAttachmentPreviewVariant = 'composer' | 'message';
 
-interface IAiImageAttachmentPreviewItem {
+interface IAiAttachmentPreviewItem {
   id: string;
   name: string;
-  preview: IAiImageAttachmentPreview;
+  preview?: IAiImageAttachmentPreview;
+  mediaType?: string;
+  detailLabel?: string;
 }
+
+interface IPhotoSwipeZoomLevelView {
+  fit: number;
+  elementSize: {
+    x: number;
+    y: number;
+  } | null;
+}
+
+const LIGHTBOX_INITIAL_MAX_WIDTH = 960;
+const LIGHTBOX_INITIAL_MAX_HEIGHT = 640;
+const LIGHTBOX_VERTICAL_PADDING = 72;
+const LIGHTBOX_COMPACT_HORIZONTAL_PADDING = 24;
+const LIGHTBOX_DESKTOP_HORIZONTAL_PADDING = 160;
+const LIGHTBOX_DESKTOP_MIN_WIDTH = 960;
+const LIGHTBOX_SHOW_ANIMATION_DURATION = 0;
+const LIGHTBOX_HIDE_ANIMATION_DURATION = 120;
+const LIGHTBOX_ZOOM_ANIMATION_DURATION = 160;
 
 const props = withDefaults(
   defineProps<{
-    items: readonly IAiImageAttachmentPreviewItem[];
+    items: readonly IAiAttachmentPreviewItem[];
     ariaLabel?: string;
     removable?: boolean;
     variant?: TAiImageAttachmentPreviewVariant;
   }>(),
   {
-    ariaLabel: '图片附件预览',
+    ariaLabel: '附件预览',
     removable: false,
     variant: 'composer',
   },
@@ -34,15 +67,23 @@ const emit = defineEmits<{
 const galleryRef = ref<HTMLElement | null>(null);
 
 let lightbox: PhotoSwipeLightbox | null = null;
+const imagePreloadHandles = new Map<string, HTMLImageElement>();
+const preloadedImageSources = new Set<string>();
+
+const attachmentVariant = computed<TAttachmentVariant>(() =>
+  props.variant === 'composer' ? 'inline' : 'grid',
+);
+
+const attachmentItems = computed(() =>
+  props.items.map((item) => ({
+    item,
+    data: toAttachmentData(item),
+  })),
+);
 
 const openableIndexes = computed(() =>
   props.items.reduce<number[]>((indexes, item, index) => {
-    if (
-      typeof item.preview.width === 'number' &&
-      item.preview.width > 0 &&
-      typeof item.preview.height === 'number' &&
-      item.preview.height > 0
-    ) {
+    if (canOpenItem(item)) {
       indexes.push(index);
     }
 
@@ -50,15 +91,102 @@ const openableIndexes = computed(() =>
   }, []),
 );
 
-const canOpenItem = (item: IAiImageAttachmentPreviewItem): boolean =>
-  typeof item.preview.width === 'number' &&
+const canOpenItem = (item: IAiAttachmentPreviewItem): item is IAiAttachmentPreviewItem & {
+  preview: IAiImageAttachmentPreview;
+} =>
+  Boolean(item.preview?.src) &&
+  typeof item.preview?.width === 'number' &&
   item.preview.width > 0 &&
-  typeof item.preview.height === 'number' &&
+  typeof item.preview?.height === 'number' &&
   item.preview.height > 0;
+
+const toAttachmentData = (item: IAiAttachmentPreviewItem): TAttachmentData => ({
+  id: item.id,
+  type: 'file',
+  url: item.preview?.src ?? '',
+  mediaType: item.preview?.mimeType ?? item.mediaType ?? 'application/octet-stream',
+  filename: item.name,
+});
+
+const openablePreviewSources = computed(() =>
+  props.items.reduce<string[]>((sources, item) => {
+    if (canOpenItem(item)) {
+      sources.push(item.preview.src);
+    }
+
+    return sources;
+  }, []),
+);
 
 const destroyLightbox = (): void => {
   lightbox?.destroy();
   lightbox = null;
+};
+
+const releasePreloadHandle = (src: string, image: HTMLImageElement): void => {
+  if (imagePreloadHandles.get(src) !== image) {
+    return;
+  }
+
+  image.onload = null;
+  image.onerror = null;
+  imagePreloadHandles.delete(src);
+};
+
+const completeImagePreload = (src: string, image: HTMLImageElement): void => {
+  preloadedImageSources.add(src);
+  releasePreloadHandle(src, image);
+};
+
+const preloadImagePreview = (src: string): void => {
+  if (preloadedImageSources.has(src) || imagePreloadHandles.has(src)) {
+    return;
+  }
+
+  const image = new Image();
+  image.decoding = 'async';
+  image.onload = () => {
+    if (typeof image.decode !== 'function') {
+      completeImagePreload(src, image);
+    }
+  };
+  image.onerror = () => releasePreloadHandle(src, image);
+  imagePreloadHandles.set(src, image);
+  image.src = src;
+
+  if (typeof image.decode === 'function') {
+    void image
+      .decode()
+      .then(() => completeImagePreload(src, image))
+      .catch(() => releasePreloadHandle(src, image));
+  } else if (image.complete) {
+    completeImagePreload(src, image);
+  }
+};
+
+const clearImagePreloads = (): void => {
+  imagePreloadHandles.forEach((image, src) => {
+    releasePreloadHandle(src, image);
+  });
+};
+
+const resolveLightboxHorizontalPadding = (viewportWidth: number): number => {
+  if (viewportWidth < LIGHTBOX_DESKTOP_MIN_WIDTH) {
+    return LIGHTBOX_COMPACT_HORIZONTAL_PADDING;
+  }
+
+  return LIGHTBOX_DESKTOP_HORIZONTAL_PADDING;
+};
+
+const resolveInitialLightboxZoom = (zoomLevel: IPhotoSwipeZoomLevelView): number => {
+  if (!zoomLevel.elementSize) {
+    return zoomLevel.fit;
+  }
+
+  const widthZoom = LIGHTBOX_INITIAL_MAX_WIDTH / zoomLevel.elementSize.x;
+  const heightZoom = LIGHTBOX_INITIAL_MAX_HEIGHT / zoomLevel.elementSize.y;
+
+  return Math.min(zoomLevel.fit, widthZoom, heightZoom);
 };
 
 const initLightbox = (): void => {
@@ -70,14 +198,30 @@ const initLightbox = (): void => {
     gallery: galleryRef.value,
     children: 'a[data-ai-attachment-preview="image"]',
     pswpModule: () => import('photoswipe'),
-    showHideAnimationType: 'zoom',
+    showHideAnimationType: 'none',
+    showAnimationDuration: LIGHTBOX_SHOW_ANIMATION_DURATION,
+    hideAnimationDuration: LIGHTBOX_HIDE_ANIMATION_DURATION,
+    zoomAnimationDuration: LIGHTBOX_ZOOM_ANIMATION_DURATION,
+    paddingFn: (viewportSize) => {
+      const horizontalPadding = resolveLightboxHorizontalPadding(viewportSize.x);
+
+      return {
+        top: LIGHTBOX_VERTICAL_PADDING,
+        right: horizontalPadding,
+        bottom: LIGHTBOX_VERTICAL_PADDING,
+        left: horizontalPadding,
+      };
+    },
+    initialZoomLevel: resolveInitialLightboxZoom,
+    secondaryZoomLevel: (zoomLevel) => Math.min(zoomLevel.fit, 1),
+    maxZoomLevel: (zoomLevel) => Math.max(1, zoomLevel.fit),
     bgOpacity: 0.78,
     mainClass: 'pswp--ai-attachment-preview',
   });
   lightbox.init();
 };
 
-const openImagePreview = (item: IAiImageAttachmentPreviewItem, index: number): void => {
+const openImagePreview = (item: IAiAttachmentPreviewItem, index: number): void => {
   if (!canOpenItem(item) || !lightbox) {
     return;
   }
@@ -108,108 +252,160 @@ watch(
   { immediate: true },
 );
 
+watch(
+  openablePreviewSources,
+  (sources) => {
+    sources.forEach(preloadImagePreview);
+  },
+  { immediate: true },
+);
+
 onBeforeUnmount(() => {
   destroyLightbox();
+  clearImagePreloads();
 });
 </script>
 
 <template>
-  <div
-    v-if="items.length"
-    ref="galleryRef"
-    class="ai-image-attachment-preview-grid"
-    :data-variant="variant"
-    :aria-label="ariaLabel"
-  >
-    <article
-      v-for="(item, index) in items"
-      :key="item.id"
-      class="ai-image-attachment-preview-card"
-      :data-variant="variant"
-    >
-      <a
-        class="ai-image-attachment-preview-link"
-        :class="{ 'is-openable': canOpenItem(item) }"
-        :href="item.preview.src"
-        :data-pswp-src="item.preview.src"
-        :data-pswp-width="item.preview.width ?? undefined"
-        :data-pswp-height="item.preview.height ?? undefined"
-        :data-ai-attachment-preview="canOpenItem(item) ? 'image' : undefined"
-        :aria-label="`查看图片附件 ${item.name}`"
-        :title="item.name"
-        @click.prevent="openImagePreview(item, index)"
-      >
-        <img
-          :src="item.preview.src"
-          :alt="item.name"
-          loading="lazy"
-          decoding="async"
-          draggable="false"
-        >
-      </a>
+  <div v-if="items.length" ref="galleryRef" class="ai-image-attachment-preview-grid" :data-variant="variant"
+    :aria-label="ariaLabel">
+    <Attachments class="ai-attachment-list" :variant="attachmentVariant">
+      <template v-for="({ item, data }, index) in attachmentItems" :key="item.id">
+        <AttachmentHoverCard v-if="attachmentVariant === 'inline'">
+          <AttachmentHoverCardTrigger as-child>
+            <Attachment :data="data" class="ai-attachment-card" :data-variant="variant" @remove="handleRemove(item.id)">
+              <a v-if="canOpenItem(item)" class="ai-image-attachment-preview-link ai-attachment-preview-frame"
+                :class="{ 'is-openable': canOpenItem(item) }" :href="item.preview.src" :data-pswp-src="item.preview.src"
+                :data-pswp-width="item.preview.width ?? undefined" :data-pswp-height="item.preview.height ?? undefined"
+                data-ai-attachment-preview="image" :aria-label="`查看图片附件 ${item.name}`" :title="item.name"
+                @click.prevent="openImagePreview(item, index)">
+                <AttachmentPreview class="ai-attachment-preview-media" />
+              </a>
+              <div v-else class="ai-attachment-preview-frame" :title="item.name">
+                <AttachmentPreview class="ai-attachment-preview-media" />
+              </div>
 
-      <button
-        v-if="removable"
-        type="button"
-        class="ai-image-attachment-preview-remove"
-        aria-label="移除图片附件"
-        @click.stop="handleRemove(item.id)"
-      >
-        <X aria-hidden="true" />
-      </button>
-    </article>
+              <AttachmentInfo class="ai-attachment-inline-info" />
+
+              <AttachmentRemove v-if="removable" class="ai-image-attachment-preview-remove" label="移除附件" />
+            </Attachment>
+          </AttachmentHoverCardTrigger>
+
+          <AttachmentHoverCardContent class="ai-attachment-hover-card">
+            <div class="ai-attachment-hover-card__content">
+              <div v-if="getMediaCategory(data) === 'image' && data.type === 'file' && data.url"
+                class="ai-attachment-hover-card__image">
+                <img :alt="getAttachmentLabel(data)" :src="data.url" loading="lazy" decoding="async">
+              </div>
+              <div class="ai-attachment-hover-card__meta">
+                <h4>{{ getAttachmentLabel(data) }}</h4>
+                <p>{{ getAttachmentMediaLabel(data) }}</p>
+                <p v-if="item.detailLabel">{{ item.detailLabel }}</p>
+              </div>
+            </div>
+          </AttachmentHoverCardContent>
+        </AttachmentHoverCard>
+
+        <template v-else>
+          <Attachment :data="data" class="ai-attachment-card" :data-variant="variant" @remove="handleRemove(item.id)">
+            <a v-if="canOpenItem(item)" class="ai-image-attachment-preview-link ai-attachment-preview-frame"
+              :class="{ 'is-openable': canOpenItem(item) }" :href="item.preview.src" :data-pswp-src="item.preview.src"
+              :data-pswp-width="item.preview.width ?? undefined" :data-pswp-height="item.preview.height ?? undefined"
+              data-ai-attachment-preview="image" :aria-label="`查看图片附件 ${item.name}`" :title="item.name"
+              @click.prevent="openImagePreview(item, index)">
+              <AttachmentPreview class="ai-attachment-preview-media" />
+            </a>
+            <div v-else class="ai-attachment-preview-frame" :title="item.name">
+              <AttachmentPreview class="ai-attachment-preview-media" />
+            </div>
+
+            <AttachmentInfo v-if="attachmentVariant === 'inline'" class="ai-attachment-inline-info" />
+            <span v-else class="sr-only">{{ item.name }}</span>
+
+            <AttachmentRemove v-if="removable" class="ai-image-attachment-preview-remove" label="移除附件" />
+          </Attachment>
+        </template>
+      </template>
+    </Attachments>
   </div>
 </template>
 
 <style scoped>
 .ai-image-attachment-preview-grid {
-  display: flex;
   min-width: 0;
-  flex-wrap: wrap;
-  gap: 10px;
 }
 
 .ai-image-attachment-preview-grid[data-variant='message'] {
+  display: flex;
   justify-content: flex-end;
 }
 
-.ai-image-attachment-preview-card {
-  position: relative;
+.ai-attachment-list {
+  max-width: 100%;
+}
+
+.ai-image-attachment-preview-grid[data-variant='composer'] .ai-attachment-list {
+  justify-content: flex-start;
+}
+
+.ai-image-attachment-preview-grid[data-variant='message'] .ai-attachment-list {
+  justify-content: flex-end;
+}
+
+.ai-attachment-card {
+  border-color: color-mix(in srgb, var(--shell-divider) 82%, transparent);
+  background: #ffffff;
+  color: var(--text-primary);
+}
+
+.ai-attachment-card[data-variant='composer'] {
+  max-width: min(100%, 220px);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0 6px 0 4px;
+  color: var(--text-primary);
+}
+
+.ai-attachment-card[data-variant='message'] {
+  width: 96px;
+  height: 96px;
+  border-radius: 12px;
+  background: #f4f4f5;
+}
+
+.ai-attachment-preview-frame {
+  display: flex;
   flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  text-decoration: none;
 }
 
-.ai-image-attachment-preview-card[data-variant='composer'] {
-  --ai-image-attachment-preview-radius: 9px;
-  width: 112px;
-  height: 76px;
+.ai-attachment-card[data-variant='composer'] .ai-attachment-preview-frame {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: transparent;
 }
 
-.ai-image-attachment-preview-card[data-variant='message'] {
-  --ai-image-attachment-preview-radius: 12px;
-  width: 148px;
-  height: 104px;
-  max-width: min(40vw, 148px);
-}
-
-.ai-image-attachment-preview-link {
-  display: block;
+.ai-attachment-card[data-variant='message'] .ai-attachment-preview-frame {
   width: 100%;
   height: 100%;
-  overflow: hidden;
-  border-radius: var(--ai-image-attachment-preview-radius, var(--image-attachment-preview-radius, 12px));
-  background: var(--image-preview-frame-surface);
-  box-shadow: var(--image-attachment-preview-shadow, var(--image-preview-frame-shadow));
-  transition:
-    transform var(--motion-duration-normal) var(--motion-easing-emphasized),
-    box-shadow var(--motion-duration-normal) var(--motion-easing-standard);
+  border-radius: inherit;
+  background: #f4f4f5;
+}
+
+.ai-attachment-preview-frame :deep(.ai-attachment-preview-media) {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: transparent;
 }
 
 .ai-image-attachment-preview-link.is-openable {
   cursor: pointer;
-}
-
-.ai-image-attachment-preview-link:hover {
-  transform: translateY(-1px);
 }
 
 .ai-image-attachment-preview-link:focus-visible {
@@ -217,71 +413,115 @@ onBeforeUnmount(() => {
   outline-offset: 2px;
 }
 
-.ai-image-attachment-preview-link img {
+.ai-attachment-preview-frame :deep(img),
+.ai-attachment-preview-frame :deep(video) {
   display: block;
   width: 100%;
   height: 100%;
+  border-radius: inherit;
+  background: transparent;
   object-fit: cover;
-  background: var(--image-preview-frame-surface);
+}
+
+.ai-attachment-card[data-variant='composer'] .ai-attachment-preview-frame :deep(img),
+.ai-attachment-card[data-variant='composer'] .ai-attachment-preview-frame :deep(video) {
+  object-fit: cover;
+}
+
+.ai-attachment-inline-info {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 20px;
 }
 
 .ai-image-attachment-preview-remove {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: inline-flex;
-  width: 22px;
-  height: 22px;
+  color: var(--text-tertiary);
+}
+
+.ai-attachment-card[data-variant='composer'] .ai-image-attachment-preview-remove {
+  position: static;
+  flex: 0 0 auto;
+  opacity: 1;
+}
+
+.ai-attachment-card[data-variant='message'] .ai-image-attachment-preview-remove {
+  background: color-mix(in srgb, #ffffff 88%, transparent);
+  color: var(--text-secondary);
+}
+
+.ai-attachment-hover-card {
+  border-color: color-mix(in srgb, var(--shell-divider) 78%, transparent);
+  background: #ffffff;
+  color: var(--text-primary);
+  box-shadow: var(--image-attachment-preview-shadow, var(--image-preview-frame-shadow));
+}
+
+.ai-attachment-hover-card__content {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ai-attachment-hover-card__image {
+  display: flex;
+  width: 320px;
+  max-width: 72vw;
+  max-height: 384px;
   align-items: center;
   justify-content: center;
-  border: 0;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
-  color: var(--text-secondary);
-  cursor: pointer;
-  backdrop-filter: blur(10px);
-  opacity: 0;
-  pointer-events: none;
-  transform: scale(0.92);
-  transition:
-    opacity var(--motion-duration-fast) var(--motion-easing-standard),
-    background-color var(--motion-duration-fast) var(--motion-easing-standard),
-    color var(--motion-duration-fast) var(--motion-easing-standard),
-    transform var(--motion-duration-fast) var(--motion-easing-standard);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--shell-divider) 72%, transparent);
+  border-radius: 8px;
+  background: #f6f6f7;
 }
 
-.ai-image-attachment-preview-card:hover .ai-image-attachment-preview-remove,
-.ai-image-attachment-preview-card:focus-within .ai-image-attachment-preview-remove {
-  opacity: 1;
-  pointer-events: auto;
-  transform: scale(1);
+.ai-attachment-hover-card__image img {
+  display: block;
+  max-width: 100%;
+  max-height: 384px;
+  object-fit: contain;
 }
 
-.ai-image-attachment-preview-remove:hover {
-  background: var(--panel-bg);
+.ai-attachment-hover-card__meta {
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.ai-attachment-hover-card__meta h4 {
+  margin: 0;
   color: var(--text-primary);
-  transform: scale(1.03);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
 }
 
-.ai-image-attachment-preview-remove:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent-strong) 24%, transparent);
-  outline-offset: 2px;
+.ai-attachment-hover-card__meta p {
+  margin: 3px 0 0;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
 }
 
-.ai-image-attachment-preview-remove svg {
-  width: 12px;
-  height: 12px;
-}
-
-:global(.pswp--ai-attachment-preview .pswp__img) {
+:global(.pswp--ai-attachment-preview .pswp__img),
+:global(.pswp--ai-attachment-preview .pswp__img--placeholder) {
   border-radius: var(--image-attachment-preview-radius, 12px);
   background: var(--image-preview-frame-surface);
   box-shadow: var(--image-attachment-preview-shadow, var(--image-preview-frame-shadow));
 }
 
+:global(.pswp--ai-attachment-preview .pswp__img--placeholder) {
+  object-fit: cover;
+}
+
+:global(.pswp--ai-attachment-preview) {
+  --pswp-transition-duration: 180ms;
+  --pswp-placeholder-bg: var(--image-preview-frame-surface);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ai-image-attachment-preview-link,
-  .ai-image-attachment-preview-remove {
+  .ai-attachment-card {
     transition: none;
   }
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,6 +25,11 @@ import {
   resolveConfiguredRuntimeName,
   type IAgentSidecarRuntime,
 } from './engines/runtime.js';
+import {
+  clearDeepSeekReasoningStoreForTest,
+  deepseekReasoningFetch,
+  runWithDeepSeekReasoningContext,
+} from './models/deepseek-reasoning-fetch.js';
 import { agentPlanSchema } from './schemas/plan.js';
 import {
   agentSidecarChatRequestSchema,
@@ -34,6 +39,7 @@ import {
   createAgentSidecarServer,
 } from './server.js';
 import { createMastraTimeTools } from './tools/time.js';
+import { ensureMastraLogFile } from './tools/log.js';
 
 const unsupportedRuntimeResponse = async (
   ...args: Parameters<IAgentSidecarRuntime['chat']>
@@ -60,6 +66,25 @@ const isMastraRequestContextLike = (value: unknown): value is {
   && 'toJSON' in value
   && typeof value.toJSON === 'function',
 );
+
+const isZodLikeSchema = (value: unknown): value is {
+  safeParse: (input: unknown) => { success: boolean };
+} => Boolean(
+  value
+  && typeof value === 'object'
+  && 'safeParse' in value
+  && typeof value.safeParse === 'function',
+);
+
+const assertSchemaAccepts = (schema: unknown, input: unknown): void => {
+  assert.equal(isZodLikeSchema(schema), true);
+
+  if (!isZodLikeSchema(schema)) {
+    throw new Error('schema does not support safeParse');
+  }
+
+  assert.equal(schema.safeParse(input).success, true);
+};
 
 const assertMastraRequestContext = (
   value: unknown,
@@ -142,6 +167,144 @@ const parseNdjsonFrames = (body: string): unknown[] => body
   .map((line) => JSON.parse(line));
 
 const createTemporaryWorkspace = (): string => mkdtempSync(join(tmpdir(), 'mastra-workspace-'));
+
+const toRecordForTest = (value: unknown): Record<string, unknown> | null => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+);
+
+describe('DeepSeek reasoning fetch middleware', () => {
+  it('captures non-stream reasoning_content and injects it by sorted tool call ids', async () => {
+    clearDeepSeekReasoningStoreForTest();
+    const originalFetch = globalThis.fetch;
+    const capturedBodies: unknown[] = [];
+    let callCount = 0;
+
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        return new Response(JSON.stringify({
+          choices: [{
+            message: {
+              role: 'assistant',
+              reasoning_content: '需要先读取时间。',
+              tool_calls: [{ id: 'tool-b' }, { id: 'tool-a' }],
+            },
+          }],
+        }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      capturedBodies.push(JSON.parse(String(init?.body)) as unknown);
+      return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '完成' } }] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      await runWithDeepSeekReasoningContext({ sessionId: 'session-1', runId: 'run-1' }, async () => {
+        const firstResponse = await deepseekReasoningFetch('https://example.com/chat/completions', {
+          method: 'POST',
+          body: JSON.stringify({
+            messages: [{ role: 'user', content: '现在几点' }],
+          }),
+        });
+        await firstResponse.text();
+
+        const secondResponse = await deepseekReasoningFetch('https://example.com/chat/completions', {
+          method: 'POST',
+          body: JSON.stringify({
+            messages: [{
+              role: 'assistant',
+              tool_calls: [{ id: 'tool-a' }, { id: 'tool-b' }],
+            }],
+          }),
+        });
+        await secondResponse.text();
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearDeepSeekReasoningStoreForTest();
+    }
+
+    const body = toRecordForTest(capturedBodies[0]);
+    const messages = Array.isArray(body?.messages) ? body.messages : [];
+    const assistantMessage = toRecordForTest(messages[0]);
+    assert.equal(assistantMessage?.reasoning_content, '需要先读取时间。');
+  });
+
+  it('captures streaming reasoning_content across SSE chunks without changing the stream body', async () => {
+    clearDeepSeekReasoningStoreForTest();
+    const originalFetch = globalThis.fetch;
+    const encoder = new TextEncoder();
+    const capturedBodies: unknown[] = [];
+    let callCount = 0;
+
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      callCount += 1;
+
+      if (callCount === 1) {
+        const firstLine = 'data: {"choices":[{"delta":{"reasoning_content":"我需要';
+        const secondLine = '查时间","tool_calls":[{"id":"call-2"},{"id":"call-1"}]}}]}\n';
+        const doneLine = 'data: [DONE]\n';
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode(firstLine));
+            controller.enqueue(encoder.encode(secondLine));
+            controller.enqueue(encoder.encode(doneLine));
+            controller.close();
+          },
+        });
+
+        return new Response(body, {
+          headers: { 'content-type': 'text/event-stream; charset=utf-8' },
+        });
+      }
+
+      capturedBodies.push(JSON.parse(String(init?.body)) as unknown);
+      return new Response(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '完成' } }] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    let streamedText = '';
+
+    try {
+      await runWithDeepSeekReasoningContext({ sessionId: 'session-2', runId: 'run-2' }, async () => {
+        const streamResponse = await deepseekReasoningFetch('https://example.com/chat/completions', {
+          method: 'POST',
+          body: JSON.stringify({
+            messages: [{ role: 'user', content: '现在几点' }],
+          }),
+        });
+        streamedText = await streamResponse.text();
+
+        const nextResponse = await deepseekReasoningFetch('https://example.com/chat/completions', {
+          method: 'POST',
+          body: JSON.stringify({
+            messages: [{
+              role: 'assistant',
+              tool_calls: [{ id: 'call-1' }, { id: 'call-2' }],
+            }],
+          }),
+        });
+        await nextResponse.text();
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      clearDeepSeekReasoningStoreForTest();
+    }
+
+    assert.match(streamedText, /我需要查时间/u);
+    const body = toRecordForTest(capturedBodies[0]);
+    const messages = Array.isArray(body?.messages) ? body.messages : [];
+    const assistantMessage = toRecordForTest(messages[0]);
+    assert.equal(assistantMessage?.reasoning_content, '我需要查时间');
+  });
+});
 
 describe('Agent sidecar request schema', () => {
   it('normalizes nullable optional fields from old Tauri clients', () => {
@@ -414,6 +577,22 @@ describe('Mastra memory helpers', () => {
   });
 });
 
+describe('Mastra file logger helpers', () => {
+  it('creates the log file before FileTransport opens it', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'mastra-log-'));
+    const logFilePath = join(tempRoot, 'nested', 'mastra.log');
+
+    try {
+      const ensuredPath = ensureMastraLogFile(logFilePath);
+
+      assert.equal(ensuredPath, logFilePath);
+      assert.equal(existsSync(logFilePath), true);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('Agent sidecar visible result', () => {
   it('does not expose reasoning blocks in the final assistant text', () => {
     const result = {
@@ -582,7 +761,7 @@ describe('Mastra runtime chat', () => {
     });
 
     assert.equal(typeof capturedModel, 'object');
-    assert.equal((capturedModel as { provider?: unknown } | null)?.provider, 'deepseek.chat');
+    assert.equal((capturedModel as { provider?: unknown } | null)?.provider, 'deepseek');
     assert.equal((capturedModel as { modelId?: unknown } | null)?.modelId, 'deepseek-chat');
     assert.deepEqual(capturedMessages, [
       { role: 'assistant', content: '你好，我可以帮你做什么？' },
@@ -986,6 +1165,7 @@ describe('Mastra runtime chat', () => {
     assert.doesNotMatch(String(startedEvent.event?.inputPreview ?? ''), /secret-value/u);
     assert.equal(completedEvent.event?.type, 'agent.tool.completed');
     assert.equal(completedEvent.event?.toolName, 'web_search');
+    assert.equal(completedEvent.event?.toolUseId, 'tool-call-1');
     assert.equal(completedEvent.event?.ok, true);
     assert.match(String(completedEvent.event?.resultPreview ?? ''), /搜索完成/u);
     assert.equal(response.result, '已完成搜索。');
@@ -1041,6 +1221,25 @@ describe('Mastra runtime chat', () => {
 });
 
 describe('Mastra native time tools', () => {
+  it('keeps provider-facing time tool schemas loose so empty model arguments reach execute', async () => {
+    const tools = createMastraTimeTools({
+      now: () => new Date('2026-05-09T10:32:45.000Z'),
+      localTimezone: 'Asia/Shanghai',
+    });
+
+    assertSchemaAccepts(tools.get_current_time.inputSchema, {});
+    assertSchemaAccepts(tools.get_current_time.inputSchema, { input: {} });
+    assertSchemaAccepts(tools.get_current_time.inputSchema, { arguments: { timezone: null } });
+    assertSchemaAccepts(tools.convert_time.inputSchema, {});
+    assertSchemaAccepts(tools.convert_time.inputSchema, {
+      arguments: {
+        source_timezone: null,
+        time: '18:30',
+        target_timezone: 'America/New_York',
+      },
+    });
+  });
+
   it('defaults get_current_time to the configured local timezone', async () => {
     const tools = createMastraTimeTools({
       now: () => new Date('2026-05-09T10:32:45.000Z'),
@@ -1517,6 +1716,7 @@ describe('Mastra runtime execute', () => {
           visibility: 'user',
           level: 'info',
           toolName: 'read_file',
+          toolUseId: 'tool-1',
           ok: true,
           resultPreview: '{"content":[{"type":"text","text":"README 内容"}],"isError":false}',
         },
@@ -1901,7 +2101,7 @@ describe('Mastra runtime plan', () => {
     });
 
     assert.equal(typeof capturedModel, 'object');
-    assert.equal((capturedModel as { provider?: unknown } | null)?.provider, 'deepseek.chat');
+    assert.equal((capturedModel as { provider?: unknown } | null)?.provider, 'deepseek');
     assert.equal((capturedModel as { modelId?: unknown } | null)?.modelId, 'deepseek-chat');
     assert.equal(capturedToolNames.includes('read_file'), true);
     assert.equal(capturedToolNames.includes('read_current_file'), false);

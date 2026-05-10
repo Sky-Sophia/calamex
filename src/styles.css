@@ -163,6 +163,7 @@
   --workbench-motion-layer-terminal: 12;
   --workbench-content-top-offset: 40px;
   --workbench-content-left-radius: 12px;
+  --window-corner-radius: 10px;
   --workbench-content-bg: #ffffff;
   --text-primary: #f0f6fc;
   --text-secondary: #9198a1;
@@ -443,6 +444,8 @@ button:disabled,
   height: calc(var(--workbench-content-top-offset) + 1px);
   align-items: stretch;
   background: transparent;
+  overflow: hidden;
+  border-top-right-radius: var(--window-corner-radius);
 }
 
 .app-window-control-button {
@@ -482,7 +485,7 @@ button:disabled,
 
 .app-window-shell .app-window-control-button.is-close {
   border: 0 !important;
-  border-radius: 0 !important;
+  border-top-right-radius: var(--window-corner-radius) !important;
   padding: 0 !important;
   appearance: none !important;
   -webkit-appearance: none !important;
@@ -630,6 +633,11 @@ button:disabled,
   user-select: none;
 }
 
+.window-titlebar-controls {
+  overflow: hidden;
+  border-top-right-radius: var(--window-corner-radius);
+}
+
 .menubar-menu-item {
   position: relative;
   display: inline-flex;
@@ -684,7 +692,7 @@ button:disabled,
 
 .window-titlebar .window-control-button.is-close {
   border: 0 !important;
-  border-radius: 0 !important;
+  border-top-right-radius: var(--window-corner-radius) !important;
   padding: 0 !important;
   appearance: none !important;
   -webkit-appearance: none !important;

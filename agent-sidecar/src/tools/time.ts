@@ -3,24 +3,13 @@ import { z } from 'zod';
 
 export const DEFAULT_LOCAL_TIMEZONE = 'Asia/Shanghai';
 
-const optionalNullableStringSchema = z.string().nullish().optional();
+const looseModelToolInputSchema = z.object({}).passthrough();
 
 const currentTimeBaseInputSchema = z.object({
   timezone: z.string()
     .optional()
     .describe('IANA timezone name. If omitted, use the local timezone.'),
 });
-
-const currentTimeToolInputSchema = z.object({
-  timezone: optionalNullableStringSchema
-    .describe('IANA timezone name. If omitted, use the local timezone.'),
-  input: z.object({
-    timezone: optionalNullableStringSchema,
-  }).passthrough().nullish().optional(),
-  arguments: z.object({
-    timezone: optionalNullableStringSchema,
-  }).passthrough().nullish().optional(),
-}).passthrough();
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -92,26 +81,6 @@ const convertTimeBaseInputSchema = z.object({
     .optional()
     .describe('Target IANA timezone name. If omitted, use the local timezone.'),
 });
-
-const convertTimeToolInputSchema = z.object({
-  source_timezone: optionalNullableStringSchema
-    .describe('Source IANA timezone name. If omitted, use the local timezone.'),
-  time: z.string()
-    .optional()
-    .describe('Time to convert in 24-hour format (HH:MM or HH:MM:SS).'),
-  target_timezone: optionalNullableStringSchema
-    .describe('Target IANA timezone name. If omitted, use the local timezone.'),
-  input: z.object({
-    source_timezone: optionalNullableStringSchema,
-    time: z.string().optional(),
-    target_timezone: optionalNullableStringSchema,
-  }).passthrough().nullish().optional(),
-  arguments: z.object({
-    source_timezone: optionalNullableStringSchema,
-    time: z.string().optional(),
-    target_timezone: optionalNullableStringSchema,
-  }).passthrough().nullish().optional(),
-}).passthrough();
 
 const convertTimeNormalizedInputSchema = z.preprocess(
   (value) => removeNullishFields(unwrapModelToolInput(value), ['source_timezone', 'target_timezone']),
@@ -366,7 +335,7 @@ export const createMastraTimeTools = (
     get_current_time: createTool({
       id: 'get_current_time',
       description: 'Get current time in a timezone. If the user does not specify one, use the local timezone.',
-      inputSchema: currentTimeToolInputSchema,
+      inputSchema: looseModelToolInputSchema,
       outputSchema: timeSnapshotSchema,
       strict: true,
       inputExamples: [
@@ -386,7 +355,7 @@ export const createMastraTimeTools = (
     convert_time: createTool({
       id: 'convert_time',
       description: 'Convert a wall-clock time between timezones. If a timezone is omitted, use the local timezone.',
-      inputSchema: convertTimeToolInputSchema,
+      inputSchema: looseModelToolInputSchema,
       outputSchema: convertTimeOutputSchema,
       strict: true,
       inputExamples: [

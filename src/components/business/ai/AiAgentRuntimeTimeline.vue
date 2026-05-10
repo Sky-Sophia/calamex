@@ -114,10 +114,18 @@ interface IToolIconMatcher {
 }
 
 type TInlineMarkdownTokenKind = 'text' | 'strong' | 'emphasis' | 'code';
+type TReasoningMarkdownBlockKind = 'paragraph' | 'heading' | 'unordered-list' | 'ordered-list' | 'quote';
 
 interface IInlineMarkdownToken {
   kind: TInlineMarkdownTokenKind;
   text: string;
+}
+
+interface IReasoningMarkdownBlock {
+  type: TReasoningMarkdownBlockKind;
+  id: string;
+  text?: string;
+  items?: string[];
 }
 
 const props = withDefaults(defineProps<{
@@ -128,6 +136,7 @@ const props = withDefaults(defineProps<{
 });
 
 const inlineMarkdownTokenCache = new Map<string, IInlineMarkdownToken[]>();
+const reasoningMarkdownBlockCache = new Map<string, IReasoningMarkdownBlock[]>();
 
 const TOOL_ICON_MATCHERS: readonly IToolIconMatcher[] = [
   {
@@ -538,6 +547,23 @@ const WEB_SEARCH_TOOL_NAMES = new Set([
   'tavily_research',
 ]);
 
+const WEB_SEARCH_SOURCE_URL_KEYS = [
+  'url',
+  'href',
+  'link',
+] as const;
+
+const WEB_SEARCH_SOURCE_HOST_KEYS = [
+  'domain',
+  'domains',
+  'site',
+  'sites',
+  'includeDomain',
+  'include_domain',
+  'includeDomains',
+  'include_domains',
+] as const;
+
 const collectPreviewPathCandidate = (value: unknown, depth = 0): string | null => {
   if (depth > 4 || value == null) {
     return null;
@@ -631,56 +657,181 @@ const getHostname = (url: string): string => {
   }
 };
 
-const getDisplayWebSearchUrl = (url: string): string => {
-  const hostname = getHostname(url);
+const normalizeWebSearchHost = (host: string): string =>
+  host.trim().toLowerCase().replace(/^www\./u, '');
 
-  if (!hostname) {
-    return url.trim();
+const getDisplayWebSearchUrl = (url: string): string => {
+  const host = normalizeWebSearchHost(getHostname(url));
+
+  return host || url.trim();
+};
+
+const collectUrlsFromText = (value: string): string[] => {
+  const matches = value.match(/https?:\/\/[^\s"'<>）)]+/giu);
+
+  return matches?.map((url) => url.trim()).filter(Boolean) ?? [];
+};
+
+const pushWebSearchSource = (
+  sources: IWebSearchSourceChip[],
+  seen: Set<string>,
+  rawUrl: string,
+): void => {
+  const url = rawUrl.trim();
+  const host = normalizeWebSearchHost(getHostname(url));
+
+  if (!url || !host || seen.has(url)) {
+    return;
   }
 
-  return hostname.startsWith('www.') ? hostname : `www.${hostname}`;
+  if (seen.has(host)) {
+    return;
+  }
+
+  seen.add(url);
+  seen.add(host);
+  sources.push({
+    url,
+    host,
+    displayUrl: getDisplayWebSearchUrl(url),
+  });
+};
+
+const pushWebSearchHostSource = (
+  sources: IWebSearchSourceChip[],
+  seen: Set<string>,
+  rawHost: string,
+): void => {
+  const host = normalizeWebSearchHost(rawHost);
+
+  if (!host || host.includes('/') || host.includes(':') || seen.has(host)) {
+    return;
+  }
+
+  seen.add(host);
+  sources.push({
+    url: host,
+    host,
+    displayUrl: host,
+  });
+};
+
+const collectWebSearchSourcesFromValue = (
+  value: unknown,
+  sources: IWebSearchSourceChip[],
+  seen: Set<string>,
+  depth = 0,
+): void => {
+  if (depth > 5 || sources.length >= 6 || value == null) {
+    return;
+  }
+
+  if (isNonEmptyString(value)) {
+    for (const url of collectUrlsFromText(value)) {
+      pushWebSearchSource(sources, seen, url);
+
+      if (sources.length >= 6) {
+        return;
+      }
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectWebSearchSourcesFromValue(item, sources, seen, depth + 1);
+
+      if (sources.length >= 6) {
+        return;
+      }
+    }
+    return;
+  }
+
+  if (typeof value !== 'object') {
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  for (const key of WEB_SEARCH_SOURCE_URL_KEYS) {
+    const candidate = record[key];
+
+    if (isNonEmptyString(candidate)) {
+      pushWebSearchSource(sources, seen, candidate);
+
+      if (sources.length >= 6) {
+        return;
+      }
+    }
+  }
+
+  for (const key of WEB_SEARCH_SOURCE_HOST_KEYS) {
+    const candidate = record[key];
+
+    if (isNonEmptyString(candidate)) {
+      pushWebSearchHostSource(sources, seen, candidate);
+    } else if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        if (isNonEmptyString(item)) {
+          pushWebSearchHostSource(sources, seen, item);
+        }
+
+        if (sources.length >= 6) {
+          return;
+        }
+      }
+    }
+
+    if (sources.length >= 6) {
+      return;
+    }
+  }
+
+  for (const nestedValue of Object.values(record)) {
+    collectWebSearchSourcesFromValue(nestedValue, sources, seen, depth + 1);
+
+    if (sources.length >= 6) {
+      return;
+    }
+  }
 };
 
 const resolveWebSearchSources = (value: string | undefined): IWebSearchSourceChip[] => {
   const parsed = parsePreviewJson(value);
-  let rawItems: unknown[] = [];
-
-  if (Array.isArray(parsed)) {
-    rawItems = parsed;
-  } else if (parsed && typeof parsed === 'object') {
-    const { results } = parsed as Record<string, unknown>;
-
-    if (Array.isArray(results)) {
-      rawItems = results;
-    }
-  }
-
   const seen = new Set<string>();
   const sources: IWebSearchSourceChip[] = [];
 
-  for (const item of rawItems) {
-    if (!item || typeof item !== 'object') {
+  collectWebSearchSourcesFromValue(parsed ?? value, sources, seen);
+
+  return sources;
+};
+
+const mergeWebSearchSources = (
+  ...groups: readonly (readonly IWebSearchSourceChip[] | undefined)[]
+): IWebSearchSourceChip[] | undefined => {
+  const seen = new Set<string>();
+  const merged: IWebSearchSourceChip[] = [];
+
+  for (const group of groups) {
+    if (!group?.length) {
       continue;
     }
 
-    const record = item as Record<string, unknown>;
-    const url = isNonEmptyString(record.url) ? record.url.trim() : '';
-    const host = getHostname(url);
+    for (const source of group) {
+      pushWebSearchSource(merged, seen, source.url);
 
-    if (!url || !host || seen.has(url)) {
-      continue;
+      if (merged.length >= 6) {
+        return merged;
+      }
     }
-
-    seen.add(url);
-    sources.push({
-      url,
-      host,
-      displayUrl: getDisplayWebSearchUrl(url),
-    });
   }
 
-  return sources.slice(0, 6);
+  return merged.length ? merged : undefined;
 };
+
+const isWebSearchToolName = (toolName: string | undefined): boolean =>
+  Boolean(toolName && WEB_SEARCH_TOOL_NAMES.has(toolName));
 
 interface IToolActionDescriptor {
   action: string;
@@ -734,12 +885,28 @@ const describeToolAction = (
     };
   }
 
+  if (toolName === 'get_current_time') {
+    if (event.type === 'agent.tool.completed' && !event.ok) {
+      return {
+        action: '当前时间读取失败',
+        suppressMeta: true,
+      };
+    }
+
+    return {
+      action: event.type === 'agent.tool.started'
+        ? '正在读取当前时间'
+        : '当前时间读取完成',
+      suppressMeta: true,
+    };
+  }
+
   if (WEB_SEARCH_TOOL_NAMES.has(toolName)) {
     const query = resolveWebSearchQuery(event.type === 'agent.tool.started' ? event.inputPreview : undefined)
       ?? fallbackResourceLabel
       ?? undefined;
     const webSearchSources = resolveWebSearchSources(
-      event.type === 'agent.tool.completed' ? event.resultPreview : undefined,
+      event.type === 'agent.tool.completed' ? event.resultPreview : event.inputPreview,
     );
 
     if (event.type === 'agent.tool.completed' && !event.ok) {
@@ -753,7 +920,7 @@ const describeToolAction = (
 
     return {
       action: event.type === 'agent.tool.started'
-        ? `Searching for ${query ?? 'web results'}`
+        ? `Search for ${query ?? 'web results'}`
         : 'Complete Search',
       resourceLabel: query,
       suppressMeta: true,
@@ -818,13 +985,26 @@ const createToolNode = (
   const id = createEventKey(event, eventIndex);
 
   if (event.type === 'agent.tool.progress') {
+    const webSearchSources = mergeWebSearchSources(
+      previousNode?.webSearchSources,
+      resolveWebSearchSources(event.dataPreview),
+    );
+
     return {
-      id,
-      kind: 'thinking',
-      icon: 'brain',
-      action: '工具执行中',
-      tags: parsePreviewValue(event.dataPreview),
+      id: previousNode?.id ?? id,
+      kind: previousNode?.kind ?? 'thinking',
+      icon: previousNode?.icon ?? 'brain',
+      toolName: previousNode?.toolName,
+      toolUseId: previousNode?.toolUseId,
+      resourceLabel: previousNode?.resourceLabel,
+      suppressMeta: previousNode?.suppressMeta,
+      webSearchSources,
+      action: previousNode?.action ?? '工具执行中',
+      tags: previousNode?.suppressMeta
+        ? []
+        : parsePreviewValue(event.dataPreview),
       status: 'running',
+      tail: previousNode?.tail,
     };
   }
 
@@ -842,7 +1022,10 @@ const createToolNode = (
       toolUseId: event.toolUseId,
       resourceLabel: actionDescriptor.resourceLabel,
       suppressMeta: actionDescriptor.suppressMeta,
-      webSearchSources: actionDescriptor.webSearchSources,
+      webSearchSources: mergeWebSearchSources(
+        previousNode?.webSearchSources,
+        actionDescriptor.webSearchSources,
+      ),
       action: actionDescriptor.action,
       tags: actionDescriptor.suppressMeta
         ? []
@@ -860,7 +1043,10 @@ const createToolNode = (
     toolUseId: event.toolUseId ?? previousNode?.toolUseId,
     resourceLabel: actionDescriptor.resourceLabel,
     suppressMeta: actionDescriptor.suppressMeta,
-    webSearchSources: actionDescriptor.webSearchSources ?? previousNode?.webSearchSources,
+    webSearchSources: mergeWebSearchSources(
+      previousNode?.webSearchSources,
+      actionDescriptor.webSearchSources,
+    ),
     action: actionDescriptor.action,
     tags: actionDescriptor.suppressMeta
       ? []
@@ -903,6 +1089,34 @@ const findPendingToolTaskIndex = (
   }
 
   return -1;
+};
+
+const findPendingWebSearchTaskIndex = (
+  items: readonly TTimelineItem[],
+): number => {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+
+    if (
+      item.type === 'task'
+      && item.node.status === 'running'
+      && isWebSearchToolName(item.node.toolName)
+    ) {
+      return index;
+    }
+  }
+
+  return -1;
+};
+
+const findAdjacentWebSearchTaskIndex = (
+  items: readonly TTimelineItem[],
+): number => {
+  const item = items.at(-1);
+
+  return item?.type === 'task' && isWebSearchToolName(item.node.toolName)
+    ? items.length - 1
+    : -1;
 };
 
 const buildTimelineItems = (events: readonly TAgentRuntimeEvent[]): TTimelineItem[] => {
@@ -985,6 +1199,35 @@ const buildTimelineItems = (events: readonly TAgentRuntimeEvent[]): TTimelineIte
     if (isToolEvent(event)) {
       flushReasoningLine();
 
+      if (event.type === 'agent.tool.progress') {
+        const pendingTaskIndex = findPendingWebSearchTaskIndex(items);
+
+        if (pendingTaskIndex >= 0 && resolveWebSearchSources(event.dataPreview).length > 0) {
+          const pendingTask = items[pendingTaskIndex];
+
+          if (pendingTask.type === 'task') {
+            pendingTask.node = createToolNode(event, eventIndex, pendingTask.node);
+            return;
+          }
+        }
+      }
+
+      if (
+        event.type === 'agent.tool.started'
+        && isWebSearchToolName(normalizeRuntimeToolName(event.toolName))
+      ) {
+        const adjacentTaskIndex = findAdjacentWebSearchTaskIndex(items);
+
+        if (adjacentTaskIndex >= 0) {
+          const adjacentTask = items[adjacentTaskIndex];
+
+          if (adjacentTask.type === 'task') {
+            adjacentTask.node = createToolNode(event, eventIndex, adjacentTask.node);
+            return;
+          }
+        }
+      }
+
       if (event.type === 'agent.tool.completed') {
         const pendingTaskIndex = findPendingToolTaskIndex(items, event);
 
@@ -994,6 +1237,19 @@ const buildTimelineItems = (events: readonly TAgentRuntimeEvent[]): TTimelineIte
           if (pendingTask.type === 'task') {
             pendingTask.node = createToolNode(event, eventIndex, pendingTask.node);
             return;
+          }
+        }
+
+        if (isWebSearchToolName(normalizeRuntimeToolName(event.toolName))) {
+          const adjacentTaskIndex = findAdjacentWebSearchTaskIndex(items);
+
+          if (adjacentTaskIndex >= 0) {
+            const adjacentTask = items[adjacentTaskIndex];
+
+            if (adjacentTask.type === 'task') {
+              adjacentTask.node = createToolNode(event, eventIndex, adjacentTask.node);
+              return;
+            }
           }
         }
       }
@@ -1037,16 +1293,9 @@ const getTaskIcon = (node: ITaskNodeItem): Component =>
   TASK_ICON_MAP[node.icon];
 
 const getFaviconSource = (host: string): string =>
-  `favicon://localhost/${encodeURIComponent(host)}`;
+  `http://favicon.localhost/${encodeURIComponent(host)}`;
 
-const buildWebSourceFallbackSvg = (label: string): string => {
-  const text = (label.trim().charAt(0) || '?').toUpperCase();
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><rect width="24" height="24" rx="12" fill="#d4d4d8"/><text x="12" y="16" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" fill="#27272a">${text}</text></svg>`;
-
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-};
-
-const handleWebSourceIconError = (event: Event, label: string): void => {
+const handleWebSourceIconError = (event: Event): void => {
   const target = event.target;
 
   if (!(target instanceof HTMLImageElement)) {
@@ -1054,7 +1303,8 @@ const handleWebSourceIconError = (event: Event, label: string): void => {
   }
 
   target.onerror = null;
-  target.src = buildWebSourceFallbackSvg(label);
+  target.hidden = true;
+  target.parentElement?.classList.add('is-fallback');
 };
 
 const getTaskStepStatus = (node: ITaskNodeItem): 'complete' | 'active' | 'pending' => {
@@ -1165,6 +1415,127 @@ const tokenizeInlineMarkdown = (value: string): IInlineMarkdownToken[] => {
   inlineMarkdownTokenCache.set(value, tokens);
   return tokens;
 };
+
+const isReasoningHeadingLine = (line: string): boolean => {
+  if (line.includes('://')) {
+    return false;
+  }
+
+  if (/^\s{0,3}#{1,6}\s+\S/u.test(line)) {
+    return true;
+  }
+
+  const trimmed = line.trim();
+  return trimmed.length > 1 && trimmed.length <= 80 && /[:：]$/u.test(trimmed);
+};
+
+const normalizeReasoningHeadingText = (line: string): string =>
+  line
+    .trim()
+    .replace(/^\s{0,3}#{1,6}\s+/u, '')
+    .replace(/\s+#*\s*$/u, '');
+
+const parseReasoningMarkdownBlocks = (segment: string): IReasoningMarkdownBlock[] => {
+  const cached = reasoningMarkdownBlockCache.get(segment);
+  if (cached) {
+    return cached;
+  }
+
+  const blocks: IReasoningMarkdownBlock[] = [];
+  const paragraphLines: string[] = [];
+  let listType: 'ordered-list' | 'unordered-list' | undefined;
+  let listItems: string[] = [];
+
+  const pushBlock = (block: Omit<IReasoningMarkdownBlock, 'id'>): void => {
+    blocks.push({
+      ...block,
+      id: `${blocks.length}:${block.type}`,
+    });
+  };
+
+  const flushParagraph = (): void => {
+    const text = paragraphLines.join('\n').trim();
+    paragraphLines.length = 0;
+
+    if (text) {
+      pushBlock({ type: 'paragraph', text });
+    }
+  };
+
+  const flushList = (): void => {
+    if (listType && listItems.length > 0) {
+      pushBlock({ type: listType, items: listItems });
+    }
+
+    listType = undefined;
+    listItems = [];
+  };
+
+  const flushInlineBlocks = (): void => {
+    flushParagraph();
+    flushList();
+  };
+
+  for (const line of segment.replace(/\r\n?/gu, '\n').split('\n')) {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      flushInlineBlocks();
+      continue;
+    }
+
+    const unorderedMatch = /^\s{0,3}[-*+]\s+(.+)$/u.exec(line);
+    if (unorderedMatch) {
+      flushParagraph();
+
+      if (listType !== 'unordered-list') {
+        flushList();
+        listType = 'unordered-list';
+      }
+
+      listItems.push(unorderedMatch[1].trim());
+      continue;
+    }
+
+    const orderedMatch = /^\s{0,3}\d+[.)]\s+(.+)$/u.exec(line);
+    if (orderedMatch) {
+      flushParagraph();
+
+      if (listType !== 'ordered-list') {
+        flushList();
+        listType = 'ordered-list';
+      }
+
+      listItems.push(orderedMatch[1].trim());
+      continue;
+    }
+
+    const quoteMatch = /^\s{0,3}>\s?(.+)$/u.exec(line);
+    if (quoteMatch) {
+      flushInlineBlocks();
+      pushBlock({ type: 'quote', text: quoteMatch[1].trim() });
+      continue;
+    }
+
+    if (isReasoningHeadingLine(line)) {
+      flushInlineBlocks();
+      pushBlock({ type: 'heading', text: normalizeReasoningHeadingText(line) });
+      continue;
+    }
+
+    flushList();
+    paragraphLines.push(line);
+  }
+
+  flushInlineBlocks();
+
+  if (reasoningMarkdownBlockCache.size > 240) {
+    reasoningMarkdownBlockCache.clear();
+  }
+
+  reasoningMarkdownBlockCache.set(segment, blocks);
+  return blocks;
+};
 </script>
 
 <template>
@@ -1188,16 +1559,66 @@ const tokenizeInlineMarkdown = (value: string): IInlineMarkdownToken[] => {
           </template>
 
           <div class="agent-line">
-            <p v-for="(segment, segmentIndex) in item.segments" :key="`${item.id}:segment:${segmentIndex}`"
-              class="agent-line__segment">
-              <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(segment)"
-                :key="`${item.id}:segment:${segmentIndex}:token:${tokenIndex}`">
-                <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
-                <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
-                <code v-else-if="token.kind === 'code'" class="agent-line__code">{{ token.text }}</code>
-                <span v-else>{{ token.text }}</span>
+            <template v-for="(segment, segmentIndex) in item.segments" :key="`${item.id}:segment:${segmentIndex}`">
+              <template v-for="block in parseReasoningMarkdownBlocks(segment)"
+                :key="`${item.id}:segment:${segmentIndex}:block:${block.id}`">
+                <p v-if="block.type === 'paragraph'" class="agent-line__segment agent-line__paragraph">
+                  <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
+                    :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:token:${tokenIndex}`">
+                    <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
+                    <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
+                    <code v-else-if="token.kind === 'code'" class="agent-line__code">{{ token.text }}</code>
+                    <span v-else>{{ token.text }}</span>
+                  </template>
+                </p>
+
+                <p v-else-if="block.type === 'heading'" class="agent-line__segment agent-line__heading">
+                  <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
+                    :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:token:${tokenIndex}`">
+                    <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
+                    <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
+                    <code v-else-if="token.kind === 'code'" class="agent-line__code">{{ token.text }}</code>
+                    <span v-else>{{ token.text }}</span>
+                  </template>
+                </p>
+
+                <blockquote v-else-if="block.type === 'quote'" class="agent-line__segment agent-line__quote">
+                  <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
+                    :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:token:${tokenIndex}`">
+                    <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
+                    <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
+                    <code v-else-if="token.kind === 'code'" class="agent-line__code">{{ token.text }}</code>
+                    <span v-else>{{ token.text }}</span>
+                  </template>
+                </blockquote>
+
+                <ol v-else-if="block.type === 'ordered-list'" class="agent-line__segment agent-line__list">
+                  <li v-for="(entry, entryIndex) in block.items ?? []"
+                    :key="`${segmentIndex}:${block.id}:entry:${entryIndex}`">
+                    <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
+                      :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:entry:${entryIndex}:token:${tokenIndex}`">
+                      <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
+                      <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
+                      <code v-else-if="token.kind === 'code'" class="agent-line__code">{{ token.text }}</code>
+                      <span v-else>{{ token.text }}</span>
+                    </template>
+                  </li>
+                </ol>
+
+                <ul v-else class="agent-line__segment agent-line__list">
+                  <li v-for="(entry, entryIndex) in block.items ?? []"
+                    :key="`${segmentIndex}:${block.id}:entry:${entryIndex}`">
+                    <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
+                      :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:entry:${entryIndex}:token:${tokenIndex}`">
+                      <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
+                      <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
+                      <code v-else-if="token.kind === 'code'" class="agent-line__code">{{ token.text }}</code>
+                      <span v-else>{{ token.text }}</span>
+                    </template>
+                  </li>
+                </ul>
               </template>
-            </p>
+            </template>
           </div>
         </ChainOfThoughtStep>
 
@@ -1218,12 +1639,16 @@ const tokenizeInlineMarkdown = (value: string): IInlineMarkdownToken[] => {
           <Task v-if="item.node.tags.length || item.node.tail || item.node.webSearchSources?.length"
             class="ai-runtime-task">
             <TaskContent v-if="item.node.tags.length || item.node.tail || item.node.webSearchSources?.length"
-              class="ai-runtime-task-content">
+              class="ai-runtime-task-content"
+              :class="{ 'has-web-search-sources': item.node.webSearchSources?.length }">
               <div v-if="item.node.webSearchSources?.length" class="ai-runtime-web-search-sources">
                 <div v-for="source in item.node.webSearchSources" :key="`${item.node.id}:source:${source.url}`"
                   class="ai-runtime-web-source-pill" :title="source.url">
-                  <img class="ai-runtime-web-source-icon" :src="getFaviconSource(source.host)" alt="" loading="lazy"
-                    decoding="async" @error="handleWebSourceIconError($event, source.displayUrl)" />
+                  <span class="ai-runtime-web-source-icon-wrap" aria-hidden="true">
+                    <img class="ai-runtime-web-source-icon" :src="getFaviconSource(source.host)" alt="" loading="lazy"
+                      decoding="async" @error="handleWebSourceIconError" />
+                    <Globe class="ai-runtime-web-source-icon-fallback" />
+                  </span>
                   <span class="ai-runtime-web-source-label">{{ source.displayUrl }}</span>
                 </div>
               </div>
@@ -1315,6 +1740,39 @@ const tokenizeInlineMarkdown = (value: string): IInlineMarkdownToken[] => {
   margin-top: 6px;
 }
 
+.agent-line__heading {
+  color: var(--text-secondary);
+  font-weight: 650;
+}
+
+.agent-line__list {
+  list-style-position: outside;
+  margin-bottom: 0;
+  margin-left: 0;
+  padding-left: 18px;
+  white-space: normal;
+}
+
+.agent-line__list li {
+  min-width: 0;
+  padding-left: 2px;
+  white-space: pre-wrap;
+}
+
+.agent-line__list li+li {
+  margin-top: 3px;
+}
+
+.agent-line__list li::marker {
+  color: var(--text-tertiary);
+}
+
+.agent-line__quote {
+  border-left: 2px solid color-mix(in srgb, var(--shell-divider) 82%, transparent);
+  color: var(--text-secondary);
+  padding-left: 10px;
+}
+
 .agent-line__strong {
   color: inherit;
   font-weight: 650;
@@ -1345,6 +1803,10 @@ const tokenizeInlineMarkdown = (value: string): IInlineMarkdownToken[] => {
   padding-left: 24px;
 }
 
+.ai-runtime-task-content.has-web-search-sources :deep(> div) {
+  padding-left: 0;
+}
+
 .ai-runtime-task-item {
   color: var(--text-tertiary);
   font-size: 12px;
@@ -1364,26 +1826,51 @@ const tokenizeInlineMarkdown = (value: string): IInlineMarkdownToken[] => {
 .ai-runtime-web-source-pill {
   display: inline-flex;
   min-width: 0;
+  max-width: 100%;
   align-items: center;
   gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--shell-divider) 72%, transparent);
   border-radius: 999px;
-  background: #f4f4f5;
-  color: #27272a;
-  padding: 4px 12px;
+  background: color-mix(in srgb, var(--surface-soft) 88%, transparent);
+  color: var(--text-secondary);
+  padding: 3px 10px;
 }
 
-.ai-runtime-web-source-icon {
+.ai-runtime-web-source-icon-wrap {
+  display: inline-flex;
   width: 16px;
   height: 16px;
   flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+
+.ai-runtime-web-source-icon,
+.ai-runtime-web-source-icon-fallback {
+  width: 16px;
+  height: 16px;
+}
+
+.ai-runtime-web-source-icon {
+  display: block;
+  border-radius: var(--radius-sm);
+}
+
+.ai-runtime-web-source-icon-fallback {
+  display: none;
   stroke-width: 2;
+}
+
+.ai-runtime-web-source-icon-wrap.is-fallback .ai-runtime-web-source-icon-fallback {
+  display: block;
 }
 
 .ai-runtime-web-source-label {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+  white-space: normal;
 }
 
 .ai-runtime-task-file {

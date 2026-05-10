@@ -10,6 +10,7 @@ use tauri::http::{Request, Response, StatusCode};
 use tauri::Manager;
 use tokio::fs;
 use tokio::net::lookup_host;
+use tokio::task::JoinSet;
 
 use crate::ai_tools::web_fetch::validate_fetch_url;
 
@@ -90,7 +91,10 @@ fn parse_favicon_host(request: &Request<Vec<u8>>) -> Option<String> {
         .authority()
         .map(|value| value.as_str())
         .unwrap_or_default();
-    if !authority.is_empty() && !authority.eq_ignore_ascii_case("localhost") {
+    if !authority.is_empty()
+        && !authority.eq_ignore_ascii_case("localhost")
+        && !authority.eq_ignore_ascii_case("favicon.localhost")
+    {
         return None;
     }
 
@@ -257,21 +261,43 @@ async fn write_failure_cache_entry(cache_root: &Path, host: &str) -> Result<(), 
 // ─── fetch pipeline ─────────────────────────────────────────────────────────
 
 async fn fetch_favicon_bytes(host: &str) -> Result<(Vec<u8>, String), String> {
-    let mut candidates: Vec<String> = Vec::with_capacity(4);
-    if let Some(icon_url) = resolve_html_icon_url(host).await {
-        candidates.push(icon_url.to_string());
+    let mut primary_candidates: Vec<String> = Vec::with_capacity(6);
+    primary_candidates.push(format!("https://{host}/favicon.ico"));
+    primary_candidates.push(format!("https://favicon.im/{host}?larger=true"));
+    primary_candidates.push(format!("https://manifest.im/icon/{host}"));
+    primary_candidates.push(format!("https://favicon.id/{host}?t=l"));
+    primary_candidates.push(format!("https://favicon.so/{host}"));
+    if let Some(slug) = simple_icon_slug_for_host(host) {
+        primary_candidates.push(format!("https://cdn.simpleicons.org/{slug}"));
     }
-    candidates.push(format!(
-        "https://www.google.com/s2/favicons?domain={host}&sz=64"
-    ));
-    candidates.push(format!("https://icons.duckduckgo.com/ip3/{host}.ico"));
-    candidates.push(format!("https://{host}/favicon.ico"));
 
-    for candidate in candidates {
-        if let Ok(pair) = try_fetch_icon(&candidate).await {
+    if let Ok(pair) = fetch_first_available_icon(primary_candidates).await {
+        return Ok(pair);
+    }
+
+    if let Some(icon_url) = resolve_html_icon_url(host).await {
+        if let Ok(pair) = try_fetch_icon(icon_url.as_str()).await {
             return Ok(pair);
         }
     }
+
+    Err("favicon not found".to_string())
+}
+
+async fn fetch_first_available_icon(candidates: Vec<String>) -> Result<(Vec<u8>, String), String> {
+    let mut tasks = JoinSet::new();
+
+    for candidate in candidates {
+        tasks.spawn(async move { try_fetch_icon(&candidate).await });
+    }
+
+    while let Some(result) = tasks.join_next().await {
+        if let Ok(Ok(pair)) = result {
+            tasks.abort_all();
+            return Ok(pair);
+        }
+    }
+
     Err("favicon not found".to_string())
 }
 
@@ -338,11 +364,16 @@ async fn try_fetch_icon(candidate_url: &str) -> Result<(Vec<u8>, String), String
         return Err("empty favicon payload".into());
     }
 
-    if !looks_like_image(&content_type, &bytes) {
+    let detected_content_type = detect_image_content_type(&content_type, &bytes);
+
+    if detected_content_type.is_none() {
         return Err(format!("not an image (content-type={content_type})"));
     }
 
-    Ok((bytes, sanitize_content_type(&content_type)))
+    Ok((
+        bytes,
+        detected_content_type.unwrap_or_else(|| "image/x-icon".to_string()),
+    ))
 }
 
 async fn read_capped_bytes(
@@ -374,35 +405,60 @@ fn sanitize_content_type(raw: &str) -> String {
         .unwrap_or_else(|| "image/x-icon".to_string())
 }
 
-fn looks_like_image(content_type: &str, bytes: &[u8]) -> bool {
+fn detect_image_content_type(content_type: &str, bytes: &[u8]) -> Option<String> {
     let ct = content_type.to_ascii_lowercase();
     if ct.starts_with("image/") {
-        return true;
+        return Some(sanitize_content_type(content_type));
     }
     // 一些站点会返回 application/octet-stream / 错误 text/html，靠魔数兜底
     if bytes.len() >= 8 && &bytes[0..4] == b"\x89PNG" {
-        return true;
+        return Some("image/png".to_string());
     }
     if bytes.len() >= 4 && &bytes[0..4] == b"\x00\x00\x01\x00" {
-        return true; // ICO
+        return Some("image/x-icon".to_string());
     }
     if bytes.len() >= 6 && (&bytes[0..6] == b"GIF87a" || &bytes[0..6] == b"GIF89a") {
-        return true;
+        return Some("image/gif".to_string());
     }
     if bytes.len() >= 3 && &bytes[0..3] == b"\xff\xd8\xff" {
-        return true; // JPEG
+        return Some("image/jpeg".to_string());
     }
     if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        return true;
+        return Some("image/webp".to_string());
     }
     let head = &bytes[..bytes.len().min(512)];
     if let Ok(text) = std::str::from_utf8(head) {
         let trimmed = text.trim_start();
         if trimmed.starts_with("<svg") || trimmed.starts_with("<?xml") {
-            return true;
+            return Some("image/svg+xml".to_string());
         }
     }
-    false
+    None
+}
+
+fn simple_icon_slug_for_host(host: &str) -> Option<&'static str> {
+    let normalized = host.trim().trim_start_matches("www.");
+
+    match normalized {
+        "github.com" => Some("github"),
+        "youtube.com" | "youtu.be" => Some("youtube"),
+        "zhihu.com" => Some("zhihu"),
+        "weibo.com" => Some("sinaweibo"),
+        "douban.com" => Some("douban"),
+        "qq.com" => Some("tencentqq"),
+        "x.com" | "twitter.com" => Some("x"),
+        "npmjs.com" => Some("npm"),
+        "nodejs.org" => Some("nodedotjs"),
+        "rust-lang.org" => Some("rust"),
+        "vuejs.org" => Some("vuedotjs"),
+        "vitejs.dev" => Some("vite"),
+        "tauri.app" => Some("tauri"),
+        "stackoverflow.com" => Some("stackoverflow"),
+        "medium.com" => Some("medium"),
+        "reddit.com" => Some("reddit"),
+        "wikipedia.org" => Some("wikipedia"),
+        _ => None,
+    }
 }
 
 // ─── HTML <link rel="icon"> 解析 (词边界 + sizes 选最大) ─────────────────────
@@ -692,4 +748,54 @@ fn binary_response(
         .header("Cache-Control", cache_control)
         .body(bytes)
         .unwrap_or_else(|_| Response::new(Vec::new()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(uri: &str) -> Request<Vec<u8>> {
+        Request::builder()
+            .uri(uri)
+            .body(Vec::new())
+            .expect("test favicon request should be valid")
+    }
+
+    #[test]
+    fn parse_favicon_host_accepts_custom_scheme_host() {
+        let request = request("favicon://localhost/github.com");
+
+        assert_eq!(parse_favicon_host(&request).as_deref(), Some("github.com"));
+    }
+
+    #[test]
+    fn parse_favicon_host_accepts_webview_localhost_alias() {
+        let request = request("http://favicon.localhost/github.com");
+
+        assert_eq!(parse_favicon_host(&request).as_deref(), Some("github.com"));
+    }
+
+    #[test]
+    fn parse_favicon_host_rejects_unexpected_authority() {
+        let request = request("http://example.com/github.com");
+
+        assert_eq!(parse_favicon_host(&request), None);
+    }
+
+    #[test]
+    fn detects_svg_from_plain_text_response() {
+        let bytes = br#"<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"></svg>"#;
+
+        assert_eq!(
+            detect_image_content_type("text/plain; charset=utf-8", bytes).as_deref(),
+            Some("image/svg+xml")
+        );
+    }
+
+    #[test]
+    fn maps_common_hosts_to_simple_icons_slugs() {
+        assert_eq!(simple_icon_slug_for_host("github.com"), Some("github"));
+        assert_eq!(simple_icon_slug_for_host("www.zhihu.com"), Some("zhihu"));
+        assert_eq!(simple_icon_slug_for_host("weibo.com"), Some("sinaweibo"));
+    }
 }

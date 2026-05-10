@@ -97,33 +97,30 @@ describe('AiMarkdown rendering', () => {
 
     await flushRender();
 
-    expect(wrapper.find('.code-block-container').exists()).toBe(true);
-    expect(wrapper.find('.code-block-header').exists()).toBe(true);
-    expect(wrapper.findAll('.code-action-btn')).toHaveLength(2);
+    expect(wrapper.find('.ai-markdown-code-block').exists()).toBe(true);
+    expect(wrapper.find('.ai-markdown-code-block__header').exists()).toBe(true);
+    expect(wrapper.findAll('.ai-markdown-code-block__icon-button')).toHaveLength(1);
     expect(wrapper.find('button[aria-label="复制代码"]').exists()).toBe(true);
     expect(wrapper.find('button[aria-label="折叠代码块"]').exists()).toBe(true);
-    expect(wrapper.find('.ai-code-block__copy svg').exists()).toBe(true);
-    expect(wrapper.find('.ai-markdown-design-body pre').exists()).toBe(true);
+    expect(wrapper.find('.ai-markdown-code-block__copy svg').exists()).toBe(true);
+    expect(wrapper.find('.ai-markdown-code-block pre').exists()).toBe(true);
     expect(wrapper.text()).toContain('const ready = true;');
 
     const toggleButton = wrapper.get('button[aria-label="折叠代码块"]');
     expect(toggleButton.attributes('aria-expanded')).toBe('true');
-    expect(wrapper.get('.ai-code-block').classes()).not.toContain('is-collapsed');
-    expect(wrapper.get('.ai-code-block__body').attributes('style') ?? '').not.toContain('display: none');
+    expect(wrapper.get('.ai-markdown-code-block').classes()).not.toContain('is-collapsed');
 
     await toggleButton.trigger('click');
     await nextTick();
 
     expect(wrapper.find('button[aria-label="展开代码块"]').exists()).toBe(true);
-    expect(wrapper.get('.ai-code-block').classes()).toContain('is-collapsed');
-    expect(wrapper.get('.ai-code-block__body').attributes('style') ?? '').toContain('display: none');
+    expect(wrapper.get('.ai-markdown-code-block').classes()).toContain('is-collapsed');
 
     await wrapper.get('button[aria-label="展开代码块"]').trigger('click');
     await nextTick();
 
     expect(wrapper.find('button[aria-label="折叠代码块"]').exists()).toBe(true);
-    expect(wrapper.get('.ai-code-block').classes()).not.toContain('is-collapsed');
-    expect(wrapper.get('.ai-code-block__body').attributes('style') ?? '').not.toContain('display: none');
+    expect(wrapper.get('.ai-markdown-code-block').classes()).not.toContain('is-collapsed');
   });
 
   it('代码节点原地更新时仍用当前内容渲染代码块', async () => {
@@ -148,7 +145,7 @@ describe('AiMarkdown rendering', () => {
     expect(wrapper.text()).toContain('第一步：观察地图');
     expect(wrapper.text()).toContain('第二步：记录问题');
     expect(wrapper.find('button[aria-label="折叠代码块"]').exists()).toBe(true);
-    expect(wrapper.get('.ai-code-block__body').attributes('style') ?? '').not.toContain('display: none');
+    expect(wrapper.get('.ai-markdown-code-block').classes()).not.toContain('is-collapsed');
   });
 
   it('renders LaTeX formulas through markstream-vue katex support', async () => {

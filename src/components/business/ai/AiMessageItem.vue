@@ -14,7 +14,7 @@ import { useMessage } from '@/composables/useMessage';
 import type { TAiServicePlatformId } from '@/constants/ai-providers';
 import type { IAiChatMessage, IAiContextReference, TAiChatMessageActionId } from '@/types/ai';
 import { tryWriteClipboardText } from '@/utils/clipboard';
-import { Check, Copy, FileText, Image as ImageIcon } from 'lucide-vue-next';
+import { Check, Copy } from 'lucide-vue-next';
 import { computed, onBeforeUnmount, ref } from 'vue';
 
 const props = defineProps<{
@@ -185,32 +185,17 @@ const userAttachmentReferences = computed(() => {
   return props.message.references.filter(isAttachmentReference);
 });
 
-const userImageAttachmentReferences = computed(() =>
-  userAttachmentReferences.value.filter(hasImageAttachmentPreview),
-);
-
-const userFileAttachmentReferences = computed(() =>
-  userAttachmentReferences.value.filter((reference) => !hasImageAttachmentPreview(reference)),
-);
-
-const userImageAttachmentItems = computed(() =>
-  userImageAttachmentReferences.value.map((reference) => ({
+const userAttachmentItems = computed(() =>
+  userAttachmentReferences.value.map((reference) => ({
     id: reference.id,
     name: resolveAttachmentLabel(reference),
     preview: reference.attachmentPreview,
+    mediaType: reference.attachmentPreview?.mimeType ?? resolveAttachmentMediaType(reference),
   })),
 );
 
 function isAttachmentReference(reference: IAiContextReference): boolean {
   return reference.id.startsWith('attachment:');
-}
-
-function hasImageAttachmentPreview(
-  reference: IAiContextReference,
-): reference is IAiContextReference & {
-  attachmentPreview: NonNullable<IAiContextReference['attachmentPreview']>;
-} {
-  return Boolean(reference.attachmentPreview?.src);
 }
 
 function resolveAttachmentLabel(reference: IAiContextReference): string {
@@ -224,6 +209,14 @@ function resolveAttachmentLabel(reference: IAiContextReference): string {
     .replace(/^图片附件\s*·\s*/u, '')
     .replace(/^附件\s*·\s*/u, '')
     .trim();
+}
+
+function resolveAttachmentMediaType(reference: IAiContextReference): string {
+  if (reference.kind === 'image-attachment') {
+    return 'image/*';
+  }
+
+  return 'text/plain';
 }
 
 const copyMessageContent = async (): Promise<void> => {
@@ -269,27 +262,12 @@ onBeforeUnmount(() => {
       :is-streaming="message.stream?.status === 'streaming'"
     />
     <AiImageAttachmentPreviewGrid
-      v-if="userImageAttachmentItems.length"
+      v-if="userAttachmentItems.length"
       class="ai-message-image-attachments"
-      :items="userImageAttachmentItems"
-      aria-label="已发送图片附件"
+      :items="userAttachmentItems"
+      aria-label="已发送附件"
       variant="message"
     />
-    <div
-      v-if="userFileAttachmentReferences.length"
-      class="ai-message-attachments"
-      aria-label="已发送附件"
-    >
-      <span
-        v-for="reference in userFileAttachmentReferences"
-        :key="reference.id"
-        class="ai-message-attachment-chip"
-      >
-        <ImageIcon v-if="reference.kind === 'image-attachment'" aria-hidden="true" />
-        <FileText v-else aria-hidden="true" />
-        <span>{{ resolveAttachmentLabel(reference) }}</span>
-      </span>
-    </div>
     <MessageContent
       v-if="shouldShowMessageBubble"
       class="ai-message-bubble"

@@ -32,15 +32,6 @@
             </svg>
           </header>
 
-          <div class="source-control-setup-search-bar" aria-disabled="true">
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <circle cx="7" cy="7" r="5" />
-              <line x1="14" y1="14" x2="11" y2="11" />
-            </svg>
-            <span class="source-control-setup-search-placeholder">搜索变更、分支......</span>
-
-          </div>
-
           <div class="source-control-setup-empty-state">
             <svg class="source-control-setup-empty-icon" viewBox="0 0 48 48" aria-hidden="true">
               <path d="M14 14 L14 34" />
@@ -89,17 +80,6 @@
     </template>
 
     <template v-else>
-      <div class="source-control-search">
-        <label class="source-control-search-box">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="11" cy="11" r="7" />
-            <path d="M20 20l-3.5-3.5" />
-          </svg>
-          <input v-model="searchQuery" type="text" placeholder="搜索变更、分支……" />
-
-        </label>
-      </div>
-
       <div class="source-control-branch">
         <svg class="source-control-branch-icon" viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="6" cy="3" r="2" />

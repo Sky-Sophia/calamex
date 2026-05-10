@@ -1,3 +1,6 @@
+import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
+import { dirname } from 'node:path';
+
 import { createTool } from '@mastra/core/tools';
 import { PinoLogger } from '@mastra/loggers';
 import { FileTransport } from '@mastra/loggers/file';
@@ -52,11 +55,25 @@ export interface IMastraLogToolsRef {
 
 export const createMastraLoggerRef = (): IMastraLogToolsRef => ({ current: null });
 
+export const ensureMastraLogFile = (logFilePath: string): string => {
+    const logDir = dirname(logFilePath);
+
+    if (!existsSync(logDir)) {
+        mkdirSync(logDir, { recursive: true });
+    }
+
+    if (!existsSync(logFilePath)) {
+        closeSync(openSync(logFilePath, 'a'));
+    }
+
+    return logFilePath;
+};
+
 export const createMastraFileLogger = (logFilePath: string): PinoLogger => new PinoLogger({
     name: 'mastra-sidecar',
     level: 'info',
     transports: {
-        file: new FileTransport({ path: logFilePath }),
+        file: new FileTransport({ path: ensureMastraLogFile(logFilePath) }),
     },
     overrideDefaultTransports: false,
 });
