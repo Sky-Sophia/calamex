@@ -84,7 +84,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="ai-markdown">
-    <MarkdownRender :content="renderContent" :custom-id="rendererId" :final="isFinal" :defer-nodes-until-visible="false"
+    <MarkdownRender
+:content="renderContent" :custom-id="rendererId" :final="isFinal" :defer-nodes-until-visible="false"
       :max-live-nodes="320" :live-node-buffer="80" :initial-render-batch-size="64" :render-batch-size="96"
       :render-batch-delay="0" :render-batch-budget-ms="8" :show-tooltips="false" :typewriter="false" />
   </div>

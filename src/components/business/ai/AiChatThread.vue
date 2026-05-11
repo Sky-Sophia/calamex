@@ -5,13 +5,13 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
-import { Loader } from '@/components/ai-elements/loader';
 import { Message } from '@/components/ai-elements/message';
 import type { TAiServicePlatformId } from '@/constants/ai-providers';
 import type { IAiChatMessage, TAiChatMessageActionId } from '@/types/ai';
 import { MessageSquareIcon } from 'lucide-vue-next';
 import { computed } from 'vue';
 import AiMessageItem from './AiMessageItem.vue';
+import AiThinkingStatus from './AiThinkingStatus.vue';
 
 interface IAiChatScrollState {
   scrollTop: number;
@@ -20,14 +20,21 @@ interface IAiChatScrollState {
   distanceFromBottom: number;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   messages: IAiChatMessage[];
   isTyping: boolean;
   platformId: TAiServicePlatformId;
   providerLabel: string;
-  conversationId: string | null;
-  scrollState: IAiChatScrollState | null;
-}>();
+  typingLabel?: string;
+  conversationId?: string | null;
+  scrollState?: IAiChatScrollState | null;
+  hasExtraContent?: boolean;
+}>(), {
+  typingLabel: '正在准备回复',
+  conversationId: null,
+  scrollState: null,
+  hasExtraContent: false,
+});
 
 const emit = defineEmits<{
   messageAction: [messageId: string, actionId: TAiChatMessageActionId];
@@ -62,7 +69,7 @@ const shouldRenderStandaloneTyping = computed(
   () => props.isTyping && !hasInlineProgressMessage.value,
 );
 const shouldRenderEmptyState = computed(
-  () => props.messages.length === 0 && !shouldRenderStandaloneTyping.value,
+  () => props.messages.length === 0 && !props.hasExtraContent && !shouldRenderStandaloneTyping.value,
 );
 
 const lastAssistantMessageId = computed(() => {
@@ -76,7 +83,7 @@ const lastAssistantMessageId = computed(() => {
 
   return null;
 });
-const conversationInitialScroll = computed(() => props.scrollState ? false : 'instant');
+const conversationInitialScroll = computed(() => props.scrollState ? false : true);
 
 const handleMessageAction = (messageId: string, actionId: TAiChatMessageActionId): void => {
   emit('messageAction', messageId, actionId);
@@ -88,11 +95,15 @@ const handleScrollStateChange = (state: IAiChatScrollState): void => {
 </script>
 
 <template>
-  <Conversation class="relative size-full overflow-x-hidden ai-chat-list" aria-label="AI 对话记录"
-    :initial="conversationInitialScroll" :restore-key="conversationId"
+  <Conversation
+    class="relative size-full overflow-x-hidden ai-chat-list"
+    aria-label="AI 对话记录"
+    :initial="conversationInitialScroll"
+    :restore-key="conversationId"
     :initial-scroll-top="scrollState?.scrollTop ?? null"
     :initial-distance-from-bottom="scrollState?.distanceFromBottom ?? null"
-    @scroll-state-change="handleScrollStateChange">
+    @scroll-state-change="handleScrollStateChange"
+  >
     <ConversationContent class="ai-chat-list__content" :class="{ 'is-empty': shouldRenderEmptyState }">
       <slot v-if="shouldRenderEmptyState" name="empty">
         <ConversationEmptyState class="ai-chat-empty-state" title="还没有对话" description="选择一个提示词，或直接输入你的问题。">
@@ -106,16 +117,21 @@ const handleScrollStateChange = (state: IAiChatScrollState): void => {
         <template v-for="message in messages" :key="message.id">
           <slot v-if="message.id === lastAssistantMessageId" name="before-last-assistant" :message="message" />
           <AiMessageItem
-:message="message" :platform-id="platformId" :provider-label="providerLabel"
-            @message-action="handleMessageAction" />
+            :message="message"
+            :platform-id="platformId"
+            :provider-label="providerLabel"
+            @message-action="handleMessageAction"
+          />
           <slot name="after-message" :message="message" />
         </template>
         <slot name="after-messages" />
-        <Message v-if="shouldRenderStandaloneTyping" from="assistant" class="ai-message-typing" aria-label="AI 正在准备回复">
-          <div class="typing-status" role="status" aria-live="polite">
-            <Loader class="typing-status-icon" :size="13" />
-            <span>AI 正在准备回复</span>
-          </div>
+        <Message
+          v-if="shouldRenderStandaloneTyping"
+          from="assistant"
+          class="ai-message-typing"
+          :aria-label="typingLabel"
+        >
+          <AiThinkingStatus :label="typingLabel" />
         </Message>
       </template>
     </ConversationContent>
@@ -174,21 +190,4 @@ const handleScrollStateChange = (state: IAiChatScrollState): void => {
   align-items: flex-start;
 }
 
-.typing-status {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-quaternary);
-  font-size: 14px;
-  line-height: 22px;
-  min-height: 24px;
-}
-
-.typing-status-icon {
-  width: 13px;
-  height: 13px;
-  flex: 0 0 auto;
-  color: var(--text-tertiary);
-}
 </style>

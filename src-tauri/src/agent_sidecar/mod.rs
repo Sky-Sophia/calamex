@@ -12,7 +12,8 @@ use crate::commands::contracts::{
     AgentSidecarApprovalResolveRequest, AgentSidecarChatRequest,
     AgentSidecarCheckpointRestoreRequest, AgentSidecarExecuteRequest, AgentSidecarHealthPayload,
     AgentSidecarPlanApproveRequest, AgentSidecarPlanFinishRequest, AgentSidecarPlanQueryRequest,
-    AgentSidecarPlanRejectRequest, AgentSidecarPlanRequest, AgentSidecarResponsePayload,
+    AgentSidecarPlanRejectRequest, AgentSidecarPlanReplanRequest, AgentSidecarPlanRequest,
+    AgentSidecarPlanValidateRequest, AgentSidecarResponsePayload,
 };
 
 const DEFAULT_SIDECAR_URL: &str = "http://127.0.0.1:39871";
@@ -364,7 +365,10 @@ async fn ensure_default_sidecar_available(base_url: &str) -> Result<(), String> 
     }
 
     spawn_default_sidecar()?;
+    wait_for_default_sidecar_ready(base_url).await
+}
 
+async fn wait_for_default_sidecar_ready(base_url: &str) -> Result<(), String> {
     let deadline =
         tokio::time::Instant::now() + Duration::from_secs(SIDECAR_STARTUP_TIMEOUT_SECONDS);
     while tokio::time::Instant::now() < deadline {
@@ -372,6 +376,7 @@ async fn ensure_default_sidecar_available(base_url: &str) -> Result<(), String> 
             SidecarHealthStatus::Ready => return Ok(()),
             SidecarHealthStatus::Stale => {
                 restart_stale_default_sidecar()?;
+                spawn_default_sidecar()?;
             }
             SidecarHealthStatus::Unavailable => {}
         }
@@ -382,6 +387,18 @@ async fn ensure_default_sidecar_available(base_url: &str) -> Result<(), String> 
     Err(format!(
         "AGENT_SIDECAR_UNAVAILABLE: Node sidecar 已尝试启动，但未在 {SIDECAR_STARTUP_TIMEOUT_SECONDS} 秒内就绪。"
     ))
+}
+
+pub async fn restart() -> Result<AgentSidecarHealthPayload, String> {
+    let base_url = configured_base_url();
+    if !is_default_local_sidecar_url(&base_url) {
+        return Err("AGENT_SIDECAR_UNAVAILABLE: 仅支持重启默认本地 Node sidecar。".to_string());
+    }
+
+    restart_stale_default_sidecar()?;
+    spawn_default_sidecar()?;
+    wait_for_default_sidecar_ready(&base_url).await?;
+    health().await
 }
 
 async fn probe_sidecar_health(base_url: &str) -> SidecarHealthStatus {
@@ -821,6 +838,18 @@ pub async fn finish_plan(
     post_json("/agent/plan/finish", &payload).await
 }
 
+pub async fn validate_plan(
+    payload: AgentSidecarPlanValidateRequest,
+) -> Result<AgentSidecarResponsePayload, String> {
+    post_json("/agent/plan/validate", &payload).await
+}
+
+pub async fn replan_plan(
+    payload: AgentSidecarPlanReplanRequest,
+) -> Result<AgentSidecarResponsePayload, String> {
+    post_json("/agent/plan/replan", &payload).await
+}
+
 pub async fn execute(
     app: AppHandle,
     mut payload: AgentSidecarExecuteRequest,
@@ -966,10 +995,8 @@ mod tests {
 
     #[test]
     fn injects_tavily_key_from_sidecar_dotenv_when_user_env_is_missing() {
-        let sidecar_root = std::env::temp_dir().join(format!(
-            "xiaojianc-sidecar-env-test-{}",
-            std::process::id()
-        ));
+        let sidecar_root =
+            std::env::temp_dir().join(format!("xiaojianc-sidecar-env-test-{}", std::process::id()));
 
         fs::create_dir_all(&sidecar_root).expect("temp sidecar root should be created");
         fs::write(

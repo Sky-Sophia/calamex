@@ -8,8 +8,10 @@ import type {
   IAgentSidecarPlanApproveRequest,
   IAgentSidecarPlanFinishRequest,
   IAgentSidecarPlanQueryRequest,
+  IAgentSidecarPlanReplanRequest,
   IAgentSidecarPlanRequest,
   IAgentSidecarPlanRejectRequest,
+  IAgentSidecarPlanValidateRequest,
   IAgentSidecarResponsePayload,
   IAgentSidecarStreamEventPayload,
 } from '@/types/agent-sidecar';
@@ -66,6 +68,9 @@ export const aiService = {
   sidecarHealth(): Promise<IAgentSidecarHealthPayload> {
     return tauriService.agentSidecarHealth();
   },
+  sidecarRestart(): Promise<IAgentSidecarHealthPayload> {
+    return tauriService.agentSidecarRestart();
+  },
   sidecarChat(payload: IAgentSidecarChatRequest): Promise<IAgentSidecarResponsePayload> {
     return tauriService.agentSidecarChat(payload);
   },
@@ -83,6 +88,12 @@ export const aiService = {
   },
   sidecarPlanFinish(payload: IAgentSidecarPlanFinishRequest): Promise<IAgentSidecarResponsePayload> {
     return tauriService.agentSidecarPlanFinish(payload);
+  },
+  sidecarPlanValidate(payload: IAgentSidecarPlanValidateRequest): Promise<IAgentSidecarResponsePayload> {
+    return tauriService.agentSidecarPlanValidate(payload);
+  },
+  sidecarPlanReplan(payload: IAgentSidecarPlanReplanRequest): Promise<IAgentSidecarResponsePayload> {
+    return tauriService.agentSidecarPlanReplan(payload);
   },
   sidecarExecute(payload: IAgentSidecarExecuteRequest): Promise<IAgentSidecarResponsePayload> {
     return tauriService.agentSidecarExecute(payload);

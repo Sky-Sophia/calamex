@@ -739,7 +739,7 @@ const applyReplacementToSearch = async (): Promise<void> => {
   try {
     const oldString = searchQuery.value.trim();
     const goal = buildReplacementGoal(targets, oldString, replacementQuery.value);
-    const payload = await aiService.sidecarExecute({
+    const payload = await aiService.sidecarChat({
       sessionId: `search-replace:${Date.now().toString(36)}`,
       goal,
       messages: [

@@ -13,7 +13,7 @@ import type { IGitDiffPreviewRequest } from '@/types/git';
 import {
     FolderTree,
     GitBranch,
-    Play,
+    LibraryBig,
     Search,
     TerminalSquare,
 } from 'lucide-vue-next';
@@ -65,7 +65,7 @@ const sidebarTabs: readonly ISidebarTabItem[] = [
     { label: '文件', view: 'explorer' },
     { label: '搜索', view: 'search' },
     { label: 'Git', view: 'source-control' },
-    { label: '运行', view: 'run' },
+    { label: '模板', view: 'run' },
     { label: 'SSH', view: 'extensions' },
 ] as const;
 
@@ -92,7 +92,8 @@ watch(
 <template>
     <aside class="workbench-dashboard-sidebar flex h-full min-h-0 flex-col overflow-hidden bg-(--sidebar-bg)">
         <div class="workbench-dashboard-sidebar__brand-slot">
-            <button type="button" class="workbench-dashboard-sidebar__brand-button"
+            <button
+type="button" class="workbench-dashboard-sidebar__brand-button"
                 :aria-label="props.isAiMode ? '切换到编辑区' : '切换到 AI 界面'" :title="props.isAiMode ? '切换到编辑区' : '切换到 AI 界面'"
                 @click="emit('toggle-primary-mode')">
                 <img class="workbench-dashboard-sidebar__brand-icon" :src="appBrandIcon" alt="软件图标">
@@ -101,7 +102,8 @@ watch(
 
         <header class="workbench-dashboard-sidebar__toolbar-shell border-b border-(--shell-divider) px-3 py-3">
             <nav class="workbench-dashboard-sidebar__toolbar" aria-label="工作台侧边栏切换">
-                <button v-for="item in sidebarTabs" :key="item.view" type="button"
+                <button
+v-for="item in sidebarTabs" :key="item.view" type="button"
                     class="workbench-dashboard-sidebar__toolbar-button"
                     :class="{ 'is-active': props.activeView === item.view }" :aria-label="item.label"
                     :aria-pressed="props.activeView === item.view" @click="emit('select-view', item.view)">
@@ -109,7 +111,7 @@ watch(
                         <FolderTree v-if="item.view === 'explorer'" />
                         <Search v-else-if="item.view === 'search'" />
                         <GitBranch v-else-if="item.view === 'source-control'" />
-                        <Play v-else-if="item.view === 'run'" />
+                        <LibraryBig v-else-if="item.view === 'run'" />
                         <TerminalSquare v-else />
                     </span>
 
@@ -122,10 +124,12 @@ watch(
             </nav>
         </header>
 
-        <div class="workbench-dashboard-sidebar__panel-host min-h-0 flex-1 overflow-hidden"
+        <div
+class="workbench-dashboard-sidebar__panel-host min-h-0 flex-1 overflow-hidden"
             :data-switch-direction="switchDirection">
             <Transition name="workbench-sidebar-panel">
-                <AppSidebar :document="props.document" :view="props.activeView"
+                <AppSidebar
+:document="props.document" :view="props.activeView"
                     :is-desktop-runtime="props.isDesktopRuntime" :workspace-root-path="props.workspaceRootPath"
                     :preloaded-workspace-root="props.preloadedWorkspaceRoot"
                     :startup-explorer-expanded-paths="props.startupExplorerExpandedPaths"

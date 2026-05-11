@@ -108,6 +108,17 @@ export const agentSidecarExecuteRequestSchema = baseAgentRequestSchema.extend({
   planStepId: requiredNonEmptyStringSchema,
 });
 
+export const agentSidecarPlanValidateRequestSchema = baseAgentRequestSchema.extend({
+  planId: requiredNonEmptyStringSchema,
+  planVersion: z.number().int().positive(),
+});
+
+export const agentSidecarPlanReplanRequestSchema = baseAgentRequestSchema.extend({
+  goal: requiredNonEmptyStringSchema,
+  planId: requiredNonEmptyStringSchema,
+  planVersion: z.number().int().positive(),
+});
+
 const planVersionRequestSchema = z.object({
   sessionId: optionalNonEmptyStringSchema,
   planId: requiredNonEmptyStringSchema,
@@ -452,6 +463,22 @@ export const createAgentSidecarServer = (
       void handlePost(request, response, async (body, options) => {
         const payload = agentSidecarPlanQueryRequestSchema.parse(body);
         return runtime.getPlan(payload, options);
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && url === '/agent/plan/validate') {
+      void handlePost(request, response, async (body, options) => {
+        const payload = agentSidecarPlanValidateRequestSchema.parse(body);
+        return runtime.validatePlan(toAgentInput(payload, 'agent'), options);
+      });
+      return;
+    }
+
+    if (request.method === 'POST' && url === '/agent/plan/replan') {
+      void handlePost(request, response, async (body, options) => {
+        const payload = agentSidecarPlanReplanRequestSchema.parse(body);
+        return runtime.replanPlan(toAgentInput(payload, 'plan'), options);
       });
       return;
     }

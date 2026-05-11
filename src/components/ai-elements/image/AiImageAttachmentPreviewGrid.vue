@@ -284,16 +284,19 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="items.length" ref="galleryRef" class="ai-image-attachment-preview-grid" :data-variant="variant"
+  <div
+v-if="items.length" ref="galleryRef" class="ai-image-attachment-preview-grid" :data-variant="variant"
     :aria-label="ariaLabel">
     <Attachments class="ai-attachment-list" :variant="attachmentVariant">
       <template v-for="entry in attachmentItems" :key="entry.item.id">
         <!-- composer / inline 变体：缩略图为 hover 触发区 -->
-        <Attachment v-if="attachmentVariant === 'inline'" :data="entry.data" class="ai-attachment-card"
+        <Attachment
+v-if="attachmentVariant === 'inline'" :data="entry.data" class="ai-attachment-card"
           :data-variant="variant" @remove="handleRemove(entry.item.id)">
           <AttachmentHoverCard>
             <AttachmentHoverCardTrigger as-child>
-              <a v-if="entry.openable && entry.item.preview"
+              <a
+v-if="entry.openable && entry.item.preview"
                 class="ai-image-attachment-preview-link ai-attachment-preview-frame is-openable"
                 :href="entry.item.preview.src" :data-pswp-src="entry.item.preview.src"
                 :data-pswp-width="entry.item.preview.width" :data-pswp-height="entry.item.preview.height"
@@ -302,14 +305,16 @@ onBeforeUnmount(() => {
                 @click.prevent="openImagePreview(entry.item, entry.index)">
                 <AttachmentPreview class="ai-attachment-preview-media" />
               </a>
-              <div v-else class="ai-attachment-preview-frame" role="img" :aria-label="entry.item.name"
+              <div
+v-else class="ai-attachment-preview-frame" role="img" :aria-label="entry.item.name"
                 :title="entry.item.name">
                 <AttachmentPreview class="ai-attachment-preview-media" />
               </div>
             </AttachmentHoverCardTrigger>
             <AttachmentHoverCardContent class="ai-attachment-hover-card">
               <div class="ai-attachment-hover-card__content">
-                <div v-if="getMediaCategory(entry.data) === 'image' && entry.data.type === 'file' && entry.data.url"
+                <div
+v-if="getMediaCategory(entry.data) === 'image' && entry.data.type === 'file' && entry.data.url"
                   class="ai-attachment-hover-card__image">
                   <img :alt="getAttachmentLabel(entry.data)" :src="entry.data.url" loading="lazy" decoding="async">
                 </div>
@@ -326,9 +331,11 @@ onBeforeUnmount(() => {
         </Attachment>
 
         <!-- message / grid 变体：缩略图本身就是整张卡，hover 仍仅在缩略图上 -->
-        <Attachment v-else :data="entry.data" class="ai-attachment-card" :data-variant="variant"
+        <Attachment
+v-else :data="entry.data" class="ai-attachment-card" :data-variant="variant"
           @remove="handleRemove(entry.item.id)">
-          <a v-if="entry.openable && entry.item.preview"
+          <a
+v-if="entry.openable && entry.item.preview"
             class="ai-image-attachment-preview-link ai-attachment-preview-frame is-openable"
             :href="entry.item.preview.src" :data-pswp-src="entry.item.preview.src"
             :data-pswp-width="entry.item.preview.width" :data-pswp-height="entry.item.preview.height"
@@ -337,7 +344,8 @@ onBeforeUnmount(() => {
             @click.prevent="openImagePreview(entry.item, entry.index)">
             <AttachmentPreview class="ai-attachment-preview-media" />
           </a>
-          <div v-else class="ai-attachment-preview-frame" role="img" :aria-label="entry.item.name"
+          <div
+v-else class="ai-attachment-preview-frame" role="img" :aria-label="entry.item.name"
             :title="entry.item.name">
             <AttachmentPreview class="ai-attachment-preview-media" />
           </div>

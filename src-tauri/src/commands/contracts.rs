@@ -1408,6 +1408,37 @@ pub struct AgentSidecarExecuteRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentSidecarPlanValidateRequest {
+    #[serde(skip_serializing_if = "is_blank_optional_string")]
+    pub(crate) session_id: Option<String>,
+    #[serde(skip_serializing_if = "is_blank_optional_string")]
+    pub(crate) goal: Option<String>,
+    pub(crate) messages: Vec<AgentSidecarMessagePayload>,
+    #[serde(skip_serializing_if = "is_blank_optional_string")]
+    pub(crate) workspace_root_path: Option<String>,
+    #[serde(default)]
+    pub(crate) context: Vec<AiContextReferencePayload>,
+    pub(crate) plan_id: String,
+    pub(crate) plan_version: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSidecarPlanReplanRequest {
+    #[serde(skip_serializing_if = "is_blank_optional_string")]
+    pub(crate) session_id: Option<String>,
+    pub(crate) goal: String,
+    pub(crate) messages: Vec<AgentSidecarMessagePayload>,
+    #[serde(skip_serializing_if = "is_blank_optional_string")]
+    pub(crate) workspace_root_path: Option<String>,
+    #[serde(default)]
+    pub(crate) context: Vec<AiContextReferencePayload>,
+    pub(crate) plan_id: String,
+    pub(crate) plan_version: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentSidecarPlanApproveRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
     pub(crate) session_id: Option<String>,

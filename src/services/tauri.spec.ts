@@ -362,4 +362,27 @@ describe('tauriService', () => {
       },
     });
   });
+
+  it('agentSidecarRestart invokes the restart command and validates health payload', async () => {
+    invokeMock.mockResolvedValue({
+      ok: true,
+      status: 'ready',
+      engine: 'mastra',
+      version: null,
+      protocolVersion: '7',
+      implementationVersion: 'deepseek-reasoning-transport-v6-plan-history',
+      mcp: {
+        configuredServers: 0,
+        serverNames: [],
+        errors: [],
+      },
+    });
+
+    await expect(tauriService.agentSidecarRestart()).resolves.toMatchObject({
+      ok: true,
+      status: 'ready',
+      engine: 'mastra',
+    });
+    expect(invokeMock).toHaveBeenCalledWith('agent_sidecar_restart', undefined);
+  });
 });

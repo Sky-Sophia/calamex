@@ -47,6 +47,34 @@ export interface IAgentSidecarExecuteProjection {
   hasFileMutations: boolean;
 }
 
+export interface IAgentSidecarPlanValidationFinding {
+  stepId: string | null;
+  severity: 'low' | 'medium' | 'high';
+  title: string;
+  detail: string;
+  retryable: boolean;
+}
+
+export interface IAgentSidecarPlanValidationAcceptance {
+  criterion: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface IAgentSidecarPlanValidationReport {
+  status: 'passed' | 'failed' | 'needs_replan';
+  summary: string;
+  checkedStepIds: string[];
+  needsReplan: boolean;
+  findings: IAgentSidecarPlanValidationFinding[];
+  acceptance: IAgentSidecarPlanValidationAcceptance[];
+}
+
+export interface IAgentSidecarPlanValidationProjection {
+  report: IAgentSidecarPlanValidationReport | null;
+  errorMessage: string | null;
+}
+
 export interface IAgentSidecarToolProjection {
   toolCalls: IAiToolCall[];
   activityText: string;
@@ -407,6 +435,92 @@ const getStringField = (value: TJsonValue, keys: readonly string[]): string | nu
   }
 
   return null;
+};
+
+const isJsonObject = (value: TJsonValue): value is { readonly [key: string]: TJsonValue } =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const getBooleanField = (value: TJsonValue, key: string): boolean | null => {
+  const candidate = getRecordValue(value, key);
+
+  return typeof candidate === 'boolean' ? candidate : null;
+};
+
+const getStringArrayField = (value: TJsonValue, key: string): string[] => {
+  const candidate = getRecordValue(value, key);
+  if (!Array.isArray(candidate)) {
+    return [];
+  }
+
+  return candidate.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+};
+
+const getObjectArrayField = (
+  value: TJsonValue,
+  key: string,
+): { readonly [key: string]: TJsonValue }[] => {
+  const candidate = getRecordValue(value, key);
+  if (!Array.isArray(candidate)) {
+    return [];
+  }
+
+  return candidate.filter(isJsonObject);
+};
+
+const toValidationSeverity = (value: string | null): IAgentSidecarPlanValidationFinding['severity'] =>
+  value === 'high' || value === 'medium' || value === 'low' ? value : 'medium';
+
+const toValidationStatus = (value: string | null): IAgentSidecarPlanValidationReport['status'] | null => {
+  if (value === 'passed' || value === 'failed' || value === 'needs_replan') {
+    return value;
+  }
+
+  return null;
+};
+
+const parseValidationFinding = (
+  value: { readonly [key: string]: TJsonValue },
+): IAgentSidecarPlanValidationFinding => ({
+  stepId: getStringField(value, ['stepId']) ?? null,
+  severity: toValidationSeverity(getStringField(value, ['severity'])),
+  title: getStringField(value, ['title']) ?? '验证发现',
+  detail: getStringField(value, ['detail']) ?? '',
+  retryable: getBooleanField(value, 'retryable') ?? false,
+});
+
+const parseValidationAcceptance = (
+  value: { readonly [key: string]: TJsonValue },
+): IAgentSidecarPlanValidationAcceptance => ({
+  criterion: getStringField(value, ['criterion']) ?? '验收项',
+  passed: getBooleanField(value, 'passed') ?? false,
+  detail: getStringField(value, ['detail']) ?? '',
+});
+
+const parseValidationReport = (value: TJsonValue): IAgentSidecarPlanValidationReport | null => {
+  const reportValue = isJsonObject(value) && isJsonObject(value.report)
+    ? value.report
+    : value;
+
+  if (!isJsonObject(reportValue)) {
+    return null;
+  }
+
+  const status = toValidationStatus(getStringField(reportValue, ['status']));
+  const summary = getStringField(reportValue, ['summary']);
+  const needsReplan = getBooleanField(reportValue, 'needsReplan');
+
+  if (!status || !summary || needsReplan === null) {
+    return null;
+  }
+
+  return {
+    status,
+    summary,
+    checkedStepIds: getStringArrayField(reportValue, 'checkedStepIds'),
+    needsReplan,
+    findings: getObjectArrayField(reportValue, 'findings').map(parseValidationFinding),
+    acceptance: getObjectArrayField(reportValue, 'acceptance').map(parseValidationAcceptance),
+  };
 };
 
 const collectStringValuesForKeys = (
@@ -1428,6 +1542,21 @@ export const projectSidecarPlanRecordResponse = (
     versions: event?.versions.map(planRecordToVersionSummary) ?? [],
     metadata: event ? planRecordToMetadata(event.record) : null,
     errorMessage: extractErrorMessage(response.events),
+  };
+};
+
+export const projectSidecarPlanValidationResponse = (
+  response: IAgentSidecarResponsePayload,
+): IAgentSidecarPlanValidationProjection => {
+  const validatorResult = response.events.find((event): event is Extract<TAgentUiEvent, { type: 'tool_result' }> =>
+    event.type === 'tool_result' && event.toolName === 'plan_validator'
+  );
+  const report = validatorResult ? parseValidationReport(validatorResult.output) : null;
+
+  return {
+    report,
+    errorMessage: extractErrorMessage(response.events) ??
+      (report ? null : 'sidecar 未返回有效的计划验证报告。'),
   };
 };
 

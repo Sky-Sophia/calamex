@@ -31,11 +31,10 @@ import type {
   TSshAuthMode,
   TSshContentTab,
   TSshFileKind,
-  TSshFooterAction,
   TSshPanelTab,
   TSshTransferDirection,
 } from '@/types/ssh'
-import { RefreshCw, Server, Unplug } from 'lucide-vue-next'
+import { Clock3, RefreshCw, Server, Unplug } from 'lucide-vue-next'
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
@@ -884,33 +883,6 @@ const handleConnectSubmit = (): void => {
   void handleConnect()
 }
 
-const handleImportConfig = async (): Promise<void> => {
-  try {
-    const hosts = await tauriService.listSshConfigHosts()
-    if (hosts.length === 0) {
-      message.info('未在本机 SSH 配置中发现可导入主机。')
-      return
-    }
-
-    const importedConnections = hosts.map((host) => ({
-      id: host.id,
-      name: host.name,
-      username: host.username,
-      host: host.host,
-      port: String(host.port),
-      authMode: 'key',
-      identityPath: host.identityPath ?? '',
-      lastUsedLabel: host.lastUsedLabel,
-      lastUsedAt: null,
-    }))
-    sshStore.setRecentConnections([...importedConnections, ...sshStore.recentConnections])
-    message.success(`已导入 ${hosts.length} 个 SSH 配置主机。`)
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'SSH 配置导入失败。'
-    message.error(errorMessage)
-  }
-}
-
 const handleSelectRecentConnection = async (connection: ISshRecentConnection): Promise<void> => {
   sshStore.setConnectionFormFromProfile(connection)
   if (connection.authMode === 'password') {
@@ -1027,24 +999,6 @@ const handleContextMenuSelect = (action: ILinearContextMenuItem): void => {
   closeContextMenu()
 }
 
-const handleFooterAction = (action: TSshFooterAction): void => {
-  if (!isConnected.value) {
-    return
-  }
-
-  if (action === 'new-folder') {
-    void openCreateDirectoryDialog()
-    return
-  }
-
-  if (action === 'download') {
-    void downloadSelectedFile()
-    return
-  }
-
-  void uploadFileToCurrentDirectory()
-}
-
 const handleWindowClick = (event: MouseEvent): void => {
   const target = event.target
 
@@ -1133,42 +1087,23 @@ onBeforeUnmount(() => {
         <div class="ssh-form-row">
           <label class="ssh-form-group">
             <span>主机地址</span>
-            <input
-              v-model="connectionForm.host"
-              type="text"
-              placeholder="192.168.1.100"
-              autocomplete="off"
-              :aria-invalid="Boolean(connectionFieldErrors.host)"
-              @input="clearConnectionFieldError('host')"
-            />
+            <input v-model="connectionForm.host" type="text" placeholder="192.168.1.100" autocomplete="off"
+              :aria-invalid="Boolean(connectionFieldErrors.host)" @input="clearConnectionFieldError('host')" />
             <FieldError v-if="connectionFieldErrors.host" :message="connectionFieldErrors.host" />
           </label>
 
           <label class="ssh-form-group is-compact">
             <span>端口</span>
-            <input
-              v-model="connectionForm.port"
-              type="text"
-              placeholder="22"
-              inputmode="numeric"
-              autocomplete="off"
-              :aria-invalid="Boolean(connectionFieldErrors.port)"
-              @input="clearConnectionFieldError('port')"
-            />
+            <input v-model="connectionForm.port" type="text" placeholder="22" inputmode="numeric" autocomplete="off"
+              :aria-invalid="Boolean(connectionFieldErrors.port)" @input="clearConnectionFieldError('port')" />
             <FieldError v-if="connectionFieldErrors.port" :message="connectionFieldErrors.port" />
           </label>
         </div>
 
         <label class="ssh-form-group">
           <span>用户名</span>
-          <input
-            v-model="connectionForm.username"
-            type="text"
-            placeholder="root"
-            autocomplete="off"
-            :aria-invalid="Boolean(connectionFieldErrors.username)"
-            @input="clearConnectionFieldError('username')"
-          />
+          <input v-model="connectionForm.username" type="text" placeholder="root" autocomplete="off"
+            :aria-invalid="Boolean(connectionFieldErrors.username)" @input="clearConnectionFieldError('username')" />
           <FieldError v-if="connectionFieldErrors.username" :message="connectionFieldErrors.username" />
         </label>
 
@@ -1214,29 +1149,16 @@ onBeforeUnmount(() => {
 
         <label v-if="connectionForm.authMode === 'key'" class="ssh-form-group">
           <span>私钥路径</span>
-          <input
-            v-model="connectionForm.identityPath"
-            type="text"
-            placeholder="~/.ssh/id_rsa"
-            autocomplete="off"
+          <input v-model="connectionForm.identityPath" type="text" placeholder="~/.ssh/id_rsa" autocomplete="off"
             :aria-invalid="Boolean(connectionFieldErrors.identityPath)"
-            @input="clearConnectionFieldError('identityPath')"
-          />
-          <FieldError
-            v-if="connectionFieldErrors.identityPath"
-            :message="connectionFieldErrors.identityPath"
-          />
+            @input="clearConnectionFieldError('identityPath')" />
+          <FieldError v-if="connectionFieldErrors.identityPath" :message="connectionFieldErrors.identityPath" />
         </label>
         <label v-else class="ssh-form-group">
           <span>登录密码</span>
-          <input
-            v-model="connectionForm.password"
-            type="password"
-            placeholder="输入 SSH 登录密码"
-            autocomplete="current-password"
-            :aria-invalid="Boolean(connectionFieldErrors.password)"
-            @input="clearConnectionFieldError('password')"
-          />
+          <input v-model="connectionForm.password" type="password" placeholder="输入 SSH 登录密码"
+            autocomplete="current-password" :aria-invalid="Boolean(connectionFieldErrors.password)"
+            @input="clearConnectionFieldError('password')" />
           <FieldError v-if="connectionFieldErrors.password" :message="connectionFieldErrors.password" />
         </label>
 
@@ -1276,40 +1198,24 @@ onBeforeUnmount(() => {
             </svg>
             新建连接
           </button>
-
-          <button type="button" class="ssh-button ssh-button--ghost ssh-button--stacked ssh-button--disconnected-ghost"
-            @click="handleImportConfig">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-            导入配置
-          </button>
         </div>
 
         <section class="ssh-recent-section ssh-recent-section--disconnected" aria-label="最近使用 SSH 连接">
           <div class="ssh-recent-title ssh-recent-title--disconnected">最近使用</div>
 
           <div v-if="normalizedRecentConnections.length === 0" class="ssh-recent-empty">
-            暂无真实连接记录，可新建连接或导入本机 SSH 配置。
+            暂无真实连接记录，可新建连接。
           </div>
 
           <button v-for="connection in normalizedRecentConnections" :key="connection.id" type="button"
             class="ssh-recent-item ssh-recent-item--disconnected" @click="handleSelectRecentConnection(connection)">
             <span class="ssh-recent-icon ssh-recent-icon--disconnected" aria-hidden="true">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                stroke-linecap="round" stroke-linejoin="round">
-                <rect x="2" y="4" width="20" height="16" rx="2" />
-                <line x1="6" y1="8" x2="6.01" y2="8" />
-              </svg>
+              <Clock3 />
             </span>
 
             <span class="ssh-recent-info">
-              <span class="ssh-recent-name ssh-recent-name--disconnected">{{ connection.name }}</span>
-              <span class="ssh-recent-host ssh-recent-host--disconnected">{{ connection.username }}@{{ connection.host
-                }}</span>
+              <span class="ssh-recent-name ssh-recent-name--disconnected">{{ connection.username }}@{{ connection.host
+              }}</span>
             </span>
 
             <span class="ssh-recent-time ssh-recent-time--disconnected">{{ connection.lastUsedLabel }}</span>
@@ -1325,71 +1231,41 @@ onBeforeUnmount(() => {
                 <BreadcrumbItem v-if="item.type === 'ellipsis'">
                   <DropdownMenu>
                     <DropdownMenuTrigger as-child>
-                      <button
-                        type="button"
-                        class="ssh-path-ellipsis"
-                        :disabled="isRemoteDirectoryLoading"
-                        aria-label="展开中间路径"
-                      >
+                      <button type="button" class="ssh-path-ellipsis" :disabled="isRemoteDirectoryLoading"
+                        aria-label="展开中间路径">
                         <BreadcrumbEllipsis class="ssh-path-ellipsis-icon" />
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" class="ssh-path-menu">
-                      <DropdownMenuItem
-                        v-for="segment in item.segments"
-                        :key="segment.id"
-                        class="ssh-path-menu-item"
-                        :disabled="isRemoteDirectoryLoading"
-                        @select="handlePathSegmentClick(segment)"
-                      >
+                      <DropdownMenuItem v-for="segment in item.segments" :key="segment.id" class="ssh-path-menu-item"
+                        :disabled="isRemoteDirectoryLoading" @select="handlePathSegmentClick(segment)">
                         {{ segment.label }}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </BreadcrumbItem>
                 <BreadcrumbItem v-else>
-                  <BreadcrumbPage
-                    v-if="item.path === currentRemotePath"
-                    class="ssh-path-segment is-current"
-                  >
+                  <BreadcrumbPage v-if="item.path === currentRemotePath" class="ssh-path-segment is-current">
                     {{ item.label }}
                   </BreadcrumbPage>
                   <BreadcrumbLink v-else as-child>
-                    <button
-                      type="button"
-                      class="ssh-path-segment"
-                      :disabled="isRemoteDirectoryLoading"
-                      @click="handlePathSegmentClick(item)"
-                    >
+                    <button type="button" class="ssh-path-segment" :disabled="isRemoteDirectoryLoading"
+                      @click="handlePathSegmentClick(item)">
                       {{ item.label }}
                     </button>
                   </BreadcrumbLink>
                 </BreadcrumbItem>
-                <BreadcrumbSeparator
-                  v-if="index < sshBreadcrumbItems.length - 1"
-                  class="ssh-path-separator"
-                />
+                <BreadcrumbSeparator v-if="index < sshBreadcrumbItems.length - 1" class="ssh-path-separator" />
               </template>
             </BreadcrumbList>
           </Breadcrumb>
           <div class="ssh-path-actions">
-            <button
-              type="button"
-              class="ssh-path-action"
-              aria-label="断开 SSH 连接"
-              title="断开连接"
-              @click="disconnectSshSession"
-            >
+            <button type="button" class="ssh-path-action" aria-label="断开 SSH 连接" title="断开连接"
+              @click="disconnectSshSession">
               <Unplug aria-hidden="true" />
             </button>
-            <button
-              type="button"
-              class="ssh-path-action"
-              :disabled="isRemoteDirectoryLoading"
-              aria-label="刷新远端目录"
-              title="刷新远端目录"
-              @click="refreshCurrentRemoteDirectory"
-            >
+            <button type="button" class="ssh-path-action" :disabled="isRemoteDirectoryLoading" aria-label="刷新远端目录"
+              title="刷新远端目录" @click="refreshCurrentRemoteDirectory">
               <RefreshCw aria-hidden="true" />
             </button>
           </div>
@@ -1461,49 +1337,6 @@ onBeforeUnmount(() => {
         </div>
       </template>
     </div>
-
-    <footer class="ssh-sidebar-footer" :class="{ 'ssh-sidebar-footer--disconnected': isDisconnected }">
-      <button type="button" class="ssh-footer-button" :class="{
-        'ssh-footer-button--disconnected': isDisconnected,
-        'is-disabled': isDisconnected || isPathMutating,
-      }" :disabled="isDisconnected || isPathMutating" title="连接后可用"
-        @click="handleFooterAction('new-folder')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-          stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 5v14" />
-          <path d="M5 12h14" />
-        </svg>
-        新建
-      </button>
-
-      <button type="button" class="ssh-footer-button" :class="{
-        'ssh-footer-button--disconnected': isDisconnected,
-        'is-disabled': isDisconnected || isTransferBusy || isPathMutating,
-      }" :disabled="isDisconnected || isTransferBusy || isPathMutating" title="连接后可用"
-        @click="handleFooterAction('upload')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-          stroke-linejoin="round" aria-hidden="true">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="17 8 12 3 7 8" />
-          <line x1="12" y1="3" x2="12" y2="15" />
-        </svg>
-        上传
-      </button>
-
-      <button type="button" class="ssh-footer-button" :class="{
-        'ssh-footer-button--disconnected': isDisconnected,
-        'is-disabled': isDisconnected || isTransferBusy || isPathMutating,
-      }" :disabled="isDisconnected || isTransferBusy || isPathMutating" title="连接后可用"
-        @click="handleFooterAction('download')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-          stroke-linejoin="round" aria-hidden="true">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="7 10 12 15 17 10" />
-          <line x1="12" y1="15" x2="12" y2="3" />
-        </svg>
-        下载
-      </button>
-    </footer>
   </section>
 
   <LinearContextMenu :open="isConnected && contextMenu.open" :x="contextMenu.x" :y="contextMenu.y"
@@ -1710,7 +1543,6 @@ onBeforeUnmount(() => {
 
 .ssh-tab,
 .ssh-button,
-.ssh-footer-button,
 .ssh-file-item,
 .ssh-path-segment {
   appearance: none;
@@ -1911,15 +1743,24 @@ onBeforeUnmount(() => {
   padding: 6px 8px;
   cursor: pointer;
   text-align: left;
-  transition: background-color 0.12s ease;
+  transition: background-color 0.16s ease, color 0.16s ease;
 }
 
 .ssh-recent-item:hover {
   background: color-mix(in srgb, var(--surface-soft) 96%, transparent);
 }
 
+.ssh-recent-item:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--surface-soft) 94%, transparent);
+}
+
 .ssh-recent-item--disconnected:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.ssh-recent-item--disconnected:focus-visible {
+  background: rgba(15, 23, 42, 0.12);
 }
 
 .ssh-recent-icon {
@@ -1962,20 +1803,7 @@ onBeforeUnmount(() => {
 }
 
 .ssh-recent-name--disconnected {
-  color: #efeff7;
-}
-
-.ssh-recent-host {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
-  color: color-mix(in srgb, var(--text-quaternary) 72%, transparent);
-}
-
-.ssh-recent-host--disconnected {
-  color: #4a4a54;
+  color: #1f2937;
 }
 
 .ssh-recent-time {
@@ -1985,7 +1813,7 @@ onBeforeUnmount(() => {
 }
 
 .ssh-recent-time--disconnected {
-  color: #3a3a44;
+  color: #4b5563;
 }
 
 .ssh-connect-form {
@@ -2650,65 +2478,6 @@ onBeforeUnmount(() => {
   100% {
     transform: translateX(260%);
   }
-}
-
-.ssh-sidebar-footer {
-  display: flex;
-  gap: 6px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--shell-divider);
-}
-
-.ssh-sidebar-footer--disconnected {
-  gap: 6px;
-  padding: 10px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.ssh-footer-button {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  border: 1px solid color-mix(in srgb, var(--shell-divider) 88%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--surface-soft) 100%, transparent);
-  padding: 7px 0;
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.ssh-footer-button:hover {
-  background: var(--surface-soft-strong);
-  color: var(--text-primary);
-}
-
-.ssh-footer-button--disconnected {
-  color: #b0b0bc;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.ssh-footer-button:disabled,
-.ssh-footer-button.is-disabled,
-.ssh-footer-button:disabled:hover,
-.ssh-footer-button.is-disabled:hover {
-  color: #3a3a44;
-  background: rgba(255, 255, 255, 0.04);
-  cursor: default;
-  opacity: 0.6;
-}
-
-.ssh-footer-button svg {
-  width: 14px;
-  height: 14px;
 }
 
 .ssh-modal-backdrop {

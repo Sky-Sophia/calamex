@@ -7,8 +7,10 @@ import type {
   IAgentSidecarPlanApproveRequest,
   IAgentSidecarPlanFinishRequest,
   IAgentSidecarPlanQueryRequest,
+  IAgentSidecarPlanReplanRequest,
   IAgentSidecarPlanRequest,
   IAgentSidecarPlanRejectRequest,
+  IAgentSidecarPlanValidateRequest,
   IAgentSidecarResponsePayload,
   IAgentSidecarStreamEventPayload,
 } from './agent-sidecar';
@@ -260,6 +262,7 @@ export interface ISshConfigHostPayload {
 
 export interface ITauriService {
   agentSidecarHealth(): Promise<IAgentSidecarHealthPayload>;
+  agentSidecarRestart(): Promise<IAgentSidecarHealthPayload>;
   agentSidecarChat(payload: IAgentSidecarChatRequest): Promise<IAgentSidecarResponsePayload>;
   agentSidecarPlan(payload: IAgentSidecarPlanRequest): Promise<IAgentSidecarResponsePayload>;
   agentSidecarPlanApprove(
@@ -273,6 +276,12 @@ export interface ITauriService {
   ): Promise<IAgentSidecarResponsePayload>;
   agentSidecarPlanFinish(
     payload: IAgentSidecarPlanFinishRequest,
+  ): Promise<IAgentSidecarResponsePayload>;
+  agentSidecarPlanValidate(
+    payload: IAgentSidecarPlanValidateRequest,
+  ): Promise<IAgentSidecarResponsePayload>;
+  agentSidecarPlanReplan(
+    payload: IAgentSidecarPlanReplanRequest,
   ): Promise<IAgentSidecarResponsePayload>;
   agentSidecarExecute(payload: IAgentSidecarExecuteRequest): Promise<IAgentSidecarResponsePayload>;
   agentSidecarResolveApproval(

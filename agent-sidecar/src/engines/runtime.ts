@@ -57,6 +57,14 @@ export interface IAgentSidecarRuntime {
         input: IPlanFinishInput,
         options?: IAgentRuntimeRunOptions,
     ): Promise<IAgentRuntimeResponse>;
+    validatePlan(
+        input: IAgentRuntimeInput,
+        options?: IAgentRuntimeRunOptions,
+    ): Promise<IAgentRuntimeResponse>;
+    replanPlan(
+        input: IAgentRuntimeInput,
+        options?: IAgentRuntimeRunOptions,
+    ): Promise<IAgentRuntimeResponse>;
     resolveApproval(
         input: IApprovalResolutionInput,
         options?: IAgentRuntimeRunOptions,

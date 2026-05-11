@@ -13,7 +13,8 @@ const props = withDefaults(
 </script>
 
 <template>
-    <tr :class="cn(
+    <tr
+:class="cn(
         'border-b transition-colors hover:bg-muted/40 data-[state=selected]:bg-muted/50',
         props.class,
     )">

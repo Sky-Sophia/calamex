@@ -8,7 +8,9 @@ import { pathToFileURL } from 'node:url';
 
 import type { MastraModelConfig } from '@mastra/core/llm';
 import { ModelRouterLanguageModel } from '@mastra/core/llm';
+import { createTool } from '@mastra/core/tools';
 import { createWorkspaceTools, WORKSPACE_TOOLS, type AnyWorkspace } from '@mastra/core/workspace';
+import { z } from 'zod';
 
 import { buildSystemPrompt, extractVisibleAgentResultText } from './engines/agent-runtime-helpers.js';
 import {
@@ -30,12 +32,17 @@ import {
   type IAgentPlanStore,
   type TAgentPlanRecord,
 } from './engines/plan-store.js';
+import { LibsqlAgentPlanWorkflowStore } from './engines/plan-workflow-store.js';
 import {
   clearDeepSeekReasoningStoreForTest,
   deepseekReasoningFetch,
   runWithDeepSeekReasoningContext,
 } from './models/deepseek-reasoning-fetch.js';
-import { agentPlanSchema } from './schemas/plan.js';
+import { agentPlanGenerationSchema, agentPlanSchema } from './schemas/plan.js';
+import {
+  agentPlanDeltaSchema,
+  agentPlanValidationReportSchema,
+} from './schemas/plan-workflow.js';
 import {
   agentSidecarChatRequestSchema,
   agentSidecarExecuteRequestSchema,
@@ -143,6 +150,20 @@ const unsupportedPlanFinish = async (
   throw new Error('Not implemented in test runtime.');
 };
 
+const unsupportedPlanValidation = async (
+  ...args: Parameters<IAgentSidecarRuntime['validatePlan']>
+): Promise<Awaited<ReturnType<IAgentSidecarRuntime['validatePlan']>>> => {
+  void args;
+  throw new Error('Not implemented in test runtime.');
+};
+
+const unsupportedPlanReplan = async (
+  ...args: Parameters<IAgentSidecarRuntime['replanPlan']>
+): Promise<Awaited<ReturnType<IAgentSidecarRuntime['replanPlan']>>> => {
+  void args;
+  throw new Error('Not implemented in test runtime.');
+};
+
 const createFakeRuntime = (
   overrides: Partial<IAgentSidecarRuntime> = {},
 ): IAgentSidecarRuntime => ({
@@ -155,6 +176,8 @@ const createFakeRuntime = (
   getPlan: unsupportedPlanQuery,
   rejectPlan: unsupportedPlanReject,
   finishPlan: unsupportedPlanFinish,
+  validatePlan: unsupportedPlanValidation,
+  replanPlan: unsupportedPlanReplan,
   resolveApproval: unsupportedApprovalResolution,
   restoreCheckpoint: unsupportedRollbackRestore,
   ...overrides,
@@ -267,6 +290,22 @@ const createFakePlanStore = (
     };
   },
 });
+
+const createPlanWorkflowStoreForTest = (): {
+  cleanup: () => void;
+  store: LibsqlAgentPlanWorkflowStore;
+} => {
+  const directory = mkdtempSync(join(tmpdir(), 'agent-plan-workflow-runtime-'));
+  const store = new LibsqlAgentPlanWorkflowStore({
+    url: pathToFileURL(join(directory, 'plan-workflows.db')).href,
+    now: () => '2026-05-03T00:00:00.000Z',
+  });
+
+  return {
+    cleanup: () => rmSync(directory, { force: true, recursive: true }),
+    store,
+  };
+};
 
 describe('LibSQL agent plan store', () => {
   const createStore = (): {
@@ -446,6 +485,213 @@ describe('LibSQL agent plan store', () => {
         }),
         /必须批准后才能执行/u,
       );
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('LibSQL agent plan workflow store', () => {
+  const createStore = (): {
+    cleanup: () => void;
+    store: LibsqlAgentPlanWorkflowStore;
+  } => {
+    const directory = mkdtempSync(join(tmpdir(), 'agent-plan-workflow-store-'));
+    let tick = 0;
+    const store = new LibsqlAgentPlanWorkflowStore({
+      url: pathToFileURL(join(directory, 'plan-workflows.db')).href,
+      now: () => `2026-05-03T00:10:${String(tick++).padStart(2, '0')}.000Z`,
+    });
+
+    return {
+      cleanup: () => rmSync(directory, { force: true, recursive: true }),
+      store,
+    };
+  };
+
+  it('creates a suspended workflow run and projects approval from append-only events', async () => {
+    const { cleanup, store } = createStore();
+    const record = createPlanRecordForTest({
+      status: 'pending_approval',
+      approvedAt: null,
+    });
+
+    try {
+      const created = await store.createForPlan({ record });
+      const approvedRecord = createPlanRecordForTest({
+        planId: record.planId,
+        threadId: record.threadId,
+        version: record.version,
+        status: 'approved',
+      });
+      const approved = await store.approvePlan(approvedRecord, 'tester');
+      const events = await store.listEvents({
+        planId: record.planId,
+        version: record.version,
+      });
+
+      assert.equal(created.status, 'waiting_approval');
+      assert.equal(created.phase, 'approval_gate');
+      assert.equal(created.state.suspend.reason, 'plan_approval');
+      assert.equal(typeof created.state.suspend.token, 'string');
+      assert.equal(created.state.executionCursor, 0);
+      assert.equal(created.state.stepIdempotencyKeys['step-1'], `${record.planId}:v${record.version}:step:step-1`);
+      assert.equal(approved.status, 'approved');
+      assert.equal(approved.phase, 'execute_plan');
+      assert.equal(approved.state.approval.approved, true);
+      assert.equal(approved.state.suspend.reason, null);
+      assert.deepEqual(events.map((event) => event.event.type), [
+        'PlanGenerated',
+        'Suspended',
+        'PlanApproved',
+        'Resumed',
+      ]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('tracks step idempotency, heartbeat, completion cursor, and finish from event replay', async () => {
+    const { cleanup, store } = createStore();
+    const record = createPlanRecordForTest({
+      status: 'approved',
+    });
+
+    try {
+      await store.createForPlan({ record });
+      await store.approvePlan(record);
+      const started = await store.startStep({
+        planId: record.planId,
+        version: record.version,
+        stepId: 'step-1',
+        mastraRunId: 'run-1',
+      });
+      await store.heartbeat({
+        planId: record.planId,
+        version: record.version,
+        stepId: 'step-1',
+        phase: 'before_tool',
+      });
+      const completed = await store.completeStep({
+        planId: record.planId,
+        version: record.version,
+        stepId: 'step-1',
+        resultRef: 'run-1',
+      });
+      const finished = await store.finishPlan({
+        planId: record.planId,
+        version: record.version,
+        status: 'completed',
+      });
+      const events = await store.listEvents({
+        planId: record.planId,
+        version: record.version,
+      });
+
+      assert.equal(started.status, 'executing');
+      assert.equal(started.currentStepId, 'step-1');
+      assert.equal(started.mastraRunId, 'run-1');
+      assert.equal(completed.state.completedStepIds.includes('step-1'), true);
+      assert.equal(completed.state.executionCursor, 1);
+      assert.equal(completed.phase, 'validate_result');
+      assert.equal(finished.status, 'completed');
+      assert.equal(finished.phase, 'finish');
+      assert.equal(typeof finished.finishedAt, 'string');
+      assert.deepEqual(events.map((event) => event.event.type), [
+        'PlanGenerated',
+        'Suspended',
+        'PlanApproved',
+        'Resumed',
+        'StepStarted',
+        'Heartbeat',
+        'Heartbeat',
+        'StepCompleted',
+        'Heartbeat',
+        'PlanFinished',
+      ]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('records validator reports and replan deltas as workflow events', async () => {
+    const { cleanup, store } = createStore();
+    const record = createPlanRecordForTest({
+      status: 'approved',
+    });
+    const report = agentPlanValidationReportSchema.parse({
+      status: 'needs_replan',
+      summary: '步骤输出缺少验证证据。',
+      checkedStepIds: ['step-1'],
+      needsReplan: true,
+      findings: [
+        {
+          stepId: 'step-1',
+          severity: 'medium',
+          title: '验收缺口',
+          detail: '没有看到测试或诊断结果。',
+          retryable: true,
+        },
+      ],
+      acceptance: [
+        {
+          criterion: '步骤完成。',
+          passed: false,
+          detail: '缺少可验证结果。',
+        },
+      ],
+    });
+    const delta = agentPlanDeltaSchema.parse({
+      summary: '补充验证步骤。',
+      added: [
+        {
+          id: 'verify-step-1',
+          title: '验证执行结果',
+          goal: '读取诊断并确认步骤输出。',
+          status: 'pending',
+          tools: ['get_diagnostics'],
+          riskLevel: 'low',
+          requiresApproval: false,
+          expectedOutput: '验证报告通过。',
+        },
+      ],
+      modified: [],
+      removed: [],
+    });
+
+    try {
+      await store.createForPlan({ record });
+      await store.approvePlan(record);
+      const reported = await store.reportValidator({
+        planId: record.planId,
+        version: record.version,
+        report,
+      });
+      const replanned = await store.issueReplan({
+        planId: record.planId,
+        version: record.version,
+        toVersion: 2,
+        delta,
+      });
+      const events = await store.listEvents({
+        planId: record.planId,
+        version: record.version,
+      });
+
+      assert.equal(reported.phase, 'replan');
+      assert.equal(reported.state.validator.status, 'needs_replan');
+      assert.equal(reported.state.validator.needsReplan, true);
+      assert.equal(reported.state.suspend.reason, 'validator_needs_replan');
+      assert.equal(replanned.state.replanOfVersion, 1);
+      assert.deepEqual(events.map((event) => event.event.type), [
+        'PlanGenerated',
+        'Suspended',
+        'PlanApproved',
+        'Resumed',
+        'ValidatorReported',
+        'Suspended',
+        'ReplanIssued',
+      ]);
     } finally {
       cleanup();
     }
@@ -1018,7 +1264,7 @@ describe('Mastra runtime chat', () => {
         clients: [],
         configs: [],
         errors: [],
-        tools: [],
+        tools: {},
         disconnectAll: async () => {
           disconnectCalls += 1;
         },
@@ -1162,7 +1408,7 @@ describe('Mastra runtime chat', () => {
         clients: [],
         configs: [],
         errors: [],
-        tools: [],
+        tools: {},
         disconnectAll: async () => {
           disconnectCalls += 1;
         },
@@ -1248,46 +1494,19 @@ describe('Mastra runtime chat', () => {
         clients: [],
         configs: [],
         errors: [],
-        tools: [
-          {
-            name: 'read_text_file',
-            description: '读取文本文件',
-            toolSpec: {
-              inputSchema: {
-                type: 'object',
-                properties: {
-                  path: { type: 'string' },
-                },
-                required: ['path'],
-              },
-            },
-            mcpClient: {
-              callTool: async () => ({
-                content: [{ type: 'text', text: '不应被调用' }],
-                isError: false,
-              }),
-            },
-          },
-          {
-            name: 'tavily-search',
+        tools: {
+          tavily_mcp_tavily_search: createTool({
+            id: 'tavily_mcp_tavily_search',
             description: '联网搜索',
-            toolSpec: {
-              inputSchema: {
-                type: 'object',
-                properties: {
-                  query: { type: 'string' },
-                },
-                required: ['query'],
-              },
-            },
-            mcpClient: {
-              callTool: async () => ({
-                content: [{ type: 'text', text: '搜索完成' }],
-                isError: false,
-              }),
-            },
-          },
-        ],
+            inputSchema: z.object({
+              query: z.string(),
+            }),
+            execute: async () => ({
+              content: [{ type: 'text', text: '搜索完成' }],
+              isError: false,
+            }),
+          }),
+        },
         disconnectAll: async () => undefined,
       }),
       createAgent: (config) => {
@@ -1323,7 +1542,7 @@ describe('Mastra runtime chat', () => {
       });
 
       assert.equal(capturedToolNames.includes('read_text_file'), false);
-      assert.equal(capturedToolNames.includes('tavily-search'), true);
+      assert.equal(capturedToolNames.includes('tavily_mcp_tavily_search'), true);
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true });
     }
@@ -1338,7 +1557,7 @@ describe('Mastra runtime chat', () => {
         clients: [],
         configs: [],
         errors: [],
-        tools: [],
+        tools: {},
         disconnectAll: async () => {
           disconnectCalls += 1;
         },
@@ -1418,7 +1637,7 @@ describe('Mastra runtime chat', () => {
         clients: [],
         configs: [],
         errors: [],
-        tools: [],
+        tools: {},
         disconnectAll: async () => {
           disconnectCalls += 1;
         },
@@ -1526,7 +1745,7 @@ describe('Mastra runtime chat', () => {
         clients: [],
         configs: [],
         errors: [],
-        tools: [],
+        tools: {},
         disconnectAll: async () => {
           disconnectCalls += 1;
         },
@@ -1751,7 +1970,7 @@ describe('Mastra runtime built-in tools', () => {
         clients: [],
         configs: [],
         errors: [],
-        tools: [],
+        tools: {},
         disconnectAll: async () => undefined,
       }),
       createAgent: (config) => {
@@ -1799,7 +2018,7 @@ describe('Mastra runtime built-in tools', () => {
         clients: [],
         configs: [],
         errors: [],
-        tools: [],
+        tools: {},
         disconnectAll: async () => undefined,
       }),
       createAgent: (config) => {
@@ -1854,35 +2073,28 @@ describe('Mastra runtime execute', () => {
     let capturedToolNames: string[] = [];
     let disconnectCalls = 0;
     const executionRecord = createPlanRecordForTest();
+    const workflowStore = createPlanWorkflowStoreForTest();
     const runtime = new MastraRuntime({
       readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
       createPlanStore: () => createFakePlanStore(executionRecord),
+      createPlanWorkflowStore: () => workflowStore.store,
       createMcpClientBundle: async () => ({
         clients: [],
         configs: [],
         errors: [],
-        tools: [
-          {
-            name: 'read_file',
+        tools: {
+          git_read_file: createTool({
+            id: 'git_read_file',
             description: '读取文件内容',
-            toolSpec: {
-              inputSchema: {
-                type: 'object',
-                properties: {
-                  path: { type: 'string' },
-                },
-                required: ['path'],
-                additionalProperties: false,
-              },
-            },
-            mcpClient: {
-              callTool: async () => ({
-                content: [{ type: 'text', text: 'README 内容' }],
-                isError: false,
-              }),
-            },
-          },
-        ],
+            inputSchema: z.object({
+              path: z.string(),
+            }),
+            execute: async () => ({
+              content: [{ type: 'text', text: 'README 内容' }],
+              isError: false,
+            }),
+          }),
+        },
         disconnectAll: async () => {
           disconnectCalls += 1;
         },
@@ -1971,7 +2183,7 @@ describe('Mastra runtime execute', () => {
     assert.deepEqual(capturedMessages, [
       { role: 'user', content: '请直接执行' },
     ]);
-    assert.equal(capturedToolNames.includes('read_file'), true);
+    assert.equal(capturedToolNames.includes('git_read_file'), true);
     assert.equal(capturedToolNames.includes('read_current_file'), false);
     assert.equal(capturedToolNames.includes('get_current_time'), true);
     assert.equal(capturedToolNames.includes('convert_time'), true);
@@ -2101,6 +2313,7 @@ describe('Mastra runtime execute', () => {
     });
     assert.match(response.sessionId, /^mastra-execute-/u);
     assert.equal(disconnectCalls, 1);
+    workflowStore.cleanup();
   });
 
   it('captures reasoning_content chunks as agent.reasoning.delta events', async () => {
@@ -2111,7 +2324,7 @@ describe('Mastra runtime execute', () => {
         clients: [],
         configs: [],
         errors: [],
-        tools: [],
+        tools: {},
         disconnectAll: async () => {
           disconnectCalls += 1;
         },
@@ -2180,14 +2393,16 @@ describe('Mastra runtime approval resolution', () => {
         ],
       }),
     });
+    const workflowStore = createPlanWorkflowStoreForTest();
     const runtime = new MastraRuntime({
       readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
       createPlanStore: () => createFakePlanStore(executionRecord),
+      createPlanWorkflowStore: () => workflowStore.store,
       createMcpClientBundle: async () => ({
         clients: [],
         configs: [],
         errors: [],
-        tools: [],
+        tools: {},
         disconnectAll: async () => {
           disconnectCalls += 1;
         },
@@ -2333,6 +2548,7 @@ describe('Mastra runtime approval resolution', () => {
     ]);
     assert.equal(resumed.result, '审批后继续执行');
     assert.equal(disconnectCalls, 1);
+    workflowStore.cleanup();
   });
 
   it('keeps the existing approval tool_result plus done contract instead of returning a runtime-specific placeholder error', async () => {
@@ -2382,6 +2598,7 @@ describe('Mastra runtime plan', () => {
     let capturedGenerateOptions: unknown;
     let capturedModel: MastraModelConfig | null = null;
     let capturedToolNames: string[] = [];
+    let capturedInstructions = '';
     let disconnectCalls = 0;
     const plan = agentPlanSchema.parse({
       goal: '完成迁移',
@@ -2413,49 +2630,31 @@ describe('Mastra runtime plan', () => {
     const runtime = new MastraRuntime({
       readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
       createMcpClientBundle: async () => ({
-        tools: [
-          {
-            name: 'read_file',
+        tools: {
+          git_read_file: createTool({
+            id: 'git_read_file',
             description: '读取文件内容',
-            toolSpec: {
-              inputSchema: {
-                type: 'object',
-                properties: {
-                  path: { type: 'string' },
-                },
-                required: ['path'],
-                additionalProperties: false,
-              },
-            },
-            mcpClient: {
-              callTool: async () => ({
-                content: [{ type: 'text', text: 'README 内容' }],
-                isError: false,
-              }),
-            },
-          },
-          {
-            name: 'write_file',
+            inputSchema: z.object({
+              path: z.string(),
+            }),
+            execute: async () => ({
+              content: [{ type: 'text', text: 'README 内容' }],
+              isError: false,
+            }),
+          }),
+          git_write_file: createTool({
+            id: 'git_write_file',
             description: '写入文件内容',
-            toolSpec: {
-              inputSchema: {
-                type: 'object',
-                properties: {
-                  path: { type: 'string' },
-                  content: { type: 'string' },
-                },
-                required: ['path', 'content'],
-                additionalProperties: false,
-              },
-            },
-            mcpClient: {
-              callTool: async () => ({
-                content: [{ type: 'text', text: '写入完成' }],
-                isError: false,
-              }),
-            },
-          },
-        ],
+            inputSchema: z.object({
+              path: z.string(),
+              content: z.string(),
+            }),
+            execute: async () => ({
+              content: [{ type: 'text', text: '写入完成' }],
+              isError: false,
+            }),
+          }),
+        },
         disconnectAll: async () => {
           disconnectCalls += 1;
         },
@@ -2465,6 +2664,7 @@ describe('Mastra runtime plan', () => {
         status: 'pending_approval',
       })),
       createAgent: (config) => {
+        capturedInstructions = config.instructions;
         capturedModel = config.model;
         capturedToolNames = Object.keys(config.tools ?? {});
 
@@ -2506,13 +2706,16 @@ describe('Mastra runtime plan', () => {
     assert.equal(typeof capturedModel, 'object');
     assert.equal((capturedModel as { provider?: unknown } | null)?.provider, 'deepseek');
     assert.equal((capturedModel as { modelId?: unknown } | null)?.modelId, 'deepseek-chat');
-    assert.equal(capturedToolNames.includes('read_file'), true);
-    assert.equal(capturedToolNames.includes('write_file'), false);
+    assert.equal(capturedToolNames.includes('git_read_file'), true);
+    assert.equal(capturedToolNames.includes('git_write_file'), false);
     assert.equal(capturedToolNames.includes('read_current_file'), false);
     assert.equal(capturedToolNames.includes('get_current_time'), true);
     assert.equal(capturedToolNames.includes('convert_time'), true);
+    assert.match(capturedInstructions, /json object/u);
+    assert.match(capturedInstructions, /根对象必须直接包含 goal 和 steps/u);
+    assert.match(capturedInstructions, /短步骤节点/u);
     assert.deepEqual(capturedMessages, [
-      { role: 'user', content: '目标：完成迁移\n给我一个迁移计划' },
+      { role: 'user', content: '输出格式：返回一个简洁的 json object，根对象必须直接包含 goal、steps；steps 只写短标题节点，不要包裹在 plan/result/data 字段里。\n目标：完成迁移\n给我一个迁移计划' },
     ]);
     const planMemoryScope = createMastraMemoryScope({}, response.sessionId);
     assert.deepEqual(capturedGenerateOptions, {
@@ -2525,7 +2728,7 @@ describe('Mastra runtime plan', () => {
         resource: planMemoryScope.resource,
       },
       structuredOutput: {
-        schema: agentPlanSchema,
+        schema: agentPlanGenerationSchema,
       },
     });
     assert.deepEqual(streamedEvents, [
@@ -2557,12 +2760,132 @@ describe('Mastra runtime plan', () => {
     assert.equal(disconnectCalls, 1);
   });
 
+  it('fills the request goal when structured plan output omits the top-level goal', async () => {
+    let disconnectCalls = 0;
+    const generatedPlan = {
+      summary: '迁移 runtime 并补充协议回归。',
+      requiresApproval: true,
+      steps: [
+        {
+          id: 'step-1',
+          title: '抽象 runtime 接口',
+          goal: '把 provider 细节隔离到 sidecar runtime 层。',
+          status: 'planned',
+          tools: 'read_file',
+          files: 'agent-sidecar/src/engines/mastra-runtime.ts',
+          acceptanceCriteria: 'runtime contract 抽象清晰，并且协议回归通过。',
+          riskLevel: 'minor',
+          requiresApproval: 'false',
+          expectedOutput: '完成 runtime contract 抽象。',
+        },
+      ],
+    };
+    const runtime = new MastraRuntime({
+      readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
+      createMcpClientBundle: async () => ({
+        tools: {},
+        disconnectAll: async () => {
+          disconnectCalls += 1;
+        },
+      }),
+      createAgent: () => ({
+        stream: async () => ({
+          fullStream: (async function* () { })(),
+        }),
+        generate: async () => ({
+          object: generatedPlan,
+          text: '',
+        }),
+      }),
+    });
+
+    const response = await runtime.plan({
+      mode: 'plan',
+      goal: '完成迁移',
+      messages: [{ role: 'user', content: '给我一个迁移计划' }],
+      context: [],
+    });
+    const planReadyEvent = response.events.find((event) => event.type === 'plan_ready');
+
+    if (planReadyEvent?.type !== 'plan_ready') {
+      throw new Error('expected plan_ready event');
+    }
+
+    assert.equal(planReadyEvent.plan.goal, '完成迁移');
+    assert.equal(planReadyEvent.plan.summary, '迁移 runtime 并补充协议回归。');
+    assert.equal(planReadyEvent.plan.steps[0]?.status, 'pending');
+    assert.equal(planReadyEvent.plan.steps[0]?.riskLevel, 'medium');
+    assert.equal(planReadyEvent.plan.steps[0]?.requiresApproval, false);
+    assert.deepEqual(planReadyEvent.plan.steps[0]?.tools, ['read_file']);
+    assert.deepEqual(planReadyEvent.plan.steps[0]?.files, ['agent-sidecar/src/engines/mastra-runtime.ts']);
+    assert.deepEqual(planReadyEvent.plan.steps[0]?.acceptanceCriteria, ['runtime contract 抽象清晰，并且协议回归通过。']);
+    assert.equal(response.result, '已生成计划：1 个待办事项。');
+    assert.equal(disconnectCalls, 1);
+  });
+
+  it('unwraps common structured plan envelope fields before strict persistence validation', async () => {
+    let disconnectCalls = 0;
+    const generatedPlan = {
+      summary: '迁移 runtime 并补充协议回归。',
+      requiresApproval: true,
+      steps: [
+        {
+          id: 'step-1',
+          title: '抽象 runtime 接口',
+          goal: '把 provider 细节隔离到 sidecar runtime 层。',
+          status: 'pending',
+          tools: ['read_file'],
+          riskLevel: 'low',
+          requiresApproval: false,
+          expectedOutput: '完成 runtime contract 抽象。',
+        },
+      ],
+    };
+    const runtime = new MastraRuntime({
+      readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
+      createMcpClientBundle: async () => ({
+        tools: {},
+        disconnectAll: async () => {
+          disconnectCalls += 1;
+        },
+      }),
+      createAgent: () => ({
+        stream: async () => ({
+          fullStream: (async function* () { })(),
+        }),
+        generate: async () => ({
+          object: {
+            plan: generatedPlan,
+          },
+          text: '',
+        }),
+      }),
+    });
+
+    const response = await runtime.plan({
+      mode: 'plan',
+      goal: '完成迁移',
+      messages: [{ role: 'user', content: '给我一个迁移计划' }],
+      context: [],
+    });
+    const planReadyEvent = response.events.find((event) => event.type === 'plan_ready');
+
+    if (planReadyEvent?.type !== 'plan_ready') {
+      throw new Error('expected plan_ready event');
+    }
+
+    assert.equal(planReadyEvent.plan.goal, '完成迁移');
+    assert.equal(planReadyEvent.plan.steps[0]?.id, 'step-1');
+    assert.equal(response.result, '已生成计划：1 个待办事项。');
+    assert.equal(disconnectCalls, 1);
+  });
+
   it('returns the existing sidecar error shape when Mastra plan output is invalid', async () => {
     let disconnectCalls = 0;
     const runtime = new MastraRuntime({
       readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
       createMcpClientBundle: async () => ({
-        tools: [],
+        tools: {},
         disconnectAll: async () => {
           disconnectCalls += 1;
         },
@@ -2595,6 +2918,197 @@ describe('Mastra runtime plan', () => {
     assert.equal(disconnectCalls, 1);
   });
 
+  it('runs a readonly validator agent and persists structured validation reports', async () => {
+    let capturedInstructions = '';
+    let capturedGenerateOptions: unknown;
+    let disconnectCalls = 0;
+    const executionRecord = createPlanRecordForTest({
+      status: 'executing',
+    });
+    const workflowStore = createPlanWorkflowStoreForTest();
+    const report = agentPlanValidationReportSchema.parse({
+      status: 'needs_replan',
+      summary: '缺少验证证据。',
+      checkedStepIds: ['step-1'],
+      needsReplan: true,
+      findings: [
+        {
+          stepId: 'step-1',
+          severity: 'medium',
+          title: '缺少验证',
+          detail: '没有看到测试或诊断输出。',
+          retryable: true,
+        },
+      ],
+      acceptance: [
+        {
+          criterion: '步骤完成。',
+          passed: false,
+          detail: '没有足够证据。',
+        },
+      ],
+    });
+    const runtime = new MastraRuntime({
+      readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
+      createPlanStore: () => createFakePlanStore(executionRecord),
+      createPlanWorkflowStore: () => workflowStore.store,
+      createMcpClientBundle: async () => ({
+        tools: {},
+        disconnectAll: async () => {
+          disconnectCalls += 1;
+        },
+      }),
+      createAgent: (config) => {
+        capturedInstructions = config.instructions;
+
+        return {
+          stream: async () => ({
+            fullStream: (async function* () { })(),
+          }),
+          generate: async (_messages, options) => {
+            capturedGenerateOptions = options;
+
+            return {
+              object: report,
+              text: '',
+            };
+          },
+        };
+      },
+    });
+
+    const response = await runtime.validatePlan({
+      mode: 'agent',
+      goal: '验证执行结果',
+      messages: [{ role: 'user', content: '验证执行结果' }],
+      context: [],
+      planId: executionRecord.planId,
+      planVersion: executionRecord.version,
+    });
+    const events = await workflowStore.store.listEvents({
+      planId: executionRecord.planId,
+      version: executionRecord.version,
+    });
+
+    assert.match(capturedInstructions, /Validator Agent/u);
+    assert.deepEqual(capturedGenerateOptions, {
+      runId: capturedGenerateOptions && typeof capturedGenerateOptions === 'object' && 'runId' in capturedGenerateOptions
+        ? (capturedGenerateOptions as { runId: unknown }).runId
+        : '',
+      maxSteps: 8,
+      toolChoice: 'auto',
+      structuredOutput: {
+        schema: agentPlanValidationReportSchema,
+      },
+      memory: {
+        thread: createMastraMemoryScope({}, response.sessionId).thread,
+        resource: createMastraMemoryScope({}, response.sessionId).resource,
+      },
+    });
+    assert.equal(response.result, '验证完成：缺少验证证据。，需要重新规划。');
+    assert.deepEqual(events.map((event) => event.event.type), [
+      'PlanGenerated',
+      'Suspended',
+      'PlanApproved',
+      'Resumed',
+      'ValidatorReported',
+      'Suspended',
+    ]);
+    assert.equal(disconnectCalls, 1);
+    workflowStore.cleanup();
+  });
+
+  it('runs a replanner agent, applies delta plan, and creates the next pending version', async () => {
+    let disconnectCalls = 0;
+    const executionRecord = createPlanRecordForTest({
+      status: 'executing',
+    });
+    const workflowStore = createPlanWorkflowStoreForTest();
+    const delta = agentPlanDeltaSchema.parse({
+      summary: '补充验证步骤。',
+      added: [
+        {
+          id: 'verify-step-1',
+          title: '验证执行结果',
+          goal: '读取诊断并确认输出。',
+          status: 'pending',
+          tools: ['get_diagnostics'],
+          riskLevel: 'low',
+          requiresApproval: false,
+          expectedOutput: '验证通过。',
+        },
+      ],
+      modified: [
+        {
+          id: 'step-1',
+          patch: {
+            title: '执行并保留证据',
+            acceptanceCriteria: ['步骤完成。', '保留验证证据。'],
+          },
+        },
+      ],
+      removed: [],
+    });
+    const runtime = new MastraRuntime({
+      readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
+      createPlanStore: () => createFakePlanStore(executionRecord),
+      createPlanWorkflowStore: () => workflowStore.store,
+      createMcpClientBundle: async () => ({
+        tools: {},
+        disconnectAll: async () => {
+          disconnectCalls += 1;
+        },
+      }),
+      createAgent: () => ({
+        stream: async () => ({
+          fullStream: (async function* () { })(),
+        }),
+        generate: async () => ({
+          object: delta,
+          text: '',
+        }),
+      }),
+    });
+
+    const response = await runtime.replanPlan({
+      mode: 'plan',
+      goal: '根据验证结果重新规划',
+      messages: [{ role: 'user', content: '根据验证结果重新规划' }],
+      context: [],
+      planId: executionRecord.planId,
+      planVersion: executionRecord.version,
+    });
+    const planReadyEvent = response.events.find((event) => event.type === 'plan_ready');
+    const oldWorkflowEvents = await workflowStore.store.listEvents({
+      planId: executionRecord.planId,
+      version: executionRecord.version,
+    });
+    const nextWorkflow = await workflowStore.store.getWorkflow({
+      planId: executionRecord.planId,
+      version: 2,
+    });
+
+    if (planReadyEvent?.type !== 'plan_ready') {
+      throw new Error('expected plan_ready event');
+    }
+
+    assert.equal(planReadyEvent.version, 2);
+    assert.equal(planReadyEvent.status, 'pending_approval');
+    assert.equal(planReadyEvent.plan.steps[0]?.id, 'step-1');
+    assert.equal(planReadyEvent.plan.steps[0]?.title, '执行并保留证据');
+    assert.equal(planReadyEvent.plan.steps[1]?.id, 'verify-step-1');
+    assert.equal(nextWorkflow.state.replanOfVersion, 1);
+    assert.deepEqual(oldWorkflowEvents.map((event) => event.event.type), [
+      'PlanGenerated',
+      'Suspended',
+      'PlanApproved',
+      'Resumed',
+      'ReplanIssued',
+    ]);
+    assert.equal(disconnectCalls, 1);
+    workflowStore.cleanup();
+  });
+
   it('restores a persisted checkpoint through Mastra timeTravel and preserves rollback runtime events', async () => {
     let capturedRollbackOptions: unknown;
     let disconnectCalls = 0;
@@ -2609,7 +3123,7 @@ describe('Mastra runtime plan', () => {
         },
       }),
       createMcpClientBundle: async () => ({
-        tools: [],
+        tools: {},
         disconnectAll: async () => {
           disconnectCalls += 1;
         },

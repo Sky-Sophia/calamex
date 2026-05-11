@@ -85,6 +85,7 @@ export const dark: IRoles = {
         addedSubtle: P.darkBgSuccessMuted,
         deletedSubtle: P.darkBgDangerMuted,
         modifiedSubtle: P.darkBgAccentMuted,
+        divider: P.darkBorderDefault,
     },
 
     terminal: {

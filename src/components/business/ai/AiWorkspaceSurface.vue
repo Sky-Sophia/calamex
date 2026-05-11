@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import AiAssistantPanel from '@/components/business/ai/AiAssistantPanel.vue';
 import { Card, CardContent } from '@/components/ui/card';
+import { useMessage } from '@/composables/useMessage';
+import { aiService } from '@/services/modules/ai';
 import type {
     IActiveRunSummary,
     IAnalyzeScriptPayload,
@@ -8,7 +10,8 @@ import type {
     IEditorSelectionSummary,
 } from '@/types/editor';
 import type { IGitDiffPreviewPayload, IGitRepositoryStatusPayload } from '@/types/git';
-import { PanelRight } from 'lucide-vue-next';
+import { toErrorMessage } from '@/utils/error';
+import { PanelRight, RotateCw } from 'lucide-vue-next';
 import { ref } from 'vue';
 
 defineProps<{
@@ -25,9 +28,30 @@ const emit = defineEmits<{
 }>();
 
 const isRightSidebarVisible = ref(false);
+const isRestartingSidecar = ref(false);
+const message = useMessage();
 
 const toggleRightSidebar = (): void => {
     isRightSidebarVisible.value = !isRightSidebarVisible.value;
+};
+
+const handleRestartSidecar = async (): Promise<void> => {
+    if (isRestartingSidecar.value) {
+        return;
+    }
+
+    isRestartingSidecar.value = true;
+
+    try {
+        const health = await aiService.sidecarRestart();
+        message.success('Agent sidecar 已重启', {
+            description: `当前状态：${health.status}`,
+        });
+    } catch (error) {
+        message.error(toErrorMessage(error, '重启 Agent sidecar 失败'));
+    } finally {
+        isRestartingSidecar.value = false;
+    }
 };
 </script>
 
@@ -36,15 +60,26 @@ const toggleRightSidebar = (): void => {
         <CardContent class="ai-workspace-shell flex min-h-0 flex-1 px-0 pb-0 pt-0">
             <div class="ai-workspace-main flex min-h-0 flex-1">
                 <section class="ai-workspace-primary min-w-0 flex-1">
-                    <AiAssistantPanel class="flex-1" :document="document" :active-run="activeRun" :analysis="analysis"
+                    <AiAssistantPanel
+class="flex-1" :document="document" :active-run="activeRun" :analysis="analysis"
                         :selection="selection" :git-status="gitStatus" :workspace-root-path="workspaceRootPath"
                         @open-patch-diff="emit('open-patch-diff', $event)">
                         <template #header-actions-after>
-                            <button v-if="!isRightSidebarVisible" type="button"
+                            <button
+v-if="!isRightSidebarVisible" type="button"
                                 class="ai-icon-button ai-right-sidebar-toggle-btn"
                                 :aria-label="isRightSidebarVisible ? '收起右侧面板' : '展开右侧面板'"
                                 :aria-expanded="isRightSidebarVisible" @click="toggleRightSidebar">
                                 <PanelRight aria-hidden="true" />
+                            </button>
+                            <button
+                                type="button"
+                                class="ai-icon-button ai-right-sidebar-toggle-btn ai-sidecar-restart-btn"
+                                title="重启 Agent sidecar"
+                                aria-label="重启 Agent sidecar"
+                                :disabled="isRestartingSidecar"
+                                @click="void handleRestartSidecar()">
+                                <RotateCw :class="{ 'ai-sidecar-restart-btn__icon--spinning': isRestartingSidecar }" aria-hidden="true" />
                             </button>
                         </template>
                     </AiAssistantPanel>
@@ -55,9 +90,19 @@ const toggleRightSidebar = (): void => {
                     :class="isRightSidebarVisible ? 'w-[320px]' : 'w-0'">
                     <div v-if="isRightSidebarVisible" class="ai-workspace-right-sidebar__inner">
                         <div class="ai-workspace-right-sidebar__header">
-                            <button type="button" class="ai-icon-button ai-right-sidebar-toggle-btn" aria-label="收起右侧面板"
+                            <button
+type="button" class="ai-icon-button ai-right-sidebar-toggle-btn" aria-label="收起右侧面板"
                                 aria-expanded="true" @click="toggleRightSidebar">
                                 <PanelRight aria-hidden="true" />
+                            </button>
+                            <button
+                                type="button"
+                                class="ai-icon-button ai-right-sidebar-toggle-btn ai-sidecar-restart-btn"
+                                title="重启 Agent sidecar"
+                                aria-label="重启 Agent sidecar"
+                                :disabled="isRestartingSidecar"
+                                @click="void handleRestartSidecar()">
+                                <RotateCw :class="{ 'ai-sidecar-restart-btn__icon--spinning': isRestartingSidecar }" aria-hidden="true" />
                             </button>
                         </div>
                         <p class="ai-workspace-right-sidebar__empty">这里还没有内容</p>
@@ -108,6 +153,7 @@ const toggleRightSidebar = (): void => {
     min-height: 52px;
     align-items: center;
     justify-content: flex-end;
+    gap: 4px;
     padding: 12px 18px 10px;
 }
 
@@ -140,10 +186,30 @@ const toggleRightSidebar = (): void => {
     color: var(--text-primary);
 }
 
+.ai-right-sidebar-toggle-btn:disabled {
+    cursor: wait;
+    color: var(--text-tertiary);
+    opacity: 0.65;
+}
+
 .ai-right-sidebar-toggle-btn svg {
     width: 15px;
     height: 15px;
     stroke-width: 1.75;
+}
+
+.ai-sidecar-restart-btn__icon--spinning {
+    animation: ai-sidecar-restart-spin 0.8s linear infinite;
+}
+
+@keyframes ai-sidecar-restart-spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 :deep(.ai-assistant-panel) {

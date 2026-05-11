@@ -73,12 +73,14 @@ const resolveAlignClass = (align?: ITableCellNode['align']): string => {
         <Table class="ai-markdown-table__table">
             <TableHeader>
                 <TableRow class="ai-markdown-table__row hover:bg-transparent data-[state=selected]:bg-transparent">
-                    <TableHead v-for="(cell, headerIndex) in props.node.header.cells"
+                    <TableHead
+v-for="(cell, headerIndex) in props.node.header.cells"
                         :key="`header-${String(props.indexKey)}-${headerIndex}`" :class="[
                             'ai-markdown-table__head',
                             resolveAlignClass(cell.align),
                         ]">
-                        <MarkdownRender :nodes="cell.children" :custom-id="props.customId"
+                        <MarkdownRender
+:nodes="cell.children" :custom-id="props.customId"
                             :index-key="`table-head-${String(props.indexKey)}-${headerIndex}`"
                             :typewriter="props.typewriter" :render-as-fragment="true" @copy="emit('copy', $event)" />
                     </TableHead>
@@ -86,14 +88,17 @@ const resolveAlignClass = (align?: ITableCellNode['align']): string => {
             </TableHeader>
 
             <TableBody>
-                <TableRow v-for="(row, rowIndex) in rowList" :key="`row-${String(props.indexKey)}-${rowIndex}`"
+                <TableRow
+v-for="(row, rowIndex) in rowList" :key="`row-${String(props.indexKey)}-${rowIndex}`"
                     class="ai-markdown-table__row hover:bg-transparent data-[state=selected]:bg-transparent">
-                    <TableCell v-for="(cell, cellIndex) in row.cells"
+                    <TableCell
+v-for="(cell, cellIndex) in row.cells"
                         :key="`cell-${String(props.indexKey)}-${rowIndex}-${cellIndex}`" :class="[
                             'ai-markdown-table__cell',
                             resolveAlignClass(cell.align),
                         ]">
-                        <MarkdownRender :nodes="cell.children" :custom-id="props.customId"
+                        <MarkdownRender
+:nodes="cell.children" :custom-id="props.customId"
                             :index-key="`table-cell-${String(props.indexKey)}-${rowIndex}-${cellIndex}`"
                             :typewriter="props.typewriter" :render-as-fragment="true" @copy="emit('copy', $event)" />
                     </TableCell>

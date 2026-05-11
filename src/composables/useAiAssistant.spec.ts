@@ -490,6 +490,7 @@ const aiServiceMock = vi.hoisted(() => {
     planTask,
     sidecarPlan,
     sidecarPlanQuery,
+    sidecarChat: sidecarExecute,
     sidecarExecute,
     sidecarResolveApproval,
     sidecarRestoreCheckpoint,
@@ -575,6 +576,7 @@ vi.mock('@/services/modules/ai', () => ({
     classifyTask: aiServiceMock.classifyTask,
     planTask: aiServiceMock.planTask,
     onNarratorStream: aiServiceMock.onNarratorStream,
+    sidecarChat: aiServiceMock.sidecarChat,
     sidecarPlan: aiServiceMock.sidecarPlan,
     sidecarPlanQuery: aiServiceMock.sidecarPlanQuery,
     sidecarExecute: aiServiceMock.sidecarExecute,
@@ -1364,29 +1366,12 @@ describe('useAiAssistant streaming integration', () => {
 
     await assistant.sendMessage();
 
-    expect(assistant.messages.value).toHaveLength(2);
+    expect(assistant.messages.value).toHaveLength(1);
     expect(assistant.messages.value[0]).toMatchObject({
       role: 'user',
       content: userQuestion,
     });
-    expect(assistant.messages.value[1]).toMatchObject({
-      role: 'assistant',
-      content: finalAnswer,
-    });
-    expect(assistant.messages.value[1]?.toolCalls).toEqual([
-      expect.objectContaining({
-        name: 'list_project_files',
-        status: 'succeeded',
-      }),
-      expect.objectContaining({
-        name: 'search_project_files',
-        status: 'succeeded',
-      }),
-      expect.objectContaining({
-        name: 'write_file',
-        status: 'pending',
-      }),
-    ]);
+    expect(assistant.messages.value[0]?.content).toBe(userQuestion);
     expect(aiServiceMock.classifyTask).toHaveBeenCalledTimes(0);
     expect(aiServiceMock.sidecarPlan).toHaveBeenCalledWith(
       expect.objectContaining({

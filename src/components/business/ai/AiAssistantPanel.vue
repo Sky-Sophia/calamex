@@ -6,6 +6,7 @@ import { Loader } from '@/components/ai-elements/loader';
 import AiChatThread from '@/components/business/ai/AiChatThread.vue';
 import AiFloatingSuggestions from '@/components/business/ai/AiFloatingSuggestions.vue';
 import AiPatchPreview from '@/components/business/ai/AiPatchPreview.vue';
+import AiPlanConfirmationMessage from '@/components/business/ai/AiPlanConfirmationMessage.vue';
 import AiPlanModePanel from '@/components/business/ai/AiPlanModePanel.vue';
 import AiPromptInput from '@/components/business/ai/AiPromptInput.vue';
 import AiProviderIcon from '@/components/business/ai/AiProviderIcon.vue';
@@ -24,6 +25,7 @@ import { useAiWebSources } from '@/composables/useAiWebSources';
 import { findAiServicePlatformByModel } from '@/constants/ai-providers';
 import type {
   IAiAgentRun,
+  IAiAgentStepFinalAnswer,
   IAiChatMessage,
   IAiConfigPayload,
   IAiProviderSettingsActionFeedback,
@@ -98,6 +100,14 @@ const aiModelName = computed(() => {
 
   return selectedModel.split('/').filter(Boolean).at(-1) ?? selectedModel;
 });
+const providerMarkTitle = computed(() => {
+  const selectedModel = assistant.config.value.selectedModel?.trim();
+  if (!selectedModel) {
+    return aiIconTitle.value;
+  }
+
+  return `${aiIconTitle.value} · ${selectedModel}`;
+});
 const historyThreads = computed(() => assistant.historyThreads.value.slice(-MAX_HISTORY_MESSAGES).reverse());
 const activeHistoryThread = computed(() =>
   assistant.historyThreads.value.find((thread) => thread.id === assistant.activeConversationId.value) ?? null,
@@ -161,25 +171,68 @@ const hasPlannedAgentState = computed(() =>
   planIsClassifying.value ||
   planIsPlanning.value ||
   Boolean(planErrorMessage.value) ||
+  Boolean(planId.value) ||
+  Boolean(planStatus.value) ||
   Boolean(planActiveRun.value),
 );
-const planVisible = computed(() => {
+const isPlanConfirmationStatus = computed(() =>
+  planStatus.value === 'pending_approval' ||
+  planStatus.value === 'draft' ||
+  planStatus.value === 'rejected' ||
+  !planStatus.value,
+);
+const planConfirmationVisible = computed(() => {
   if (assistant.activeMode.value !== 'plan') {
     return false;
   }
 
-  return hasPlannedAgentState.value ||
-    Boolean(planPendingToolConfirmation.value && (
-      planHasPlan.value ||
-      planActiveRun.value
-    ));
+  return planSteps.value.length > 0 &&
+    !planActiveRun.value &&
+    !planApprovedAt.value &&
+    isPlanConfirmationStatus.value;
+});
+const canApprovePlan = computed(() =>
+  planSteps.value.length >= 2 &&
+  planSteps.value.length <= 6 &&
+  !planActiveRun.value &&
+  !planApprovedAt.value &&
+  (
+    planStatus.value === 'pending_approval' ||
+    planStatus.value === 'draft' ||
+    !planStatus.value
+  ),
+);
+const canEditPlan = computed(() =>
+  !planActiveRun.value &&
+  !planApprovedAt.value &&
+  !planIsPlanning.value &&
+  !planIsApproving.value &&
+  !planIsClassifying.value &&
+  (
+    planStatus.value === 'draft' ||
+    !planStatus.value
+  ),
+);
+const planProgressVisible = computed(() => {
+  if (assistant.activeMode.value !== 'plan') {
+    return false;
+  }
+
+  return Boolean(planActiveRun.value) ||
+    Boolean(planActiveToolActivity.value) ||
+    Boolean(planPendingToolConfirmation.value && planActiveRun.value) ||
+    Boolean(planApprovedAt.value) ||
+    planStatus.value === 'approved' ||
+    planStatus.value === 'executing' ||
+    planStatus.value === 'completed' ||
+    planStatus.value === 'failed';
 });
 const directToolConfirmationVisible = computed(() => {
   if (assistant.activeMode.value !== 'agent') {
     return false;
   }
 
-  return Boolean(planPendingToolConfirmation.value) && !planVisible.value;
+  return Boolean(planPendingToolConfirmation.value) && !planProgressVisible.value;
 });
 const activePlanStep = computed(() => {
   const currentStepId = planActiveRun.value?.currentStepId;
@@ -246,6 +299,34 @@ const buildAgentFlowToolCalls = (run: IAiAgentRun | null): IAiToolCall[] => {
     }));
 };
 
+const buildPlanRunFinalAnswer = (
+  run: IAiAgentRun,
+  stepFinalAnswers: IAiAgentStepFinalAnswer[],
+): string => {
+  if (run.status === 'failed') {
+    return `计划执行失败：${run.errorMessage ?? '执行过程中出现错误。'}`;
+  }
+
+  if (run.status === 'cancelled') {
+    return '计划执行已取消。';
+  }
+
+  const answerByStepId = new Map(stepFinalAnswers.map((answer) => [answer.stepId, answer.content.trim()]));
+  const resultLines = run.steps
+    .filter((step) => step.status === 'done')
+    .map((step) => {
+      const answer = answerByStepId.get(step.id);
+      return answer
+        ? `- ${step.title}：${answer}`
+        : `- ${step.title}：已完成。`;
+    });
+
+  return [
+    '已完成这轮计划执行。',
+    ...(resultLines.length ? ['', '执行结果：', ...resultLines] : []),
+  ].join('\n');
+};
+
 const activeAgentFlowMessage = computed<IAiChatMessage | null>(() => {
   if (assistant.activeMode.value !== 'plan') {
     return null;
@@ -253,18 +334,21 @@ const activeAgentFlowMessage = computed<IAiChatMessage | null>(() => {
 
   const run = planActiveRun.value;
   const toolCalls = buildAgentFlowToolCalls(run);
-  const latestAnswer = run
-    ? planStore.value.getStepFinalAnswers(run.id).at(-1) ?? null
-    : null;
 
   if (!run && toolCalls.length === 0) {
     return null;
   }
 
   const latestToolCall = toolCalls.at(-1);
+  const stepFinalAnswers = run ? planStore.value.getStepFinalAnswers(run.id) : [];
+  const latestAnswer = stepFinalAnswers.at(-1) ?? null;
   const createdAt = latestAnswer?.createdAt ?? run?.updatedAt ?? new Date().toISOString();
-  const content = latestAnswer?.content.trim() ||
-    (latestToolCall
+  const isTerminalRun = run
+    ? run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled'
+    : false;
+  const content = run && isTerminalRun
+    ? buildPlanRunFinalAnswer(run, stepFinalAnswers)
+    : (latestToolCall
       ? `AI 正在自动使用工具：${latestToolCall.summary}`
       : 'Agent 正在执行计划。');
 
@@ -307,6 +391,21 @@ const submitLabel = computed(() => {
 
   return assistant.sendButtonLabel.value;
 });
+const assistantTypingLabel = computed(() => {
+  if (
+    assistant.activeMode.value === 'plan' &&
+    (planIsPlanning.value || planIsClassifying.value)
+  ) {
+    return '正在生成计划';
+  }
+
+  return '正在准备回复';
+});
+
+if (planStore.value.mode === 'plan' || Boolean(planId.value) || Boolean(planActiveRun.value)) {
+  assistant.activeMode.value = 'plan';
+}
+
 const fileRollbackPrompt = computed(() => assistant.fileRollbackPrompt.value);
 const fileRollbackLabel = computed(() => {
   const prompt = fileRollbackPrompt.value;
@@ -539,10 +638,13 @@ const handleRegeneratePlan = async (): Promise<void> => {
 const handleApprovePlan = async (): Promise<void> => {
   try {
     await assistant.agentPlan.approvePlan();
-    await agentRun.runPlan(
+    await agentRun.runPlanToCompletion(
       planActiveGoal.value,
       planSteps.value,
-      assistant.currentReferences.value,
+      {
+        context: assistant.buildSidecarContextReferences(),
+        workspaceRootPath: props.workspaceRootPath,
+      },
     );
   } catch (error) {
     setPlanError(error, '批准或启动计划失败。');
@@ -579,10 +681,24 @@ const handlePauseRun = async (): Promise<void> => {
 };
 
 const handleResumeRun = async (): Promise<void> => {
-  await withAgentRunAction(
+  const resumedRun = await withAgentRunAction(
     (runId) => agentRun.resumeRun(runId),
     '继续 Agent run 失败。',
   );
+
+  if (!resumedRun) {
+    return;
+  }
+
+  try {
+    await agentRun.continueRunToCompletion(resumedRun.id, {
+      goal: planActiveGoal.value,
+      context: assistant.buildSidecarContextReferences(),
+      workspaceRootPath: props.workspaceRootPath,
+    });
+  } catch (error) {
+    setPlanError(error, '继续执行计划失败。');
+  }
 };
 
 const handleCancelRun = async (): Promise<void> => {
@@ -620,13 +736,26 @@ const handleResolveToolConfirmation = async (
   if (agentRun.hasSidecarStepToolConfirmation(confirmation.id)) {
     isAgentRunActionPending.value = true;
     setPlanErrorMessage('');
+    let resolvedRun: IAiAgentRun | null = null;
 
     try {
-      await agentRun.resolveSidecarStepToolConfirmation(confirmation.id, decision);
+      resolvedRun = await agentRun.resolveSidecarStepToolConfirmation(confirmation.id, decision);
     } catch (error) {
       setPlanError(error, '处理 Sidecar step 工具确认失败。');
     } finally {
       isAgentRunActionPending.value = false;
+    }
+
+    if (resolvedRun?.status === 'running-plan') {
+      try {
+        await agentRun.continueRunToCompletion(resolvedRun.id, {
+          goal: planActiveGoal.value,
+          context: assistant.buildSidecarContextReferences(),
+          workspaceRootPath: props.workspaceRootPath,
+        });
+      } catch (error) {
+        setPlanError(error, '继续执行计划失败。');
+      }
     }
 
     return;
@@ -696,7 +825,19 @@ const testProvider = async (
   }
 };
 
+const restorePersistedPlanUiState = async (): Promise<void> => {
+  if (!hasPlannedAgentState.value && planStore.value.mode !== 'plan') {
+    return;
+  }
+
+  assistant.activeMode.value = 'plan';
+  await assistant.agentPlan.restorePersistedPlanState();
+};
+
 onMounted(() => {
+  restorePersistedPlanUiState().catch((error) => {
+    setPlanError(error, '恢复计划状态失败。');
+  });
   assistant.loadConfig().then(() => {
     settingsDraft.value = cloneAiConfigPayload(assistant.config.value);
   }).catch(() => undefined);
@@ -708,7 +849,7 @@ onMounted(() => {
 <template>
   <section class="ai-assistant-panel" aria-label="AI 助手面板">
     <header class="ai-panel-header">
-      <div class="ai-provider-mark" aria-label="当前 AI 平台和模型">
+      <div class="ai-provider-mark" aria-label="当前 AI 平台和模型" :title="providerMarkTitle">
         <AiProviderIcon class="ai-provider-mark__icon" :platform-id="aiIconPlatformId" decorative />
         <span class="ai-provider-mark__copy">
           <span class="ai-provider-mark__label">{{ aiModelName }}</span>
@@ -728,7 +869,8 @@ onMounted(() => {
         </button>
         <DropdownMenu v-model:open="isHistoryOpen">
           <DropdownMenuTrigger as-child>
-            <button type="button" class="ai-icon-button" aria-label="对话记录" aria-haspopup="dialog"
+            <button
+type="button" class="ai-icon-button" aria-label="对话记录" aria-haspopup="dialog"
               :aria-expanded="isHistoryOpen">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                 <path d="M3 3v5h5" />
@@ -737,20 +879,23 @@ onMounted(() => {
               </svg>
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent class="ai-history-popover border-0! outline-none! ring-0!" align="end" side="bottom"
+          <DropdownMenuContent
+class="ai-history-popover border-0! outline-none! ring-0!" align="end" side="bottom"
             :side-offset="8" :collision-padding="12">
             <header class="ai-history-header">
               <div class="ai-history-title-group">
                 <strong>对话记录</strong>
               </div>
-              <button v-if="activeHistoryThread" type="button" class="ai-history-clear-icon"
+              <button
+v-if="activeHistoryThread" type="button" class="ai-history-clear-icon"
                 aria-label="删除当前对话记录" @click="openDeleteConversationDialog(activeHistoryThread.id)">
                 <Trash2 aria-hidden="true" />
               </button>
             </header>
             <div v-if="historyThreads.length" class="ai-history-scroll-area">
               <div class="ai-history-list">
-                <article v-for="thread in historyThreads" :key="thread.id" class="ai-history-item"
+                <article
+v-for="thread in historyThreads" :key="thread.id" class="ai-history-item"
                   :class="{ 'is-active': thread.id === assistant.activeConversationId.value }">
                   <button type="button" class="ai-history-button" @click="openHistoryThread(thread.id)">
                     <div class="ai-history-meta">
@@ -759,7 +904,8 @@ onMounted(() => {
                     </div>
                     <div class="ai-history-subtitle">{{ getHistoryMessageCountLabel(thread.messages) }}</div>
                   </button>
-                  <button type="button" class="ai-history-delete-button" aria-label="删除这条对话记录"
+                  <button
+type="button" class="ai-history-delete-button" aria-label="删除这条对话记录"
                     @click.stop="openDeleteConversationDialog(thread.id)">
                     <Trash2 aria-hidden="true" />
                   </button>
@@ -773,30 +919,60 @@ onMounted(() => {
       </div>
     </header>
 
-    <AiChatThread :messages="threadMessages" :is-typing="assistant.isSending.value" :platform-id="aiIconPlatformId"
-      :provider-label="aiIconTitle" :conversation-id="assistant.activeConversationId.value"
+    <AiChatThread
+      :messages="threadMessages"
+      :is-typing="assistant.isSending.value"
+      :platform-id="aiIconPlatformId"
+      :provider-label="aiIconTitle"
+      :conversation-id="assistant.activeConversationId.value"
       :scroll-state="assistant.activeConversationScrollState.value"
-      @scroll-state-change="handleConversationScrollStateChange">
+      :typing-label="assistantTypingLabel"
+      :has-extra-content="planConfirmationVisible"
+      @scroll-state-change="handleConversationScrollStateChange"
+    >
       <template #empty>
-        <AiFloatingSuggestions :suggestions="suggestionPool.suggestions.value" :disabled="assistant.isSending.value"
+        <AiFloatingSuggestions
+:suggestions="suggestionPool.suggestions.value" :disabled="assistant.isSending.value"
           @select="handleSuggestionSelect" />
       </template>
       <template #after-message="{ message }">
         <Checkpoint v-if="getConversationCheckpoint(message.id)" class="ai-conversation-checkpoint">
-          <CheckpointTrigger class="ai-conversation-checkpoint__trigger" :disabled="isConversationCheckpointDisabled"
+          <CheckpointTrigger
+class="ai-conversation-checkpoint__trigger" :disabled="isConversationCheckpointDisabled"
             @click="handleRestoreConversationCheckpoint(message.id)">
             <CheckpointIcon class="ai-conversation-checkpoint__icon" aria-hidden="true" />
             <span class="ai-conversation-checkpoint__label">{{ getConversationCheckpointLabel(message.id) }}</span>
-            <Loader v-if="isConversationCheckpointRestoring(message.id)" class="ai-conversation-checkpoint__loader"
+            <Loader
+v-if="isConversationCheckpointRestoring(message.id)" class="ai-conversation-checkpoint__loader"
               :size="12" />
             <span v-else class="ai-conversation-checkpoint__spacer" aria-hidden="true"></span>
           </CheckpointTrigger>
         </Checkpoint>
       </template>
+      <template #after-messages>
+        <AiPlanConfirmationMessage
+          v-if="planConfirmationVisible"
+          :goal="planActiveGoal"
+          :summary="planSummary"
+          :status="planStatus"
+          :steps="planSteps"
+          :is-planning="planIsPlanning"
+          :is-approving="planIsApproving"
+          :can-edit="canEditPlan"
+          :can-approve="canApprovePlan"
+          :approved-at="planApprovedAt"
+          @update-step-title="handleUpdatePlanStepTitle"
+          @remove-step="handleRemovePlanStep"
+          @regenerate="handleRegeneratePlan"
+          @reject="handleRejectPlan"
+          @approve="handleApprovePlan"
+        />
+      </template>
     </AiChatThread>
     <div v-if="fileRollbackPrompt" class="ai-file-rollback-entry" :class="`is-${fileRollbackPrompt.status}`">
       <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
-      <button type="button" class="ai-file-rollback-entry__button" :disabled="isFileRollbackDisabled"
+      <button
+type="button" class="ai-file-rollback-entry__button" :disabled="isFileRollbackDisabled"
         :aria-label="fileRollbackLabel" @click="assistant.rollbackLatestFileChange">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
           <path d="M3 7v5h5" />
@@ -806,7 +982,8 @@ onMounted(() => {
       </button>
       <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
     </div>
-    <AiPatchPreview :patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
+    <AiPatchPreview
+:patch="assistant.proposedPatch.value" :is-applying="assistant.isApplyingPatch.value"
       :workspace-root-path="workspaceRootPath" @apply="assistant.applyProposedPatch"
       @close="assistant.proposedPatch.value = null" @open-diff="emit('open-patch-diff', $event)" />
     <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
@@ -822,12 +999,14 @@ onMounted(() => {
       </button>
       <span class="ai-patch-entry__line" aria-hidden="true"></span>
     </div>
-    <AiWebSourcesPanel v-if="webSourcesVisible" :sources="webSources.sources.value"
-      :activity="planVisible ? null : webSources.activity.value" :error-message="webSources.errorMessage.value"
+    <AiWebSourcesPanel
+v-if="webSourcesVisible" :sources="webSources.sources.value"
+      :activity="planProgressVisible ? null : webSources.activity.value" :error-message="webSources.errorMessage.value"
       :is-searching="webSources.isSearching.value" :network-permission="networkPermission"
       @search="handleSearchWebSources" @fetch-source="handleFetchWebSource" @clear="webSources.clear" />
-    <div class="ai-composer-shell" :class="{ 'has-plan': planVisible }">
-      <AiPlanModePanel v-if="planVisible" :goal="planActiveGoal" :plan-summary="planSummary"
+    <div class="ai-composer-shell" :class="{ 'has-plan': planProgressVisible }">
+      <AiPlanModePanel
+v-if="planProgressVisible" :goal="planActiveGoal" :plan-summary="planSummary"
         :plan-status="planStatus" :plan-id="planId" :plan-version="planVersion" :plan-thread-id="planThreadId"
         :plan-created-at="planCreatedAt" :plan-updated-at="planUpdatedAt" :plan-executed-at="planExecutedAt"
         :plan-rejection-reason="planRejectionReason" :plan-error-message="planExecutionErrorMessage"
@@ -841,10 +1020,12 @@ onMounted(() => {
         @reset="handleResetPlan" @run-step="handleRunStep" @pause-run="handlePauseRun" @resume-run="handleResumeRun"
         @cancel-run="handleCancelRun" @resolve-tool-confirmation="handleResolveToolConfirmation" />
       <div v-if="directToolConfirmationVisible && planPendingToolConfirmation" class="ai-direct-tool-confirmation">
-        <AiToolConfirmationCard :confirmation="planPendingToolConfirmation" :disabled="isAgentRunActionPending"
+        <AiToolConfirmationCard
+:confirmation="planPendingToolConfirmation" :disabled="isAgentRunActionPending"
           @resolve="handleResolveToolConfirmation" />
       </div>
-      <AiPromptInput v-model="assistant.draft.value" v-model:active-mode="assistant.activeMode.value"
+      <AiPromptInput
+v-model="assistant.draft.value" v-model:active-mode="assistant.activeMode.value"
         :disabled="assistant.isSending.value" :error-message="assistant.errorMessage.value" :submit-label="submitLabel"
         :provider-label="aiIconTitle" :attachments="assistant.attachedFiles.value"
         :has-attachments="assistant.attachedFiles.value.length > 0" :token-context="tokenContextProps"
@@ -852,7 +1033,8 @@ onMounted(() => {
         @remove-file="assistant.removeAttachedFile" />
     </div>
 
-    <AiProviderSettings v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
+    <AiProviderSettings
+v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
       :open="assistant.isSettingsOpen.value" :config="assistant.config.value"
       :profiles="assistant.providerProfiles.value" :load-profile-detail="assistant.getProviderProfileDetail"
       @close="assistant.isSettingsOpen.value = false" @save="saveSettings" @save-credentials="saveCredentials"
@@ -1264,13 +1446,13 @@ onMounted(() => {
 }
 
 .ai-composer-shell.has-plan {
-  background: #ffffff;
+  background: transparent;
 }
 
 .ai-composer-shell :global(.ai-plan-mode-panel) {
   border-top: 0;
   background: transparent;
-  padding: 8px 10px 0;
+  padding: 0 0 calc(var(--app-density-scale) * 0.125rem);
 }
 
 .ai-direct-tool-confirmation {

@@ -28,6 +28,27 @@ const clipboardMock = vi.hoisted(() => ({
   writeFileSystemPathToClipboard: vi.fn().mockResolvedValue(undefined),
 }));
 
+const LinearContextMenuStub = {
+  props: ['open', 'groups'],
+  emits: ['select'],
+  template: `
+    <div v-if="open" class="linear-context-menu-root">
+      <template v-for="group in groups" :key="group.key">
+        <button
+          v-for="item in group.items"
+          :key="item.key"
+          type="button"
+          data-slot="dropdown-menu-item"
+          :disabled="item.disabled"
+          @pointerdown="$emit('select', item)"
+        >
+          {{ item.label }}
+        </button>
+      </template>
+    </div>
+  `,
+};
+
 vi.mock('@/services/tauri', () => ({
   tauriService: tauriServiceMock,
 }));
@@ -192,6 +213,11 @@ const mountPanel = async (status = createStatus()) => {
       workspaceRootPath: 'D:/repo',
       activePath: null,
     },
+    global: {
+      stubs: {
+        LinearContextMenu: LinearContextMenuStub,
+      },
+    },
   });
   await flushPromises();
   return wrapper;
@@ -243,7 +269,7 @@ describe('SourceControlPanel', () => {
 
     expect(tauriServiceMock.initGitRepository).toHaveBeenCalledWith('D:/repo');
     expect(tauriServiceMock.getGitRepositoryStatus).toHaveBeenLastCalledWith('D:/repo');
-    expect(wrapper.find('.source-control-repo-name').text()).toBe('repo');
+    expect(wrapper.find('.source-control-branch-name').text()).toBe('main');
   });
 
   it('初始化后仍未得到当前工作区仓库时停留在引导页并显示错误', async () => {
@@ -264,12 +290,15 @@ describe('SourceControlPanel', () => {
   it('批量暂存会调用真实 Git store/IPC 路径', async () => {
     const wrapper = await mountPanel();
 
+    await wrapper.get('[aria-label="更多 Git 操作"]').trigger('click');
+    await flushPromises();
+
     const stageAllButton = wrapper
-      .findAll('.source-control-toolbar-btn')
+      .findAll('[data-slot="dropdown-menu-item"]')
       .find((button) => button.text() === '全部暂存');
     expect(stageAllButton).toBeDefined();
 
-    await stageAllButton?.trigger('click');
+    await stageAllButton?.trigger('pointerdown');
     await flushPromises();
 
     expect(tauriServiceMock.stageGitPaths).toHaveBeenCalledWith({
@@ -296,11 +325,12 @@ describe('SourceControlPanel', () => {
     });
     await flushPromises();
 
-    const diffMenuItem = Array.from(document.body.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-item"]'))
-      .find((button) => button.textContent?.includes('查看 Diff'));
+    const diffMenuItem = wrapper
+      .findAll('[data-slot="dropdown-menu-item"]')
+      .find((button) => button.text().includes('查看 Diff'));
     expect(diffMenuItem).toBeDefined();
 
-    diffMenuItem?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    await diffMenuItem?.trigger('pointerdown');
     await flushPromises();
 
     expect(wrapper.emitted('open-diff')).toEqual([
@@ -337,11 +367,12 @@ describe('SourceControlPanel', () => {
     });
     await flushPromises();
 
-    const copyPathMenuItem = Array.from(document.body.querySelectorAll<HTMLElement>('[data-slot="dropdown-menu-item"]'))
-      .find((button) => button.textContent?.includes('复制路径'));
+    const copyPathMenuItem = wrapper
+      .findAll('[data-slot="dropdown-menu-item"]')
+      .find((button) => button.text().includes('复制路径'));
     expect(copyPathMenuItem).toBeDefined();
 
-    copyPathMenuItem?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    await copyPathMenuItem?.trigger('pointerdown');
     await flushPromises();
 
     expect(clipboardMock.writeFileSystemPathToClipboard).toHaveBeenCalledWith(

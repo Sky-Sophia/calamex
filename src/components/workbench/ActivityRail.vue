@@ -39,15 +39,9 @@ viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-wid
     </button>
     <button
 type="button" class="activity-button app-tooltip-target" :class="{ 'is-active': activeView === 'run' }"
-      data-tooltip="运行" data-tooltip-placement="right" data-tooltip-lock-placement="true" aria-label="运行"
+      data-tooltip="模板" data-tooltip-placement="right" data-tooltip-lock-placement="true" aria-label="模板"
       :aria-pressed="activeView === 'run'" @click="emit('select-view', 'run')">
-      <svg
-viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.7"
-        stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3.5" y="5" width="17" height="14" rx="2" />
-        <path d="M7 9l3 3-3 3" />
-        <path d="M12.5 15h4.5" />
-      </svg>
+      <LibraryBig class="h-5 w-5" aria-hidden="true" />
     </button>
     <button
 type="button" class="activity-button app-tooltip-target"
@@ -79,6 +73,7 @@ viewBox="0 0 16 16" class="activity-settings-icon h-4.5 w-4.5" fill="currentColo
 
 <script setup lang="ts">
 import type { TWorkbenchSidebarView } from '@/types/app';
+import { LibraryBig } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
 defineProps<{

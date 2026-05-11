@@ -82,9 +82,10 @@ export const light: IRoles = {
         modified: P.lightBgAccentEmphasis,
         added: P.lightFgSuccess,
         deleted: P.lightFgDanger,
-        addedSubtle: P.lightBgSuccessMuted,
-        deletedSubtle: P.lightBgDangerMuted,
+        addedSubtle: P.lightDiffInsertedLineBackground,
+        deletedSubtle: P.lightDiffRemovedLineBackground,
         modifiedSubtle: P.lightBgAccentMuted,
+        divider: P.lightDiffDivider,
     },
 
     terminal: {

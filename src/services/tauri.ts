@@ -566,6 +566,13 @@ const agentSidecarHealthIpc = defineContractIpc(
   { idempotent: true, audit: 'sensitive', timeoutMs: 10_000 },
 );
 
+const agentSidecarRestartIpc = defineContractIpc(
+  'agent_sidecar_restart',
+  '重启 Agent sidecar 进程',
+  tauriContracts.agentSidecarRestart,
+  { audit: 'sensitive', timeoutMs: 30_000 },
+);
+
 const agentSidecarChatIpc = definePayloadIpc(
   'agent_sidecar_chat',
   '通过 Node sidecar 执行 Agent Ask',
@@ -614,6 +621,28 @@ const agentSidecarPlanFinishIpc = definePayloadIpc(
   '收口 Agent sidecar 计划状态',
   tauriContracts.agentSidecarPlanFinish,
   { audit: 'sensitive', timeoutMs: AGENT_SIDECAR_TASK_TIMEOUT_MS },
+);
+
+const agentSidecarPlanValidateIpc = definePayloadIpc(
+  'agent_sidecar_plan_validate',
+  '验证 Agent sidecar 计划执行结果',
+  tauriContracts.agentSidecarPlanValidate,
+  {
+    audit: 'sensitive',
+    timeoutMs: AGENT_SIDECAR_TASK_TIMEOUT_MS,
+    measureInput: measureAiChatInput,
+  },
+);
+
+const agentSidecarPlanReplanIpc = definePayloadIpc(
+  'agent_sidecar_plan_replan',
+  '根据验证结果重新生成 Agent sidecar 计划',
+  tauriContracts.agentSidecarPlanReplan,
+  {
+    audit: 'sensitive',
+    timeoutMs: AGENT_SIDECAR_TASK_TIMEOUT_MS,
+    measureInput: measureAiChatInput,
+  },
 );
 
 const agentSidecarExecuteIpc = definePayloadIpc(
@@ -1295,6 +1324,8 @@ export const tauriService: ITauriService & {
 } = {
   agentSidecarHealth: () => agentSidecarHealthIpc(undefined),
 
+  agentSidecarRestart: () => agentSidecarRestartIpc(undefined),
+
   agentSidecarChat: agentSidecarChatIpc,
 
   agentSidecarPlan: agentSidecarPlanIpc,
@@ -1306,6 +1337,10 @@ export const tauriService: ITauriService & {
   agentSidecarPlanReject: agentSidecarPlanRejectIpc,
 
   agentSidecarPlanFinish: agentSidecarPlanFinishIpc,
+
+  agentSidecarPlanValidate: agentSidecarPlanValidateIpc,
+
+  agentSidecarPlanReplan: agentSidecarPlanReplanIpc,
 
   agentSidecarExecute: agentSidecarExecuteIpc,
 

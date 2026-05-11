@@ -21,8 +21,20 @@ import type { IGitRepositoryStatusPayload } from '@/types/git';
 import { createDefaultAiModelEndpointConfig } from '@/utils/ai-config';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { computed, nextTick, ref } from 'vue';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+    computed,
+    defineComponent,
+    h,
+    inject,
+    nextTick,
+    onBeforeUnmount,
+    onMounted,
+    provide,
+    ref,
+    type ComputedRef,
+    type InjectionKey,
+} from 'vue';
 
 const useAiAssistantMock = vi.hoisted(() => vi.fn());
 const useAiSuggestionPoolMock = vi.hoisted(() => vi.fn());
@@ -42,6 +54,87 @@ interface IAiConversationThreadMock {
     updatedAt: string;
     messages: IAiChatMessage[];
 }
+
+interface ITestDropdownMenuContext {
+    open: ComputedRef<boolean>;
+    setOpen(value: boolean): void;
+}
+
+const TEST_DROPDOWN_MENU_CONTEXT: InjectionKey<ITestDropdownMenuContext> =
+    Symbol('test-dropdown-menu-context');
+
+const TestDropdownMenu = defineComponent({
+    name: 'TestDropdownMenu',
+    props: {
+        open: {
+            type: Boolean,
+            default: false,
+        },
+    },
+    emits: ['update:open'],
+    setup(props, { emit, slots }) {
+        const root = ref<HTMLElement | null>(null);
+        const open = computed(() => props.open);
+        const setOpen = (value: boolean): void => {
+            emit('update:open', value);
+        };
+        const handlePointerDown = (event: PointerEvent): void => {
+            if (!props.open) {
+                return;
+            }
+
+            const targetNode = event.target instanceof Node ? event.target : null;
+            if (targetNode && root.value?.contains(targetNode)) {
+                return;
+            }
+
+            setOpen(false);
+        };
+
+        provide(TEST_DROPDOWN_MENU_CONTEXT, { open, setOpen });
+        onMounted(() => {
+            document.body.addEventListener('pointerdown', handlePointerDown);
+        });
+        onBeforeUnmount(() => {
+            document.body.removeEventListener('pointerdown', handlePointerDown);
+        });
+
+        return () => h('div', { ref: root }, slots.default?.());
+    },
+});
+
+const TestDropdownMenuTrigger = defineComponent({
+    name: 'TestDropdownMenuTrigger',
+    setup(_props, { slots }) {
+        const context = inject(TEST_DROPDOWN_MENU_CONTEXT);
+
+        return () => h('div', {
+            'data-slot': 'dropdown-menu-trigger',
+            onClick: (event: MouseEvent) => {
+                event.stopPropagation();
+                context?.setOpen(!context.open.value);
+            },
+        }, slots.default?.());
+    },
+});
+
+const TestDropdownMenuContent = defineComponent({
+    name: 'TestDropdownMenuContent',
+    inheritAttrs: false,
+    setup(_props, { attrs, slots }) {
+        const context = inject(TEST_DROPDOWN_MENU_CONTEXT);
+
+        return () => context?.open.value
+            ? h('section', attrs, slots.default?.())
+            : null;
+    },
+});
+
+const historyDropdownStubs = {
+    DropdownMenu: TestDropdownMenu,
+    DropdownMenuTrigger: TestDropdownMenuTrigger,
+    DropdownMenuContent: TestDropdownMenuContent,
+};
 
 const createAssistantMock = (
     messagesList: IAiChatMessage[],
@@ -161,6 +254,7 @@ const createAssistantMock = (
             removeStep: vi.fn(),
             approvePlan: vi.fn(),
             resetPlan: vi.fn(),
+            restorePersistedPlanState: vi.fn().mockResolvedValue(undefined),
         },
         canPreviewPatch: computed(() => false),
         sendButtonLabel: computed(() => '发送'),
@@ -296,6 +390,10 @@ describe('AiAssistantPanel', () => {
             rotateBatch: vi.fn(),
             refreshPool: vi.fn(),
         });
+    });
+
+    afterEach(() => {
+        document.body.innerHTML = '';
     });
 
     it('顶部保留 AI 图标和模型名称，但不再渲染 Chat Agent Plan 模式选择入口', () => {
@@ -608,7 +706,7 @@ describe('AiAssistantPanel', () => {
         expect(wrapper.find('.ai-runtime-timeline').exists()).toBe(false);
     });
 
-    it('shows plan panel only in plan mode when a plan exists', () => {
+    it('在 plan mode 有待确认计划时把确认卡渲染到对话流里', () => {
         const assistantMock = createAssistantMock([]);
         assistantMock.activeMode.value = 'plan';
         assistantMock.agentPlan.store.hasPlan = true;
@@ -652,18 +750,99 @@ describe('AiAssistantPanel', () => {
             },
             global: {
                 stubs: {
+                    AiChatThread: {
+                        template: '<div data-testid="chat-thread"><slot name="after-messages" /></div>',
+                    },
+                    AiContextChips: { template: '<div />' },
+                    AiPatchPreview: { template: '<div />' },
+                    AiPromptInput: { template: '<div />' },
+                    AiProviderSettings: { template: '<div />' },
+                    AiPlanModePanel: { template: '<div data-testid="plan-mode-panel" />' },
+                    AiPlanConfirmationMessage: { template: '<div data-testid="plan-confirmation-message" />' },
+                    teleport: true,
+                },
+            },
+        });
+
+        expect(wrapper.find('[data-testid="plan-mode-panel"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="plan-confirmation-message"]').exists()).toBe(true);
+    });
+
+    it('生成计划时把对话等待态文案切换为正在生成计划', () => {
+        const assistantMock = createAssistantMock([createMessage(1)]);
+        assistantMock.activeMode.value = 'plan';
+        assistantMock.isSending.value = true;
+        assistantMock.agentPlan.store.isPlanning = true;
+        useAiAssistantMock.mockReturnValue(assistantMock);
+
+        const wrapper = mount(AiAssistantPanel, {
+            props: {
+                document: createDocument(),
+                activeRun: null as IActiveRunSummary | null,
+                analysis: createAnalysis(),
+                selection: null as IEditorSelectionSummary | null,
+                gitStatus: createGitStatus(),
+                workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+            },
+            global: {
+                stubs: {
+                    AiChatThread: {
+                        props: ['typingLabel'],
+                        template: '<div class="chat-thread-stub">{{ typingLabel }}</div>',
+                    },
+                    AiContextChips: { template: '<div />' },
+                    AiPatchPreview: { template: '<div />' },
+                    AiPromptInput: { template: '<div />' },
+                    AiProviderSettings: { template: '<div />' },
+                    AiPlanModePanel: { template: '<div />' },
+                    AiWebSourcesPanel: { template: '<div />' },
+                    AiToolConfirmationCard: { template: '<div />' },
+                    teleport: true,
+                },
+            },
+        });
+
+        expect(wrapper.get('.chat-thread-stub').text()).toBe('正在生成计划');
+    });
+
+    it('刷新恢复时只要有持久化 planId 就回到计划模式并回查计划记录', async () => {
+        const assistantMock = createAssistantMock([]);
+        assistantMock.activeMode.value = 'agent';
+        Reflect.set(assistantMock.agentPlan.store, 'mode', 'plan');
+        assistantMock.agentPlan.store.planId = 'plan-persisted-1';
+        assistantMock.agentPlan.store.planVersion = 1;
+        assistantMock.agentPlan.store.planStatus = 'pending_approval';
+        useAiAssistantMock.mockReturnValue(assistantMock);
+
+        const wrapper = mount(AiAssistantPanel, {
+            props: {
+                document: createDocument(),
+                activeRun: null as IActiveRunSummary | null,
+                analysis: createAnalysis(),
+                selection: null as IEditorSelectionSummary | null,
+                gitStatus: createGitStatus(),
+                workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+            },
+            global: {
+                stubs: {
                     AiChatThread: { template: '<div />' },
                     AiContextChips: { template: '<div />' },
                     AiPatchPreview: { template: '<div />' },
                     AiPromptInput: { template: '<div />' },
                     AiProviderSettings: { template: '<div />' },
                     AiPlanModePanel: { template: '<div data-testid="plan-mode-panel" />' },
+                    AiWebSourcesPanel: { template: '<div />' },
+                    AiToolConfirmationCard: { template: '<div />' },
                     teleport: true,
                 },
             },
         });
 
-        expect(wrapper.find('[data-testid="plan-mode-panel"]').exists()).toBe(true);
+        await nextTick();
+
+        expect(assistantMock.activeMode.value).toBe('plan');
+        expect(wrapper.find('[data-testid="plan-mode-panel"]').exists()).toBe(false);
+        expect(assistantMock.agentPlan.restorePersistedPlanState).toHaveBeenCalledTimes(1);
     });
 
     it('does not show the plan panel in agent mode even when stale plan state exists', () => {
@@ -698,7 +877,7 @@ describe('AiAssistantPanel', () => {
         expect(wrapper.find('[data-testid="plan-mode-panel"]').exists()).toBe(false);
     });
 
-    it('wires prompt mode updates into the real panel state', async () => {
+    it('wires prompt mode updates into the plan confirmation message state', async () => {
         const assistantMock = createAssistantMock([]);
         assistantMock.activeMode.value = 'agent';
         assistantMock.agentPlan.store.hasPlan = true;
@@ -717,7 +896,9 @@ describe('AiAssistantPanel', () => {
             },
             global: {
                 stubs: {
-                    AiChatThread: { template: '<div />' },
+                    AiChatThread: {
+                        template: '<div data-testid="chat-thread"><slot name="after-messages" /></div>',
+                    },
                     AiContextChips: { template: '<div />' },
                     AiPatchPreview: { template: '<div />' },
                     AiPromptInput: {
@@ -726,6 +907,7 @@ describe('AiAssistantPanel', () => {
                     },
                     AiProviderSettings: { template: '<div />' },
                     AiPlanModePanel: { template: '<div data-testid="plan-mode-panel" />' },
+                    AiPlanConfirmationMessage: { template: '<div data-testid="plan-confirmation-message" />' },
                     teleport: true,
                 },
             },
@@ -737,7 +919,8 @@ describe('AiAssistantPanel', () => {
         await nextTick();
 
         expect(assistantMock.activeMode.value).toBe('plan');
-        expect(wrapper.find('[data-testid="plan-mode-panel"]').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="plan-mode-panel"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="plan-confirmation-message"]').exists()).toBe(true);
     });
 
     it('简单工具确认不再冒充计划面板', () => {
@@ -856,10 +1039,10 @@ describe('AiAssistantPanel', () => {
         ]);
         const steps = [
             createPlanStep('plan-step-1', '定位对话流运行反馈', 'done'),
-            createPlanStep('plan-step-2', '修复计划折叠交互', 'running'),
-            createPlanStep('plan-step-3', '执行全过程测试', 'pending'),
+            createPlanStep('plan-step-2', '修复计划折叠交互', 'done'),
+            createPlanStep('plan-step-3', '执行全过程测试', 'done'),
         ];
-        const activeRun = createAgentRun(steps, 'plan-step-2');
+        const activeRun = createAgentRun(steps, null);
 
         assistantMock.activeMode.value = 'plan';
         assistantMock.agentPlan.store.hasPlan = true;
@@ -972,12 +1155,14 @@ describe('AiAssistantPanel', () => {
                     AiPromptInput: { template: '<div />' },
                     AiProviderSettings: { template: '<div />' },
                     AiTaskPlan: { template: '<div />' },
+                    ...historyDropdownStubs,
                     teleport: true,
                 },
             },
         });
 
-        await wrapper.get('[aria-label="对话记录"]').trigger('click');
+        await wrapper.get('[aria-label="对话记录"]').trigger('click', { button: 0, ctrlKey: false });
+        await nextTick();
 
         expect(wrapper.findAll('.ai-history-item')).toHaveLength(20);
         expect(wrapper.text()).toContain('对话记录');
@@ -1009,6 +1194,7 @@ describe('AiAssistantPanel', () => {
                     AiPlanModePanel: { template: '<div />' },
                     AiPromptInput: { template: '<div />' },
                     AiProviderSettings: { template: '<div />' },
+                    ...historyDropdownStubs,
                     teleport: true,
                 },
             },
@@ -1041,13 +1227,22 @@ describe('AiAssistantPanel', () => {
                     AiPlanModePanel: { template: '<div />' },
                     AiPromptInput: { template: '<div />' },
                     AiProviderSettings: { template: '<div />' },
+                    ...historyDropdownStubs,
                     teleport: true,
                 },
             },
         });
 
-        await wrapper.get('[aria-label="对话记录"]').trigger('click');
-        await wrapper.findAll('.ai-history-button')[1]?.trigger('click');
+        await wrapper.get('[aria-label="对话记录"]').trigger('click', { button: 0, ctrlKey: false });
+        await nextTick();
+
+        const historyButtons = wrapper.findAll('.ai-history-button');
+        expect(historyButtons).toHaveLength(2);
+        expect(historyButtons[0]?.text()).toContain('第 2 组对话');
+        expect(historyButtons[1]?.text()).toContain('第 1 组对话');
+
+        await historyButtons[1]?.trigger('click');
+        await nextTick();
 
         expect(assistantMock.switchConversation).toHaveBeenCalledWith('thread-1');
     });
@@ -1119,15 +1314,17 @@ describe('AiAssistantPanel', () => {
                     AiPlanModePanel: { template: '<div />' },
                     AiPromptInput: { template: '<div />' },
                     AiProviderSettings: { template: '<div />' },
+                    ...historyDropdownStubs,
                     teleport: true,
                 },
             },
         });
 
-        await wrapper.get('[aria-label="对话记录"]').trigger('click');
+        await wrapper.get('[aria-label="对话记录"]').trigger('click', { button: 0, ctrlKey: false });
+        await nextTick();
         expect(wrapper.find('.ai-history-popover').exists()).toBe(true);
 
-        document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
         await nextTick();
 
         expect(wrapper.find('.ai-history-popover').exists()).toBe(false);

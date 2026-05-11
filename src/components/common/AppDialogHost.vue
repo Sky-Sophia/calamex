@@ -1,7 +1,8 @@
 <template>
   <AlertDialog :open="Boolean(dialogState)">
     <AlertDialogPortal v-if="dialogState">
-      <AlertDialogContent ref="dialogPanelRef" class="app-dialog-panel" tabindex="-1"
+      <AlertDialogContent
+ref="dialogPanelRef" class="app-dialog-panel" tabindex="-1"
         :data-variant="dialogState.variant" :aria-labelledby="titleId" :aria-describedby="descriptionId"
         @open-auto-focus="handleOpenAutoFocus">
         <div class="app-dialog-copy">
@@ -14,7 +15,8 @@
         </div>
         <div class="app-dialog-footer">
           <AlertDialogCancel as-child>
-            <Button variant="ghost" size="sm" class="app-dialog-button app-dialog-secondary-button"
+            <Button
+variant="ghost" size="sm" class="app-dialog-button app-dialog-secondary-button"
               @click="handleAction('cancel')">
               {{ dialogState.cancelText }}
             </Button>

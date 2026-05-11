@@ -226,6 +226,34 @@ export const useAiAgentPlan = () => {
     applyPlanRecordPayload(payload, { replacePlanSnapshot: true });
   };
 
+  const restorePersistedPlanState = async (): Promise<void> => {
+    const hasPersistedSnapshot = store.steps.length > 0 ||
+      Boolean(store.activeRun) ||
+      Boolean(store.planId);
+
+    if (!hasPersistedSnapshot) {
+      return;
+    }
+
+    store.mode = 'plan';
+    store.isClassifying = false;
+    store.isPlanning = false;
+    store.isApproving = false;
+
+    if (!store.planId) {
+      return;
+    }
+
+    await refreshPlanRecord(store.planId, store.planVersion ?? undefined).catch((error: unknown) => {
+      logger.warn({
+        event: 'ai-agent-plan-persisted-refresh-failed',
+        err: error,
+        planId: store.planId,
+        planVersion: store.planVersion,
+      });
+    });
+  };
+
   const updateStep = (
     stepId: string,
     partial: Partial<IAiTaskPlanStep>,
@@ -320,6 +348,7 @@ export const useAiAgentPlan = () => {
     createPlan,
     regeneratePlan,
     refreshPlanRecord,
+    restorePersistedPlanState,
     updateStep,
     removeStep,
     approvePlan,

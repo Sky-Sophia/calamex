@@ -115,6 +115,53 @@ describe('AiMessageItem', () => {
     expect(wrapper.find('.ai-message-bubble').exists()).toBe(false);
   });
 
+  it('空的流式助手消息默认显示脑袋图标和准备回复文案', () => {
+    const wrapper = mount(AiMessageItem, {
+      props: {
+        message: createMessage({
+          stream: {
+            status: 'streaming',
+          },
+        }),
+        platformId: 'deepseek',
+        providerLabel: 'DeepSeek',
+      },
+      global: {
+        stubs: {
+          AiMarkdown: { template: '<div class="markdown-stub" />' },
+        },
+      },
+    });
+
+    expect(wrapper.find('.ai-thinking-status').exists()).toBe(true);
+    expect(wrapper.find('.ai-thinking-status__icon').exists()).toBe(true);
+    expect(wrapper.text()).toContain('正在准备回复');
+  });
+
+  it('最终回答开始后不再显示准备回复状态', () => {
+    const wrapper = mount(AiMessageItem, {
+      props: {
+        message: createMessage({
+          content: '这是最终回答。',
+          stream: {
+            status: 'streaming',
+            finalAnswerStarted: true,
+          },
+        }),
+        platformId: 'deepseek',
+        providerLabel: 'DeepSeek',
+      },
+      global: {
+        stubs: {
+          AiMarkdown: { template: '<div class="markdown-stub">这是最终回答。</div>' },
+        },
+      },
+    });
+
+    expect(wrapper.find('.ai-thinking-status').exists()).toBe(false);
+    expect(wrapper.find('.ai-message-bubble').exists()).toBe(true);
+  });
+
   it('流式生成时显示输出 token 进度', () => {
     const wrapper = mount(AiMessageItem, {
       props: {
@@ -588,6 +635,13 @@ describe('AiMessageItem', () => {
 
     await wrapper.get('.ai-image-attachment-preview-link').trigger('click');
 
-    expect(lightboxMock.instances[0]?.loadAndOpen).toHaveBeenCalledWith(0);
+    expect(lightboxMock.instances[0]?.loadAndOpen).toHaveBeenCalledWith(0, [
+      expect.objectContaining({
+        src: 'blob:attachment-preview-message',
+        width: 1280,
+        height: 720,
+        alt: 'screenshot.png',
+      }),
+    ]);
   });
 });

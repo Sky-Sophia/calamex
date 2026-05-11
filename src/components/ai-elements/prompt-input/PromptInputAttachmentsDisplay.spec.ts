@@ -141,7 +141,14 @@ describe('PromptInputAttachmentsDisplay', () => {
     expect(wrapper.text()).not.toContain('4.5 KB');
 
     await wrapper.get('.ai-image-attachment-preview-link').trigger('click');
-    expect(lightboxMock.instances[0]?.loadAndOpen).toHaveBeenCalledWith(0);
+    expect(lightboxMock.instances[0]?.loadAndOpen).toHaveBeenCalledWith(0, [
+      expect.objectContaining({
+        src: 'data:image/png;base64,ZmFrZQ==',
+        width: 665,
+        height: 329,
+        alt: 'pasted-image.png',
+      }),
+    ]);
 
     await wrapper.get('.ai-image-attachment-preview-remove').trigger('click');
     expect(wrapper.emitted('remove')).toEqual([['image-1']]);

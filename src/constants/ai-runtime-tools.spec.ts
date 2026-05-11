@@ -7,5 +7,11 @@ describe('ai-runtime-tools', () => {
     expect(classifyRuntimeToolKind('tavily-search')).toBe('network');
     expect(classifyRuntimeToolKind('tavily-extract')).toBe('network');
     expect(classifyRuntimeToolKind('tavily_map')).toBe('network');
+    expect(classifyRuntimeToolKind('tavily-mcp_tavily_search')).toBe('network');
+  });
+
+  it('把 Mastra 官方浏览器工具识别为浏览器工具', () => {
+    expect(classifyRuntimeToolKind('browser_goto')).toBe('browser');
+    expect(classifyRuntimeToolKind('browser_snapshot')).toBe('browser');
   });
 });

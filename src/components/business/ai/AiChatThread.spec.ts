@@ -68,6 +68,26 @@ describe('AiChatThread', () => {
     expect(wrapper.find('.ai-logo').exists()).toBe(false);
   });
 
+  it('uses the provided standalone typing label', () => {
+    const wrapper = mount(AiChatThread, {
+      props: {
+        messages: [createMessage({ role: 'user', content: '生成计划', stream: undefined })],
+        isTyping: true,
+        typingLabel: '正在生成计划',
+        platformId: 'deepseek',
+        providerLabel: 'DeepSeek',
+      },
+      global: {
+        stubs: {
+          AiMessageItem: { template: '<div class="message-item-stub" />' },
+        },
+      },
+    });
+
+    expect(wrapper.find('.ai-message-typing').attributes('aria-label')).toBe('正在生成计划');
+    expect(wrapper.text()).toContain('正在生成计划');
+  });
+
   it('locks horizontal overflow inside the thread container instead of exposing a bottom slider', () => {
     const wrapper = mount(AiChatThread, {
       props: {

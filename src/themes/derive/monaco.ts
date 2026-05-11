@@ -144,7 +144,8 @@ function buildMonacoColors(
     const borderWeak = tokens.overlay.border;
     const borderSep = tokens.overlay.separator;
     const btnBg = isDark ? tokens.accent.statusbar : tokens.accent.strong;
-    const diffInsertedBackground = '#294a2b';
+    const diffInsertedBackground = tokens.diff.addedSubtle;
+    const diffRemovedBackground = tokens.diff.deletedSubtle;
 
     return {
         // ── 全局 ──
@@ -155,6 +156,7 @@ function buildMonacoColors(
         errorForeground: tokens.status.danger,
         'icon.foreground': fgSecondary,
         'selection.background': selection,
+        'sash.hoverBorder': tokens.diff.divider,
         'widget.shadow': isDark ? '#0308146b' : '#0f172a1f',
         'scrollbar.shadow': '#00000000',
 
@@ -226,6 +228,8 @@ function buildMonacoColors(
         'editorGutter.deletedBackground': tokens.diff.deleted,
         'diffEditor.insertedLineBackground': diffInsertedBackground,
         'diffEditor.insertedTextBackground': diffInsertedBackground,
+        'diffEditor.removedLineBackground': diffRemovedBackground,
+        'diffEditor.removedTextBackground': diffRemovedBackground,
 
         // ── Overview Ruler ──
         'editorOverviewRuler.border': '#00000000',

@@ -2,7 +2,8 @@
   <Teleport to="body">
     <ContextMenu v-if="props.open" :modal="false">
       <ContextMenuTrigger as-child>
-        <span ref="triggerRef" aria-hidden="true" class="linear-context-menu-trigger fixed size-px opacity-0"
+        <span
+ref="triggerRef" aria-hidden="true" class="linear-context-menu-trigger fixed size-px opacity-0"
           :style="anchorStyle" />
       </ContextMenuTrigger>
 
@@ -14,7 +15,8 @@
 
           <template v-for="item in group.items" :key="item.key">
             <ContextMenuSub v-if="item.children?.length">
-              <ContextMenuSubTrigger :disabled="item.disabled" :inset="resolveItemInset(item)"
+              <ContextMenuSubTrigger
+:disabled="item.disabled" :inset="resolveItemInset(item)"
                 class="text-[#1f1f1f] focus:bg-[#f5f5f5] focus:text-[#1f1f1f] data-[highlighted]:bg-[#f5f5f5] data-[highlighted]:text-[#1f1f1f] data-[state=open]:bg-[#f5f5f5] data-[state=open]:text-[#1f1f1f]">
                 <LinearContextMenuIcon v-if="item.icon" :icon="item.icon" class="size-4" />
                 <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
@@ -23,9 +25,11 @@
                 </ContextMenuShortcut>
               </ContextMenuSubTrigger>
 
-              <ContextMenuSubContent :side="submenuSide" :side-offset="4"
+              <ContextMenuSubContent
+:side="submenuSide" :side-offset="4"
                 class="linear-context-menu-root w-44 border border-[#e8e8e8] bg-[#ffffff] text-[#1f1f1f]">
-                <ContextMenuItem v-for="child in item.children" :key="child.key" :disabled="child.disabled"
+                <ContextMenuItem
+v-for="child in item.children" :key="child.key" :disabled="child.disabled"
                   :inset="resolveItemInset(child)" :variant="child.variant ?? 'default'"
                   class="text-[#1f1f1f] focus:bg-[#f5f5f5] focus:text-[#1f1f1f] data-[highlighted]:bg-[#f5f5f5] data-[highlighted]:text-[#1f1f1f]"
                   @select.prevent="handleItemSelect(child)" @pointerdown.prevent.stop="handleItemPointerDown(child)">
@@ -38,7 +42,8 @@
               </ContextMenuSubContent>
             </ContextMenuSub>
 
-            <ContextMenuItem v-else :disabled="item.disabled" :inset="resolveItemInset(item)"
+            <ContextMenuItem
+v-else :disabled="item.disabled" :inset="resolveItemInset(item)"
               :variant="item.variant ?? 'default'"
               class="text-[#1f1f1f] focus:bg-[#f5f5f5] focus:text-[#1f1f1f] data-[highlighted]:bg-[#f5f5f5] data-[highlighted]:text-[#1f1f1f]"
               @select.prevent="handleItemSelect(item)" @pointerdown.prevent.stop="handleItemPointerDown(item)">

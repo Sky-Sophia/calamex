@@ -69,45 +69,29 @@ const mountPanel = (overrides: Partial<InstanceType<typeof AiPlanModePanel>['$pr
     },
   });
 
-const findButtonByText = (
-  wrapper: ReturnType<typeof mountPanel>,
-  label: string,
-) => {
-  const button = wrapper.findAll('button').find((item) => item.text() === label);
-
-  if (!button) {
-    throw new Error(`找不到按钮：${label}`);
-  }
-
-  return button;
-};
-
 describe('AiPlanModePanel', () => {
-  it('在分类阶段先显示输入框上方的计划生成状态', () => {
+  it('分类阶段不在输入框上方渲染计划生成文案', () => {
     const wrapper = mountPanel({
       steps: [],
       isClassifying: true,
     });
 
-    expect(wrapper.text()).toContain('待办事项');
-    expect(wrapper.text()).toContain('正在判断是否需要计划');
-    expect(wrapper.find('.ai-plan-status-icon').exists()).toBe(true);
+    expect(wrapper.text()).toContain('执行进度');
+    expect(wrapper.text()).not.toContain('正在判断是否需要计划');
+    expect(wrapper.find('.ai-plan-step-queue').exists()).toBe(false);
   });
 
-  it('展示计划步骤并支持批准计划', async () => {
+  it('只展示执行步骤和进度，不承载计划审批动作', async () => {
     const wrapper = mountPanel();
 
-    expect(wrapper.text()).toContain('待办事项(0/3)');
-    const titleInputs = wrapper.findAll<HTMLInputElement>('input[aria-label="编辑计划步骤标题"]');
-    expect(titleInputs[0]?.element.value).toBe('收集上下文');
-    expect(titleInputs[1]?.element.value).toBe('输出方案');
-
-    await wrapper.find('.ai-plan-button.is-primary').trigger('click');
-
-    expect(wrapper.emitted('approve')).toHaveLength(1);
+    expect(wrapper.text()).toContain('执行进度(0/3)');
+    expect(wrapper.text()).toContain('收集上下文');
+    expect(wrapper.text()).toContain('输出方案');
+    expect(wrapper.find('input[aria-label="编辑计划步骤标题"]').exists()).toBe(false);
+    expect(wrapper.findAll('button').some((button) => button.text() === '批准并启动')).toBe(false);
   });
 
-  it('收起待办事项框后隐藏计划内容和运行按钮', async () => {
+  it('收起执行进度后隐藏步骤队列', async () => {
     const steps = [createStep(0), createStep(1), createStep(2)];
     const wrapper = mountPanel({
       steps,
@@ -117,14 +101,14 @@ describe('AiPlanModePanel', () => {
 
     expect(wrapper.get('.ai-plan-title-button').attributes('aria-expanded')).toBe('true');
     expect(wrapper.find('.ai-plan-body').exists()).toBe(true);
-    expect(wrapper.text()).toContain('执行下一步');
+    expect(wrapper.text()).toContain('收集上下文');
 
     await wrapper.get('.ai-plan-title-button').trigger('click');
 
     expect(wrapper.get('.ai-plan-title-button').attributes('aria-expanded')).toBe('false');
     expect(wrapper.find('.ai-plan-body').exists()).toBe(false);
-    expect(wrapper.text()).toContain('待办事项(0/3)');
-    expect(wrapper.text()).not.toContain('执行下一步');
+    expect(wrapper.text()).toContain('执行进度(0/3)');
+    expect(wrapper.text()).not.toContain('收集上下文');
 
     await wrapper.get('.ai-plan-title-button').trigger('click');
 
@@ -132,7 +116,7 @@ describe('AiPlanModePanel', () => {
     expect(wrapper.find('.ai-plan-body').exists()).toBe(true);
   });
 
-  it('计划已批准后禁用批准按钮并展示待执行说明', async () => {
+  it('计划运行后隐藏审批按钮并展示运行状态', async () => {
     const steps = [createStep(0), createStep(1), createStep(2)];
     const wrapper = mountPanel({
       steps,
@@ -140,41 +124,27 @@ describe('AiPlanModePanel', () => {
       activeRun: createRun(steps),
     });
 
-    const approveButton = findButtonByText(wrapper, '已批准');
-
     expect(wrapper.text()).toContain('运行中');
-    expect(approveButton.attributes('disabled')).toBeDefined();
+    expect(wrapper.findAll('button').some((button) => button.text() === '已批准')).toBe(false);
   });
 
-  it('编辑标题和删除步骤时向外抛出事件', async () => {
+  it('执行队列不提供本地编辑和删除入口', async () => {
     const wrapper = mountPanel();
-    const input = wrapper.find('input[aria-label="编辑计划步骤标题"]');
 
-    await input.setValue('重新收集上下文');
-    await input.trigger('keydown.enter');
-
-    expect(wrapper.emitted('updateStepTitle')).toEqual([
-      ['plan-step-1', '重新收集上下文'],
-    ]);
-
-    await wrapper.find('.ai-plan-step-remove').trigger('click');
-
-    expect(wrapper.emitted('removeStep')).toEqual([
-      ['plan-step-1'],
-    ]);
+    expect(wrapper.find('input[aria-label="编辑计划步骤标题"]').exists()).toBe(false);
+    expect(wrapper.find('.ai-plan-step-remove').exists()).toBe(false);
   });
 
-  it('持久化后的待审批计划禁用本地编辑以避免审批快照偏离', () => {
+  it('持久化后的待审批计划仍只显示只读执行队列', () => {
     const wrapper = mountPanel({
       planStatus: 'pending_approval',
     });
-    const input = wrapper.find('input[aria-label="编辑计划步骤标题"]');
 
-    expect(input.attributes('disabled')).toBeDefined();
-    expect(wrapper.find('.ai-plan-step-remove').attributes('disabled')).toBeDefined();
+    expect(wrapper.find('input[aria-label="编辑计划步骤标题"]').exists()).toBe(false);
+    expect(wrapper.find('.ai-plan-step-remove').exists()).toBe(false);
   });
 
-  it('展示计划审计元数据和版本记录', () => {
+  it('不在紧凑队列中展示计划审计元数据和版本记录', () => {
     const wrapper = mountPanel({
       planId: 'plan-audit-123456789',
       planVersion: 2,
@@ -188,14 +158,13 @@ describe('AiPlanModePanel', () => {
       ],
     });
 
-    expect(wrapper.text()).toContain('计划');
-    expect(wrapper.text()).toContain('v2');
-    expect(wrapper.text()).toContain('已拒绝');
-    expect(wrapper.text()).toContain('拒绝原因：需要调整范围');
-    expect(wrapper.text()).toContain('v1 · 已批准');
+    expect(wrapper.text()).not.toContain('plan-audit');
+    expect(wrapper.text()).not.toContain('v2');
+    expect(wrapper.text()).not.toContain('拒绝原因：需要调整范围');
+    expect(wrapper.text()).not.toContain('v1 · 已批准');
   });
 
-  it('展示运行状态并支持推进、暂停、取消 run', async () => {
+  it('运行中只展示状态、步骤和进度', async () => {
     const steps = [createStep(0), createStep(1), createStep(2)];
     const wrapper = mountPanel({
       steps,
@@ -204,18 +173,17 @@ describe('AiPlanModePanel', () => {
     });
 
     expect(wrapper.text()).toContain('运行中');
-    expect(wrapper.text()).toContain('0/3 步');
+    expect(wrapper.text()).toContain('执行进度(0/3)');
+    expect(wrapper.text()).toContain('收集上下文');
+    expect(wrapper.text()).not.toContain('暂停');
+    expect(wrapper.text()).not.toContain('取消');
 
-    await findButtonByText(wrapper, '执行下一步').trigger('click');
-    await findButtonByText(wrapper, '暂停').trigger('click');
-    await findButtonByText(wrapper, '取消').trigger('click');
-
-    expect(wrapper.emitted('runStep')).toHaveLength(1);
-    expect(wrapper.emitted('pauseRun')).toHaveLength(1);
-    expect(wrapper.emitted('cancelRun')).toHaveLength(1);
+    expect(wrapper.emitted('runStep')).toBeUndefined();
+    expect(wrapper.emitted('pauseRun')).toBeUndefined();
+    expect(wrapper.emitted('cancelRun')).toBeUndefined();
   });
 
-  it('有工具确认待处理时禁用继续执行按钮', () => {
+  it('有工具确认待处理时仍不把确认卡塞进执行队列', () => {
     const steps = [createStep(0), createStep(1), createStep(2)];
     const wrapper = mountPanel({
       steps,
@@ -235,10 +203,11 @@ describe('AiPlanModePanel', () => {
       },
     });
 
-    expect(findButtonByText(wrapper, '执行下一步').attributes('disabled')).toBeDefined();
+    expect(wrapper.findAll('button').some((button) => button.text() === '执行下一步')).toBe(false);
+    expect(wrapper.text()).not.toContain('允许 Agent 使用 run_test 吗？');
   });
 
-  it('在计划下方展示当前 Web 工具活动', () => {
+  it('不在执行队列中展示当前 Web 工具活动', () => {
     const wrapper = mountPanel({
       webActivity: {
         id: 'web-activity-1',
@@ -249,11 +218,11 @@ describe('AiPlanModePanel', () => {
       },
     });
 
-    expect(wrapper.text()).toContain('Tauri docs');
-    expect(wrapper.find('.ai-web-activity-spinner').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain('Tauri docs');
+    expect(wrapper.find('.ai-web-activity-spinner').exists()).toBe(false);
   });
 
-  it('在计划下方实时展示当前普通工具活动', () => {
+  it('不在执行队列中展示当前普通工具活动', () => {
     const wrapper = mountPanel({
       toolActivity: {
         id: 'tool-activity-1',
@@ -265,7 +234,7 @@ describe('AiPlanModePanel', () => {
       },
     });
 
-    expect(wrapper.text()).toContain('正在读取当前文件…');
-    expect(wrapper.find('.ai-plan-status-icon').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain('正在读取当前文件…');
+    expect(wrapper.find('.ai-plan-status-icon').exists()).toBe(false);
   });
 });

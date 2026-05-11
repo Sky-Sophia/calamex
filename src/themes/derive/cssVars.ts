@@ -94,6 +94,7 @@ export function emitCssVars(roles: IRoles, tokens: IComponentTokens): void {
     set('--diff-modified', tokens.diff.modified);
     set('--diff-added', tokens.diff.added);
     set('--diff-deleted', tokens.diff.deleted);
+    set('--diff-divider', tokens.diff.divider);
 
     // ── 浮层（菜单/下拉/Popover）────────────────────────────────────────────
     set('--overlay-bg', tokens.overlay.background);

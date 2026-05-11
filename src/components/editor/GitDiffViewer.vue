@@ -52,7 +52,7 @@ const resolveLineNumbers = (enabled: boolean): 'off' | 'on' => (enabled ? 'on' :
 const resolveRuntimeOptions = (): monaco.editor.IDiffEditorConstructionOptions => ({
   automaticLayout: false,
   contextmenu: false,
-  diffWordWrap: 'off',
+  diffWordWrap: 'on',
   enableSplitViewResizing: true,
   fixedOverflowWidgets: true,
   fontFamily: resolveEditorFontFamily(props.editorSettings.fontFamily),
@@ -81,6 +81,8 @@ const resolveRuntimeOptions = (): monaco.editor.IDiffEditorConstructionOptions =
   },
   useInlineViewWhenSpaceIsLimited: false,
   useShadowDOM: false,
+  wordWrap: 'on',
+  wrappingIndent: 'same',
 });
 
 const layoutDiffEditor = (): boolean => {
@@ -229,6 +231,8 @@ watch(
 }
 
 .git-diff-viewer-surface {
+  --vscode-sash-hover-size: var(--diff-resize-handle-width);
+
   min-height: 0;
   height: 100%;
   flex: 1 1 auto;

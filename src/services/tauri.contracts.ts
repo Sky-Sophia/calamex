@@ -7,8 +7,10 @@ import {
   agentSidecarPlanApproveRequestSchema,
   agentSidecarPlanFinishRequestSchema,
   agentSidecarPlanQueryRequestSchema,
+  agentSidecarPlanReplanRequestSchema,
   agentSidecarPlanRequestSchema,
   agentSidecarPlanRejectRequestSchema,
+  agentSidecarPlanValidateRequestSchema,
   agentSidecarResponsePayloadSchema,
 } from '@/types/agent-sidecar.schema';
 import {
@@ -351,6 +353,10 @@ export const tauriContracts = {
     inSchema: z.void(),
     outSchema: agentSidecarHealthPayloadSchema,
   },
+  agentSidecarRestart: {
+    inSchema: z.void(),
+    outSchema: agentSidecarHealthPayloadSchema,
+  },
   agentSidecarChat: {
     inSchema: agentSidecarChatRequestSchema,
     outSchema: agentSidecarResponsePayloadSchema,
@@ -373,6 +379,14 @@ export const tauriContracts = {
   },
   agentSidecarPlanFinish: {
     inSchema: agentSidecarPlanFinishRequestSchema,
+    outSchema: agentSidecarResponsePayloadSchema,
+  },
+  agentSidecarPlanValidate: {
+    inSchema: agentSidecarPlanValidateRequestSchema,
+    outSchema: agentSidecarResponsePayloadSchema,
+  },
+  agentSidecarPlanReplan: {
+    inSchema: agentSidecarPlanReplanRequestSchema,
     outSchema: agentSidecarResponsePayloadSchema,
   },
   agentSidecarExecute: {

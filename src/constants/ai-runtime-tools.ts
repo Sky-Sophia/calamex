@@ -77,6 +77,7 @@ const TOOL_KIND_MATCHERS: readonly IToolKindMatcher[] = [
         kind: 'browser',
         patterns: [
             /open_browser_page/u,
+            /^browser_/u,
             /browser_navigate/u,
             /browser_evaluate/u,
             /fetch_webpage/u,
@@ -86,6 +87,9 @@ const TOOL_KIND_MATCHERS: readonly IToolKindMatcher[] = [
     {
         kind: 'terminal',
         patterns: [
+            /mastra_workspace_execute_command/u,
+            /mastra_workspace_get_process_output/u,
+            /mastra_workspace_kill_process/u,
             /run_in_terminal/u,
             /get_terminal_output/u,
             /send_to_terminal/u,

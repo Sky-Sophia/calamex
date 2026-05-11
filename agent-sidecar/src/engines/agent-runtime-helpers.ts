@@ -40,10 +40,11 @@ const buildIdentityInstruction = (modelId: string): string => {
 
 const buildModeInstruction = (mode: TAgentMode): string => (mode === 'plan'
     ? [
-        'Plan 模式要求：使用 structured output 返回 AgentPlan，不要输出 Markdown 或额外解释。',
-        'steps 必须依据用户的真实任务制定，2 到 6 步，避免“分析/实现/测试”这类模板标题。',
-        '顶层可以包含 summary 和 requiresApproval；每个 step 必须包含 id、title、goal、status、tools、riskLevel、requiresApproval、expectedOutput。',
-        'step 可补充 description、files、commands、risks、acceptanceCriteria，用于 UI 展示和执行验收。',
+        'Plan 模式要求：使用 structured output 返回一个简洁的 json object，根对象必须直接包含 goal 和 steps，不要输出 Markdown 或额外解释。',
+        '像 Codex Plan Mode 一样，只给用户下一步要做什么的短步骤节点；由你根据任务复杂度自主判断步骤数量，通常 3 到 5 步，简单任务可以 2 步。',
+        '每个 step 的 title 必须短而具体，建议 8 到 18 个中文字符；不要写长段落、背景知识、验收清单或方案说明。',
+        '每个 step 必须包含 id、title、goal、status、tools、riskLevel、requiresApproval、expectedOutput；goal 和 expectedOutput 可以与 title 保持同样简短。',
+        '除非用户明确要求详细方案，否则不要生成 description、files、commands、risks、acceptanceCriteria。',
         'Plan 阶段只有只读工具，绝不能尝试写文件、运行命令、安装依赖或执行 Git 变更。',
         '如果使用 MCP 工具读取上下文，请先读取真实信息再生成计划。',
         '联网搜索必须优先使用 Tavily MCP 官方工具名：tavily-search 用于搜索，tavily-extract 用于读取网页内容，tavily-map / tavily-crawl 用于站点映射或抓取；不要在 Mastra sidecar 中生成旧的 web_search / web_fetch 伪工具名。',

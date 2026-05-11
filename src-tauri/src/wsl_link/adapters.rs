@@ -48,8 +48,12 @@ impl WslLinkTransportAdapter for VsockGrpcAdapter {
 #[cfg(windows)]
 pub mod windows_hyperv {
     use std::{
-        fmt, io, mem, os::windows::io::FromRawSocket, process::Command, sync::OnceLock,
-        time::Duration,
+        fmt, io, mem,
+        os::windows::{io::FromRawSocket, process::CommandExt},
+        process::{Command, Stdio},
+        sync::OnceLock,
+        thread,
+        time::{Duration, Instant},
     };
 
     use thiserror::Error;
@@ -73,6 +77,11 @@ pub mod windows_hyperv {
     pub const WSL_LINK_HV_VSOCK_TEMPLATE_DATA4: [u8; 8] =
         [0xbd, 0x58, 0x64, 0x00, 0x6a, 0x79, 0x86, 0xd3];
     pub const WSL_LINK_HV_VSOCK_MAX_LISTEN_PORT: u32 = 0x7fff_ffff;
+    pub const WSL_LINK_WSL_WAKE_TIMEOUT: Duration = Duration::from_secs(8);
+    pub const WSL_LINK_WSL_WAKE_POLL_INTERVAL: Duration = Duration::from_millis(250);
+    pub const WSL_LINK_AF_HYPERV_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(300);
+    const WSL_LINK_AF_HYPERV_CONNECT_ATTEMPTS: usize = 2;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     #[derive(Debug, Error, PartialEq, Eq)]
     pub enum WslLinkHypervAddressError {
@@ -88,6 +97,17 @@ pub mod windows_hyperv {
         HcsdiagFailed(String),
         #[error("WSL Link 未在 hcsdiag list 输出中找到运行中的 WSL2 VM GUID。")]
         WslVmGuidNotFound,
+        #[error("WSL Link 自动拉起默认 WSL2 发行版失败：{0}")]
+        WslWakeIo(String),
+        #[error(
+            "WSL Link 自动拉起默认 WSL2 发行版退出失败，退出码：{status_code:?}，输出：{output}"
+        )]
+        WslWakeFailed {
+            status_code: Option<i32>,
+            output: String,
+        },
+        #[error("WSL Link 自动拉起默认 WSL2 发行版后等待运行 VM 超时：{0:?}")]
+        WslWakeTimeout(Duration),
     }
 
     #[derive(Debug, Error)]
@@ -102,7 +122,7 @@ pub mod windows_hyperv {
         SetNonBlocking(i32),
         #[error("WSL Link AF_HYPERV connect 失败：{0}")]
         Connect(i32),
-        #[error("WSL Link AF_HYPERV connect 超时：{0:?}")]
+        #[error("WSL Link AF_HYPERV connect 超时：{0:?}。WSL2 已运行，但 WSL Link agent 可能尚未监听，请先启动 WSL Link agent 或稍后重试。")]
         ConnectTimeout(Duration),
         #[error("WSL Link AF_HYPERV select 失败：{0}")]
         Select(i32),
@@ -191,9 +211,11 @@ pub mod windows_hyperv {
         port: u32,
         timeout: Duration,
     ) -> Result<tokio::net::TcpStream, WslLinkHypervConnectError> {
-        let vm_id = resolve_running_wsl_vm_guid_with_hcsdiag()?;
+        let vm_id = tokio::task::spawn_blocking(resolve_running_wsl_vm_guid_with_auto_start)
+            .await
+            .map_err(|error| WslLinkHypervConnectError::TokioStream(io::Error::other(error)))??;
         let address = WslHypervSocketAddress::new(vm_id, port)?;
-        connect_hyperv_stream(address, timeout).await
+        connect_hyperv_stream_with_retry(address, timeout).await
     }
 
     pub async fn connect_hyperv_stream(
@@ -223,18 +245,30 @@ pub mod windows_hyperv {
 
     pub fn resolve_running_wsl_vm_guid_with_hcsdiag() -> Result<WslVmGuid, WslLinkHypervAddressError>
     {
-        let output = Command::new("hcsdiag.exe")
-            .arg("list")
+        let mut command = Command::new("hcsdiag.exe");
+        command.arg("list").creation_flags(CREATE_NO_WINDOW);
+        let output = command
             .output()
             .map_err(|error| WslLinkHypervAddressError::HcsdiagIo(error.to_string()))?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stderr = decode_command_output(&output.stderr);
             return Err(WslLinkHypervAddressError::HcsdiagFailed(stderr));
         }
 
         parse_hcsdiag_list_wsl_vm_guid(&String::from_utf8_lossy(&output.stdout))
             .ok_or(WslLinkHypervAddressError::WslVmGuidNotFound)
+    }
+
+    pub fn resolve_running_wsl_vm_guid_with_auto_start(
+    ) -> Result<WslVmGuid, WslLinkHypervAddressError> {
+        resolve_running_wsl_vm_guid_with_wake(
+            resolve_running_wsl_vm_guid_with_hcsdiag,
+            wake_default_wsl2_distribution,
+            thread::sleep,
+            WSL_LINK_WSL_WAKE_TIMEOUT,
+            WSL_LINK_WSL_WAKE_POLL_INTERVAL,
+        )
     }
 
     pub fn parse_hcsdiag_list_wsl_vm_guid(output: &str) -> Option<WslVmGuid> {
@@ -312,6 +346,112 @@ pub mod windows_hyperv {
             .find_map(|item| WslVmGuid::parse(item).ok())
     }
 
+    pub(super) fn resolve_running_wsl_vm_guid_with_wake<P, W, S>(
+        mut probe: P,
+        mut wake: W,
+        mut sleep: S,
+        timeout: Duration,
+        poll_interval: Duration,
+    ) -> Result<WslVmGuid, WslLinkHypervAddressError>
+    where
+        P: FnMut() -> Result<WslVmGuid, WslLinkHypervAddressError>,
+        W: FnMut() -> Result<(), WslLinkHypervAddressError>,
+        S: FnMut(Duration),
+    {
+        match probe() {
+            Ok(vm_id) => return Ok(vm_id),
+            Err(WslLinkHypervAddressError::WslVmGuidNotFound) => {}
+            Err(error) => return Err(error),
+        }
+
+        wake()?;
+        let started_at = Instant::now();
+        loop {
+            match probe() {
+                Ok(vm_id) => return Ok(vm_id),
+                Err(WslLinkHypervAddressError::WslVmGuidNotFound) => {}
+                Err(error) => return Err(error),
+            }
+
+            let elapsed = started_at.elapsed();
+            if elapsed >= timeout {
+                return Err(WslLinkHypervAddressError::WslWakeTimeout(timeout));
+            }
+
+            let delay = poll_interval.min(timeout.saturating_sub(elapsed));
+            if !delay.is_zero() {
+                sleep(delay);
+            }
+        }
+    }
+
+    fn wake_default_wsl2_distribution() -> Result<(), WslLinkHypervAddressError> {
+        let mut command = Command::new("wsl.exe");
+        command
+            .args(["--exec", "/bin/sh", "-lc", "true"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let output = command
+            .output()
+            .map_err(|error| WslLinkHypervAddressError::WslWakeIo(error.to_string()))?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let stdout = decode_command_output(&output.stdout);
+        let stderr = decode_command_output(&output.stderr);
+        Err(WslLinkHypervAddressError::WslWakeFailed {
+            status_code: output.status.code(),
+            output: command_failure_output(&stdout, &stderr),
+        })
+    }
+
+    fn command_failure_output(stdout: &str, stderr: &str) -> String {
+        match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
+            (true, true) => "无输出。".to_string(),
+            (false, true) => stdout.trim().to_string(),
+            (true, false) => stderr.trim().to_string(),
+            (false, false) => format!("{}\n{}", stdout.trim(), stderr.trim()),
+        }
+    }
+
+    pub(super) fn decode_command_output(bytes: &[u8]) -> String {
+        if bytes.is_empty() {
+            return String::new();
+        }
+
+        let output = if looks_like_utf16le(bytes) {
+            let units = bytes
+                .chunks_exact(2)
+                .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                .collect::<Vec<_>>();
+            String::from_utf16_lossy(&units)
+        } else {
+            String::from_utf8_lossy(bytes).to_string()
+        };
+
+        output
+            .replace('\u{feff}', "")
+            .replace('\0', "")
+            .trim()
+            .to_string()
+    }
+
+    fn looks_like_utf16le(bytes: &[u8]) -> bool {
+        bytes.len() >= 4
+            && bytes
+                .iter()
+                .skip(1)
+                .step_by(2)
+                .filter(|byte| **byte == 0)
+                .count()
+                >= 2
+    }
+
     fn format_guid(guid: &GUID) -> String {
         format!(
             "{:08x}-{:04x}-{:04x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
@@ -342,6 +482,30 @@ pub mod windows_hyperv {
         let std_stream = unsafe { std::net::TcpStream::from_raw_socket(raw_socket as _) };
         std_stream.set_nonblocking(true)?;
         tokio::net::TcpStream::from_std(std_stream).map_err(Into::into)
+    }
+
+    async fn connect_hyperv_stream_with_retry(
+        address: WslHypervSocketAddress,
+        timeout: Duration,
+    ) -> Result<tokio::net::TcpStream, WslLinkHypervConnectError> {
+        for attempt in 0..WSL_LINK_AF_HYPERV_CONNECT_ATTEMPTS {
+            match connect_hyperv_stream(address, timeout).await {
+                Ok(stream) => return Ok(stream),
+                Err(error)
+                    if should_retry_hyperv_connect(&error)
+                        && attempt + 1 < WSL_LINK_AF_HYPERV_CONNECT_ATTEMPTS =>
+                {
+                    tokio::time::sleep(WSL_LINK_AF_HYPERV_CONNECT_RETRY_DELAY).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        unreachable!("WSL Link AF_HYPERV connect attempts must be greater than zero")
+    }
+
+    pub(super) fn should_retry_hyperv_connect(error: &WslLinkHypervConnectError) -> bool {
+        matches!(error, WslLinkHypervConnectError::ConnectTimeout(_))
     }
 
     fn ensure_winsock_started() -> Result<(), WslLinkHypervConnectError> {
@@ -520,6 +684,8 @@ pub mod linux_vsock {
 mod tests {
     use super::*;
     use crate::wsl_link::manager::WslLinkTransportAdapter;
+    #[cfg(windows)]
+    use std::{cell::Cell, time::Duration};
 
     #[test]
     fn vsock_grpc_adapter_uses_reserved_port() {
@@ -600,5 +766,113 @@ mod tests {
         let output = "VM, Running, 11111111-2222-3333-4444-555555555555, Docker";
 
         assert!(windows_hyperv::parse_hcsdiag_list_wsl_vm_guid(output).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_hyperv_guid_resolver_wakes_default_wsl_when_vm_is_missing() {
+        let probe_count = Cell::new(0);
+        let wake_count = Cell::new(0);
+
+        let vm_id = windows_hyperv::resolve_running_wsl_vm_guid_with_wake(
+            || {
+                let count = probe_count.get();
+                probe_count.set(count + 1);
+                if count == 0 {
+                    Err(windows_hyperv::WslLinkHypervAddressError::WslVmGuidNotFound)
+                } else {
+                    windows_hyperv::WslVmGuid::parse("90db8b89-0d35-4f79-8ce9-49ea0ac8b7cd")
+                }
+            },
+            || {
+                wake_count.set(wake_count.get() + 1);
+                Ok(())
+            },
+            |_| {},
+            Duration::from_secs(1),
+            Duration::from_millis(1),
+        )
+        .expect("resolver should return VM GUID after wake");
+
+        assert_eq!(vm_id.as_guid().data1, 0x90db8b89);
+        assert_eq!(probe_count.get(), 2);
+        assert_eq!(wake_count.get(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_hyperv_guid_resolver_does_not_wake_for_hcsdiag_errors() {
+        let wake_count = Cell::new(0);
+
+        let result = windows_hyperv::resolve_running_wsl_vm_guid_with_wake(
+            || {
+                Err(windows_hyperv::WslLinkHypervAddressError::HcsdiagIo(
+                    "boom".to_string(),
+                ))
+            },
+            || {
+                wake_count.set(wake_count.get() + 1);
+                Ok(())
+            },
+            |_| {},
+            Duration::from_secs(1),
+            Duration::from_millis(1),
+        );
+
+        assert!(matches!(
+            result,
+            Err(windows_hyperv::WslLinkHypervAddressError::HcsdiagIo(error))
+                if error == "boom"
+        ));
+        assert_eq!(wake_count.get(), 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_hyperv_guid_resolver_times_out_after_wake() {
+        let wake_count = Cell::new(0);
+
+        let result = windows_hyperv::resolve_running_wsl_vm_guid_with_wake(
+            || Err(windows_hyperv::WslLinkHypervAddressError::WslVmGuidNotFound),
+            || {
+                wake_count.set(wake_count.get() + 1);
+                Ok(())
+            },
+            |_| {},
+            Duration::ZERO,
+            Duration::ZERO,
+        );
+
+        assert!(matches!(
+            result,
+            Err(windows_hyperv::WslLinkHypervAddressError::WslWakeTimeout(timeout))
+                if timeout == Duration::ZERO
+        ));
+        assert_eq!(wake_count.get(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_command_output_decoder_handles_utf16le() {
+        let mut bytes = Vec::new();
+        for unit in "默认发行版：Ubuntu".encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        assert_eq!(
+            windows_hyperv::decode_command_output(&bytes),
+            "默认发行版：Ubuntu"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_hyperv_connect_retry_only_retries_timeout() {
+        assert!(windows_hyperv::should_retry_hyperv_connect(
+            &windows_hyperv::WslLinkHypervConnectError::ConnectTimeout(Duration::from_secs(3))
+        ));
+        assert!(!windows_hyperv::should_retry_hyperv_connect(
+            &windows_hyperv::WslLinkHypervConnectError::Connect(10061)
+        ));
     }
 }

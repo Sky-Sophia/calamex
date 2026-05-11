@@ -9,20 +9,51 @@ const aiServiceMock = vi.hoisted(() => {
     const sidecarExecute = vi.fn();
     const sidecarResolveApproval = vi.fn();
     const sidecarPlanFinish = vi.fn();
+    const sidecarPlanValidate = vi.fn();
+    const sidecarPlanReplan = vi.fn();
     const onSidecarStream = vi.fn(async () => vi.fn());
 
     return {
         sidecarExecute,
         sidecarResolveApproval,
         sidecarPlanFinish,
+        sidecarPlanValidate,
+        sidecarPlanReplan,
         onSidecarStream,
         reset(): void {
             sidecarExecute.mockReset();
             sidecarResolveApproval.mockReset();
             sidecarPlanFinish.mockReset();
+            sidecarPlanValidate.mockReset();
+            sidecarPlanReplan.mockReset();
             onSidecarStream.mockReset();
             onSidecarStream.mockResolvedValue(vi.fn());
             sidecarPlanFinish.mockResolvedValue(undefined);
+            sidecarPlanValidate.mockResolvedValue({
+                sessionId: 'sidecar-plan-validate',
+                events: [
+                    {
+                        type: 'tool_result',
+                        toolName: 'plan_validator',
+                        output: {
+                            report: {
+                                status: 'passed',
+                                summary: '验证通过。',
+                                checkedStepIds: ['plan-step-1', 'plan-step-2'],
+                                needsReplan: false,
+                                findings: [],
+                                acceptance: [],
+                            },
+                        },
+                    },
+                    {
+                        type: 'done',
+                        result: '验证通过。',
+                    },
+                ],
+                result: '验证通过。',
+            });
+            sidecarPlanReplan.mockResolvedValue(undefined);
         },
     };
 });
@@ -32,6 +63,8 @@ vi.mock('@/services/modules/ai', () => ({
         sidecarExecute: aiServiceMock.sidecarExecute,
         sidecarResolveApproval: aiServiceMock.sidecarResolveApproval,
         sidecarPlanFinish: aiServiceMock.sidecarPlanFinish,
+        sidecarPlanValidate: aiServiceMock.sidecarPlanValidate,
+        sidecarPlanReplan: aiServiceMock.sidecarPlanReplan,
         onSidecarStream: aiServiceMock.onSidecarStream,
     },
 }));
@@ -230,6 +263,12 @@ describe('useAiAgentRun', () => {
             workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
         });
 
+        expect(aiServiceMock.sidecarPlanValidate).toHaveBeenCalledWith(expect.objectContaining({
+            planId: 'plan-runtime-1',
+            planVersion: 1,
+            goal: '实现 Step Runtime',
+            workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+        }));
         expect(aiServiceMock.sidecarPlanFinish).toHaveBeenCalledWith({
             planId: 'plan-runtime-1',
             version: 1,
@@ -238,6 +277,161 @@ describe('useAiAgentRun', () => {
         expect(store.planStatus).toBe('completed');
         expect(store.planExecutedAt).toBe('2026-04-29T10:03:00.000Z');
         expect(store.planSummary).toBe('已完成的测试计划。');
+    });
+
+    it('批准后可以自动连续执行全部计划步骤直到完成', async () => {
+        aiServiceMock.sidecarExecute
+            .mockResolvedValueOnce({
+                sessionId: 'sidecar-step-session-auto-1',
+                events: [
+                    {
+                        type: 'done',
+                        result: '上下文已收集。',
+                    },
+                ],
+                result: '上下文已收集。',
+            })
+            .mockResolvedValueOnce({
+                sessionId: 'sidecar-step-session-auto-2',
+                events: [
+                    {
+                        type: 'done',
+                        result: '验证已完成。',
+                    },
+                ],
+                result: '验证已完成。',
+            });
+        aiServiceMock.sidecarPlanFinish.mockResolvedValueOnce({
+            sessionId: 'sidecar-plan-finish-auto',
+            events: [
+                {
+                    type: 'done',
+                    result: '计划已完成。',
+                },
+            ],
+            result: '计划已完成。',
+        });
+
+        const agentRun = useAiAgentRun();
+        const store = useAiAgentStore();
+        const steps = createRun().steps;
+        seedApprovedPlan(store, '实现 Step Runtime', steps);
+
+        const run = await agentRun.runPlanToCompletion('实现 Step Runtime', steps, {
+            context: [],
+            workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+        });
+
+        expect(aiServiceMock.sidecarExecute).toHaveBeenCalledTimes(2);
+        expect(aiServiceMock.sidecarPlanValidate).toHaveBeenCalledTimes(1);
+        expect(aiServiceMock.sidecarExecute.mock.calls.map((call) => call[0]?.planStepId)).toEqual([
+            'plan-step-1',
+            'plan-step-2',
+        ]);
+        expect(run.status).toBe('completed');
+        expect(store.activeRun?.steps.map((step) => step.status)).toEqual(['done', 'done']);
+        expect(store.getStepFinalAnswers(run.id).map((answer) => answer.content)).toEqual([
+            '上下文已收集。',
+            '验证已完成。',
+        ]);
+    });
+
+    it('验证需要重规划时生成新的 pending 计划版本而不是完成旧计划', async () => {
+        const steps = [createStep(0)];
+        aiServiceMock.sidecarExecute.mockResolvedValueOnce({
+            sessionId: 'sidecar-step-session-replan',
+            events: [
+                {
+                    type: 'done',
+                    result: '步骤已完成。',
+                },
+            ],
+            result: '步骤已完成。',
+        });
+        aiServiceMock.sidecarPlanValidate.mockResolvedValueOnce({
+            sessionId: 'sidecar-plan-validate-replan',
+            events: [
+                {
+                    type: 'tool_result',
+                    toolName: 'plan_validator',
+                    output: {
+                        report: {
+                            status: 'needs_replan',
+                            summary: '验证发现还缺少补充步骤。',
+                            checkedStepIds: ['plan-step-1'],
+                            needsReplan: true,
+                            findings: [
+                                {
+                                    stepId: 'plan-step-1',
+                                    severity: 'medium',
+                                    title: '缺少验证',
+                                    detail: '需要增加验证步骤。',
+                                    retryable: true,
+                                },
+                            ],
+                            acceptance: [],
+                        },
+                    },
+                },
+            ],
+            result: '需要重规划。',
+        });
+        aiServiceMock.sidecarPlanReplan.mockResolvedValueOnce({
+            sessionId: 'sidecar-plan-replan',
+            events: [
+                {
+                    type: 'plan_ready',
+                    planId: 'plan-runtime-1',
+                    threadId: 'thread-runtime-1',
+                    version: 2,
+                    status: 'pending_approval',
+                    plan: {
+                        goal: '实现 Step Runtime',
+                        summary: '补充验证后的计划。',
+                        requiresApproval: true,
+                        steps: [
+                            {
+                                id: 'plan-step-2',
+                                title: '补充验证',
+                                goal: '补充验证',
+                                status: 'pending',
+                                tools: ['run_test'],
+                                riskLevel: 'low',
+                                requiresApproval: false,
+                                expectedOutput: '验证结论',
+                            },
+                        ],
+                    },
+                },
+                {
+                    type: 'done',
+                    result: '已生成修正计划。',
+                },
+            ],
+            result: '已生成修正计划。',
+        });
+
+        const agentRun = useAiAgentRun();
+        const store = useAiAgentStore();
+        seedApprovedPlan(store, '实现 Step Runtime', steps);
+        const run = await agentRun.runPlan('实现 Step Runtime', steps);
+
+        await agentRun.runStepWithSidecar(run.id, {
+            goal: '实现 Step Runtime',
+            context: [],
+            workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
+        });
+
+        expect(aiServiceMock.sidecarPlanFinish).not.toHaveBeenCalled();
+        expect(aiServiceMock.sidecarPlanReplan).toHaveBeenCalledWith(expect.objectContaining({
+            planId: 'plan-runtime-1',
+            planVersion: 1,
+            goal: '实现 Step Runtime',
+        }));
+        expect(store.planVersion).toBe(2);
+        expect(store.planStatus).toBe('pending_approval');
+        expect(store.mode).toBe('plan');
+        expect(store.steps[0]?.title).toBe('补充验证');
     });
 
     it('Sidecar step 工具确认后通过 sidecar approval 继续并完成步骤', async () => {

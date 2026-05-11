@@ -239,6 +239,21 @@ export const agentSidecarExecuteRequestSchema = agentSidecarBaseRequestSchema.ex
   planStepId: requiredNonEmptyStringSchema,
 });
 
+export const agentSidecarPlanValidateRequestSchema = agentSidecarBaseRequestSchema.extend({
+  planId: requiredNonEmptyStringSchema,
+  planVersion: z.number().int().positive(),
+}).omit({
+  planStepId: true,
+});
+
+export const agentSidecarPlanReplanRequestSchema = agentSidecarBaseRequestSchema.extend({
+  goal: requiredNonEmptyStringSchema,
+  planId: requiredNonEmptyStringSchema,
+  planVersion: z.number().int().positive(),
+}).omit({
+  planStepId: true,
+});
+
 const agentSidecarPlanVersionRequestSchema = z.object({
   sessionId: optionalNonEmptyStringSchema,
   planId: requiredNonEmptyStringSchema,

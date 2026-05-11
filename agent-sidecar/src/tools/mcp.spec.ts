@@ -40,9 +40,7 @@ describe('MCP sidecar config', () => {
 
     assert.deepEqual(loaded.errors, [LOGOSCOPE_MISSING_ERROR]);
     assert.deepEqual(loaded.configs.map((config) => config.name), [
-      'filesystem',
       'git',
-      'playwright',
       'probe',
       'memory',
       'sequential-thinking',
@@ -54,15 +52,13 @@ describe('MCP sidecar config', () => {
     ]);
   });
 
-  it('wires workspace, memory and Tavily settings into server configs', () => {
+  it('wires workspace, memory and Tavily settings into official MCP server configs', () => {
     const loaded = loadMcpServerConfigs({
       workspaceRootPath: WORKSPACE_ROOT,
       env: defaultEnv,
       platform: 'win32',
     });
-    const filesystem = loaded.configs.find((config) => config.name === 'filesystem');
     const git = loaded.configs.find((config) => config.name === 'git');
-    const playwright = loaded.configs.find((config) => config.name === 'playwright');
     const probe = loaded.configs.find((config) => config.name === 'probe');
     const memory = loaded.configs.find((config) => config.name === 'memory');
     const github = loaded.configs.find((config) => config.name === 'github');
@@ -71,12 +67,9 @@ describe('MCP sidecar config', () => {
     const sqliteMcp = loaded.configs.find((config) => config.name === 'sqlite-mcp');
     const tavily = loaded.configs.find((config) => config.name === 'tavily-mcp');
 
-    assert.ok(filesystem?.args);
-    assert.equal(filesystem.args[0], WORKSPACE_ROOT);
     assert.equal(git?.command, UVX_FIXTURE_PATH);
     assert.deepEqual(git?.args, ['mcp-server-git==2026.1.14', '--repository', WORKSPACE_ROOT]);
     assert.equal(git?.env?.GIT_PYTHON_GIT_EXECUTABLE, GIT_FIXTURE_PATH);
-    assert.deepEqual(playwright?.args, ['--headless']);
     assert.equal(probe?.command, 'npx.cmd');
     assert.deepEqual(probe?.args, ['-y', '@probelabs/probe@0.6.0-rc315', 'mcp']);
     assert.equal(memory?.env?.MEMORY_FILE_PATH, MEMORY_FILE_PATH);
@@ -152,9 +145,7 @@ describe('MCP sidecar config', () => {
 
     assert.equal(loaded.configs.some((config) => config.name === 'oldSearch'), false);
     assert.deepEqual(loaded.configs.map((config) => config.name), [
-      'filesystem',
       'git',
-      'playwright',
       'probe',
       'memory',
       'sequential-thinking',
@@ -192,11 +183,9 @@ describe('MCP sidecar config', () => {
       env: defaultEnv,
       platform: 'win32',
     }), {
-      configuredServers: 11,
+      configuredServers: 9,
       serverNames: [
-        'filesystem',
         'git',
-        'playwright',
         'probe',
         'memory',
         'sequential-thinking',
@@ -210,7 +199,7 @@ describe('MCP sidecar config', () => {
     });
   });
 
-  it('builds a Mastra-ready MCP bundle from the official SDK and keeps healthy tools when one configured server closes', async () => {
+  it('builds a Mastra-ready MCP bundle from the official MCPClient and keeps healthy tools when one configured server closes', async () => {
     const bundle = await createMastraMcpClientBundle({
       workspaceRootPath: WORKSPACE_ROOT,
       env: defaultEnv,
@@ -218,13 +207,11 @@ describe('MCP sidecar config', () => {
     });
 
     try {
-      const readFileTool = bundle.tools.find((tool) => tool.name === 'read_file');
-      const sequentialThinkingTool = bundle.tools.find((tool) => tool.name === 'sequentialthinking');
+      const toolNames = Object.keys(bundle.tools);
+      const sequentialThinkingToolName = toolNames.find((toolName) => toolName.includes('sequentialthinking'));
 
-      assert.ok(readFileTool);
-      assert.ok(sequentialThinkingTool);
-      assert.equal(typeof readFileTool.mcpClient.callTool, 'function');
-      assert.equal(typeof readFileTool.toolSpec.inputSchema, 'object');
+      assert.ok(sequentialThinkingToolName);
+      assert.equal(typeof bundle.tools[sequentialThinkingToolName], 'object');
       assert.equal(
         bundle.errors.some((error) => error.includes('git')),
         true,

@@ -3,12 +3,13 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { AgentBrowser } from '@mastra/agent-browser';
 import { Agent, type ToolsInput } from '@mastra/core/agent';
 import { createDurableAgent, DurableStepIds } from '@mastra/core/agent/durable';
+import type { MastraBrowser } from '@mastra/core/browser';
 import type { MastraModelConfig } from '@mastra/core/llm';
 import { Mastra } from '@mastra/core/mastra';
 import { RequestContext } from '@mastra/core/request-context';
-import { toStandardSchema } from '@mastra/core/schema';
 import type {
     TextDeltaPayload,
     ToolCallPayload,
@@ -36,7 +37,20 @@ import {
     runWithDeepSeekReasoningContext,
 } from '../models/deepseek-reasoning-fetch.js';
 import type { TJsonValue } from '../schemas/events.js';
-import { agentPlanSchema, type TAgentPlan } from '../schemas/plan.js';
+import {
+    agentPlanGenerationSchema,
+    agentPlanSchema,
+    agentPlanStepSchema,
+    type TAgentPlan,
+    type TAgentPlanStep,
+} from '../schemas/plan.js';
+import {
+    agentPlanDeltaSchema,
+    agentPlanValidationReportSchema,
+    type TAgentPlanDelta,
+    type TAgentPlanStepPatch,
+    type TAgentPlanValidationReport,
+} from '../schemas/plan-workflow.js';
 import { redactForStream } from '../streaming/stream-redaction.js';
 import {
     createAgentRuntimeEvent,
@@ -58,6 +72,10 @@ import {
     resolveMastraStorageUrl,
 } from './mastra-memory.js';
 import { createAgentPlanStore, type IAgentPlanStore, type TAgentPlanRecord } from './plan-store.js';
+import {
+    createAgentPlanWorkflowStore,
+    type IAgentPlanWorkflowStore,
+} from './plan-workflow-store.js';
 import type {
     IAgentRuntimeResponse,
     IAgentRuntimeRunOptions,
@@ -79,6 +97,8 @@ import type {
 const DEFAULT_MASTRA_LOG_FILE = './.agent-sidecar/mastra.log';
 const DEFAULT_EXECUTION_AGENT_ID = 'calamex-agent-sidecar';
 const DEFAULT_EXECUTION_AGENT_NAME = 'Calamex Agent Sidecar';
+const DEFAULT_VALIDATOR_AGENT_ID = 'calamex-agent-sidecar-validator';
+const DEFAULT_REPLANNER_AGENT_ID = 'calamex-agent-sidecar-replanner';
 const RUNTIME_TOOL_PREVIEW_CHARS = 1200;
 const WORKSPACE_OPERATION_TIMEOUT_MS = 30_000;
 const WORKSPACE_LSP_DIAGNOSTIC_TIMEOUT_MS = 5_000;
@@ -184,18 +204,11 @@ interface IMastraAgentConfig {
     model: MastraModelConfig;
     tools?: ToolsInput;
     workspace?: AnyWorkspace;
-}
-
-interface IMcpToolLike {
-    name: string;
-    description: string;
-    toolSpec: {
-        inputSchema?: unknown;
-    };
+    browser?: MastraBrowser;
 }
 
 interface IMastraMcpBundle {
-    tools: IMcpToolLike[];
+    tools: ToolsInput;
     disconnectAll: () => Promise<void>;
 }
 
@@ -212,6 +225,7 @@ interface IMastraRuntimeDeps {
         options?: { workspaceRootPath?: string | null },
     ) => Promise<IMastraMcpBundle>;
     createPlanStore?: () => IAgentPlanStore;
+    createPlanWorkflowStore?: () => IAgentPlanWorkflowStore;
     now?: () => string;
 }
 
@@ -222,6 +236,7 @@ interface IMastraPendingApproval {
     sessionId: string;
     toolCallId: string;
     workspace?: AnyWorkspace;
+    browser?: MastraBrowser;
 }
 
 interface IMastraTextStreamSummary {
@@ -229,6 +244,12 @@ interface IMastraTextStreamSummary {
     releaseResources: boolean;
     streamErrorMessage: string | null;
     visibleText: string;
+}
+
+interface IPlanWorkflowStepTracker {
+    planId: string;
+    version: number;
+    stepId: string;
 }
 
 type TRuntimeEventFactory = (draft: TAgentRuntimeEventDraft) => TAgentRuntimeOutputEvent;
@@ -258,12 +279,6 @@ const createSessionId = (prefix: string): string =>
     `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 const APPROVAL_TOKEN_PREFIX = 'mastra-approval.';
-
-const DEFAULT_TOOL_INPUT_SCHEMA = {
-    type: 'object',
-    properties: {},
-    additionalProperties: false,
-} as const;
 
 const toRecord = (value: unknown): Record<string, unknown> | null => (
     value && typeof value === 'object' && !Array.isArray(value)
@@ -374,23 +389,6 @@ const createRuntimePreview = (
     return redactForStream(clipped);
 };
 
-const extractMcpErrorMessage = (value: unknown): string | null => {
-    const record = toRecord(value);
-
-    if (record?.isError !== true) {
-        return null;
-    }
-
-    const content = Array.isArray(record.content) ? record.content : [];
-    const text = content
-        .map((item) => toNonEmptyString(toRecord(item)?.text))
-        .filter((item): item is string => Boolean(item))
-        .join('\n')
-        .trim();
-
-    return text || 'MCP tool returned an error result.';
-};
-
 const pushUiEvent = (
     events: TAgentRuntimeOutputEvent[],
     event: TAgentRuntimeOutputEvent,
@@ -498,7 +496,6 @@ const createWorkspaceToolsConfig = (profile: TMastraToolProfile): WorkspaceTools
     requireApproval: false,
     [WORKSPACE_TOOLS.FILESYSTEM.READ_FILE]: {
         enabled: true,
-        name: 'view',
         maxOutputTokens: 6_000,
     },
     [WORKSPACE_TOOLS.FILESYSTEM.GREP]: {
@@ -507,12 +504,10 @@ const createWorkspaceToolsConfig = (profile: TMastraToolProfile): WorkspaceTools
     ...(profile === 'write' ? {
         [WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE]: {
             enabled: true,
-            name: 'string_replace_lsp',
             requireReadBeforeWrite: true,
         },
         [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: {
             enabled: true,
-            name: 'write_file',
             requireReadBeforeWrite: true,
         },
         [WORKSPACE_TOOLS.FILESYSTEM.AST_EDIT]: {
@@ -562,6 +557,18 @@ const destroyMastraWorkspace = async (workspace: AnyWorkspace | undefined): Prom
     await workspace.destroy().catch(() => undefined);
 };
 
+const createMastraBrowser = (): MastraBrowser => new AgentBrowser({
+    headless: true,
+});
+
+const destroyMastraBrowser = async (browser: MastraBrowser | undefined): Promise<void> => {
+    if (!browser || browser.status === 'closed') {
+        return;
+    }
+
+    await browser.close().catch(() => undefined);
+};
+
 const createMastraModelConfig = (
     model: TDeepSeekModelConfig,
 ): MastraModelConfig => model;
@@ -574,6 +581,7 @@ const defaultCreateAgent = (config: IMastraAgentConfig): IMastraAgentLike => {
         model: config.model,
         ...(config.tools ? { tools: config.tools } : {}),
         ...(config.workspace ? { workspace: config.workspace } : {}),
+        ...(config.browser ? { browser: config.browser } : {}),
     });
     const bridge = agent as unknown as IMastraAgentLike;
     const approveToolCall = typeof bridge.approveToolCall === 'function'
@@ -614,6 +622,7 @@ const defaultCreateExecutionHandle = async (
         model: config.model,
         ...(config.tools ? { tools: config.tools } : {}),
         ...(config.workspace ? { workspace: config.workspace } : {}),
+        ...(config.browser ? { browser: config.browser } : {}),
     });
     const durableAgent = createDurableAgent({ agent: baseAgent });
     const mastra = new Mastra({
@@ -669,87 +678,26 @@ const defaultCreateExecutionHandle = async (
     };
 };
 
-const getMcpToolClient = (tool: IMcpToolLike): {
-    callTool: (targetTool: unknown, args: TJsonValue) => Promise<unknown>;
-} | null => {
-    const candidate = toRecord(tool)?.mcpClient;
-    const client = toRecord(candidate);
-
-    if (!client || typeof client.callTool !== 'function') {
-        return null;
-    }
-
-    return {
-        callTool: client.callTool as (targetTool: unknown, args: TJsonValue) => Promise<unknown>,
-    };
-};
-
-const createMastraMcpTools = (
-    tools: IMcpToolLike[],
-): Record<string, ReturnType<typeof createTool>> => Object.fromEntries(
-    tools.map((tool) => [tool.name, createTool({
-        id: tool.name,
-        description: tool.description,
-        inputSchema: toStandardSchema(tool.toolSpec.inputSchema ?? DEFAULT_TOOL_INPUT_SCHEMA),
-        execute: async (inputData) => {
-            const client = getMcpToolClient(tool);
-
-            if (!client) {
-                throw new Error(`MCP tool ${tool.name} 缺少客户端句柄。`);
-            }
-
-            const result = await client.callTool(tool, toJsonValue(inputData));
-            const errorMessage = extractMcpErrorMessage(result);
-
-            if (errorMessage) {
-                throw new Error(errorMessage);
-            }
-
-            return toJsonValue(result);
-        },
-    })]),
-);
-
-const FILESYSTEM_MCP_TOOL_NAMES = new Set([
-    'read_file',
-    'read_text_file',
-    'read_media_file',
-    'read_multiple_files',
-    'write_file',
-    'edit_file',
-    'create_directory',
-    'list_directory',
-    'list_directory_with_sizes',
-    'directory_tree',
-    'move_file',
-    'search_files',
-    'get_file_info',
-    'list_allowed_directories',
-]);
-
 const READONLY_MCP_TOOL_DENY_PATTERN =
     /(?:^|[_-])(write|edit|create|move|delete|remove|run|exec|execute|shell|install|apply|commit|checkout|reset|add|stage|unstage|discard|drop|push|pull|merge|rebase|stash|upload|send|post|put|patch|update|insert|replace)(?:$|[_-])/iu;
 
-const filterMcpToolsForWorkspace = (
-    tools: readonly IMcpToolLike[],
-    workspace: AnyWorkspace | undefined,
-): IMcpToolLike[] => {
-    if (!workspace) {
-        return [...tools];
-    }
-
-    return tools.filter((tool) => !FILESYSTEM_MCP_TOOL_NAMES.has(tool.name));
-};
-
 const filterMcpToolsForProfile = (
-    tools: readonly IMcpToolLike[],
+    tools: ToolsInput,
     profile: TMastraToolProfile,
-): IMcpToolLike[] => {
+): ToolsInput => {
     if (profile === 'write') {
-        return [...tools];
+        return tools;
     }
 
-    return tools.filter((tool) => !READONLY_MCP_TOOL_DENY_PATTERN.test(tool.name));
+    const filteredTools: ToolsInput = {};
+
+    for (const [name, tool] of Object.entries(tools)) {
+        if (!READONLY_MCP_TOOL_DENY_PATTERN.test(name)) {
+            filteredTools[name] = tool;
+        }
+    }
+
+    return filteredTools;
 };
 
 const findCurrentFileReference = (
@@ -795,17 +743,16 @@ const loadMastraMcpTools = async (
     tools: ToolsInput;
     hasTools: boolean;
     workspace: AnyWorkspace | undefined;
+    browser: MastraBrowser | undefined;
 }> => {
     const bundle = await createBundle(workspaceRootPath
         ? { workspaceRootPath }
         : {});
     const workspace = createMastraWorkspace(workspaceRootPath, profile);
-    const mcpTools = filterMcpToolsForProfile(
-        filterMcpToolsForWorkspace(bundle.tools, workspace),
-        profile,
-    );
+    const browser = createMastraBrowser();
+    const mcpTools = filterMcpToolsForProfile(bundle.tools, profile);
     const tools: ToolsInput = {
-        ...createMastraMcpTools(mcpTools),
+        ...mcpTools,
         ...createUiContextTools(contextReferences),
         ...createMastraTimeTools(),
         ...(loggerRef ? createMastraLogTools(loggerRef) : {}),
@@ -816,6 +763,7 @@ const loadMastraMcpTools = async (
         tools,
         hasTools: Object.keys(tools).length > 0,
         workspace,
+        browser,
     };
 };
 
@@ -846,8 +794,12 @@ const buildMastraUserPrompt = (input: IAgentRuntimeInput): string => {
         .map((message, index) => `tool ${index + 1}: ${message.content}`)
         .join('\n');
     const goal = request === input.goal ? '' : `目标：${input.goal}`;
+    const outputContract = input.mode === 'plan'
+        ? '输出格式：返回一个简洁的 json object，根对象必须直接包含 goal、steps；steps 只写短标题节点，不要包裹在 plan/result/data 字段里。'
+        : '';
 
     return [
+        outputContract,
         goal,
         request,
         toolContext ? `工具上下文：\n${toolContext}` : '',
@@ -903,6 +855,221 @@ const normalizeMastraError = (error: unknown): string => {
     return typeof message === 'string' && message.trim().length > 0
         ? message
         : String(error);
+};
+
+const PLAN_WRAPPER_KEYS = ['plan', 'result', 'data'] as const;
+const unwrapGeneratedPlanCandidate = (value: unknown): unknown => {
+    const record = toRecord(value);
+
+    if (!record) {
+        return value;
+    }
+
+    for (const key of PLAN_WRAPPER_KEYS) {
+        if (toRecord(record[key])) {
+            return record[key];
+        }
+    }
+
+    return value;
+};
+
+const toStringArray = (value: unknown): string[] | undefined => {
+    if (value === null || value === undefined) {
+        return undefined;
+    }
+
+    const singleValue = toNonEmptyString(value);
+    if (singleValue) {
+        return [singleValue];
+    }
+
+    if (!Array.isArray(value)) {
+        return undefined;
+    }
+
+    const values = value
+        .map((item) => toNonEmptyString(item))
+        .filter((item): item is string => Boolean(item));
+
+    return values.length > 0 ? values : undefined;
+};
+
+const toBoolean = (value: unknown): boolean | undefined => {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+
+    const text = toNonEmptyString(value)?.toLowerCase();
+
+    if (text === 'true' || text === 'yes' || text === '是') {
+        return true;
+    }
+
+    if (text === 'false' || text === 'no' || text === '否') {
+        return false;
+    }
+
+    return undefined;
+};
+
+const normalizePlanStepStatus = (value: unknown): TAgentPlanStep['status'] => {
+    const status = toNonEmptyString(value);
+    switch (status) {
+        case 'running':
+        case 'done':
+        case 'failed':
+        case 'skipped':
+        case 'cancelled':
+            return status;
+        default:
+            return 'pending';
+    }
+};
+
+const normalizePlanStepRiskLevel = (value: unknown): TAgentPlanStep['riskLevel'] => {
+    const riskLevel = toNonEmptyString(value);
+    switch (riskLevel) {
+        case 'low':
+        case 'high':
+            return riskLevel;
+        default:
+            return 'medium';
+    }
+};
+
+const normalizeGeneratedAgentPlanStep = (
+    value: unknown,
+    index: number,
+): Record<string, unknown> | null => {
+    const record = toRecord(value);
+
+    if (!record) {
+        return null;
+    }
+
+    const title = toNonEmptyString(record.title)
+        ?? toNonEmptyString(record.goal)
+        ?? toNonEmptyString(record.description)
+        ?? `步骤 ${index + 1}`;
+    const goal = toNonEmptyString(record.goal)
+        ?? toNonEmptyString(record.description)
+        ?? title;
+    const riskLevel = normalizePlanStepRiskLevel(record.riskLevel);
+    const tools = toStringArray(record.tools) ?? [];
+    const files = toStringArray(record.files);
+    const commands = toStringArray(record.commands);
+    const risks = toStringArray(record.risks);
+    const acceptanceCriteria = toStringArray(record.acceptanceCriteria);
+    const expectedOutput = toNonEmptyString(record.expectedOutput)
+        ?? acceptanceCriteria?.join('\n')
+        ?? goal;
+
+    return {
+        ...record,
+        id: toNonEmptyString(record.id) ?? `step-${index + 1}`,
+        title,
+        goal,
+        status: normalizePlanStepStatus(record.status),
+        tools,
+        ...(files ? { files } : {}),
+        ...(commands ? { commands } : {}),
+        ...(risks ? { risks } : {}),
+        ...(acceptanceCriteria ? { acceptanceCriteria } : {}),
+        riskLevel,
+        requiresApproval: toBoolean(record.requiresApproval) ?? (
+            riskLevel !== 'low'
+        ),
+        expectedOutput,
+    };
+};
+
+const normalizeGeneratedAgentPlan = (
+    value: unknown,
+    fallbackGoal: string,
+): TAgentPlan | null => {
+    const generationResult = agentPlanGenerationSchema.safeParse(value);
+
+    if (!generationResult.success) {
+        return null;
+    }
+
+    const candidateRecord = toRecord(unwrapGeneratedPlanCandidate(generationResult.data));
+
+    if (!candidateRecord) {
+        return null;
+    }
+
+    const steps = Array.isArray(candidateRecord.steps)
+        ? candidateRecord.steps
+            .map((step, index) => normalizeGeneratedAgentPlanStep(step, index))
+            .filter((step): step is Record<string, unknown> => Boolean(step))
+        : undefined;
+
+    const parsedPlan = agentPlanSchema.safeParse({
+        ...candidateRecord,
+        goal: toNonEmptyString(candidateRecord.goal) ?? fallbackGoal,
+        requiresApproval: toBoolean(candidateRecord.requiresApproval) ?? true,
+        ...(steps ? { steps } : {}),
+    });
+
+    return parsedPlan.success ? parsedPlan.data : null;
+};
+
+const parseValidationReport = (value: unknown): TAgentPlanValidationReport | null => {
+    const parsedReport = agentPlanValidationReportSchema.safeParse(value);
+    return parsedReport.success ? parsedReport.data : null;
+};
+
+const parsePlanDelta = (value: unknown): TAgentPlanDelta | null => {
+    const parsedDelta = agentPlanDeltaSchema.safeParse(value);
+    return parsedDelta.success ? parsedDelta.data : null;
+};
+
+const applyStepPatch = (
+    step: TAgentPlanStep,
+    patch: TAgentPlanStepPatch,
+): TAgentPlanStep => {
+    const definedPatch: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(patch)) {
+        if (value !== undefined) {
+            definedPatch[key] = value;
+        }
+    }
+
+    return agentPlanStepSchema.parse({
+        ...step,
+        ...definedPatch,
+        status: 'pending',
+    });
+};
+
+const applyAgentPlanDelta = (
+    plan: TAgentPlan,
+    delta: TAgentPlanDelta,
+): TAgentPlan | null => {
+    const removedIds = new Set(delta.removed);
+    const modifiedById = new Map(delta.modified.map((item) => [item.id, item.patch]));
+    const addedIds = new Set(delta.added.map((step) => step.id));
+    const steps = [
+        ...plan.steps
+            .filter((step) => !removedIds.has(step.id))
+            .map((step) => {
+                const patch = modifiedById.get(step.id);
+                return patch ? applyStepPatch(step, patch) : step;
+            })
+            .filter((step) => !addedIds.has(step.id)),
+        ...delta.added,
+    ];
+    const parsedPlan = agentPlanSchema.safeParse({
+        ...plan,
+        summary: delta.summary,
+        steps,
+        requiresApproval: true,
+    });
+
+    return parsedPlan.success ? parsedPlan.data : null;
 };
 
 const encodeApprovalRequestId = (runId: string, toolCallId: string): string => {
@@ -1197,6 +1364,8 @@ export class MastraRuntime {
 
     private readonly planStore: IAgentPlanStore;
 
+    private readonly planWorkflowStore: IAgentPlanWorkflowStore;
+
     private readonly loggerRef: IMastraLogToolsRef;
 
     private readonly pendingApprovals = new Map<string, IMastraPendingApproval>();
@@ -1207,6 +1376,9 @@ export class MastraRuntime {
         this.createAgent = deps.createAgent ?? defaultCreateAgent;
         this.storage = deps.createStorage ? deps.createStorage() : defaultCreateStorage();
         this.planStore = deps.createPlanStore ? deps.createPlanStore() : createAgentPlanStore();
+        this.planWorkflowStore = deps.createPlanWorkflowStore
+            ? deps.createPlanWorkflowStore()
+            : createAgentPlanWorkflowStore();
         this.loggerRef = createMastraLoggerRef();
         this.createExecutionHandle = deps.createExecutionHandle
             ?? ((config) => defaultCreateExecutionHandle(config, this.storage, this.loggerRef));
@@ -1226,6 +1398,7 @@ export class MastraRuntime {
         bundle: IMastraMcpBundle,
         chunk: { type: 'tool-call-approval'; payload: ToolCallPayload },
         workspace?: AnyWorkspace,
+        browser?: MastraBrowser,
     ): string | null {
         const runId = getChunkRunId(chunk);
 
@@ -1245,6 +1418,7 @@ export class MastraRuntime {
             sessionId,
             toolCallId: chunk.payload.toolCallId,
             ...(workspace ? { workspace } : {}),
+            ...(browser ? { browser } : {}),
         });
 
         return requestId;
@@ -1259,6 +1433,8 @@ export class MastraRuntime {
         options: IAgentRuntimeRunOptions,
         createRuntimeEvent?: TRuntimeEventFactory,
         workspace?: AnyWorkspace,
+        browser?: MastraBrowser,
+        workflowTracker?: IPlanWorkflowStepTracker,
     ): Promise<IMastraTextStreamSummary> {
         let visibleText = '';
         let emittedVisibleText = '';
@@ -1301,6 +1477,15 @@ export class MastraRuntime {
             }
 
             if (isChunkWithType(chunk, 'tool-call') && isToolCallChunk(chunk)) {
+                if (workflowTracker) {
+                    await this.planWorkflowStore.heartbeat({
+                        planId: workflowTracker.planId,
+                        version: workflowTracker.version,
+                        stepId: workflowTracker.stepId,
+                        phase: 'before_tool',
+                    });
+                }
+
                 const input = chunk.payload.args === undefined ? null : toJsonValue(chunk.payload.args);
                 const pendingToolCallIds = pendingToolCallIdsByName.get(chunk.payload.toolName) ?? [];
                 pendingToolCallIds.push(chunk.payload.toolCallId);
@@ -1330,6 +1515,15 @@ export class MastraRuntime {
             }
 
             if (isToolResultChunk(chunk)) {
+                if (workflowTracker) {
+                    await this.planWorkflowStore.heartbeat({
+                        planId: workflowTracker.planId,
+                        version: workflowTracker.version,
+                        stepId: workflowTracker.stepId,
+                        phase: 'after_tool',
+                    });
+                }
+
                 const output = toJsonValue(chunk.payload.result);
                 const pendingToolCallIds = pendingToolCallIdsByName.get(chunk.payload.toolName) ?? [];
                 const toolUseId = chunk.payload.toolCallId ?? pendingToolCallIds.shift();
@@ -1364,6 +1558,7 @@ export class MastraRuntime {
                     bundle,
                     chunk,
                     workspace,
+                    browser,
                 );
 
                 if (pendingRequestId) {
@@ -1492,13 +1687,14 @@ export class MastraRuntime {
             tools: mastraTools,
             hasTools,
             workspace,
+            browser,
         } = await loadMastraMcpTools(
             this.createMcpClientBundle,
             normalizedInput.workspaceRootPath,
             this.loggerRef,
             normalizedInput.context ?? [],
         );
-        const hasAgentTools = hasTools || Boolean(workspace);
+        const hasAgentTools = hasTools || Boolean(workspace) || Boolean(browser);
         const requestedRunId = options.context?.requestId ?? createSessionId(`${sessionPrefix}-run`);
         const memory = createMastraMemoryReference(createMastraMemoryScope(normalizedInput, sessionId));
         let shouldDisconnectBundle = true;
@@ -1512,6 +1708,7 @@ export class MastraRuntime {
                     model: createMastraModelConfig(modelConfig),
                     ...(hasTools ? { tools: mastraTools } : {}),
                     ...(workspace ? { workspace } : {}),
+                    ...(browser ? { browser } : {}),
                 });
                 const toolChoice: IMastraGenerateOptions['toolChoice'] = hasAgentTools ? 'auto' : 'none';
                 const streamOptions: IMastraGenerateOptions = {
@@ -1539,6 +1736,7 @@ export class MastraRuntime {
                     options,
                     createRuntimeEvent,
                     workspace,
+                    browser,
                 );
                 shouldDisconnectBundle = streamSummary.releaseResources;
 
@@ -1587,6 +1785,7 @@ export class MastraRuntime {
                 evictDeepSeekReasoningByPrefix(createDeepSeekReasoningRunPrefix(sessionId, requestedRunId));
                 await mcpBundle.disconnectAll();
                 await destroyMastraWorkspace(workspace);
+                await destroyMastraBrowser(browser);
             }
         }
     }
@@ -1619,6 +1818,7 @@ export class MastraRuntime {
             tools: mastraTools,
             hasTools,
             workspace,
+            browser,
         } = await loadMastraMcpTools(
             this.createMcpClientBundle,
             input.workspaceRootPath,
@@ -1626,7 +1826,7 @@ export class MastraRuntime {
             input.context ?? [],
             'readonly',
         );
-        const hasAgentTools = hasTools || Boolean(workspace);
+        const hasAgentTools = hasTools || Boolean(workspace) || Boolean(browser);
         const requestedRunId = options.context?.requestId ?? createSessionId('mastra-plan-run');
         const memory = createMastraMemoryReference(createMastraMemoryScope(input, sessionId));
 
@@ -1642,13 +1842,14 @@ export class MastraRuntime {
                     model: createMastraModelConfig(modelConfig),
                     ...(hasTools ? { tools: mastraTools } : {}),
                     ...(workspace ? { workspace } : {}),
+                    ...(browser ? { browser } : {}),
                 });
                 const toolChoice: IMastraGenerateOptions['toolChoice'] = hasAgentTools ? 'auto' : 'none';
                 const generateOptions: IMastraGenerateOptions = {
                     maxSteps: hasAgentTools ? 10 : 1,
                     toolChoice,
                     structuredOutput: {
-                        schema: agentPlanSchema,
+                        schema: agentPlanGenerationSchema,
                     },
                     memory,
                     ...(options.context?.signal ? { abortSignal: options.context.signal } : {}),
@@ -1658,9 +1859,9 @@ export class MastraRuntime {
                     ...input,
                     mode: 'plan',
                 }), generateOptions);
-                const parsedPlan = agentPlanSchema.safeParse(generated.object);
+                const parsedPlan = normalizeGeneratedAgentPlan(generated.object, input.goal);
 
-                if (!parsedPlan.success) {
+                if (!parsedPlan) {
                     return createErrorResponse(
                         sessionId,
                         'Mastra structured output 没有返回有效 AgentPlan，计划未生成。',
@@ -1673,8 +1874,9 @@ export class MastraRuntime {
                     ...(input.planId ? { planId: input.planId } : {}),
                     threadId: input.threadId ?? sessionId,
                     userRequest: input.goal,
-                    plan: parsedPlan.data,
+                    plan: parsedPlan,
                 });
+                await this.planWorkflowStore.createForPlan({ record });
 
                 return createPlanResponse(sessionId, record, [], options);
             });
@@ -1689,6 +1891,7 @@ export class MastraRuntime {
             evictDeepSeekReasoningByPrefix(createDeepSeekReasoningRunPrefix(sessionId, requestedRunId));
             await mcpBundle.disconnectAll();
             await destroyMastraWorkspace(workspace);
+            await destroyMastraBrowser(browser);
         }
     }
 
@@ -1700,6 +1903,7 @@ export class MastraRuntime {
 
         try {
             const record = await this.planStore.approvePlan(input);
+            await this.planWorkflowStore.approvePlan(record);
             const versions = await this.planStore.listPlanVersions(record.planId);
             return createPlanRecordResponse(
                 sessionId,
@@ -1754,6 +1958,7 @@ export class MastraRuntime {
 
         try {
             const record = await this.planStore.rejectPlan(input);
+            await this.planWorkflowStore.rejectPlan(record, input.reason);
             const versions = await this.planStore.listPlanVersions(record.planId);
             return createPlanRecordResponse(
                 sessionId,
@@ -1781,6 +1986,12 @@ export class MastraRuntime {
 
         try {
             const record = await this.planStore.finishPlan(input);
+            await this.planWorkflowStore.finishPlan({
+                planId: record.planId,
+                version: record.version,
+                status: input.status,
+                ...(input.errorMessage ? { errorMessage: input.errorMessage } : {}),
+            });
             const versions = await this.planStore.listPlanVersions(record.planId);
             const statusLabel = input.status === 'completed' ? '已完成' : '已失败';
             return createPlanRecordResponse(
@@ -1801,6 +2012,314 @@ export class MastraRuntime {
         }
     }
 
+    async validatePlan(
+        input: IAgentRuntimeInput,
+        options: IAgentRuntimeRunOptions = {},
+    ): Promise<IAgentRuntimeResponse> {
+        const sessionId = input.sessionId ?? createSessionId('mastra-plan-validate');
+        const events: TAgentRuntimeOutputEvent[] = [];
+        const planId = toNonEmptyString(input.planId);
+        const planVersion = input.planVersion;
+
+        if (!planId || !Number.isInteger(planVersion) || Number(planVersion) <= 0) {
+            return createErrorResponse(
+                sessionId,
+                '计划验证需要 planId 和 planVersion。',
+                events,
+                options,
+            );
+        }
+
+        const modelConfig = this.readModelConfig();
+
+        if (!modelConfig) {
+            return createErrorResponse(
+                sessionId,
+                'DeepSeek 未配置：请在 Node sidecar 环境设置 DEEPSEEK_API_KEY。',
+                events,
+                options,
+            );
+        }
+
+        const record = await this.planStore.getPlan({
+            planId,
+            version: Number(planVersion),
+        });
+        let workflow = await this.planWorkflowStore.createForPlan({ record });
+        if (record.status !== 'pending_approval' && record.status !== 'rejected') {
+            workflow = await this.planWorkflowStore.approvePlan(record);
+        }
+        const workflowEvents = await this.planWorkflowStore.listEvents({
+            planId,
+            version: Number(planVersion),
+        });
+        const {
+            bundle: mcpBundle,
+            tools: mastraTools,
+            hasTools,
+            workspace,
+            browser,
+        } = await loadMastraMcpTools(
+            this.createMcpClientBundle,
+            input.workspaceRootPath,
+            this.loggerRef,
+            input.context ?? [],
+            'readonly',
+        );
+        const requestedRunId = options.context?.requestId ?? createSessionId('mastra-plan-validator-run');
+        const memory = createMastraMemoryReference(createMastraMemoryScope(input, sessionId));
+
+        try {
+            return await runWithDeepSeekReasoningContext({ sessionId, runId: requestedRunId }, async () => {
+                const agent = this.createAgent({
+                    id: DEFAULT_VALIDATOR_AGENT_ID,
+                    name: 'Calamex Plan Validator',
+                    instructions: [
+                        '你是 Plan Mode 的 Validator Agent。',
+                        '你只能验证已批准计划的执行结果，不允许修改文件，不允许提出无关重构。',
+                        '优先依据 workflow event log、计划验收标准、用户目标和只读工具结果判断是否完成。',
+                        '必须返回 json object，并严格匹配结构化输出 schema。',
+                    ].join('\n'),
+                    model: createMastraModelConfig(modelConfig),
+                    ...(hasTools ? { tools: mastraTools } : {}),
+                    ...(workspace ? { workspace } : {}),
+                    ...(browser ? { browser } : {}),
+                });
+                const prompt = [
+                    '请验证这个已执行计划的结果，返回 json object。',
+                    `用户补充目标：${input.goal}`,
+                    'approvedPlanJson:',
+                    JSON.stringify(record.plan, null, 2),
+                    'workflowStateJson:',
+                    JSON.stringify(workflow.state, null, 2),
+                    'workflowEventsJson:',
+                    JSON.stringify(workflowEvents.map((event) => event.event), null, 2),
+                ].join('\n');
+                const generated = await agent.generate([{ role: 'user', content: prompt }], {
+                    maxSteps: hasTools || Boolean(workspace) || Boolean(browser) ? 8 : 1,
+                    toolChoice: hasTools || Boolean(workspace) || Boolean(browser) ? 'auto' : 'none',
+                    structuredOutput: {
+                        schema: agentPlanValidationReportSchema,
+                    },
+                    memory,
+                    ...(options.context?.signal ? { abortSignal: options.context.signal } : {}),
+                    runId: requestedRunId,
+                });
+                const report = parseValidationReport(generated.object);
+
+                if (!report) {
+                    return createErrorResponse(
+                        sessionId,
+                        'Validator 没有返回有效验证报告。',
+                        events,
+                        options,
+                    );
+                }
+
+                const projectedWorkflow = await this.planWorkflowStore.reportValidator({
+                    planId,
+                    version: Number(planVersion),
+                    report,
+                });
+                const result = report.needsReplan
+                    ? `验证完成：${report.summary}，需要重新规划。`
+                    : `验证完成：${report.summary}`;
+
+                pushUiEvent(events, {
+                    type: 'tool_result',
+                    toolName: 'plan_validator',
+                    output: toJsonValue({
+                        report,
+                        workflowPhase: projectedWorkflow.phase,
+                        workflowStatus: projectedWorkflow.status,
+                    }),
+                }, options);
+                pushUiEvent(events, {
+                    type: 'done',
+                    result,
+                }, options);
+
+                return {
+                    sessionId,
+                    events,
+                    result,
+                };
+            });
+        } catch (error) {
+            return createErrorResponse(
+                sessionId,
+                `Validator 执行失败：${normalizeMastraError(error)}`,
+                events,
+                options,
+            );
+        } finally {
+            evictDeepSeekReasoningByPrefix(createDeepSeekReasoningRunPrefix(sessionId, requestedRunId));
+            await mcpBundle.disconnectAll();
+            await destroyMastraWorkspace(workspace);
+            await destroyMastraBrowser(browser);
+        }
+    }
+
+    async replanPlan(
+        input: IAgentRuntimeInput,
+        options: IAgentRuntimeRunOptions = {},
+    ): Promise<IAgentRuntimeResponse> {
+        const sessionId = input.sessionId ?? createSessionId('mastra-plan-replan');
+        const events: TAgentRuntimeOutputEvent[] = [];
+        const planId = toNonEmptyString(input.planId);
+        const planVersion = input.planVersion;
+
+        if (!planId || !Number.isInteger(planVersion) || Number(planVersion) <= 0) {
+            return createErrorResponse(
+                sessionId,
+                '重新规划需要 planId 和 planVersion。',
+                events,
+                options,
+            );
+        }
+
+        const modelConfig = this.readModelConfig();
+
+        if (!modelConfig) {
+            return createErrorResponse(
+                sessionId,
+                'DeepSeek 未配置：请在 Node sidecar 环境设置 DEEPSEEK_API_KEY。',
+                events,
+                options,
+            );
+        }
+
+        const record = await this.planStore.getPlan({
+            planId,
+            version: Number(planVersion),
+        });
+        let workflow = await this.planWorkflowStore.createForPlan({ record });
+        if (record.status !== 'pending_approval' && record.status !== 'rejected') {
+            workflow = await this.planWorkflowStore.approvePlan(record);
+        }
+        const workflowEvents = await this.planWorkflowStore.listEvents({
+            planId,
+            version: Number(planVersion),
+        });
+        const {
+            bundle: mcpBundle,
+            tools: mastraTools,
+            hasTools,
+            workspace,
+            browser,
+        } = await loadMastraMcpTools(
+            this.createMcpClientBundle,
+            input.workspaceRootPath,
+            this.loggerRef,
+            input.context ?? [],
+            'readonly',
+        );
+        const requestedRunId = options.context?.requestId ?? createSessionId('mastra-plan-replanner-run');
+        const memory = createMastraMemoryReference(createMastraMemoryScope(input, sessionId));
+
+        try {
+            return await runWithDeepSeekReasoningContext({ sessionId, runId: requestedRunId }, async () => {
+                const agent = this.createAgent({
+                    id: DEFAULT_REPLANNER_AGENT_ID,
+                    name: 'Calamex Plan Replanner',
+                    instructions: [
+                        '你是 Plan Mode 的 Replanner Agent。',
+                        '你只输出最小 delta plan，不重写已完成且仍然有效的步骤。',
+                        'stepId 必须稳定：保留已有语义步骤 id，新步骤使用语义化 id，不使用数组下标含义。',
+                        '必须返回 json object，并严格匹配结构化输出 schema。',
+                    ].join('\n'),
+                    model: createMastraModelConfig(modelConfig),
+                    ...(hasTools ? { tools: mastraTools } : {}),
+                    ...(workspace ? { workspace } : {}),
+                    ...(browser ? { browser } : {}),
+                });
+                const prompt = [
+                    '请基于验证结果生成最小 delta plan，返回 json object。',
+                    `重新规划要求：${input.goal}`,
+                    'originalPlanJson:',
+                    JSON.stringify(record.plan, null, 2),
+                    'workflowStateJson:',
+                    JSON.stringify(workflow.state, null, 2),
+                    'workflowEventsJson:',
+                    JSON.stringify(workflowEvents.map((event) => event.event), null, 2),
+                ].join('\n');
+                const generated = await agent.generate([{ role: 'user', content: prompt }], {
+                    maxSteps: hasTools || Boolean(workspace) || Boolean(browser) ? 8 : 1,
+                    toolChoice: hasTools || Boolean(workspace) || Boolean(browser) ? 'auto' : 'none',
+                    structuredOutput: {
+                        schema: agentPlanDeltaSchema,
+                    },
+                    memory,
+                    ...(options.context?.signal ? { abortSignal: options.context.signal } : {}),
+                    runId: requestedRunId,
+                });
+                const delta = parsePlanDelta(generated.object);
+
+                if (!delta) {
+                    return createErrorResponse(
+                        sessionId,
+                        'Replanner 没有返回有效 delta plan。',
+                        events,
+                        options,
+                    );
+                }
+
+                const nextPlan = applyAgentPlanDelta(record.plan, delta);
+
+                if (!nextPlan) {
+                    return createErrorResponse(
+                        sessionId,
+                        'Replanner 生成的 delta plan 无法应用到当前计划。',
+                        events,
+                        options,
+                    );
+                }
+
+                const nextRecord = await this.planStore.createPendingPlan({
+                    planId: record.planId,
+                    threadId: record.threadId,
+                    userRequest: input.goal,
+                    plan: nextPlan,
+                });
+                await this.planWorkflowStore.createForPlan({
+                    record: nextRecord,
+                    parentRunId: workflow.workflowRunId,
+                    replanOfVersion: record.version,
+                });
+                await this.planWorkflowStore.issueReplan({
+                    planId,
+                    version: Number(planVersion),
+                    toVersion: nextRecord.version,
+                    delta,
+                });
+
+                pushUiEvent(events, {
+                    type: 'tool_result',
+                    toolName: 'plan_replanner',
+                    output: toJsonValue({
+                        fromVersion: record.version,
+                        toVersion: nextRecord.version,
+                        delta,
+                    }),
+                }, options);
+
+                return createPlanResponse(sessionId, nextRecord, events, options);
+            });
+        } catch (error) {
+            return createErrorResponse(
+                sessionId,
+                `Replanner 执行失败：${normalizeMastraError(error)}`,
+                events,
+                options,
+            );
+        } finally {
+            evictDeepSeekReasoningByPrefix(createDeepSeekReasoningRunPrefix(sessionId, requestedRunId));
+            await mcpBundle.disconnectAll();
+            await destroyMastraWorkspace(workspace);
+            await destroyMastraBrowser(browser);
+        }
+    }
+
     async execute(
         input: IAgentRuntimeInput,
         options: IAgentRuntimeRunOptions = {},
@@ -1814,6 +2333,7 @@ export class MastraRuntime {
         const planId = toNonEmptyString(normalizedInput.planId);
         const planStepId = toNonEmptyString(normalizedInput.planStepId);
         const planVersion = normalizedInput.planVersion;
+        const requestedRunId = options.context?.requestId ?? createSessionId('mastra-run');
 
         if (!planId || !planStepId || !Number.isInteger(planVersion) || Number(planVersion) <= 0) {
             return createErrorResponse(
@@ -1832,6 +2352,14 @@ export class MastraRuntime {
                 stepId: planStepId,
             });
             approvedPlanRecord = gate.record;
+            await this.planWorkflowStore.createForPlan({ record: approvedPlanRecord });
+            await this.planWorkflowStore.approvePlan(approvedPlanRecord);
+            await this.planWorkflowStore.startStep({
+                planId,
+                version: Number(planVersion),
+                stepId: planStepId,
+                mastraRunId: requestedRunId,
+            });
         } catch (error) {
             return createErrorResponse(
                 sessionId,
@@ -1857,14 +2385,14 @@ export class MastraRuntime {
             tools: mastraTools,
             hasTools,
             workspace,
+            browser,
         } = await loadMastraMcpTools(
             this.createMcpClientBundle,
             normalizedInput.workspaceRootPath,
             this.loggerRef,
             normalizedInput.context ?? [],
         );
-        const hasAgentTools = hasTools || Boolean(workspace);
-        const requestedRunId = options.context?.requestId ?? createSessionId('mastra-run');
+        const hasAgentTools = hasTools || Boolean(workspace) || Boolean(browser);
         const memory = createMastraMemoryReference(createMastraMemoryScope(normalizedInput, sessionId));
         const createRequestedRunEvent = createRuntimeEventFactory({
             runId: requestedRunId,
@@ -1889,6 +2417,7 @@ export class MastraRuntime {
                     model: createMastraModelConfig(modelConfig),
                     ...(hasTools ? { tools: mastraTools } : {}),
                     ...(workspace ? { workspace } : {}),
+                    ...(browser ? { browser } : {}),
                 });
                 const stream = await executionHandle.agent.stream(
                     buildMastraMessages(normalizedInput),
@@ -1933,10 +2462,23 @@ export class MastraRuntime {
                     options,
                     createCheckpointEvent,
                     workspace,
+                    browser,
+                    {
+                        planId,
+                        version: Number(planVersion),
+                        stepId: planStepId,
+                    },
                 );
                 shouldDisconnectBundle = streamSummary.releaseResources;
 
                 if (streamSummary.streamErrorMessage) {
+                    await this.planWorkflowStore.failStep({
+                        planId,
+                        version: Number(planVersion),
+                        stepId: planStepId,
+                        error: streamSummary.streamErrorMessage,
+                        retryable: true,
+                    });
                     return createErrorResponse(
                         sessionId,
                         `Mastra Agent 执行失败：${streamSummary.streamErrorMessage}`,
@@ -1946,6 +2488,16 @@ export class MastraRuntime {
                 }
 
                 if (streamSummary.pendingApproval) {
+                    await this.planWorkflowStore.suspend({
+                        planId,
+                        version: Number(planVersion),
+                        reason: 'tool_external_wait',
+                        payload: {
+                            stepId: planStepId,
+                            runId: checkpointRunId,
+                        },
+                        allowedFields: ['decision', 'requestId'],
+                    });
                     return {
                         sessionId,
                         events,
@@ -1956,6 +2508,13 @@ export class MastraRuntime {
                 const result = streamSummary.visibleText.trim().length > 0
                     ? streamSummary.visibleText
                     : 'Agent 已完成。';
+
+                await this.planWorkflowStore.completeStep({
+                    planId,
+                    version: Number(planVersion),
+                    stepId: planStepId,
+                    resultRef: checkpointRunId,
+                });
 
                 pushUiEvent(events, {
                     type: 'done',
@@ -1969,6 +2528,13 @@ export class MastraRuntime {
                 };
             });
         } catch (error) {
+            await this.planWorkflowStore.failStep({
+                planId,
+                version: Number(planVersion),
+                stepId: planStepId,
+                error: normalizeMastraError(error),
+                retryable: true,
+            }).catch(() => undefined);
             pushUiEvent(events, createRequestedRunEvent({
                 type: 'rollback.checkpoint.failed',
                 visibility: 'user',
@@ -1989,6 +2555,7 @@ export class MastraRuntime {
                 streamCleanup?.();
                 await mcpBundle.disconnectAll();
                 await destroyMastraWorkspace(workspace);
+                await destroyMastraBrowser(browser);
             }
         }
     }
@@ -2014,6 +2581,7 @@ export class MastraRuntime {
         if (!continueStream) {
             await pending.bundle.disconnectAll();
             await destroyMastraWorkspace(pending.workspace);
+            await destroyMastraBrowser(pending.browser);
             return this.createFallbackApprovalResponse(input, sessionId, options);
         }
 
@@ -2043,6 +2611,7 @@ export class MastraRuntime {
                         ...(this.now ? { now: this.now } : {}),
                     }),
                     pending.workspace,
+                    pending.browser,
                 );
                 shouldDisconnectBundle = streamSummary.releaseResources;
 
@@ -2093,6 +2662,7 @@ export class MastraRuntime {
                 streamCleanup?.();
                 await pending.bundle.disconnectAll();
                 await destroyMastraWorkspace(pending.workspace);
+                await destroyMastraBrowser(pending.browser);
             }
         }
     }
@@ -2183,6 +2753,7 @@ export class MastraRuntime {
                 tools: mastraTools,
                 hasTools,
                 workspace,
+                browser,
             } = await loadMastraMcpTools(this.createMcpClientBundle, workspaceRootPath, this.loggerRef);
 
             try {
@@ -2193,6 +2764,7 @@ export class MastraRuntime {
                     model: createMastraModelConfig(modelConfig),
                     ...(hasTools ? { tools: mastraTools } : {}),
                     ...(workspace ? { workspace } : {}),
+                    ...(browser ? { browser } : {}),
                 });
                 const run = await executionHandle.workflow.createRun({ runId: input.runId });
                 const requestContextRecord = requestContextToRecord(snapshot.requestContext);
@@ -2250,6 +2822,7 @@ export class MastraRuntime {
             } finally {
                 await mcpBundle.disconnectAll();
                 await destroyMastraWorkspace(workspace);
+                await destroyMastraBrowser(browser);
             }
         } catch (error) {
             pushUiEvent(events, createRuntimeEvent({

@@ -339,6 +339,17 @@ export interface IAgentSidecarExecuteRequest extends Omit<IAgentSidecarBaseReque
   planStepId: string;
 }
 
+export interface IAgentSidecarPlanValidateRequest extends Omit<IAgentSidecarBaseRequest, 'planStepId'> {
+  planId: string;
+  planVersion: number;
+}
+
+export interface IAgentSidecarPlanReplanRequest extends Omit<IAgentSidecarBaseRequest, 'goal' | 'planStepId'> {
+  goal: string;
+  planId: string;
+  planVersion: number;
+}
+
 export interface IAgentSidecarPlanApproveRequest {
   sessionId?: string;
   planId: string;

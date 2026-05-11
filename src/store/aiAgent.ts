@@ -1,6 +1,16 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
+import { z } from 'zod';
 
+import { AGENT_PLAN_STATUSES } from '@/types/agent-sidecar';
+import {
+    aiAgentNetworkPermissionSchema,
+    aiAgentRunSchema,
+    aiAgentStepDetailSchema,
+    aiAgentTaskClassificationSchema,
+    aiTaskPlanStepSchema,
+} from '@/types/ai-agent.schema';
+import { aiToolActivityInlineSchema } from '@/types/ai-stream.schema';
 import type {
     IAiAgentPatchSummary,
     IAiAgentClassifyTaskPayload,
@@ -19,6 +29,108 @@ import type {
 } from '@/types/ai';
 
 export type TAiAgentPanelMode = 'chat' | 'plan' | 'agent';
+
+const aiAgentPanelModeSchema = z.enum(['chat', 'plan', 'agent']);
+const agentPlanStatusSchema = z.enum(AGENT_PLAN_STATUSES);
+const nullablePersistedTextSchema = z.string().min(1).nullable();
+
+const aiAgentStepFinalAnswerSchema = z.object({
+    id: z.string().min(1),
+    runId: z.string().min(1),
+    stepId: z.string().min(1),
+    content: z.string(),
+    createdAt: z.string().min(1),
+});
+
+const aiAgentPersistSchema = z.object({
+    mode: aiAgentPanelModeSchema,
+    networkPermission: aiAgentNetworkPermissionSchema,
+    activeGoal: z.string(),
+    steps: z.array(aiTaskPlanStepSchema).max(6),
+    classification: aiAgentTaskClassificationSchema.nullable(),
+    classificationReason: z.string(),
+    shouldEnterPlanMode: z.boolean(),
+    approvedAt: nullablePersistedTextSchema,
+    planId: nullablePersistedTextSchema,
+    planVersion: z.number().int().positive().nullable(),
+    planStatus: agentPlanStatusSchema.nullable(),
+    planSummary: z.string(),
+    planRequiresApproval: z.boolean(),
+    planThreadId: nullablePersistedTextSchema,
+    planCreatedAt: nullablePersistedTextSchema,
+    planUpdatedAt: nullablePersistedTextSchema,
+    planExecutedAt: nullablePersistedTextSchema,
+    planRejectionReason: nullablePersistedTextSchema,
+    planErrorMessage: nullablePersistedTextSchema,
+    activeRunId: nullablePersistedTextSchema,
+    runs: z.array(aiAgentRunSchema).max(20),
+    stepDetails: z.record(z.string(), aiAgentStepDetailSchema),
+    stepFinalAnswers: z.record(z.string(), z.array(aiAgentStepFinalAnswerSchema).max(50)),
+    toolActivities: z.record(z.string(), z.array(aiToolActivityInlineSchema).max(50)),
+    errorMessage: z.string(),
+});
+
+type TAiAgentPersistState = z.infer<typeof aiAgentPersistSchema>;
+
+const normalizeHydratedRun = (run: IAiAgentRun): IAiAgentRun => {
+    if (
+        run.status !== 'running-plan' &&
+        run.status !== 'running-step' &&
+        run.status !== 'waiting-for-tool-confirmation'
+    ) {
+        return run;
+    }
+
+    return {
+        ...run,
+        status: 'paused',
+        updatedAt: new Date().toISOString(),
+    };
+};
+
+const normalizeHydratedAgentState = (state: TAiAgentPersistState): TAiAgentPersistState => {
+    const runs = state.runs.map(normalizeHydratedRun);
+    const activeRunId = state.activeRunId && runs.some((run) => run.id === state.activeRunId)
+        ? state.activeRunId
+        : null;
+
+    return {
+        ...state,
+        activeRunId,
+        runs,
+    };
+};
+
+const applyHydratedAgentState = (
+    target: TAiAgentPersistState,
+    source: TAiAgentPersistState,
+): void => {
+    target.mode = source.mode;
+    target.networkPermission = source.networkPermission;
+    target.activeGoal = source.activeGoal;
+    target.steps = source.steps;
+    target.classification = source.classification;
+    target.classificationReason = source.classificationReason;
+    target.shouldEnterPlanMode = source.shouldEnterPlanMode;
+    target.approvedAt = source.approvedAt;
+    target.planId = source.planId;
+    target.planVersion = source.planVersion;
+    target.planStatus = source.planStatus;
+    target.planSummary = source.planSummary;
+    target.planRequiresApproval = source.planRequiresApproval;
+    target.planThreadId = source.planThreadId;
+    target.planCreatedAt = source.planCreatedAt;
+    target.planUpdatedAt = source.planUpdatedAt;
+    target.planExecutedAt = source.planExecutedAt;
+    target.planRejectionReason = source.planRejectionReason;
+    target.planErrorMessage = source.planErrorMessage;
+    target.activeRunId = source.activeRunId;
+    target.runs = source.runs;
+    target.stepDetails = source.stepDetails;
+    target.stepFinalAnswers = source.stepFinalAnswers;
+    target.toolActivities = source.toolActivities;
+    target.errorMessage = source.errorMessage;
+};
 
 export const useAiAgentStore = defineStore('ai-agent', () => {
     const mode = ref<TAiAgentPanelMode>('chat');
@@ -441,4 +553,71 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         setPendingToolConfirmation,
         clearPendingToolConfirmation,
     };
+}, {
+    persist: {
+        key: 'shell-ide.ai-agent',
+        pick: [
+            'mode',
+            'networkPermission',
+            'activeGoal',
+            'steps',
+            'classification',
+            'classificationReason',
+            'shouldEnterPlanMode',
+            'approvedAt',
+            'planId',
+            'planVersion',
+            'planStatus',
+            'planSummary',
+            'planRequiresApproval',
+            'planThreadId',
+            'planCreatedAt',
+            'planUpdatedAt',
+            'planExecutedAt',
+            'planRejectionReason',
+            'planErrorMessage',
+            'activeRunId',
+            'runs',
+            'stepDetails',
+            'stepFinalAnswers',
+            'toolActivities',
+            'errorMessage',
+        ],
+        afterHydrate(ctx) {
+            const store = ctx.store as unknown as TAiAgentPersistState;
+            const parsed = aiAgentPersistSchema.safeParse({
+                mode: store.mode,
+                networkPermission: store.networkPermission,
+                activeGoal: store.activeGoal,
+                steps: store.steps,
+                classification: store.classification,
+                classificationReason: store.classificationReason,
+                shouldEnterPlanMode: store.shouldEnterPlanMode,
+                approvedAt: store.approvedAt,
+                planId: store.planId,
+                planVersion: store.planVersion,
+                planStatus: store.planStatus,
+                planSummary: store.planSummary,
+                planRequiresApproval: store.planRequiresApproval,
+                planThreadId: store.planThreadId,
+                planCreatedAt: store.planCreatedAt,
+                planUpdatedAt: store.planUpdatedAt,
+                planExecutedAt: store.planExecutedAt,
+                planRejectionReason: store.planRejectionReason,
+                planErrorMessage: store.planErrorMessage,
+                activeRunId: store.activeRunId,
+                runs: store.runs,
+                stepDetails: store.stepDetails,
+                stepFinalAnswers: store.stepFinalAnswers,
+                toolActivities: store.toolActivities,
+                errorMessage: store.errorMessage,
+            });
+
+            if (!parsed.success) {
+                return;
+            }
+
+            applyHydratedAgentState(store, normalizeHydratedAgentState(parsed.data));
+        },
+    },
 });

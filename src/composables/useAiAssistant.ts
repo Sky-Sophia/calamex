@@ -1696,7 +1696,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
 
         liveEventBuffer.push(payload.event);
       });
-      const payload = await aiService.sidecarExecute({
+      const payload = await aiService.sidecarChat({
         sessionId: sidecarSessionId,
         goal: messageContent,
         messages: toSidecarMessages(visibleMessages, references),
@@ -2629,17 +2629,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
           status: step.status,
         }));
 
-        messages.value = [
-          ...nextMessages,
-          {
-            id: createMessageId('assistant'),
-            role: 'assistant',
-            content: planResult.assistantContent,
-            createdAt: new Date().toISOString(),
-            references: [],
-            toolCalls: planResult.toolCalls,
-          },
-        ];
+        messages.value = nextMessages;
 
         clearAttachedFiles({ revokePreviews: false });
         commitDisplayMessagesToStore(titleThreadId);

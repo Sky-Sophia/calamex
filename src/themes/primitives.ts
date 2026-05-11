@@ -32,6 +32,9 @@ export const P = {
     lightBgDangerMuted: '#ffebe9',          // --bgColor-danger-muted
     lightBgDoneEmphasis: '#8250df',         // --bgColor-done-emphasis
     lightBgDoneMuted: '#fbefff',            // --bgColor-done-muted
+    lightDiffInsertedLineBackground: '#e7f4e7',
+    lightDiffRemovedLineBackground: '#fbe6e2',
+    lightDiffDivider: '#f0f2f3',
     lightControlBgRest: '#f6f8fa',          // --control-bgColor-rest
     lightControlBgHover: '#eff2f5',         // --control-bgColor-hover
     lightControlBgActive: '#e6eaef',        // --control-bgColor-active

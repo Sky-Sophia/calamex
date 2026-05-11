@@ -177,6 +177,7 @@
   --settings-accent-muted: #388bfd1a;
   --app-ui-font-size: 13px;
   --app-density-scale: 1;
+  --diff-resize-handle-width: 2px;
   --success: #3fb950;
   --warning: #d29922;
   --danger: #f85149;

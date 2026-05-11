@@ -135,6 +135,8 @@ export interface IRoles {
         addedSubtle: string;
         deletedSubtle: string;
         modifiedSubtle: string;
+        /** Diff 分隔拖拽线颜色 */
+        divider: string;
     };
 
     /** 终端（xterm）颜色 */

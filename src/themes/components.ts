@@ -141,6 +141,7 @@ export function buildComponentTokens(roles: IRoles) {
             addedSubtle: roles.diff.addedSubtle,
             deletedSubtle: roles.diff.deletedSubtle,
             modifiedSubtle: roles.diff.modifiedSubtle,
+            divider: roles.diff.divider,
         },
 
     } as const;

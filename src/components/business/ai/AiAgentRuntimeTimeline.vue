@@ -219,6 +219,7 @@ const TOOL_ICON_MATCHERS: readonly IToolIconMatcher[] = [
   {
     icon: 'play',
     patterns: [
+      /^browser_/u,
       /browser_evaluate/u,
       /run_vscode_command/u,
       /create_and_run_task/u,
@@ -547,6 +548,18 @@ const WEB_SEARCH_TOOL_NAMES = new Set([
   'tavily_research',
 ]);
 
+const READ_FILE_TOOL_NAMES = new Set([
+  'read_text_file',
+  'mastra_workspace_read_file',
+]);
+
+const WRITE_FILE_TOOL_NAMES = new Set([
+  'write_file',
+  'string_replace_lsp',
+  'mastra_workspace_write_file',
+  'mastra_workspace_edit_file',
+]);
+
 const WEB_SEARCH_SOURCE_URL_KEYS = [
   'url',
   'href',
@@ -831,7 +844,11 @@ const mergeWebSearchSources = (
 };
 
 const isWebSearchToolName = (toolName: string | undefined): boolean =>
-  Boolean(toolName && WEB_SEARCH_TOOL_NAMES.has(toolName));
+  Boolean(toolName && (
+    WEB_SEARCH_TOOL_NAMES.has(toolName)
+    || /^tavily(?:-|_)/iu.test(toolName)
+    || /(?:^|[_-])tavily(?:[_-]|$)/iu.test(toolName)
+  ));
 
 interface IToolActionDescriptor {
   action: string;
@@ -849,7 +866,7 @@ const describeToolAction = (
     ?? resolvePreviewPath(event.type === 'agent.tool.started' ? event.inputPreview : event.resultPreview)
     ?? undefined;
 
-  if (toolName === 'read_text_file' && resourceLabel) {
+  if (READ_FILE_TOOL_NAMES.has(toolName) && resourceLabel) {
     if (event.type === 'agent.tool.completed' && !event.ok) {
       return {
         action: `读取失败 ${resourceLabel}`,
@@ -867,7 +884,7 @@ const describeToolAction = (
     };
   }
 
-  if (toolName === 'write_file' && resourceLabel) {
+  if (WRITE_FILE_TOOL_NAMES.has(toolName) && resourceLabel) {
     if (event.type === 'agent.tool.completed' && !event.ok) {
       return {
         action: `编辑失败 ${resourceLabel}`,
@@ -901,7 +918,7 @@ const describeToolAction = (
     };
   }
 
-  if (WEB_SEARCH_TOOL_NAMES.has(toolName)) {
+  if (isWebSearchToolName(toolName)) {
     const query = resolveWebSearchQuery(event.type === 'agent.tool.started' ? event.inputPreview : undefined)
       ?? fallbackResourceLabel
       ?? undefined;
@@ -1539,7 +1556,8 @@ const parseReasoningMarkdownBlocks = (segment: string): IReasoningMarkdownBlock[
 </script>
 
 <template>
-  <ChainOfThought v-if="shouldRenderTimeline" class="ai-runtime-timeline" default-open
+  <ChainOfThought
+v-if="shouldRenderTimeline" class="ai-runtime-timeline" default-open
     aria-label="Agent Chain of Thought">
     <ChainOfThoughtHeader class="ai-runtime-chain-header">
       <Shimmer v-if="isStreaming" as="span" class="ai-runtime-chain-label ai-runtime-chain-label--thinking">
@@ -1552,7 +1570,8 @@ const parseReasoningMarkdownBlocks = (segment: string): IReasoningMarkdownBlock[
 
     <ChainOfThoughtContent class="ai-runtime-chain-content">
       <template v-for="item in timelineItems" :key="item.id">
-        <ChainOfThoughtStep v-if="item.type === 'reasoning'" class="ai-runtime-step is-reasoning" label="Reasoning"
+        <ChainOfThoughtStep
+v-if="item.type === 'reasoning'" class="ai-runtime-step is-reasoning" label="Reasoning"
           status="complete">
           <template #icon>
             <Dot class="ai-runtime-step-icon" aria-hidden="true" />
@@ -1560,10 +1579,12 @@ const parseReasoningMarkdownBlocks = (segment: string): IReasoningMarkdownBlock[
 
           <div class="agent-line">
             <template v-for="(segment, segmentIndex) in item.segments" :key="`${item.id}:segment:${segmentIndex}`">
-              <template v-for="block in parseReasoningMarkdownBlocks(segment)"
+              <template
+v-for="block in parseReasoningMarkdownBlocks(segment)"
                 :key="`${item.id}:segment:${segmentIndex}:block:${block.id}`">
                 <p v-if="block.type === 'paragraph'" class="agent-line__segment agent-line__paragraph">
-                  <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
+                  <template
+v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
                     :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:token:${tokenIndex}`">
                     <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
                     <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
@@ -1573,7 +1594,8 @@ const parseReasoningMarkdownBlocks = (segment: string): IReasoningMarkdownBlock[
                 </p>
 
                 <p v-else-if="block.type === 'heading'" class="agent-line__segment agent-line__heading">
-                  <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
+                  <template
+v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
                     :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:token:${tokenIndex}`">
                     <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
                     <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
@@ -1583,7 +1605,8 @@ const parseReasoningMarkdownBlocks = (segment: string): IReasoningMarkdownBlock[
                 </p>
 
                 <blockquote v-else-if="block.type === 'quote'" class="agent-line__segment agent-line__quote">
-                  <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
+                  <template
+v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
                     :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:token:${tokenIndex}`">
                     <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
                     <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
@@ -1593,9 +1616,11 @@ const parseReasoningMarkdownBlocks = (segment: string): IReasoningMarkdownBlock[
                 </blockquote>
 
                 <ol v-else-if="block.type === 'ordered-list'" class="agent-line__segment agent-line__list">
-                  <li v-for="(entry, entryIndex) in block.items ?? []"
+                  <li
+v-for="(entry, entryIndex) in block.items ?? []"
                     :key="`${segmentIndex}:${block.id}:entry:${entryIndex}`">
-                    <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
+                    <template
+v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
                       :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:entry:${entryIndex}:token:${tokenIndex}`">
                       <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
                       <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
@@ -1606,9 +1631,11 @@ const parseReasoningMarkdownBlocks = (segment: string): IReasoningMarkdownBlock[
                 </ol>
 
                 <ul v-else class="agent-line__segment agent-line__list">
-                  <li v-for="(entry, entryIndex) in block.items ?? []"
+                  <li
+v-for="(entry, entryIndex) in block.items ?? []"
                     :key="`${segmentIndex}:${block.id}:entry:${entryIndex}`">
-                    <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
+                    <template
+v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
                       :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:entry:${entryIndex}:token:${tokenIndex}`">
                       <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
                       <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
@@ -1622,30 +1649,37 @@ const parseReasoningMarkdownBlocks = (segment: string): IReasoningMarkdownBlock[
           </div>
         </ChainOfThoughtStep>
 
-        <ChainOfThoughtStep v-else-if="item.type === 'event'" class="ai-runtime-step is-event" :label="item.text"
+        <ChainOfThoughtStep
+v-else-if="item.type === 'event'" class="ai-runtime-step is-event" :label="item.text"
           status="complete">
           <template #icon>
             <Activity class="ai-runtime-step-icon" aria-hidden="true" />
           </template>
         </ChainOfThoughtStep>
 
-        <ChainOfThoughtStep v-else class="ai-runtime-step is-task" :label="item.node.action"
+        <ChainOfThoughtStep
+v-else class="ai-runtime-step is-task" :label="item.node.action"
           :status="getTaskStepStatus(item.node)">
           <template #icon>
-            <component :is="getTaskIcon(item.node)" class="ai-runtime-step-icon" :class="`is-icon-${item.node.icon}`"
+            <component
+:is="getTaskIcon(item.node)" class="ai-runtime-step-icon" :class="`is-icon-${item.node.icon}`"
               aria-hidden="true" />
           </template>
 
-          <Task v-if="item.node.tags.length || item.node.tail || item.node.webSearchSources?.length"
+          <Task
+v-if="item.node.tags.length || item.node.tail || item.node.webSearchSources?.length"
             class="ai-runtime-task">
-            <TaskContent v-if="item.node.tags.length || item.node.tail || item.node.webSearchSources?.length"
+            <TaskContent
+v-if="item.node.tags.length || item.node.tail || item.node.webSearchSources?.length"
               class="ai-runtime-task-content"
               :class="{ 'has-web-search-sources': item.node.webSearchSources?.length }">
               <div v-if="item.node.webSearchSources?.length" class="ai-runtime-web-search-sources">
-                <div v-for="source in item.node.webSearchSources" :key="`${item.node.id}:source:${source.url}`"
+                <div
+v-for="source in item.node.webSearchSources" :key="`${item.node.id}:source:${source.url}`"
                   class="ai-runtime-web-source-pill" :title="source.url">
                   <span class="ai-runtime-web-source-icon-wrap" aria-hidden="true">
-                    <img class="ai-runtime-web-source-icon" :src="getFaviconSource(source.host)" alt="" loading="lazy"
+                    <img
+class="ai-runtime-web-source-icon" :src="getFaviconSource(source.host)" alt="" loading="lazy"
                       decoding="async" @error="handleWebSourceIconError" />
                     <Globe class="ai-runtime-web-source-icon-fallback" />
                   </span>
@@ -1654,13 +1688,15 @@ const parseReasoningMarkdownBlocks = (segment: string): IReasoningMarkdownBlock[
               </div>
 
               <ChainOfThoughtSearchResults v-if="item.node.tags.length" class="ai-runtime-task-search-results">
-                <ChainOfThoughtSearchResult v-for="tag in item.node.tags" :key="`${item.node.id}:tag:${tag}`"
+                <ChainOfThoughtSearchResult
+v-for="tag in item.node.tags" :key="`${item.node.id}:tag:${tag}`"
                   class="ai-runtime-task-file" :title="tag">
                   {{ tag }}
                 </ChainOfThoughtSearchResult>
               </ChainOfThoughtSearchResults>
 
-              <TaskItem v-if="shouldShowTaskStatus(item.node) && item.node.tail" class="ai-runtime-task-item"
+              <TaskItem
+v-if="shouldShowTaskStatus(item.node) && item.node.tail" class="ai-runtime-task-item"
                 :class="`is-${item.node.status}`">
                 {{ item.node.tail }}
               </TaskItem>

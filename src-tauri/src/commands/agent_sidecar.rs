@@ -3,13 +3,19 @@ use crate::commands::contracts::{
     AgentSidecarApprovalResolveRequest, AgentSidecarChatRequest,
     AgentSidecarCheckpointRestoreRequest, AgentSidecarExecuteRequest, AgentSidecarHealthPayload,
     AgentSidecarPlanApproveRequest, AgentSidecarPlanFinishRequest, AgentSidecarPlanQueryRequest,
-    AgentSidecarPlanRejectRequest, AgentSidecarPlanRequest, AgentSidecarResponsePayload,
+    AgentSidecarPlanRejectRequest, AgentSidecarPlanReplanRequest, AgentSidecarPlanRequest,
+    AgentSidecarPlanValidateRequest, AgentSidecarResponsePayload,
 };
 use tauri::AppHandle;
 
 #[tauri::command]
 pub async fn agent_sidecar_health() -> Result<AgentSidecarHealthPayload, String> {
     agent_sidecar::health().await
+}
+
+#[tauri::command]
+pub async fn agent_sidecar_restart() -> Result<AgentSidecarHealthPayload, String> {
+    agent_sidecar::restart().await
 }
 
 #[tauri::command]
@@ -54,6 +60,20 @@ pub async fn agent_sidecar_plan_finish(
     payload: AgentSidecarPlanFinishRequest,
 ) -> Result<AgentSidecarResponsePayload, String> {
     agent_sidecar::finish_plan(payload).await
+}
+
+#[tauri::command]
+pub async fn agent_sidecar_plan_validate(
+    payload: AgentSidecarPlanValidateRequest,
+) -> Result<AgentSidecarResponsePayload, String> {
+    agent_sidecar::validate_plan(payload).await
+}
+
+#[tauri::command]
+pub async fn agent_sidecar_plan_replan(
+    payload: AgentSidecarPlanReplanRequest,
+) -> Result<AgentSidecarResponsePayload, String> {
+    agent_sidecar::replan_plan(payload).await
 }
 
 #[tauri::command]

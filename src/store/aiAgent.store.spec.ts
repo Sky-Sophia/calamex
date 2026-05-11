@@ -1,10 +1,48 @@
 import { createPinia, setActivePinia } from 'pinia';
+import piniaPluginPersistedstate from 'pinia-plugin-persistedstate';
+import { createApp, nextTick } from 'vue';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { useAiAgentStore } from '@/store/aiAgent';
+import type { IAiAgentRun, IAiTaskPlanStep } from '@/types/ai';
+
+const createStep = (index: number, status: IAiTaskPlanStep['status'] = 'pending'): IAiTaskPlanStep => ({
+  id: `plan-step-${index + 1}`,
+  index,
+  title: index === 0 ? '收集上下文' : '执行修改',
+  goal: index === 0 ? '收集上下文' : '执行修改',
+  kind: index === 0 ? 'inspect' : 'edit',
+  status,
+  expectedOutput: index === 0 ? '上下文摘要' : '修改结果',
+  tools: index === 0 ? ['read_current_file'] : ['propose_patch'],
+  requiresUserApproval: false,
+  riskLevel: 'low',
+});
+
+const createRun = (steps: IAiTaskPlanStep[]): IAiAgentRun => ({
+  id: 'agent-run-1',
+  goal: '实现计划模式持久化',
+  status: 'running-step',
+  steps,
+  currentStepId: steps[0]?.id ?? null,
+  createdAt: '2026-05-11T10:00:00.000Z',
+  updatedAt: '2026-05-11T10:01:00.000Z',
+  startedAt: '2026-05-11T10:00:00.000Z',
+  completedAt: null,
+  errorMessage: null,
+});
+
+const createPersistedPinia = () => {
+  const pinia = createPinia();
+  pinia.use(piniaPluginPersistedstate);
+  createApp({}).use(pinia);
+  setActivePinia(pinia);
+  return pinia;
+};
 
 describe('aiAgent store step details', () => {
   beforeEach(() => {
+    localStorage.clear();
     setActivePinia(createPinia());
   });
 
@@ -68,5 +106,34 @@ describe('aiAgent store step details', () => {
     expect(summaries).toHaveLength(1);
     expect(summaries[0]?.files[0]?.diffRef).toBe('diff:runtime');
     expect(JSON.stringify(summaries)).not.toContain("- const mode = 'chat'");
+  });
+
+  it('持久化计划快照并在刷新恢复时将运行中状态转为可继续的暂停态', async () => {
+    createPersistedPinia();
+    const store = useAiAgentStore();
+    const steps = [createStep(0, 'running'), createStep(1)];
+
+    store.setPlan('实现计划模式持久化', steps, {
+      planId: 'plan-persist-1',
+      threadId: 'thread-persist-1',
+      version: 1,
+      status: 'executing',
+      approvedAt: '2026-05-11T10:00:00.000Z',
+      executedAt: null,
+      rejectionReason: null,
+      errorMessage: null,
+      summary: '恢复计划模式 UI',
+      requiresApproval: true,
+    });
+    store.upsertRun(createRun(steps));
+    await nextTick();
+
+    createPersistedPinia();
+    const restored = useAiAgentStore();
+
+    expect(restored.planId).toBe('plan-persist-1');
+    expect(restored.steps).toHaveLength(2);
+    expect(restored.activeRun?.status).toBe('paused');
+    expect(restored.activeRun?.currentStepId).toBe('plan-step-1');
   });
 });

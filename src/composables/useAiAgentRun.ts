@@ -7,7 +7,9 @@ import {
   mapSidecarEventsToToolCalls,
   mapSidecarToolNameToAiToolName,
   projectSidecarExecuteResponse,
+  projectSidecarPlanResponse,
   projectSidecarPlanRecordResponse,
+  projectSidecarPlanValidationResponse,
 } from '@/utils/agent-sidecar-events';
 import { toErrorMessage } from '@/utils/error';
 
@@ -150,6 +152,11 @@ const toStepFinalAnswer = (
 const isTerminalRunStatus = (status: IAiAgentRun['status']): boolean =>
   TERMINAL_RUN_STATUSES.has(status);
 
+const isAutoExecutionBoundaryStatus = (status: IAiAgentRun['status']): boolean =>
+  isTerminalRunStatus(status) ||
+  status === 'paused' ||
+  status === 'waiting-for-tool-confirmation';
+
 const clearStepActivityFlags = (steps: IAiTaskPlanStep[]): IAiTaskPlanStep[] =>
   steps.map((step) => ({
     ...step,
@@ -246,6 +253,84 @@ export const useAiAgentRun = () => {
     }
   };
 
+  const buildPlanLifecycleMessages = (goal: string): IAgentSidecarMessage[] => [
+    {
+      role: 'user',
+      content: goal,
+    },
+  ];
+
+  const applyReplannedPlanPayload = (
+    payload: Awaited<ReturnType<typeof aiService.sidecarPlanReplan>>,
+    fallbackGoal: string,
+  ): void => {
+    const projection = projectSidecarPlanResponse(payload, fallbackGoal);
+
+    if (projection.errorMessage) {
+      throw new Error(projection.errorMessage);
+    }
+
+    if (!projection.planMetadata) {
+      throw new Error('sidecar 未返回重规划后的计划元数据。');
+    }
+
+    store.setPlan(projection.goal, projection.steps, projection.planMetadata);
+    store.mode = 'plan';
+  };
+
+  const validateCompletedSidecarPlan = async (
+    run: IAiAgentRun,
+    session: ISidecarStepLoopSession,
+  ): Promise<void> => {
+    if (run.status !== 'completed') {
+      await finishSidecarPlanIfTerminal(run);
+      return;
+    }
+
+    try {
+      const messages = buildPlanLifecycleMessages(session.goal || run.goal);
+      const validationPayload = await aiService.sidecarPlanValidate({
+        sessionId: `sidecar-validate:${run.id}:${Date.now()}`,
+        goal: session.goal || run.goal,
+        messages,
+        context: session.context,
+        workspaceRootPath: session.workspaceRootPath ?? null,
+        planId: session.planId,
+        planVersion: session.planVersion,
+      });
+      const validation = projectSidecarPlanValidationResponse(validationPayload);
+
+      if (validation.errorMessage) {
+        throw new Error(validation.errorMessage);
+      }
+
+      if (validation.report?.needsReplan) {
+        const replanPayload = await aiService.sidecarPlanReplan({
+          sessionId: `sidecar-replan:${run.id}:${Date.now()}`,
+          goal: session.goal || run.goal,
+          messages,
+          context: session.context,
+          workspaceRootPath: session.workspaceRootPath ?? null,
+          planId: session.planId,
+          planVersion: session.planVersion,
+        });
+
+        applyReplannedPlanPayload(replanPayload, session.goal || run.goal);
+        return;
+      }
+
+      await finishSidecarPlanIfTerminal(run);
+    } catch (error) {
+      const message = toErrorMessage(error, '验证 Agent 计划执行结果失败。');
+      setErrorMessage(message);
+      await finishSidecarPlanIfTerminal({
+        ...run,
+        status: 'failed',
+        errorMessage: message,
+      }, message);
+    }
+  };
+
   const appendSidecarToolState = (
     runId: string,
     stepId: string,
@@ -330,6 +415,7 @@ export const useAiAgentRun = () => {
       };
       clearRunSessions(run.id);
       store.clearPendingToolConfirmation();
+      setPlanStatus('executing', store.approvedAt);
       return applyRunPayload(run);
     } catch (error) {
       setErrorMessage(toErrorMessage(error, '启动 Agent run 失败。'));
@@ -493,7 +579,7 @@ export const useAiAgentRun = () => {
     }
 
     const nextRun = finishRunWithStepStatus(session.runId, session.stepId, 'done');
-    await finishSidecarPlanIfTerminal(nextRun);
+    await validateCompletedSidecarPlan(nextRun, session);
     return nextRun;
   };
 
@@ -552,6 +638,34 @@ export const useAiAgentRun = () => {
       throw error;
     }
   };
+
+  const continueRunToCompletion = async (
+    runId: string,
+    options: ISidecarStepLoopOptions,
+  ): Promise<IAiAgentRun> => {
+    let run = getRunOrThrow(runId);
+
+    while (!isAutoExecutionBoundaryStatus(run.status)) {
+      run = await runStepWithSidecar(run.id, options);
+    }
+
+    return run;
+  };
+
+  const runPlanToCompletion = async (
+    goal: string,
+    steps: IAiTaskPlanStep[],
+    options: Omit<ISidecarStepLoopOptions, 'goal'> = {},
+  ): Promise<IAiAgentRun> => {
+    const run = await runPlan(goal, steps, options.context ?? []);
+
+    return continueRunToCompletion(run.id, {
+      goal,
+      context: options.context ?? [],
+      workspaceRootPath: options.workspaceRootPath ?? null,
+    });
+  };
+
   const hasSidecarStepToolConfirmation = (confirmationId: string): boolean =>
     sidecarStepLoopSessions.has(confirmationId);
 
@@ -654,7 +768,7 @@ export const useAiAgentRun = () => {
     }
 
     const nextRun = finishRunWithStepStatus(session.runId, session.stepId, 'done');
-    await finishSidecarPlanIfTerminal(nextRun);
+    await validateCompletedSidecarPlan(nextRun, session);
     return nextRun;
   };
 
@@ -747,8 +861,10 @@ export const useAiAgentRun = () => {
   return {
     store,
     runPlan,
+    runPlanToCompletion,
     runStep,
     runStepWithSidecar,
+    continueRunToCompletion,
     pauseRun,
     resumeRun,
     cancelRun,

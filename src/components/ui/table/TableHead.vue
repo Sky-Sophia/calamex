@@ -13,7 +13,8 @@ const props = withDefaults(
 </script>
 
 <template>
-    <th :class="cn(
+    <th
+:class="cn(
         'text-foreground h-10 px-3 text-left align-middle font-medium [&:has([role=checkbox])]:pr-0',
         props.class,
     )">
