@@ -21,7 +21,9 @@
 //!    本文件不依赖 `apply_reverse_hunks` 多 hunk 顺序保护。
 
 use crate::ai::audit::{self, AiAuditEventKind};
-use crate::ai_edit::{self, diff_render, edit_journal, errors, snapshot, AiEditState};
+use crate::ai_edit::{
+    self, atomic_write, diff_render, edit_journal, errors, path_security, snapshot, AiEditState,
+};
 use crate::ai_patch;
 use crate::commands::contracts::{
     AiEditDiffHunkPayload, AiEditGetDiffPayload, AiEditGetDiffRequest, AiEditListTimelineRequest,
@@ -84,7 +86,8 @@ pub fn restore_snapshot(
         .files
         .iter()
         .map(|file| {
-            let current_content = fs::read_to_string(&file.path).map_err(|error| {
+            let path = validate_revert_path(&file.path)?;
+            let current_content = fs::read_to_string(&path).map_err(|error| {
                 errors::restore_conflict(format!("读取当前文件失败({}):{error}", file.path))
             })?;
             Ok(snapshot::StoredSnapshotFile {
@@ -105,8 +108,9 @@ pub fn restore_snapshot(
     ai_edit::append_snapshot(state, storage_root, pre_revert_snapshot.clone())?;
 
     for file in &target_snapshot.files {
-        ensure_parent_dir(&file.path, "恢复目录")?;
-        fs::write(&file.path, file.content.as_bytes()).map_err(|error| {
+        let path = validate_revert_path(&file.path)?;
+        ensure_parent_dir(&path, "恢复目录")?;
+        atomic_write::write_text(&path, &file.content).map_err(|error| {
             errors::restore_failed(format!("写回恢复文件失败({}):{error}", file.path))
         })?;
     }
@@ -303,7 +307,8 @@ pub fn revert_hunk(
         diff_render::apply_reverse_hunk(&current_file.content, &to_patch_hunk(selected_hunk))
             .map_err(errors::restore_conflict)?;
 
-    fs::write(target_path, restored_content.as_bytes()).map_err(|error| {
+    let safe_target_path = validate_revert_path(target_path)?;
+    atomic_write::write_text(&safe_target_path, &restored_content).map_err(|error| {
         errors::restore_failed(format!("写回 hunk 回滚文件失败({target_path}):{error}"))
     })?;
 
@@ -542,7 +547,7 @@ fn ensure_operation_matches_expected_state(
             Ok(())
         }
         "delete" => {
-            if PathBuf::from(&operation.path).exists() {
+            if validate_revert_path(&operation.path)?.exists() {
                 return Err(errors::restore_conflict(format!(
                     "文件当前已被重新创建,拒绝回滚 delete 操作:{}",
                     operation.path
@@ -554,7 +559,7 @@ fn ensure_operation_matches_expected_state(
             let current_path = operation.new_path.as_deref().ok_or_else(|| {
                 errors::restore_conflict("rename 操作缺少 newPath,无法校验当前状态。")
             })?;
-            if PathBuf::from(&operation.path).exists() {
+            if validate_revert_path(&operation.path)?.exists() {
                 return Err(errors::restore_conflict(format!(
                     "原路径已存在,说明当前文件状态已偏离 AED 记录:{}",
                     operation.path
@@ -753,7 +758,7 @@ fn is_operation_already_reverted(
 ) -> Result<bool, String> {
     match operation.kind.as_str() {
         "modify" => {
-            if !PathBuf::from(&operation.path).exists() {
+            if !validate_revert_path(&operation.path)?.exists() {
                 return Ok(false);
             }
             let source_snapshot = load_required_source_snapshot(storage_root, operation, "modify")?;
@@ -761,9 +766,9 @@ fn is_operation_already_reverted(
             let current_file = read_snapshot_file(&operation.path)?;
             Ok(current_file.content_hash == source_file.content_hash)
         }
-        "create" => Ok(!PathBuf::from(&operation.path).exists()),
+        "create" => Ok(!validate_revert_path(&operation.path)?.exists()),
         "delete" => {
-            if !PathBuf::from(&operation.path).exists() {
+            if !validate_revert_path(&operation.path)?.exists() {
                 return Ok(false);
             }
             let source_snapshot = load_required_source_snapshot(storage_root, operation, "delete")?;
@@ -775,7 +780,9 @@ fn is_operation_already_reverted(
             let current_path = operation.new_path.as_deref().ok_or_else(|| {
                 errors::restore_conflict("rename 操作缺少 newPath,无法判断回滚状态。")
             })?;
-            if PathBuf::from(current_path).exists() || !PathBuf::from(&operation.path).exists() {
+            if validate_revert_path(current_path)?.exists()
+                || !validate_revert_path(&operation.path)?.exists()
+            {
                 return Ok(false);
             }
             let source_snapshot = load_required_source_snapshot(storage_root, operation, "rename")?;
@@ -833,8 +840,9 @@ fn undo_modify_operation(
         std::slice::from_ref(&current_file),
     )?;
 
-    ensure_parent_dir(&operation.path, "撤销目录")?;
-    fs::write(&operation.path, source_file.content.as_bytes()).map_err(|error| {
+    let target_path = validate_revert_path(&operation.path)?;
+    ensure_parent_dir(&target_path, "撤销目录")?;
+    atomic_write::write_text(&target_path, &source_file.content).map_err(|error| {
         errors::restore_failed(format!("写回撤销文件失败({}):{error}", operation.path))
     })?;
 
@@ -868,7 +876,8 @@ fn undo_create_operation(
         std::slice::from_ref(&current_file),
     )?;
 
-    fs::remove_file(&operation.path).map_err(|error| {
+    let target_path = validate_revert_path(&operation.path)?;
+    fs::remove_file(&target_path).map_err(|error| {
         errors::restore_failed(format!("删除撤销文件失败({}):{error}", operation.path))
     })?;
 
@@ -894,7 +903,7 @@ fn undo_delete_operation(
     operation: &AiEditOperationPayload,
     source_snapshot: Option<&snapshot::StoredSnapshot>,
 ) -> Result<UndoExecutionResult, String> {
-    if PathBuf::from(&operation.path).exists() {
+    if validate_revert_path(&operation.path)?.exists() {
         return Err(errors::restore_conflict(format!(
             "当前文件已存在,无法撤销 delete 操作:{}",
             operation.path
@@ -917,8 +926,9 @@ fn undo_delete_operation(
         &[],
     )?;
 
-    ensure_parent_dir(&operation.path, "撤销目录")?;
-    fs::write(&operation.path, source_file.content.as_bytes()).map_err(|error| {
+    let target_path = validate_revert_path(&operation.path)?;
+    ensure_parent_dir(&target_path, "撤销目录")?;
+    atomic_write::write_text(&target_path, &source_file.content).map_err(|error| {
         errors::restore_failed(format!("写回删除文件失败({}):{error}", operation.path))
     })?;
 
@@ -949,7 +959,10 @@ fn undo_rename_operation(
         .as_deref()
         .ok_or_else(|| errors::restore_conflict("rename 操作缺少 newPath,无法撤销。"))?;
 
-    if PathBuf::from(&operation.path).exists() {
+    let original_path = validate_revert_path(&operation.path)?;
+    let current_path_buf = validate_revert_path(current_path)?;
+
+    if original_path.exists() {
         return Err(errors::restore_conflict(format!(
             "原路径已存在,无法撤销 rename 操作:{}",
             operation.path
@@ -974,8 +987,8 @@ fn undo_rename_operation(
         std::slice::from_ref(&current_file),
     )?;
 
-    ensure_parent_dir(&operation.path, "撤销目录")?;
-    fs::rename(current_path, &operation.path).map_err(|error| {
+    ensure_parent_dir(&original_path, "撤销目录")?;
+    fs::rename(&current_path_buf, &original_path).map_err(|error| {
         errors::restore_failed(format!(
             "撤销重命名失败({} -> {}):{error}",
             current_path, operation.path
@@ -1041,7 +1054,8 @@ fn require_source_file(
 }
 
 fn read_snapshot_file(path: &str) -> Result<snapshot::StoredSnapshotFile, String> {
-    let current_content = fs::read_to_string(path)
+    let safe_path = validate_revert_path(path)?;
+    let current_content = fs::read_to_string(&safe_path)
         .map_err(|error| errors::restore_conflict(format!("读取当前文件失败({path}):{error}")))?;
     Ok(snapshot::StoredSnapshotFile {
         path: path.to_string(),
@@ -1050,8 +1064,14 @@ fn read_snapshot_file(path: &str) -> Result<snapshot::StoredSnapshotFile, String
     })
 }
 
-fn ensure_parent_dir(path: &str, context: &str) -> Result<(), String> {
-    if let Some(parent) = PathBuf::from(path).parent() {
+fn validate_revert_path(path: &str) -> Result<PathBuf, String> {
+    let safe_path = path_security::validate_ai_writable_path(path)?;
+    path_security::reject_existing_symlink(&safe_path)?;
+    Ok(safe_path)
+}
+
+fn ensure_parent_dir(path: &Path, context: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|error| {
                 errors::restore_failed(format!("创建{context}失败({}):{error}", parent.display()))
@@ -1087,16 +1107,17 @@ mod tests {
     use crate::ai_edit::{
         self,
         auto_apply::{apply_operation_plans, AiAutoApplyOperationKind, AiAutoApplyOperationPlan},
-        edit_journal, errors, snapshot, AiEditState,
+        diff_render, edit_journal, errors, snapshot, AiEditState,
     };
     use crate::commands::contracts::{
         AiApplyPatchMetadataRequest, AiApplyPatchRequest, AiEditGetDiffRequest,
         AiEditListTimelineRequest, AiEditRestoreSnapshotRequest, AiEditRevertFileRequest,
         AiEditRevertHunkRequest, AiEditRevertTaskRequest, AiEditSetAuthLevelRequest,
         AiEditTimelineEntryPayload, AiEditUndoOperationRequest, AiPatchFilePayload,
-        AiPatchHunkPayload, AiPatchSetPayload,
+        AiPatchSetPayload,
     };
     use std::fs;
+    use std::path::Path;
 
     #[test]
     fn restore_snapshot_restores_file_content_and_records_snapshots() {
@@ -1126,17 +1147,7 @@ mod tests {
             AiApplyPatchRequest {
                 patch: AiPatchSetPayload {
                     summary: "应用 AI 代码块".to_string(),
-                    files: vec![AiPatchFilePayload {
-                        path: file_path.to_string_lossy().to_string(),
-                        original_hash: crate::ai_patch::hash_text("echo old"),
-                        hunks: vec![AiPatchHunkPayload {
-                            old_start: 1,
-                            old_lines: 1,
-                            new_start: 1,
-                            new_lines: 1,
-                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
-                        }],
-                    }],
+                    files: vec![patch_file(&file_path, "echo old", "echo new")],
                 },
                 metadata: None,
             },
@@ -1211,17 +1222,7 @@ mod tests {
             AiApplyPatchRequest {
                 patch: AiPatchSetPayload {
                     summary: "应用 AI 代码块".to_string(),
-                    files: vec![AiPatchFilePayload {
-                        path: file_path.to_string_lossy().to_string(),
-                        original_hash: crate::ai_patch::hash_text("echo old"),
-                        hunks: vec![AiPatchHunkPayload {
-                            old_start: 1,
-                            old_lines: 1,
-                            new_start: 1,
-                            new_lines: 1,
-                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
-                        }],
-                    }],
+                    files: vec![patch_file(&file_path, "echo old", "echo new")],
                 },
                 metadata: None,
             },
@@ -1304,17 +1305,7 @@ mod tests {
             AiApplyPatchRequest {
                 patch: AiPatchSetPayload {
                     summary: "第一次应用 AI 代码块".to_string(),
-                    files: vec![AiPatchFilePayload {
-                        path: file_path.to_string_lossy().to_string(),
-                        original_hash: crate::ai_patch::hash_text("echo old"),
-                        hunks: vec![AiPatchHunkPayload {
-                            old_start: 1,
-                            old_lines: 1,
-                            new_start: 1,
-                            new_lines: 1,
-                            lines: vec!["-echo old".to_string(), "+echo mid".to_string()],
-                        }],
-                    }],
+                    files: vec![patch_file(&file_path, "echo old", "echo mid")],
                 },
                 metadata: Some(AiApplyPatchMetadataRequest {
                     task_id: Some("task-1".to_string()),
@@ -1324,6 +1315,7 @@ mod tests {
                     confirmed_by_user: Some(true),
                     agent_run_id: None,
                     agent_step_id: None,
+                    workspace_root_path: None,
                 }),
             },
             &state,
@@ -1335,17 +1327,7 @@ mod tests {
             AiApplyPatchRequest {
                 patch: AiPatchSetPayload {
                     summary: "第二次应用 AI 代码块".to_string(),
-                    files: vec![AiPatchFilePayload {
-                        path: file_path.to_string_lossy().to_string(),
-                        original_hash: crate::ai_patch::hash_text("echo mid"),
-                        hunks: vec![AiPatchHunkPayload {
-                            old_start: 1,
-                            old_lines: 1,
-                            new_start: 1,
-                            new_lines: 1,
-                            lines: vec!["-echo mid".to_string(), "+echo new".to_string()],
-                        }],
-                    }],
+                    files: vec![patch_file(&file_path, "echo mid", "echo new")],
                 },
                 metadata: Some(AiApplyPatchMetadataRequest {
                     task_id: Some("task-1".to_string()),
@@ -1355,6 +1337,7 @@ mod tests {
                     confirmed_by_user: Some(true),
                     agent_run_id: None,
                     agent_step_id: None,
+                    workspace_root_path: None,
                 }),
             },
             &state,
@@ -1414,24 +1397,11 @@ mod tests {
             AiApplyPatchRequest {
                 patch: AiPatchSetPayload {
                     summary: "包含两个 hunk 的 AI 编辑".to_string(),
-                    files: vec![AiPatchFilePayload {
-                        path: file_path.to_string_lossy().to_string(),
-                        original_hash: crate::ai_patch::hash_text("line-1\nline-2\nline-3\nline-4"),
-                        hunks: vec![AiPatchHunkPayload {
-                            old_start: 1,
-                            old_lines: 4,
-                            new_start: 1,
-                            new_lines: 4,
-                            lines: vec![
-                                " line-1".to_string(),
-                                "-line-2".to_string(),
-                                "+line-2-updated".to_string(),
-                                " line-3".to_string(),
-                                "-line-4".to_string(),
-                                "+line-4-updated".to_string(),
-                            ],
-                        }],
-                    }],
+                    files: vec![patch_file(
+                        &file_path,
+                        "line-1\nline-2\nline-3\nline-4",
+                        "line-1\nline-2-updated\nline-3\nline-4-updated",
+                    )],
                 },
                 metadata: Some(AiApplyPatchMetadataRequest {
                     task_id: Some("task-hunk".to_string()),
@@ -1441,6 +1411,7 @@ mod tests {
                     confirmed_by_user: Some(true),
                     agent_run_id: None,
                     agent_step_id: None,
+                    workspace_root_path: None,
                 }),
             },
             &state,
@@ -1525,17 +1496,7 @@ mod tests {
             AiApplyPatchRequest {
                 patch: AiPatchSetPayload {
                     summary: "应用 AI 代码块".to_string(),
-                    files: vec![AiPatchFilePayload {
-                        path: file_path.to_string_lossy().to_string(),
-                        original_hash: crate::ai_patch::hash_text("echo old"),
-                        hunks: vec![AiPatchHunkPayload {
-                            old_start: 1,
-                            old_lines: 1,
-                            new_start: 1,
-                            new_lines: 1,
-                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
-                        }],
-                    }],
+                    files: vec![patch_file(&file_path, "echo old", "echo new")],
                 },
                 metadata: Some(AiApplyPatchMetadataRequest {
                     task_id: Some("task-restore".to_string()),
@@ -1545,6 +1506,7 @@ mod tests {
                     confirmed_by_user: None,
                     agent_run_id: None,
                     agent_step_id: None,
+                    workspace_root_path: None,
                 }),
             },
             &apply_state,
@@ -1615,17 +1577,7 @@ mod tests {
             AiApplyPatchRequest {
                 patch: AiPatchSetPayload {
                     summary: "应用 AI 代码块".to_string(),
-                    files: vec![AiPatchFilePayload {
-                        path: file_path.to_string_lossy().to_string(),
-                        original_hash: crate::ai_patch::hash_text("echo old"),
-                        hunks: vec![AiPatchHunkPayload {
-                            old_start: 1,
-                            old_lines: 1,
-                            new_start: 1,
-                            new_lines: 1,
-                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
-                        }],
-                    }],
+                    files: vec![patch_file(&file_path, "echo old", "echo new")],
                 },
                 metadata: Some(AiApplyPatchMetadataRequest {
                     task_id: Some("task-undo".to_string()),
@@ -1635,6 +1587,7 @@ mod tests {
                     confirmed_by_user: None,
                     agent_run_id: None,
                     agent_step_id: None,
+                    workspace_root_path: None,
                 }),
             },
             &apply_state,
@@ -1697,6 +1650,7 @@ mod tests {
                 path: file_path.to_string_lossy().to_string(),
                 new_path: None,
                 original_hash: None,
+                original_modified_at: None,
                 original_content: None,
                 updated_content: Some("echo created".to_string()),
             }],
@@ -1708,6 +1662,7 @@ mod tests {
                 confirmed_by_user: None,
                 agent_run_id: None,
                 agent_step_id: None,
+                workspace_root_path: None,
             }),
             "创建文件",
             &state,
@@ -1781,6 +1736,7 @@ mod tests {
                 path: file_path.to_string_lossy().to_string(),
                 new_path: None,
                 original_hash: Some(crate::ai_patch::hash_text("echo deleted")),
+                original_modified_at: None,
                 original_content: Some("echo deleted".to_string()),
                 updated_content: None,
             }],
@@ -1792,6 +1748,7 @@ mod tests {
                 confirmed_by_user: None,
                 agent_run_id: None,
                 agent_step_id: None,
+                workspace_root_path: None,
             }),
             "删除文件",
             &state,
@@ -1870,6 +1827,7 @@ mod tests {
                 path: source_path.to_string_lossy().to_string(),
                 new_path: Some(target_path.to_string_lossy().to_string()),
                 original_hash: Some(crate::ai_patch::hash_text("echo rename")),
+                original_modified_at: None,
                 original_content: Some("echo rename".to_string()),
                 updated_content: None,
             }],
@@ -1881,6 +1839,7 @@ mod tests {
                 confirmed_by_user: None,
                 agent_run_id: None,
                 agent_step_id: None,
+                workspace_root_path: None,
             }),
             "重命名文件",
             &state,
@@ -1965,6 +1924,7 @@ mod tests {
                     path: first_path.to_string_lossy().to_string(),
                     new_path: None,
                     original_hash: Some(crate::ai_patch::hash_text("echo first-old")),
+                    original_modified_at: None,
                     original_content: Some("echo first-old".to_string()),
                     updated_content: Some("echo first-new".to_string()),
                 },
@@ -1973,6 +1933,7 @@ mod tests {
                     path: second_path.to_string_lossy().to_string(),
                     new_path: None,
                     original_hash: Some(crate::ai_patch::hash_text("echo second-old")),
+                    original_modified_at: None,
                     original_content: Some("echo second-old".to_string()),
                     updated_content: Some("echo second-new".to_string()),
                 },
@@ -1985,6 +1946,7 @@ mod tests {
                 confirmed_by_user: None,
                 agent_run_id: None,
                 agent_step_id: None,
+                workspace_root_path: None,
             }),
             "批量修改文件",
             &state,
@@ -2059,6 +2021,7 @@ mod tests {
                 path: file_path.to_string_lossy().to_string(),
                 new_path: None,
                 original_hash: Some(crate::ai_patch::hash_text("echo old")),
+                original_modified_at: None,
                 original_content: Some("echo old".to_string()),
                 updated_content: Some("echo new".to_string()),
             }],
@@ -2070,6 +2033,7 @@ mod tests {
                 confirmed_by_user: None,
                 agent_run_id: None,
                 agent_step_id: None,
+                workspace_root_path: None,
             }),
             "任务回滚鉴权测试",
             &apply_state,
@@ -2096,5 +2060,14 @@ mod tests {
 
         let _ = fs::remove_file(&file_path);
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    fn patch_file(path: &Path, original: &str, updated: &str) -> AiPatchFilePayload {
+        AiPatchFilePayload {
+            path: path.to_string_lossy().to_string(),
+            original_hash: crate::ai_patch::hash_text(original),
+            original_modified_at_ms: None,
+            hunks: diff_render::render_patch_hunks(original, updated).hunks,
+        }
     }
 }

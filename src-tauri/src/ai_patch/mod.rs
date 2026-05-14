@@ -7,18 +7,26 @@ pub mod validator;
 use crate::ai::audit::{self, AiAuditEventKind};
 use crate::ai::errors;
 use crate::ai_edit::auto_apply::{self, AiAutoApplyOperationKind, AiAutoApplyOperationPlan};
-use crate::ai_edit::protected_paths;
+use crate::ai_edit::diff_render;
+use crate::ai_edit::path_security;
 use crate::ai_edit::AiEditState;
 use crate::commands::contracts::{
     AiApplyPatchFilePayload, AiApplyPatchPayload, AiApplyPatchRequest, AiPatchFilePayload,
-    AiPatchHunkPayload, AiPatchSetPayload, AiProposePatchPayload, AiProposePatchRequest,
+    AiPatchSetPayload, AiProposePatchPayload, AiProposePatchRequest,
 };
-use diffy::Patch;
+use diffy_imara::Patch;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-const FNV_PRIME: u64 = 0x100000001b3;
+const BASELINE_READ_RETRY_COUNT: usize = 3;
+
+#[derive(Debug, Clone)]
+pub struct FileContentBaseline {
+    pub content: String,
+    pub content_hash: String,
+    pub modified_at: SystemTime,
+}
 
 pub fn propose_patch(payload: AiProposePatchRequest) -> Result<AiProposePatchPayload, String> {
     if payload.path.trim().is_empty() {
@@ -31,21 +39,18 @@ pub fn propose_patch(payload: AiProposePatchRequest) -> Result<AiProposePatchPay
         return Err(errors::error("AI_PATCH_INVALID", "Patch 内容没有变化。"));
     }
 
-    let old_lines = count_lines(&payload.original_content);
-    let new_lines = count_lines(&payload.updated_content);
-    let lines = build_full_replace_lines(&payload.original_content, &payload.updated_content);
+    let rendered =
+        diff_render::render_patch_hunks(&payload.original_content, &payload.updated_content);
     let patch = AiPatchSetPayload {
         summary: payload.summary.trim().to_string(),
         files: vec![AiPatchFilePayload {
+            original_modified_at_ms: read_matching_modified_at_ms(
+                &payload.path,
+                &payload.original_content,
+            ),
             path: payload.path,
             original_hash: hash_text(&payload.original_content),
-            hunks: vec![AiPatchHunkPayload {
-                old_start: 1,
-                old_lines,
-                new_start: 1,
-                new_lines,
-                lines,
-            }],
+            hunks: rendered.hunks,
         }],
     };
     audit::emit(AiAuditEventKind::PatchProposed);
@@ -55,6 +60,7 @@ pub fn propose_patch(payload: AiProposePatchRequest) -> Result<AiProposePatchPay
 struct PendingPatchFile {
     payload_path: String,
     original_hash: String,
+    original_modified_at: SystemTime,
     original: String,
     updated: String,
 }
@@ -66,27 +72,35 @@ pub fn apply_patch(
 ) -> Result<AiApplyPatchPayload, String> {
     validate_patch(&payload.patch)?;
     let metadata = payload.metadata;
+    let workspace_root = metadata
+        .as_ref()
+        .and_then(|value| value.workspace_root_path.as_deref());
     let patch = payload.patch;
     let mut pending_files = Vec::with_capacity(patch.files.len());
 
     for file in &patch.files {
-        let path = PathBuf::from(&file.path);
-        validate_writable_path(&path)?;
-        let original = fs::read_to_string(&path).map_err(|error| {
-            errors::error("AI_PATCH_CONFLICT", format!("读取待应用文件失败：{error}"))
-        })?;
-        if hash_text(&original) != file.original_hash {
+        let path = path_security::validate_ai_writable_path_with_root(&file.path, workspace_root)?
+            .into_path_buf();
+        validate_writable_path(&path, workspace_root)?;
+        let baseline = read_text_file_baseline(&path)
+            .map_err(|error| errors::error("AI_PATCH_CONFLICT", error))?;
+        if baseline.content_hash != file.original_hash
+            || file.original_modified_at_ms.is_some_and(|expected| {
+                system_time_to_millis(baseline.modified_at) != Some(expected)
+            })
+        {
             audit::emit(AiAuditEventKind::PatchFailed);
             return Err(errors::error(
                 "AI_PATCH_CONFLICT",
                 format!("文件已变化，拒绝应用 Patch：{}", file.path),
             ));
         }
-        let updated = apply_file_patch(&original, file)?;
+        let updated = apply_file_patch(&baseline.content, file)?;
         pending_files.push(PendingPatchFile {
             payload_path: file.path.clone(),
             original_hash: file.original_hash.clone(),
-            original,
+            original_modified_at: baseline.modified_at,
+            original: baseline.content,
             updated,
         });
     }
@@ -98,6 +112,7 @@ pub fn apply_patch(
             path: file.payload_path.clone(),
             new_path: None,
             original_hash: Some(file.original_hash.clone()),
+            original_modified_at: Some(file.original_modified_at),
             original_content: Some(file.original.clone()),
             updated_content: Some(file.updated.clone()),
         })
@@ -154,12 +169,50 @@ pub fn apply_patch(
 }
 
 pub fn hash_text(value: &str) -> String {
-    let mut hash = FNV_OFFSET;
-    for byte in value.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
+    format!("blake3:{}", blake3::hash(value.as_bytes()).to_hex())
+}
+
+pub fn read_text_file_baseline(path: &Path) -> Result<FileContentBaseline, String> {
+    let mut last_error = None;
+    for _ in 0..BASELINE_READ_RETRY_COUNT {
+        let before = file_modified_at(path)?;
+        let content = fs::read_to_string(path).map_err(|error| format!("读取文件失败：{error}"))?;
+        let after = file_modified_at(path)?;
+
+        if before == after {
+            let content_hash = hash_text(&content);
+            return Ok(FileContentBaseline {
+                content,
+                content_hash,
+                modified_at: after,
+            });
+        }
+
+        last_error = Some("读取文件期间检测到文件变化。".to_string());
     }
-    format!("fnv64:{hash:016x}")
+
+    Err(last_error.unwrap_or_else(|| "读取文件 baseline 失败。".to_string()))
+}
+
+pub fn system_time_to_millis(value: SystemTime) -> Option<u64> {
+    value
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+}
+
+fn file_modified_at(path: &Path) -> Result<SystemTime, String> {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .map_err(|error| format!("读取文件修改时间失败：{error}"))
+}
+
+fn read_matching_modified_at_ms(path: &str, expected_content: &str) -> Option<u64> {
+    let baseline = read_text_file_baseline(Path::new(path)).ok()?;
+    if baseline.content_hash == hash_text(expected_content) {
+        return system_time_to_millis(baseline.modified_at);
+    }
+    None
 }
 
 fn validate_patch(patch: &AiPatchSetPayload) -> Result<(), String> {
@@ -186,29 +239,26 @@ fn validate_patch(patch: &AiPatchSetPayload) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_writable_path(path: &Path) -> Result<(), String> {
+fn validate_writable_path(path: &Path, workspace_root: Option<&str>) -> Result<(), String> {
+    let raw_path = path
+        .to_str()
+        .ok_or_else(|| errors::error("AI_PATCH_INVALID", "Patch 路径不是有效 UTF-8。"))?;
+    let path = path_security::validate_ai_writable_path_with_root(raw_path, workspace_root)?
+        .into_path_buf();
+    path_security::reject_existing_symlink(&path)?;
     if !path.is_file() {
         return Err(errors::error("AI_PATCH_CONFLICT", "Patch 目标文件不存在。"));
-    }
-    let value = path.to_string_lossy().replace('\\', "/");
-    if protected_paths::is_builtin_protected_path(&value) {
-        return Err(errors::error(
-            "AI_EDIT_PATH_PROTECTED",
-            "AED 受保护路径需要显式二次确认，当前 Patch 已被拒绝。",
-        ));
     }
     Ok(())
 }
 
 fn apply_file_patch(original: &str, file: &AiPatchFilePayload) -> Result<String, String> {
     let patch_text = build_unified_patch(file)?;
-    let patch = Patch::from_str(&patch_text).map_err(|error| {
-        errors::error("AI_PATCH_INVALID", format!("解析 Patch 失败：{error}"))
-    })?;
+    let patch = Patch::from_str(&patch_text)
+        .map_err(|error| errors::error("AI_PATCH_INVALID", format!("解析 Patch 失败：{error}")))?;
 
-    diffy::apply(original, &patch).map_err(|error| {
-        errors::error("AI_PATCH_CONFLICT", format!("应用 Patch 失败：{error}"))
-    })
+    diffy_imara::apply(original, &patch)
+        .map_err(|error| errors::error("AI_PATCH_CONFLICT", format!("应用 Patch 失败：{error}")))
 }
 
 fn build_unified_patch(file: &AiPatchFilePayload) -> Result<String, String> {
@@ -235,6 +285,9 @@ fn validate_patch_line(line: &str) -> Result<(), String> {
             "Patch 行不能包含换行符。",
         ));
     }
+    if line == "\\ No newline at end of file" {
+        return Ok(());
+    }
     if matches!(line.as_bytes().first(), Some(b' ' | b'+' | b'-')) {
         return Ok(());
     }
@@ -244,32 +297,14 @@ fn validate_patch_line(line: &str) -> Result<(), String> {
     ))
 }
 
-fn build_full_replace_lines(original: &str, updated: &str) -> Vec<String> {
-    let mut lines = Vec::new();
-    for line in original.lines() {
-        lines.push(format!("-{line}"));
-    }
-    for line in updated.lines() {
-        lines.push(format!("+{line}"));
-    }
-    if updated.ends_with('\n') {
-        lines.push("+".to_string());
-    }
-    lines
-}
-
-fn count_lines(value: &str) -> u32 {
-    value.lines().count().max(1) as u32
-}
-
 #[cfg(test)]
 mod tests {
     use super::{apply_patch, hash_text, propose_patch, validate_writable_path};
-    use crate::ai_edit::{self, edit_journal, AiEditState};
+    use crate::ai_edit::{self, diff_render, edit_journal, AiEditState};
     use crate::commands::contracts::{
         AiApplyPatchMetadataRequest, AiApplyPatchRequest, AiEditListTimelineRequest,
         AiEditSetAuthLevelRequest, AiEditTimelineEntryPayload, AiPatchFilePayload,
-        AiPatchHunkPayload, AiPatchSetPayload, AiProposePatchRequest,
+        AiPatchSetPayload, AiProposePatchRequest,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -284,6 +319,75 @@ mod tests {
         })
         .expect("patch should be generated");
         assert_eq!(payload.patch.files[0].original_hash, hash_text("echo old"));
+        assert!(payload.patch.files[0].original_hash.starts_with("blake3:"));
+    }
+
+    #[test]
+    fn propose_patch_records_original_mtime_when_disk_content_matches() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "aed-ai-patch-baseline-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ));
+        let file_path = temp_dir.join("script.sh");
+        fs::create_dir_all(&temp_dir).expect("temp directory should be created");
+        fs::write(&file_path, "echo old").expect("temp file should be written");
+
+        let payload = propose_patch(AiProposePatchRequest {
+            path: file_path.to_string_lossy().to_string(),
+            original_content: "echo old".to_string(),
+            updated_content: "echo new".to_string(),
+            summary: "更新输出".to_string(),
+        })
+        .expect("patch should be generated");
+
+        assert!(payload.patch.files[0].original_modified_at_ms.is_some());
+
+        let _ = fs::remove_file(&file_path);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn apply_patch_rejects_stale_original_mtime() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "aed-ai-patch-stale-mtime-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ));
+        let file_path = temp_dir.join("script.sh");
+        fs::create_dir_all(&temp_dir).expect("temp directory should be created");
+        fs::write(&file_path, "echo old").expect("temp file should be written");
+
+        let state = AiEditState::default();
+        let snapshot_root = temp_dir.join("snapshot-store");
+        let mut patch = patch_file(&file_path, "echo old", "echo new");
+        patch.original_modified_at_ms = Some(0);
+
+        let error = apply_patch(
+            AiApplyPatchRequest {
+                patch: AiPatchSetPayload {
+                    summary: "应用 AI 代码块".to_string(),
+                    files: vec![patch],
+                },
+                metadata: None,
+            },
+            &state,
+            &snapshot_root,
+        )
+        .expect_err("stale mtime should reject patch apply");
+
+        assert!(error.contains("AI_PATCH_CONFLICT"));
+        assert_eq!(
+            fs::read_to_string(&file_path).expect("file should still exist"),
+            "echo old"
+        );
+
+        let _ = fs::remove_file(&file_path);
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -301,7 +405,7 @@ mod tests {
         fs::create_dir_all(&protected_dir).expect("temp directory should be created");
         fs::write(&protected_path, "lock").expect("temp file should be written");
 
-        let error = validate_writable_path(&PathBuf::from(&protected_path))
+        let error = validate_writable_path(&PathBuf::from(&protected_path), None)
             .expect_err("protected path should be rejected");
         assert!(error.contains("AI_EDIT_PATH_PROTECTED"));
 
@@ -336,17 +440,7 @@ mod tests {
             AiApplyPatchRequest {
                 patch: AiPatchSetPayload {
                     summary: "应用 AI 代码块".to_string(),
-                    files: vec![AiPatchFilePayload {
-                        path: file_path.to_string_lossy().to_string(),
-                        original_hash: hash_text("echo old"),
-                        hunks: vec![AiPatchHunkPayload {
-                            old_start: 1,
-                            old_lines: 1,
-                            new_start: 1,
-                            new_lines: 1,
-                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
-                        }],
-                    }],
+                    files: vec![patch_file(&file_path, "echo old", "echo new")],
                 },
                 metadata: None,
             },
@@ -407,17 +501,7 @@ mod tests {
             AiApplyPatchRequest {
                 patch: AiPatchSetPayload {
                     summary: "应用 AI 代码块".to_string(),
-                    files: vec![AiPatchFilePayload {
-                        path: file_path.to_string_lossy().to_string(),
-                        original_hash: hash_text("echo old"),
-                        hunks: vec![AiPatchHunkPayload {
-                            old_start: 1,
-                            old_lines: 1,
-                            new_start: 1,
-                            new_lines: 1,
-                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
-                        }],
-                    }],
+                    files: vec![patch_file(&file_path, "echo old", "echo new")],
                 },
                 metadata: Some(AiApplyPatchMetadataRequest {
                     task_id: Some("task-1".to_string()),
@@ -427,6 +511,7 @@ mod tests {
                     confirmed_by_user: None,
                     agent_run_id: None,
                     agent_step_id: None,
+                    workspace_root_path: None,
                 }),
             },
             &state,
@@ -472,17 +557,7 @@ mod tests {
             AiApplyPatchRequest {
                 patch: AiPatchSetPayload {
                     summary: "应用 AI 代码块".to_string(),
-                    files: vec![AiPatchFilePayload {
-                        path: file_path.to_string_lossy().to_string(),
-                        original_hash: hash_text("echo old"),
-                        hunks: vec![AiPatchHunkPayload {
-                            old_start: 1,
-                            old_lines: 1,
-                            new_start: 1,
-                            new_lines: 1,
-                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
-                        }],
-                    }],
+                    files: vec![patch_file(&file_path, "echo old", "echo new")],
                 },
                 metadata: Some(AiApplyPatchMetadataRequest {
                     task_id: Some("task-1".to_string()),
@@ -492,6 +567,7 @@ mod tests {
                     confirmed_by_user: None,
                     agent_run_id: None,
                     agent_step_id: None,
+                    workspace_root_path: None,
                 }),
             },
             &state,
@@ -529,17 +605,7 @@ mod tests {
             AiApplyPatchRequest {
                 patch: AiPatchSetPayload {
                     summary: "应用 AI 代码块".to_string(),
-                    files: vec![AiPatchFilePayload {
-                        path: file_path.to_string_lossy().to_string(),
-                        original_hash: hash_text("echo old"),
-                        hunks: vec![AiPatchHunkPayload {
-                            old_start: 1,
-                            old_lines: 1,
-                            new_start: 1,
-                            new_lines: 1,
-                            lines: vec!["-echo old".to_string(), "+echo new".to_string()],
-                        }],
-                    }],
+                    files: vec![patch_file(&file_path, "echo old", "echo new")],
                 },
                 metadata: Some(AiApplyPatchMetadataRequest {
                     task_id: Some("task-1".to_string()),
@@ -549,6 +615,7 @@ mod tests {
                     confirmed_by_user: Some(true),
                     agent_run_id: None,
                     agent_step_id: None,
+                    workspace_root_path: None,
                 }),
             },
             &state,
@@ -564,5 +631,14 @@ mod tests {
 
         let _ = fs::remove_file(&file_path);
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    fn patch_file(path: &PathBuf, original: &str, updated: &str) -> AiPatchFilePayload {
+        AiPatchFilePayload {
+            path: path.to_string_lossy().to_string(),
+            original_hash: hash_text(original),
+            original_modified_at_ms: None,
+            hunks: diff_render::render_patch_hunks(original, updated).hunks,
+        }
     }
 }

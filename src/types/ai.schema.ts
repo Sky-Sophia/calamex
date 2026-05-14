@@ -65,6 +65,17 @@ import {
   aiWebSourceTypeSchema,
 } from '@/types/ai-web.schema';
 
+const aiUnifiedDiffHunkLineSchema = z
+  .string()
+  .refine(
+    (value) =>
+      value === '\\ No newline at end of file' ||
+      value.startsWith(' ') ||
+      value.startsWith('+') ||
+      value.startsWith('-'),
+    'Patch hunk line must be a unified diff line.',
+  );
+
 export const aiProviderTypeSchema = z.enum(['litellm']);
 export const aiModelRoleSchema = z.enum(['main', 'narrator']);
 export const activityNoteToneSchema = z.enum([
@@ -410,13 +421,14 @@ export const aiPatchSetSchema = z.object({
     z.object({
       path: z.string(),
       originalHash: z.string(),
+      originalModifiedAtMs: z.number().int().nonnegative().optional().nullable(),
       hunks: z.array(
         z.object({
           oldStart: z.number().int().nonnegative(),
           oldLines: z.number().int().nonnegative(),
           newStart: z.number().int().nonnegative(),
           newLines: z.number().int().nonnegative(),
-          lines: z.array(z.string()),
+          lines: z.array(aiUnifiedDiffHunkLineSchema),
         }),
       ),
     }),
@@ -431,6 +443,7 @@ export const aiApplyPatchMetadataSchema = z.object({
   confirmedByUser: z.boolean().nullable().optional(),
   agentRunId: z.string().min(1).nullable().optional(),
   agentStepId: z.string().min(1).nullable().optional(),
+  workspaceRootPath: z.string().min(1).nullable().optional(),
 });
 
 export const aiCodeActionRequestSchema = z.object({

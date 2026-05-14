@@ -825,7 +825,8 @@ pub struct AiPatchHunkPayload {
     /// - `' '`（空格）：上下文行
     /// - `'+'`：新增行
     /// - `'-'`：删除行
-    /// 行内不含末尾换行符，渲染端按需要补齐。
+    /// - `"\\ No newline at end of file"`：标准 unified diff 无末尾换行标记
+    /// 普通行内不含末尾换行符；应用端按 unified diff 语义补齐。
     pub(crate) lines: Vec<String>,
 }
 
@@ -834,6 +835,10 @@ pub struct AiPatchHunkPayload {
 pub struct AiPatchFilePayload {
     pub(crate) path: String,
     pub(crate) original_hash: String,
+    /// 生成 patch 时源文件的 mtime（Unix epoch 毫秒）。
+    /// 旧调用可为空；AED 写盘链路会在真正落盘前用运行时读取的 baseline 再做 OCC。
+    #[serde(default)]
+    pub(crate) original_modified_at_ms: Option<u64>,
     pub(crate) hunks: Vec<AiPatchHunkPayload>,
 }
 
@@ -878,6 +883,7 @@ pub struct AiApplyPatchMetadataRequest {
     pub(crate) confirmed_by_user: Option<bool>,
     pub(crate) agent_run_id: Option<String>,
     pub(crate) agent_step_id: Option<String>,
+    pub(crate) workspace_root_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

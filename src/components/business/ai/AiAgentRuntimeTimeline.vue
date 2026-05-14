@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import AiReasoningCodeBlock from '@/components/business/ai/AiReasoningCodeBlock.vue';
 import {
   ChainOfThought,
   ChainOfThoughtContent,
@@ -10,6 +9,7 @@ import {
 } from '@/components/ai-elements/chain-of-thought';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { Task, TaskContent, TaskItem } from '@/components/ai-elements/task';
+import AiReasoningCodeBlock from '@/components/business/ai/AiReasoningCodeBlock.vue';
 import {
   classifyRuntimeToolKind,
   normalizeRuntimeToolName,
@@ -2050,8 +2050,7 @@ const parseReasoningMarkdownBlocks = (segment: string): IReasoningMarkdownBlock[
 </script>
 
 <template>
-  <ChainOfThought
-v-if="shouldRenderTimeline" class="ai-runtime-timeline" default-open
+  <ChainOfThought v-if="shouldRenderTimeline" class="ai-runtime-timeline" default-open
     aria-label="Agent Chain of Thought">
     <ChainOfThoughtHeader class="ai-runtime-chain-header">
       <Shimmer v-if="isStreaming" as="span" class="ai-runtime-chain-label ai-runtime-chain-label--thinking">
@@ -2064,8 +2063,7 @@ v-if="shouldRenderTimeline" class="ai-runtime-timeline" default-open
 
     <ChainOfThoughtContent class="ai-runtime-chain-content">
       <template v-for="item in timelineItems" :key="item.id">
-        <ChainOfThoughtStep
-v-if="item.type === 'reasoning'" class="ai-runtime-step is-reasoning" label="Reasoning"
+        <ChainOfThoughtStep v-if="item.type === 'reasoning'" class="ai-runtime-step is-reasoning" label="Reasoning"
           status="complete">
           <template #icon>
             <Dot class="ai-runtime-step-icon" aria-hidden="true" />
@@ -2073,20 +2071,14 @@ v-if="item.type === 'reasoning'" class="ai-runtime-step is-reasoning" label="Rea
 
           <div class="agent-line">
             <template v-for="(segment, segmentIndex) in item.segments" :key="`${item.id}:segment:${segmentIndex}`">
-              <template
-v-for="block in parseReasoningMarkdownBlocks(segment)"
+              <template v-for="block in parseReasoningMarkdownBlocks(segment)"
                 :key="`${item.id}:segment:${segmentIndex}:block:${block.id}`">
-                <AiReasoningCodeBlock
-                  v-if="block.type === 'code-block'"
-                  class="agent-line__segment agent-line__code-block"
-                  :code="block.code ?? ''"
-                  :language="block.language"
-                  :fence-info="block.info"
-                />
+                <AiReasoningCodeBlock v-if="block.type === 'code-block'"
+                  class="agent-line__segment agent-line__code-block" :code="block.code ?? ''" :language="block.language"
+                  :fence-info="block.info" />
 
                 <p v-else-if="block.type === 'paragraph'" class="agent-line__segment agent-line__paragraph">
-                  <template
-v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
+                  <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
                     :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:token:${tokenIndex}`">
                     <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
                     <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
@@ -2096,8 +2088,7 @@ v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
                 </p>
 
                 <p v-else-if="block.type === 'heading'" class="agent-line__segment agent-line__heading">
-                  <template
-v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
+                  <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
                     :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:token:${tokenIndex}`">
                     <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
                     <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
@@ -2107,8 +2098,7 @@ v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
                 </p>
 
                 <blockquote v-else-if="block.type === 'quote'" class="agent-line__segment agent-line__quote">
-                  <template
-v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
+                  <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
                     :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:token:${tokenIndex}`">
                     <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
                     <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
@@ -2118,11 +2108,9 @@ v-for="(token, tokenIndex) in tokenizeInlineMarkdown(block.text ?? '')"
                 </blockquote>
 
                 <ol v-else-if="block.type === 'ordered-list'" class="agent-line__segment agent-line__list">
-                  <li
-v-for="(entry, entryIndex) in block.items ?? []"
+                  <li v-for="(entry, entryIndex) in block.items ?? []"
                     :key="`${segmentIndex}:${block.id}:entry:${entryIndex}`">
-                    <template
-v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
+                    <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
                       :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:entry:${entryIndex}:token:${tokenIndex}`">
                       <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
                       <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
@@ -2133,11 +2121,9 @@ v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
                 </ol>
 
                 <ul v-else class="agent-line__segment agent-line__list">
-                  <li
-v-for="(entry, entryIndex) in block.items ?? []"
+                  <li v-for="(entry, entryIndex) in block.items ?? []"
                     :key="`${segmentIndex}:${block.id}:entry:${entryIndex}`">
-                    <template
-v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
+                    <template v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
                       :key="`${item.id}:segment:${segmentIndex}:block:${block.id}:entry:${entryIndex}:token:${tokenIndex}`">
                       <strong v-if="token.kind === 'strong'" class="agent-line__strong">{{ token.text }}</strong>
                       <em v-else-if="token.kind === 'emphasis'" class="agent-line__emphasis">{{ token.text }}</em>
@@ -2151,37 +2137,29 @@ v-for="(token, tokenIndex) in tokenizeInlineMarkdown(entry)"
           </div>
         </ChainOfThoughtStep>
 
-        <ChainOfThoughtStep
-v-else-if="item.type === 'event'" class="ai-runtime-step is-event" :label="item.text"
+        <ChainOfThoughtStep v-else-if="item.type === 'event'" class="ai-runtime-step is-event" :label="item.text"
           status="complete">
           <template #icon>
             <Activity class="ai-runtime-step-icon" aria-hidden="true" />
           </template>
         </ChainOfThoughtStep>
 
-        <ChainOfThoughtStep
-v-else class="ai-runtime-step is-task" :label="item.node.action"
+        <ChainOfThoughtStep v-else class="ai-runtime-step is-task" :label="item.node.action"
           :status="getTaskStepStatus(item.node)">
           <template #icon>
-            <component
-:is="getTaskIcon(item.node)" class="ai-runtime-step-icon" :class="`is-icon-${item.node.icon}`"
+            <component :is="getTaskIcon(item.node)" class="ai-runtime-step-icon" :class="`is-icon-${item.node.icon}`"
               aria-hidden="true" />
           </template>
 
-          <Task
-v-if="item.node.tags.length || item.node.tail || item.node.webSearchSources?.length"
+          <Task v-if="item.node.tags.length || item.node.tail || item.node.webSearchSources?.length"
             class="ai-runtime-task">
-            <TaskContent
-v-if="item.node.tags.length || item.node.tail || item.node.webSearchSources?.length"
-              class="ai-runtime-task-content"
-              :class="{ 'has-web-search-sources': item.node.webSearchSources?.length }">
+            <TaskContent v-if="item.node.tags.length || item.node.tail || item.node.webSearchSources?.length"
+              class="ai-runtime-task-content" :class="{ 'has-web-search-sources': item.node.webSearchSources?.length }">
               <div v-if="item.node.webSearchSources?.length" class="ai-runtime-web-search-sources">
-                <div
-v-for="source in item.node.webSearchSources" :key="`${item.node.id}:source:${source.url}`"
+                <div v-for="source in item.node.webSearchSources" :key="`${item.node.id}:source:${source.url}`"
                   class="ai-runtime-web-source-pill" :title="source.url">
                   <span class="ai-runtime-web-source-icon-wrap" aria-hidden="true">
-                    <img
-class="ai-runtime-web-source-icon" :src="getFaviconSource(source.host)" alt="" loading="lazy"
+                    <img class="ai-runtime-web-source-icon" :src="getFaviconSource(source.host)" alt="" loading="lazy"
                       decoding="async" @error="handleWebSourceIconError" />
                     <Globe class="ai-runtime-web-source-icon-fallback" />
                   </span>
@@ -2190,15 +2168,13 @@ class="ai-runtime-web-source-icon" :src="getFaviconSource(source.host)" alt="" l
               </div>
 
               <ChainOfThoughtSearchResults v-if="item.node.tags.length" class="ai-runtime-task-search-results">
-                <ChainOfThoughtSearchResult
-v-for="tag in item.node.tags" :key="`${item.node.id}:tag:${tag}`"
+                <ChainOfThoughtSearchResult v-for="tag in item.node.tags" :key="`${item.node.id}:tag:${tag}`"
                   class="ai-runtime-task-file" :title="tag">
                   {{ tag }}
                 </ChainOfThoughtSearchResult>
               </ChainOfThoughtSearchResults>
 
-              <TaskItem
-v-if="shouldShowTaskStatus(item.node) && item.node.tail" class="ai-runtime-task-item"
+              <TaskItem v-if="shouldShowTaskStatus(item.node) && item.node.tail" class="ai-runtime-task-item"
                 :class="`is-${item.node.status}`">
                 {{ item.node.tail }}
               </TaskItem>
@@ -2279,7 +2255,8 @@ v-if="shouldShowTaskStatus(item.node) && item.node.tail" class="ai-runtime-task-
 }
 
 .agent-line__code-block {
-  width: 100%;
+  width: 60%;
+  max-width: 60%;
   white-space: normal;
 }
 

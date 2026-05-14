@@ -1111,6 +1111,7 @@ fn normalize_auto_apply_metadata(
         confirmed_by_user: None,
         agent_run_id: None,
         agent_step_id: None,
+        workspace_root_path: None,
     });
 
     if metadata.task_id.as_deref().is_none_or(str::is_empty) {
@@ -1133,6 +1134,13 @@ fn normalize_auto_apply_metadata(
     }
     if metadata.agent_step_id.as_deref().is_none_or(str::is_empty) {
         metadata.agent_step_id = Some(step.id.clone());
+    }
+    if metadata
+        .workspace_root_path
+        .as_deref()
+        .is_none_or(str::is_empty)
+    {
+        metadata.workspace_root_path = context.workspace_root.clone();
     }
 
     metadata
@@ -2474,7 +2482,8 @@ mod tests {
                     summary: "apply agent patch".to_string(),
                     files: vec![AiPatchFilePayload {
                         path: "src/App.vue".to_string(),
-                        original_hash: "fnv64:0000000000000000".to_string(),
+                        original_hash: "blake3:0000000000000000".to_string(),
+                        original_modified_at_ms: None,
                         hunks: vec![AiPatchHunkPayload {
                             old_start: 1,
                             old_lines: 1,

@@ -1,10 +1,14 @@
+pub mod atomic_write;
 pub mod auto_apply;
 pub mod diff_render;
 pub mod edit_journal;
 pub mod errors;
+pub mod file_transaction;
+pub mod path_security;
 pub mod protected_paths;
 pub mod revert;
 pub mod snapshot;
+pub mod storage_lock;
 pub mod timeline;
 
 use crate::ai::audit::{self, AiAuditEventKind};
@@ -210,26 +214,8 @@ pub fn list_timeline_with_state(
     Ok(AiEditListTimelinePayload { entries })
 }
 
-pub fn append_operations(
-    state: &AiEditState,
-    storage_root: &Path,
-    operations: &[AiEditOperationPayload],
-) -> Result<(), String> {
-    edit_journal::append_operations(storage_root, operations)?;
-    {
-        let mut guard = state
-            .timeline
-            .lock()
-            .map_err(|_| errors::state_poisoned())?;
-        guard.extend(
-            operations
-                .iter()
-                .cloned()
-                .map(AiEditTimelineEntryPayload::Operation),
-        );
-    }
-    run_retention_policy_best_effort(state, storage_root);
-    Ok(())
+pub fn recover_pending_file_transactions(storage_root: &Path) -> Result<(), String> {
+    file_transaction::recover_pending(storage_root)
 }
 
 pub fn append_snapshot(
@@ -248,7 +234,7 @@ pub fn append_snapshot(
     Ok(())
 }
 
-fn run_retention_policy_best_effort(state: &AiEditState, storage_root: &Path) {
+pub(crate) fn run_retention_policy_best_effort(state: &AiEditState, storage_root: &Path) {
     if let Err(error) = apply_retention_policy(state, storage_root) {
         tracing::warn!(
             target: "ai.edit",
@@ -401,21 +387,16 @@ pub fn create_snapshot(
 
     let mut file_buffers = Vec::with_capacity(file_refs.len());
     for file_ref in &file_refs {
-        let normalized = file_ref.replace('\\', "/");
-        if protected_paths::is_builtin_protected_path(&normalized) {
-            return Err(errors::snapshot_store_failed(format!(
-                "手动快照不支持受保护路径：{file_ref}"
-            )));
-        }
-
-        let path = Path::new(file_ref);
+        let path = path_security::validate_ai_writable_path(file_ref)
+            .map_err(errors::snapshot_store_failed)?;
+        path_security::reject_existing_symlink(&path).map_err(errors::snapshot_store_failed)?;
         if !path.is_file() {
             return Err(errors::snapshot_store_failed(format!(
                 "手动快照文件不存在：{file_ref}"
             )));
         }
 
-        let content = fs::read_to_string(path).map_err(|error| {
+        let content = fs::read_to_string(&path).map_err(|error| {
             errors::snapshot_store_failed(format!("读取手动快照文件失败（{file_ref}）：{error}"))
         })?;
         let content_hash = crate::ai_patch::hash_text(&content);
@@ -438,6 +419,7 @@ pub fn create_snapshot(
         confirmed_by_user: Some(true),
         agent_run_id: None,
         agent_step_id: None,
+        workspace_root_path: None,
     };
     let snapshot =
         snapshot::store_manual_snapshot(storage_root, &snapshot_sources, Some(&metadata), &label)?;
@@ -584,6 +566,7 @@ mod tests {
                 confirmed_by_user: None,
                 agent_run_id: None,
                 agent_step_id: None,
+                workspace_root_path: None,
             }),
         )
         .expect_err("manual mode should block patch apply");
@@ -613,6 +596,7 @@ mod tests {
                 confirmed_by_user: None,
                 agent_run_id: None,
                 agent_step_id: None,
+                workspace_root_path: None,
             }),
         )
         .expect("matching task id should pass");
@@ -640,6 +624,7 @@ mod tests {
                 confirmed_by_user: None,
                 agent_run_id: None,
                 agent_step_id: None,
+                workspace_root_path: None,
             }),
         )
         .expect_err("mismatched task id should be rejected");
@@ -661,6 +646,7 @@ mod tests {
                 confirmed_by_user: Some(true),
                 agent_run_id: None,
                 agent_step_id: None,
+                workspace_root_path: None,
             }),
         )
         .expect("user confirmed patch should bypass auto-apply gate");
@@ -717,7 +703,7 @@ mod tests {
 
         for index in 0..3 {
             let path = format!("src/file-{index}.sh");
-            let content_hash = format!("fnv64:{index}");
+            let content_hash = format!("blake3:{index}");
             let content = format!("echo {index}");
             let label = format!("snapshot-{index}");
             let snapshot_payload = snapshot::store_manual_snapshot(

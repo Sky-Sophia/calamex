@@ -1,4 +1,5 @@
 use super::{decode_script_bytes, encode_script_content, resolve_workspace_root};
+use crate::ai_patch::hash_text;
 use ast_grep_core::Pattern as AstPattern;
 use ast_grep_language::{LanguageExt, SupportLang};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -32,8 +33,6 @@ const MAX_REPLACEMENT_FILE_LIMIT: usize = 500;
 const MAX_DIFF_CHARS: usize = 8_000;
 const REPLACEMENT_PREVIEW_CONTEXT_CHARS: usize = 32;
 const COMPACT_PREVIEW_ELLIPSIS: &str = "…";
-const FNV_OFFSET: u64 = 0xcbf29ce484222325;
-const FNV_PRIME: u64 = 0x100000001b3;
 const SKIPPED_SEARCH_DIR_NAMES: &[&str] = &[
     ".git",
     ".hg",
@@ -906,15 +905,6 @@ fn scanned_file_from_path(workspace_root: &Path, path: PathBuf) -> Result<Scanne
         path,
         name,
     })
-}
-
-fn hash_text(value: &str) -> String {
-    let mut hash = FNV_OFFSET;
-    for byte in value.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(FNV_PRIME);
-    }
-    format!("fnv64:{hash:016x}")
 }
 
 fn scan_workspace_files(root: &Path, filters: &PathFilters) -> Result<Vec<ScannedFile>, String> {

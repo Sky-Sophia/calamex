@@ -37,6 +37,15 @@ const optionalNonEmptyStringSchema = z.preprocess((value) => {
 
 const requiredNonEmptyStringSchema = z.string().trim().min(1);
 
+const unifiedDiffHunkLineSchema = z.string().refine(
+  (value) =>
+    value === '\\ No newline at end of file'
+    || value.startsWith(' ')
+    || value.startsWith('+')
+    || value.startsWith('-'),
+  'Patch hunk line must be a unified diff line.',
+);
+
 const optionalAgentModeSchema = z.preprocess((value) => {
   if (value === null || value === undefined) {
     return undefined;
@@ -121,7 +130,7 @@ export const diffFileSchema = z.object({
     oldLines: z.number().int().nonnegative(),
     newStart: z.number().int().nonnegative(),
     newLines: z.number().int().nonnegative(),
-    lines: z.array(z.string()),
+    lines: z.array(unifiedDiffHunkLineSchema),
   })),
 });
 

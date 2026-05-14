@@ -23,6 +23,11 @@ pub const AI_EDIT_INVALID_AUTH_LEVEL: &str = "AI_EDIT_INVALID_AUTH_LEVEL";
 pub const AI_EDIT_STATE_POISONED: &str = "AI_EDIT_STATE_POISONED";
 pub const AI_EDIT_AUTH_BLOCKED: &str = "AI_EDIT_AUTH_BLOCKED";
 pub const AI_EDIT_STORAGE_PATH_UNAVAILABLE: &str = "AI_EDIT_STORAGE_PATH_UNAVAILABLE";
+pub const AI_EDIT_STORAGE_LOCKED: &str = "AI_EDIT_STORAGE_LOCKED";
+pub const AI_EDIT_PATH_INVALID: &str = "AI_EDIT_PATH_INVALID";
+pub const AI_EDIT_PATH_PROTECTED: &str = "AI_EDIT_PATH_PROTECTED";
+pub const AI_EDIT_PATH_ESCAPE: &str = "AI_EDIT_PATH_ESCAPE";
+pub const AI_EDIT_TRANSACTION_FAILED: &str = "AI_EDIT_TRANSACTION_FAILED";
 pub const AI_EDIT_JOURNAL_FAILED: &str = "AI_EDIT_JOURNAL_FAILED";
 pub const AI_EDIT_SNAPSHOT_STORE_FAILED: &str = "AI_EDIT_SNAPSHOT_STORE_FAILED";
 pub const AI_EDIT_SNAPSHOT_NOT_FOUND: &str = "AI_EDIT_SNAPSHOT_NOT_FOUND";
@@ -65,6 +70,46 @@ pub fn storage_path_unavailable(detail: &str) -> String {
     error(
         AI_EDIT_STORAGE_PATH_UNAVAILABLE,
         format!("无法解析 AED 存储目录：{detail}"),
+    )
+}
+
+/// AED 存储目录已被同项目的另一个进程占用。
+pub fn storage_locked(detail: impl AsRef<str>) -> String {
+    error(
+        AI_EDIT_STORAGE_LOCKED,
+        format!("AED 存储已被占用：{}", detail.as_ref()),
+    )
+}
+
+/// AED 收到的路径为空、非 UTF-8、包含 NUL、`..` 等非法路径形态。
+pub fn path_invalid(detail: impl AsRef<str>) -> String {
+    error(
+        AI_EDIT_PATH_INVALID,
+        format!("AED 路径非法：{}", detail.as_ref()),
+    )
+}
+
+/// AED 目标命中内置受保护路径规则。
+pub fn path_protected(detail: impl AsRef<str>) -> String {
+    error(
+        AI_EDIT_PATH_PROTECTED,
+        format!("AED 受保护路径已拒绝：{}", detail.as_ref()),
+    )
+}
+
+/// AED 目标路径试图越过当前工作区或能力目录。
+pub fn path_escape(detail: impl AsRef<str>) -> String {
+    error(
+        AI_EDIT_PATH_ESCAPE,
+        format!("AED 路径越界已拒绝：{}", detail.as_ref()),
+    )
+}
+
+/// AED 文件事务准备、提交或恢复失败。
+pub fn transaction_failed(detail: impl AsRef<str>) -> String {
+    error(
+        AI_EDIT_TRANSACTION_FAILED,
+        format!("AED 文件事务失败：{}", detail.as_ref()),
     )
 }
 

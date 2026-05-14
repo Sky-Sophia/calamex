@@ -186,13 +186,22 @@ export const aiEditRevertFilePayloadSchema = z.object({
 /**
  * AED diff hunk 预览条目 schema。
  */
+const unifiedDiffHunkLineSchema = z.string().refine(
+    (value) =>
+        value === '\\ No newline at end of file'
+        || value.startsWith(' ')
+        || value.startsWith('+')
+        || value.startsWith('-'),
+    'Patch hunk line must be a unified diff line.',
+);
+
 export const aiEditDiffHunkSchema = z.object({
     hunkIndex: z.number().int().nonnegative(),
     oldStart: z.number().int().nonnegative(),
     oldLines: z.number().int().nonnegative(),
     newStart: z.number().int().nonnegative(),
     newLines: z.number().int().nonnegative(),
-    lines: z.array(z.string()),
+    lines: z.array(unifiedDiffHunkLineSchema),
 });
 
 /**

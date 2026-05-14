@@ -14,7 +14,7 @@ const { usage, usageSource, modelId } = useContextValue();
 
 const pricing = computed(() => computeDeepSeekCostBreakdown(modelId.value, usage.value));
 const outputTokens = computed(() => pricing.value?.usage.outputTokens ?? usage.value?.outputTokens ?? 0);
-const outputLabel = computed(() => (usageSource.value === 'official' ? '官方输出' : '估算输出'));
+const outputLabel = computed(() => (usageSource.value === 'official' ? '输出' : '估算输出'));
 
 const outputCostText = computed(() => {
   if (!pricing.value) {

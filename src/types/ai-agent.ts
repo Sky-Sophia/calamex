@@ -50,11 +50,7 @@ export const AI_AGENT_RUN_STATUSES = [
   'cancelled',
 ] as const;
 
-export const AI_AGENT_TIMELINE_ITEM_TYPES = [
-  'step',
-  'tool-result',
-  'web-source',
-] as const;
+export const AI_AGENT_TIMELINE_ITEM_TYPES = ['step', 'tool-result', 'web-source'] as const;
 
 export const AI_AGENT_TIMELINE_ITEM_STATUSES = [
   'pending',
@@ -73,18 +69,9 @@ export const AI_TOOL_CONFIRMATION_OPTION_IDS = [
   'view-details',
 ] as const;
 
-export const AI_TOOL_CONFIRMATION_DECISIONS = [
-  'allow-once',
-  'allow-run',
-  'skip',
-  'stop',
-] as const;
+export const AI_TOOL_CONFIRMATION_DECISIONS = ['allow-once', 'allow-run', 'skip', 'stop'] as const;
 
-export const AI_TOOL_CONFIRMATION_OPTION_TONES = [
-  'primary',
-  'secondary',
-  'danger',
-] as const;
+export const AI_TOOL_CONFIRMATION_OPTION_TONES = ['primary', 'secondary', 'danger'] as const;
 
 export type TAiAgentPlanStepKind = (typeof AI_AGENT_PLAN_STEP_KINDS)[number];
 export type TAiAgentPlanStepStatus = (typeof AI_AGENT_PLAN_STEP_STATUSES)[number];
@@ -142,6 +129,7 @@ export interface IAiPatchHunkToolInput {
 export interface IAiPatchFileToolInput {
   path: string;
   originalHash: string;
+  originalModifiedAtMs?: number | null;
   hunks: IAiPatchHunkToolInput[];
 }
 
@@ -158,6 +146,7 @@ export interface IAiApplyPatchMetadataToolInput {
   confirmedByUser?: boolean | null;
   agentRunId?: string | null;
   agentStepId?: string | null;
+  workspaceRootPath?: string | null;
 }
 
 export interface IAiAutoApplyPatchToolInput {

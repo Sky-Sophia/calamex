@@ -16,10 +16,7 @@ import {
   AI_TOOL_CONFIRMATION_OPTION_TONES,
 } from '@/types/ai-agent';
 import { aiContextReferenceSchema } from '@/types/ai-context.schema';
-import {
-  AI_AGENT_PERMISSION_LEVELS,
-  AI_AGENT_TOOL_NAMES,
-} from '@/types/ai-tools';
+import { AI_AGENT_PERMISSION_LEVELS, AI_AGENT_TOOL_NAMES } from '@/types/ai-tools';
 import {
   aiWebFetchInputSchema,
   aiWebSearchInputSchema,
@@ -57,11 +54,24 @@ export const aiToolConfirmationDecisionSchema = z.enum(AI_TOOL_CONFIRMATION_DECI
 
 export const aiToolConfirmationOptionToneSchema = z.enum(AI_TOOL_CONFIRMATION_OPTION_TONES);
 
-const nullableOptionalTextSchema = z
-  .preprocess((value) => (value === null ? undefined : value), z.string().min(1).optional());
+const nullableOptionalTextSchema = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  z.string().min(1).optional(),
+);
 
 const nullishOptional = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((value) => (value === null ? undefined : value), schema.optional());
+
+const unifiedDiffHunkLineSchema = z
+  .string()
+  .refine(
+    (value) =>
+      value === '\\ No newline at end of file' ||
+      value.startsWith(' ') ||
+      value.startsWith('+') ||
+      value.startsWith('-'),
+    'Patch hunk line must be a unified diff line.',
+  );
 
 export const aiAgentPlanReferenceSchema = z.object({
   type: aiAgentPlanReferenceTypeSchema,
@@ -99,12 +109,13 @@ export const aiPatchHunkToolInputSchema = z.object({
   oldLines: z.number().int().nonnegative(),
   newStart: z.number().int().nonnegative(),
   newLines: z.number().int().nonnegative(),
-  lines: z.array(z.string()).min(1),
+  lines: z.array(unifiedDiffHunkLineSchema).min(1),
 });
 
 export const aiPatchFileToolInputSchema = z.object({
   path: z.string().trim().min(1),
   originalHash: z.string().trim().min(1),
+  originalModifiedAtMs: nullishOptional(z.number().int().nonnegative()),
   hunks: z.array(aiPatchHunkToolInputSchema).min(1),
 });
 
@@ -121,6 +132,7 @@ export const aiApplyPatchMetadataToolInputSchema = z.object({
   confirmedByUser: nullishOptional(z.boolean()),
   agentRunId: nullishOptional(z.string().trim().min(1)),
   agentStepId: nullishOptional(z.string().trim().min(1)),
+  workspaceRootPath: nullishOptional(z.string().trim().min(1)),
 });
 
 export const aiAutoApplyPatchToolInputSchema = z.object({
@@ -128,15 +140,17 @@ export const aiAutoApplyPatchToolInputSchema = z.object({
   metadata: nullishOptional(aiApplyPatchMetadataToolInputSchema),
 });
 
-export const aiAgentToolInputsSchema = nullishOptional(z.object({
-  webSearch: nullishOptional(aiWebSearchInputSchema),
-  webFetch: nullishOptional(aiWebFetchInputSchema),
-  proposePatch: nullishOptional(aiProposePatchToolInputSchema),
-  autoApplyPatch: nullishOptional(aiAutoApplyPatchToolInputSchema),
-  runCommand: nullishOptional(aiRunCommandToolInputSchema),
-  stageFile: nullishOptional(aiStageFileToolInputSchema),
-  createCommit: nullishOptional(aiCreateCommitToolInputSchema),
-}));
+export const aiAgentToolInputsSchema = nullishOptional(
+  z.object({
+    webSearch: nullishOptional(aiWebSearchInputSchema),
+    webFetch: nullishOptional(aiWebFetchInputSchema),
+    proposePatch: nullishOptional(aiProposePatchToolInputSchema),
+    autoApplyPatch: nullishOptional(aiAutoApplyPatchToolInputSchema),
+    runCommand: nullishOptional(aiRunCommandToolInputSchema),
+    stageFile: nullishOptional(aiStageFileToolInputSchema),
+    createCommit: nullishOptional(aiCreateCommitToolInputSchema),
+  }),
+);
 
 export const aiTaskPlanStepSchema = z.object({
   id: z.string().min(1),

@@ -435,6 +435,7 @@ export interface IAiPatchHunk {
 export interface IAiPatchFile {
   path: string;
   originalHash: string;
+  originalModifiedAtMs?: number | null;
   hunks: IAiPatchHunk[];
 }
 
@@ -514,6 +515,7 @@ export interface IAiApplyPatchMetadata {
   confirmedByUser?: boolean | null;
   agentRunId?: string | null;
   agentStepId?: string | null;
+  workspaceRootPath?: string | null;
 }
 
 export interface IAiApplyPatchRequest {

@@ -8,9 +8,9 @@ import type {
   IAgentSidecarPlanApproveRequest,
   IAgentSidecarPlanFinishRequest,
   IAgentSidecarPlanQueryRequest,
+  IAgentSidecarPlanRejectRequest,
   IAgentSidecarPlanReplanRequest,
   IAgentSidecarPlanRequest,
-  IAgentSidecarPlanRejectRequest,
   IAgentSidecarPlanValidateRequest,
   IAgentSidecarResponsePayload,
   IAgentSidecarStreamEventPayload,
@@ -63,6 +63,123 @@ import type {
   IAiEditGetDiffPayload,
   IAiEditGetDiffRequest,
 } from '@/types/ai-edit';
+import { normalizeFileSystemPath } from '@/utils/path';
+
+const SIDECAR_DOTENV_RELATIVE_PATH = 'agent-sidecar/.env';
+const TAVILY_API_KEY_ENV = 'TAVILY_API_KEY';
+const MISSING_FILE_ERROR_PATTERN = /不存在|找不到|not found|cannot find|no such file/iu;
+
+const resolveSidecarDotenvPath = (workspaceRootPath: string): string =>
+  `${normalizeFileSystemPath(workspaceRootPath, {
+    collapseDuplicateSeparators: true,
+    trimTrailingSeparator: true,
+    foldWindowsCase: false,
+  })}/${SIDECAR_DOTENV_RELATIVE_PATH}`;
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const buildDotenvLinePattern = (key: string): RegExp =>
+  new RegExp(`^\\s*(?:export\\s+)?${escapeRegExp(key)}\\s*=.*$`, 'u');
+
+const readOptionalScript = async (path: string) => {
+  try {
+    return await tauriService.loadScript(path);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (MISSING_FILE_ERROR_PATTERN.test(message)) {
+      return null;
+    }
+    throw error;
+  }
+};
+
+const parseDotenvValue = (rawValue: string): string => {
+  const trimmed = rawValue.trim();
+
+  if (!trimmed) {
+    return '';
+  }
+
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed.replace(/\s+#.*$/u, '');
+};
+
+const readDotenvAssignment = (content: string, key: string): string => {
+  const linePattern = new RegExp(
+    `^\\s*(?:export\\s+)?${escapeRegExp(key)}\\s*=\\s*(.*)\\s*$`,
+    'u',
+  );
+
+  for (const line of content.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
+
+    const match = line.match(linePattern);
+    if (match) {
+      return parseDotenvValue(match[1] ?? '');
+    }
+  }
+
+  return '';
+};
+
+const formatDotenvValue = (value: string): string =>
+  /[\s#"']/u.test(value) ? JSON.stringify(value) : value;
+
+const updateDotenvAssignment = (
+  content: string,
+  key: string,
+  nextValue: string | null,
+): string => {
+  const lineBreak = content.includes('\r\n') ? '\r\n' : '\n';
+  const hadTrailingNewline = content.endsWith('\n');
+  const linePattern = buildDotenvLinePattern(key);
+  const nextLines: string[] = [];
+  let replaced = false;
+
+  for (const line of content.split(/\r?\n/u)) {
+    if (linePattern.test(line)) {
+      if (!replaced && nextValue !== null) {
+        nextLines.push(`${key}=${formatDotenvValue(nextValue)}`);
+        replaced = true;
+      }
+      continue;
+    }
+
+    if (!line && !content) {
+      continue;
+    }
+
+    nextLines.push(line);
+  }
+
+  if (!replaced && nextValue !== null) {
+    if (nextLines.length > 0 && nextLines[nextLines.length - 1]?.trim() !== '') {
+      nextLines.push('');
+    }
+    nextLines.push(`${key}=${formatDotenvValue(nextValue)}`);
+  }
+
+  let nextContent = nextLines.join(lineBreak);
+
+  if (!nextContent) {
+    return '';
+  }
+
+  if (hadTrailingNewline || nextValue !== null) {
+    nextContent = `${nextContent}${lineBreak}`;
+  }
+
+  return nextContent;
+};
 
 export const aiService = {
   sidecarHealth(): Promise<IAgentSidecarHealthPayload> {
@@ -70,6 +187,30 @@ export const aiService = {
   },
   sidecarRestart(): Promise<IAgentSidecarHealthPayload> {
     return tauriService.agentSidecarRestart();
+  },
+  async loadTavilyApiKey(workspaceRootPath: string): Promise<string> {
+    const sidecarDotenvPath = resolveSidecarDotenvPath(workspaceRootPath);
+    const script = await readOptionalScript(sidecarDotenvPath);
+    return script ? readDotenvAssignment(script.content, TAVILY_API_KEY_ENV) : '';
+  },
+  async saveTavilyApiKey(workspaceRootPath: string, apiKey: string): Promise<void> {
+    const sidecarDotenvPath = resolveSidecarDotenvPath(workspaceRootPath);
+    const script = await readOptionalScript(sidecarDotenvPath);
+    const nextValue = apiKey.trim();
+
+    if (!script && !nextValue) {
+      return;
+    }
+
+    await tauriService.saveScript({
+      path: sidecarDotenvPath,
+      content: updateDotenvAssignment(
+        script?.content ?? '',
+        TAVILY_API_KEY_ENV,
+        nextValue || null,
+      ),
+      encoding: script?.encoding ?? 'utf-8',
+    });
   },
   sidecarChat(payload: IAgentSidecarChatRequest): Promise<IAgentSidecarResponsePayload> {
     return tauriService.agentSidecarChat(payload);

@@ -20,6 +20,8 @@ export interface IDeepSeekUsageBreakdown {
 export interface IDeepSeekCostBreakdown {
     tier: TDeepSeekPricingTier;
     usage: IDeepSeekUsageBreakdown;
+    cacheHitInputCostCny: number;
+    cacheMissInputCostCny: number;
     inputCostCny: number;
     outputCostCny: number;
     totalCostCny: number;
@@ -40,7 +42,7 @@ const DEEPSEEK_PRICING: Record<TDeepSeekPricingTier, IDeepSeekPricingRates> = {
 
 const cnyFormatter = new Intl.NumberFormat('zh-CN', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
+    maximumFractionDigits: 6,
 });
 
 const sanitizeTokenValue = (value: number | undefined): number => {
@@ -114,14 +116,18 @@ export const computeDeepSeekCostBreakdown = (
 
     const rates = DEEPSEEK_PRICING[tier];
     const usageBreakdown = getUsageBreakdown(usage);
-    const inputCostCny =
-        getCostByTokens(usageBreakdown.cacheHitInputTokens, rates.inputCacheHitPerMillionCny) +
+    const cacheHitInputCostCny =
+        getCostByTokens(usageBreakdown.cacheHitInputTokens, rates.inputCacheHitPerMillionCny);
+    const cacheMissInputCostCny =
         getCostByTokens(usageBreakdown.cacheMissInputTokens, rates.inputCacheMissPerMillionCny);
+    const inputCostCny = cacheHitInputCostCny + cacheMissInputCostCny;
     const outputCostCny = getCostByTokens(usageBreakdown.outputTokens, rates.outputPerMillionCny);
 
     return {
         tier,
         usage: usageBreakdown,
+        cacheHitInputCostCny,
+        cacheMissInputCostCny,
         inputCostCny,
         outputCostCny,
         totalCostCny: inputCostCny + outputCostCny,

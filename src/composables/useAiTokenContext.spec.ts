@@ -188,6 +188,81 @@ describe('useAiTokenContext', () => {
     expect(context.contextProps.value.usageSource).toBe('official');
   });
 
+  it('accumulates official stream usage for the current conversation', () => {
+    const messages = ref<IAiChatMessage[]>([
+      {
+        ...createMessage('第一轮回复'),
+        id: 'message-1',
+        stream: {
+          status: 'completed',
+          usage: {
+            inputTokens: 10,
+            inputTokenDetails: {
+              noCacheTokens: 8,
+              cacheReadTokens: 2,
+              cacheWriteTokens: 0,
+            },
+            outputTokens: 5,
+            outputTokenDetails: {
+              textTokens: 4,
+              reasoningTokens: 1,
+            },
+            totalTokens: 15,
+            cachedInputTokens: 2,
+            reasoningTokens: 1,
+          },
+        },
+      },
+      {
+        ...createMessage('第二轮回复'),
+        id: 'message-2',
+        stream: {
+          status: 'completed',
+          usage: {
+            inputTokens: 20,
+            inputTokenDetails: {
+              noCacheTokens: 15,
+              cacheReadTokens: 5,
+              cacheWriteTokens: 0,
+            },
+            outputTokens: 7,
+            outputTokenDetails: {
+              textTokens: 5,
+              reasoningTokens: 2,
+            },
+            totalTokens: 27,
+            cachedInputTokens: 5,
+            reasoningTokens: 2,
+          },
+        },
+      },
+    ]);
+    const context = createContext({
+      mode: 'chat',
+      messages,
+      estimationMessages: messages,
+    });
+
+    expect(context.contextProps.value.usedTokens).toBe(30);
+    expect(context.contextProps.value.usage).toMatchObject({
+      inputTokens: 30,
+      inputTokenDetails: {
+        noCacheTokens: 23,
+        cacheReadTokens: 7,
+        cacheWriteTokens: 0,
+      },
+      outputTokens: 12,
+      outputTokenDetails: {
+        textTokens: 9,
+        reasoningTokens: 3,
+      },
+      totalTokens: 42,
+      cachedInputTokens: 7,
+      reasoningTokens: 3,
+    });
+    expect(context.contextProps.value.usageSource).toBe('official');
+  });
+
   it('prioritizes official sidecar usage over runtime and local estimates', () => {
     const messages = ref<IAiChatMessage[]>([
       createMessage('这条消息的本地估算不应覆盖官方 usage。'.repeat(20)),

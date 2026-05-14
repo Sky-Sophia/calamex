@@ -1,14 +1,11 @@
-use crate::ai_edit::errors;
+use crate::ai_edit::{errors, storage_lock};
 use crate::commands::contracts::AiEditOperationPayload;
+use fjall::{Database, Keyspace, KeyspaceCreateOptions, PersistMode};
 use std::collections::HashSet;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-/// 操作日志在 storage_root 下的相对目录。
-const OPERATIONS_DIR: &str = "operations";
-/// 操作日志文件名。NDJSON 格式，一行一条 [`AiEditOperationPayload`]。
-const JOURNAL_FILE: &str = "journal.ndjson";
+const AED_DB_DIR: &str = "fjall";
+const OPERATIONS_KEYSPACE: &str = "operations";
 
 #[derive(Debug, Default)]
 pub struct JournalPruneOutcome {
@@ -16,18 +13,16 @@ pub struct JournalPruneOutcome {
     pub reclaimed_bytes: u64,
 }
 
-/// 计算操作日志文件在指定 storage_root 下的绝对路径。
-/// 唯一的路径派生入口，避免目录与文件路径出现不一致的事实源。
-fn journal_path(storage_root: &Path) -> PathBuf {
-    storage_root.join(OPERATIONS_DIR).join(JOURNAL_FILE)
+pub fn append_operations(
+    storage_root: &Path,
+    operations: &[AiEditOperationPayload],
+) -> Result<(), String> {
+    storage_lock::with_storage_write_lock(storage_root, "追加 AED 操作日志", || {
+        append_operations_locked(storage_root, operations)
+    })
 }
 
-/// 把若干条操作以 NDJSON 形式追加到操作日志文件。
-///
-/// - 空切片直接返回 `Ok(())`，不触发任何 I/O。
-/// - 文件以 append 模式打开，调用结束前会显式 `flush`。
-/// - 任意一步失败均返回 [`errors::journal_failed`] 包装的错误，调用方可继续向上传递。
-pub fn append_operations(
+fn append_operations_locked(
     storage_root: &Path,
     operations: &[AiEditOperationPayload],
 ) -> Result<(), String> {
@@ -35,90 +30,44 @@ pub fn append_operations(
         return Ok(());
     }
 
-    let path = journal_path(storage_root);
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            errors::journal_failed(format!("创建 operations 目录失败：{error}"))
-        })?;
-    }
-
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|error| {
-            errors::journal_failed(format!("打开操作日志失败（{}）：{error}", path.display()))
-        })?;
-
-    let mut writer = BufWriter::new(file);
+    let store = open_store(storage_root)?;
+    let mut batch = store.db.batch();
 
     for operation in operations {
-        serde_json::to_writer(&mut writer, operation)
+        let key = operation_key(operation);
+        let value = serde_json::to_vec(operation)
             .map_err(|error| errors::journal_failed(format!("序列化操作日志失败：{error}")))?;
-        writer.write_all(b"\n").map_err(|error| {
-            errors::journal_failed(format!("写入操作日志失败（{}）：{error}", path.display()))
-        })?;
+        batch.insert(&store.operations, key, value);
     }
 
-    // 显式 flush，避免 BufWriter 在 drop 时吞掉错误。
-    writer.flush().map_err(|error| {
-        errors::journal_failed(format!("写入操作日志失败（{}）：{error}", path.display()))
+    batch
+        .commit()
+        .map_err(|error| errors::journal_failed(format!("写入 fjall 操作日志失败：{error}")))?;
+    persist(&store.db)
+}
+
+pub fn list_operations(storage_root: &Path) -> Result<Vec<AiEditOperationPayload>, String> {
+    storage_lock::with_storage_read_lock(storage_root, "读取 AED 操作日志", || {
+        list_operations_locked(storage_root)
     })
 }
 
-/// 读取并反序列化整份操作日志。
-///
-/// - 日志不存在或路径不是普通文件时返回空集合。
-/// - 单行不可读或解析失败仅 `tracing::warn!` 并跳过，不影响其他行。
-pub fn list_operations(storage_root: &Path) -> Result<Vec<AiEditOperationPayload>, String> {
-    let path = journal_path(storage_root);
-
-    if !path.is_file() {
-        return Ok(Vec::new());
-    }
-
-    let file = match File::open(&path) {
-        Ok(file) => file,
-        // is_file 与 open 之间存在被并发清理的竞态窗口，按空日志处理。
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(errors::journal_failed(format!(
-                "读取操作日志失败（{}）：{error}",
-                path.display()
-            )));
-        }
-    };
-
-    let reader = BufReader::new(file);
+fn list_operations_locked(storage_root: &Path) -> Result<Vec<AiEditOperationPayload>, String> {
+    let store = open_store(storage_root)?;
     let mut operations = Vec::new();
 
-    for line in reader.lines() {
-        let line = match line {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::warn!(
-                    target: "ai.edit",
-                    path = %path.display(),
-                    error = %error,
-                    "skip unreadable journal line"
-                );
-                continue;
-            }
-        };
+    for item in store.operations.iter() {
+        let (_key, value) = item
+            .into_inner()
+            .map_err(|error| errors::journal_failed(format!("读取 fjall 操作日志失败：{error}")))?;
 
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        match serde_json::from_str::<AiEditOperationPayload>(&line) {
+        match serde_json::from_slice::<AiEditOperationPayload>(&value) {
             Ok(operation) => operations.push(operation),
             Err(error) => {
                 tracing::warn!(
                     target: "ai.edit",
-                    path = %path.display(),
                     error = %error,
-                    "skip invalid operation journal line"
+                    "skip invalid fjall operation journal item"
                 );
             }
         }
@@ -131,54 +80,85 @@ pub fn prune_operations(
     storage_root: &Path,
     retained_operation_ids: &HashSet<String>,
 ) -> Result<JournalPruneOutcome, String> {
-    let path = journal_path(storage_root);
-    if !path.is_file() {
-        return Ok(JournalPruneOutcome::default());
-    }
+    storage_lock::with_storage_write_lock(storage_root, "裁剪 AED 操作日志", || {
+        prune_operations_locked(storage_root, retained_operation_ids)
+    })
+}
 
-    let operations = list_operations(storage_root)?;
-    let mut kept_operations = Vec::with_capacity(operations.len());
+fn prune_operations_locked(
+    storage_root: &Path,
+    retained_operation_ids: &HashSet<String>,
+) -> Result<JournalPruneOutcome, String> {
+    let store = open_store(storage_root)?;
     let mut outcome = JournalPruneOutcome::default();
+    let mut keys_to_remove = Vec::new();
 
-    for operation in operations {
+    for item in store.operations.iter() {
+        let (key, value) = item
+            .into_inner()
+            .map_err(|error| errors::journal_failed(format!("读取 fjall 操作日志失败：{error}")))?;
+
+        let operation = match serde_json::from_slice::<AiEditOperationPayload>(&value) {
+            Ok(operation) => operation,
+            Err(error) => {
+                tracing::warn!(
+                    target: "ai.edit",
+                    error = %error,
+                    "skip invalid fjall operation journal item during prune"
+                );
+                continue;
+            }
+        };
+
         if retained_operation_ids.contains(&operation.id) {
-            kept_operations.push(operation);
             continue;
         }
 
-        outcome.reclaimed_bytes += serialized_operation_len(&operation)?;
+        outcome.reclaimed_bytes += value.len() as u64;
         outcome.removed_operation_ids.insert(operation.id);
+        keys_to_remove.push(key.to_vec());
     }
 
     if outcome.removed_operation_ids.is_empty() {
         return Ok(outcome);
     }
 
-    if kept_operations.is_empty() {
-        fs::remove_file(&path).map_err(|error| {
-            errors::journal_failed(format!("删除操作日志失败（{}）：{error}", path.display()))
-        })?;
-        return Ok(outcome);
+    let mut batch = store.db.batch();
+    for key in keys_to_remove {
+        batch.remove(&store.operations, key);
     }
-
-    let mut content = Vec::new();
-    for operation in &kept_operations {
-        serde_json::to_writer(&mut content, operation)
-            .map_err(|error| errors::journal_failed(format!("序列化操作日志失败：{error}")))?;
-        content.push(b'\n');
-    }
-
-    fs::write(&path, content).map_err(|error| {
-        errors::journal_failed(format!("重写操作日志失败（{}）：{error}", path.display()))
-    })?;
+    batch
+        .commit()
+        .map_err(|error| errors::journal_failed(format!("裁剪 fjall 操作日志失败：{error}")))?;
+    persist(&store.db)?;
 
     Ok(outcome)
 }
 
-fn serialized_operation_len(operation: &AiEditOperationPayload) -> Result<u64, String> {
-    let serialized = serde_json::to_string(operation)
-        .map_err(|error| errors::journal_failed(format!("序列化操作日志失败：{error}")))?;
-    Ok(serialized.len() as u64 + 1)
+struct JournalStore {
+    db: Database,
+    operations: Keyspace,
+}
+
+fn open_store(storage_root: &Path) -> Result<JournalStore, String> {
+    let db = Database::builder(storage_root.join(AED_DB_DIR))
+        .open()
+        .map_err(|error| errors::journal_failed(format!("打开 fjall AED 存储失败：{error}")))?;
+    let operations = db
+        .keyspace(OPERATIONS_KEYSPACE, KeyspaceCreateOptions::default)
+        .map_err(|error| {
+            errors::journal_failed(format!("打开 operations keyspace 失败：{error}"))
+        })?;
+    Ok(JournalStore { db, operations })
+}
+
+fn persist(db: &Database) -> Result<(), String> {
+    db.persist(PersistMode::SyncAll)
+        .map_err(|error| errors::journal_failed(format!("持久化 fjall 操作日志失败：{error}")))
+}
+
+fn operation_key(operation: &AiEditOperationPayload) -> String {
+    format!("{}|{}", operation.applied_at, operation.id)
 }
 
 #[cfg(test)]
@@ -190,35 +170,11 @@ mod tests {
 
     #[test]
     fn append_and_list_operations_roundtrip() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "aed-edit-journal-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time should move forward")
-                .as_nanos()
-        ));
+        let temp_dir = temp_dir("aed-edit-journal");
         fs::create_dir_all(&temp_dir).expect("temp directory should be created");
 
-        append_operations(
-            &temp_dir,
-            &[AiEditOperationPayload {
-                id: "operation-1".to_string(),
-                task_id: "task-1".to_string(),
-                turn_id: "turn-1".to_string(),
-                kind: "modify".to_string(),
-                path: "src/main.ts".to_string(),
-                new_path: None,
-                source_snapshot_id: Some("snapshot-1".to_string()),
-                before_hash: Some("fnv64:before".to_string()),
-                after_hash: Some("fnv64:after".to_string()),
-                bytes_before: Some(32),
-                bytes_after: Some(48),
-                applied_at: "2026-04-28T10:00:01.000Z".to_string(),
-                reason: "测试日志".to_string(),
-                tool_call_id: None,
-            }],
-        )
-        .expect("operations should be appended");
+        append_operations(&temp_dir, &[operation("operation-1", "task-1", "turn-1")])
+            .expect("operations should be appended");
 
         let operations = list_operations(&temp_dir).expect("operations should be listed");
 
@@ -233,67 +189,16 @@ mod tests {
     }
 
     #[test]
-    fn prune_operations_rewrites_journal_with_retained_entries_only() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "aed-edit-journal-prune-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time should move forward")
-                .as_nanos()
-        ));
+    fn prune_operations_removes_unretained_entries_only() {
+        let temp_dir = temp_dir("aed-edit-journal-prune");
         fs::create_dir_all(&temp_dir).expect("temp directory should be created");
 
         append_operations(
             &temp_dir,
             &[
-                AiEditOperationPayload {
-                    id: "operation-1".to_string(),
-                    task_id: "task-1".to_string(),
-                    turn_id: "turn-1".to_string(),
-                    kind: "modify".to_string(),
-                    path: "src/one.sh".to_string(),
-                    new_path: None,
-                    source_snapshot_id: Some("snapshot-1".to_string()),
-                    before_hash: Some("fnv64:before-1".to_string()),
-                    after_hash: Some("fnv64:after-1".to_string()),
-                    bytes_before: Some(16),
-                    bytes_after: Some(32),
-                    applied_at: "2026-04-28T10:00:01.000Z".to_string(),
-                    reason: "测试日志 1".to_string(),
-                    tool_call_id: None,
-                },
-                AiEditOperationPayload {
-                    id: "operation-2".to_string(),
-                    task_id: "task-1".to_string(),
-                    turn_id: "turn-2".to_string(),
-                    kind: "modify".to_string(),
-                    path: "src/two.sh".to_string(),
-                    new_path: None,
-                    source_snapshot_id: Some("snapshot-2".to_string()),
-                    before_hash: Some("fnv64:before-2".to_string()),
-                    after_hash: Some("fnv64:after-2".to_string()),
-                    bytes_before: Some(24),
-                    bytes_after: Some(40),
-                    applied_at: "2026-04-28T10:00:02.000Z".to_string(),
-                    reason: "测试日志 2".to_string(),
-                    tool_call_id: None,
-                },
-                AiEditOperationPayload {
-                    id: "operation-3".to_string(),
-                    task_id: "task-2".to_string(),
-                    turn_id: "turn-3".to_string(),
-                    kind: "modify".to_string(),
-                    path: "src/three.sh".to_string(),
-                    new_path: None,
-                    source_snapshot_id: Some("snapshot-3".to_string()),
-                    before_hash: Some("fnv64:before-3".to_string()),
-                    after_hash: Some("fnv64:after-3".to_string()),
-                    bytes_before: Some(32),
-                    bytes_after: Some(48),
-                    applied_at: "2026-04-28T10:00:03.000Z".to_string(),
-                    reason: "测试日志 3".to_string(),
-                    tool_call_id: None,
-                },
+                operation("operation-1", "task-1", "turn-1"),
+                operation("operation-2", "task-1", "turn-2"),
+                operation("operation-3", "task-2", "turn-3"),
             ],
         )
         .expect("operations should be appended");
@@ -312,5 +217,34 @@ mod tests {
         assert!(outcome.reclaimed_bytes > 0);
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    fn operation(id: &str, task_id: &str, turn_id: &str) -> AiEditOperationPayload {
+        AiEditOperationPayload {
+            id: id.to_string(),
+            task_id: task_id.to_string(),
+            turn_id: turn_id.to_string(),
+            kind: "modify".to_string(),
+            path: "src/main.ts".to_string(),
+            new_path: None,
+            source_snapshot_id: Some("snapshot-1".to_string()),
+            before_hash: Some("blake3:before".to_string()),
+            after_hash: Some("blake3:after".to_string()),
+            bytes_before: Some(32),
+            bytes_after: Some(48),
+            applied_at: format!("2026-04-28T10:00:0{}.000Z", &id[id.len() - 1..]),
+            reason: "测试日志".to_string(),
+            tool_call_id: None,
+        }
+    }
+
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "{name}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should move forward")
+                .as_nanos()
+        ))
     }
 }

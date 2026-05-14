@@ -189,45 +189,154 @@ interface IResolvedTokenUsage {
   usage: LanguageModelUsage;
 }
 
-const resolveLatestStreamUsage = (
-  messages: readonly IAiChatMessage[],
-): IResolvedTokenUsage | undefined => {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const stream = messages[index]?.stream;
-
-    if (!stream) {
-      continue;
-    }
-
-    if (hasUsableUsage(stream.usage)) {
-      return {
-        source: 'official',
-        usage: stream.usage,
-      };
-    }
-
-    const promptTokens = toNonNegativeFiniteNumber(stream.promptTokens);
-    const completionTokens = toNonNegativeFiniteNumber(stream.completionTokens);
-    const totalTokens = toNonNegativeFiniteNumber(stream.totalTokens);
-
-    if (
-      promptTokens === undefined &&
-      completionTokens === undefined &&
-      totalTokens === undefined
-    ) {
-      continue;
-    }
-
-    return {
-      source: stream.status === 'completed' ? 'official' : 'estimated',
-      usage: createUsage(promptTokens ?? 0, {
-        outputTokens: completionTokens,
-        totalTokens,
-      }),
-    };
+const sumTokenCounts = (
+  left: number | undefined,
+  right: number | undefined,
+): number | undefined => {
+  if (left === undefined && right === undefined) {
+    return undefined;
   }
 
-  return undefined;
+  return (left ?? 0) + (right ?? 0);
+};
+
+const sumRequiredTokenCounts = (
+  left: number | undefined,
+  right: number | undefined,
+): number => (left ?? 0) + (right ?? 0);
+
+const resolveAggregationInputTokenDetails = (
+  usage: LanguageModelUsage,
+): NonNullable<LanguageModelUsage['inputTokenDetails']> => {
+  const inputTokens = resolveUsageInputTokens(usage) ?? 0;
+  const cacheReadTokens =
+    toNonNegativeFiniteNumber(usage.inputTokenDetails?.cacheReadTokens) ??
+    toNonNegativeFiniteNumber(usage.cachedInputTokens) ??
+    0;
+
+  return {
+    noCacheTokens:
+      toNonNegativeFiniteNumber(usage.inputTokenDetails?.noCacheTokens) ??
+      Math.max(0, inputTokens - cacheReadTokens),
+    cacheReadTokens,
+    cacheWriteTokens: toNonNegativeFiniteNumber(usage.inputTokenDetails?.cacheWriteTokens) ?? 0,
+  };
+};
+
+const resolveAggregationOutputTokenDetails = (
+  usage: LanguageModelUsage,
+): NonNullable<LanguageModelUsage['outputTokenDetails']> => {
+  const outputTokens = toNonNegativeFiniteNumber(usage.outputTokens) ?? 0;
+  const reasoningTokens =
+    toNonNegativeFiniteNumber(usage.outputTokenDetails?.reasoningTokens) ??
+    toNonNegativeFiniteNumber(usage.reasoningTokens) ??
+    0;
+
+  return {
+    textTokens:
+      toNonNegativeFiniteNumber(usage.outputTokenDetails?.textTokens) ??
+      Math.max(0, outputTokens - reasoningTokens),
+    reasoningTokens,
+  };
+};
+
+const aggregateUsage = (
+  current: LanguageModelUsage | undefined,
+  next: LanguageModelUsage,
+): LanguageModelUsage => {
+  const currentInputDetails = current ? resolveAggregationInputTokenDetails(current) : undefined;
+  const nextInputDetails = resolveAggregationInputTokenDetails(next);
+  const currentOutputDetails = current ? resolveAggregationOutputTokenDetails(current) : undefined;
+  const nextOutputDetails = resolveAggregationOutputTokenDetails(next);
+  const cachedInputTokens = sumTokenCounts(
+    current?.cachedInputTokens ?? currentInputDetails?.cacheReadTokens,
+    next.cachedInputTokens ?? nextInputDetails.cacheReadTokens,
+  );
+  const reasoningTokens = sumTokenCounts(
+    current?.reasoningTokens ?? currentOutputDetails?.reasoningTokens,
+    next.reasoningTokens ?? nextOutputDetails.reasoningTokens,
+  );
+
+  return {
+    inputTokens: sumRequiredTokenCounts(current?.inputTokens, next.inputTokens),
+    inputTokenDetails: {
+      noCacheTokens: sumRequiredTokenCounts(
+        currentInputDetails?.noCacheTokens,
+        nextInputDetails.noCacheTokens,
+      ),
+      cacheReadTokens: sumRequiredTokenCounts(
+        currentInputDetails?.cacheReadTokens,
+        nextInputDetails.cacheReadTokens,
+      ),
+      cacheWriteTokens: sumRequiredTokenCounts(
+        currentInputDetails?.cacheWriteTokens,
+        nextInputDetails.cacheWriteTokens,
+      ),
+    },
+    outputTokens: sumRequiredTokenCounts(current?.outputTokens, next.outputTokens),
+    outputTokenDetails: {
+      textTokens: sumRequiredTokenCounts(
+        currentOutputDetails?.textTokens,
+        nextOutputDetails.textTokens,
+      ),
+      reasoningTokens: sumRequiredTokenCounts(
+        currentOutputDetails?.reasoningTokens,
+        nextOutputDetails.reasoningTokens,
+      ),
+    },
+    totalTokens: sumRequiredTokenCounts(current?.totalTokens, next.totalTokens),
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+  };
+};
+
+const resolveStreamOfficialUsage = (
+  stream: IAiChatMessage['stream'] | undefined,
+): LanguageModelUsage | undefined => {
+  if (!stream) {
+    return undefined;
+  }
+
+  if (hasUsableUsage(stream.usage)) {
+    return stream.usage;
+  }
+
+  if (stream.status !== 'completed') {
+    return undefined;
+  }
+
+  const promptTokens = toNonNegativeFiniteNumber(stream.promptTokens);
+  const completionTokens = toNonNegativeFiniteNumber(stream.completionTokens);
+  const totalTokens = toNonNegativeFiniteNumber(stream.totalTokens);
+
+  if (
+    promptTokens === undefined &&
+    completionTokens === undefined &&
+    totalTokens === undefined
+  ) {
+    return undefined;
+  }
+
+  return createUsage(promptTokens ?? 0, {
+    outputTokens: completionTokens,
+    totalTokens,
+  });
+};
+
+const resolveAccumulatedStreamUsage = (
+  messages: readonly IAiChatMessage[],
+): IResolvedTokenUsage | undefined => {
+  const usage = messages.reduce<LanguageModelUsage | undefined>((current, message) => {
+    const streamUsage = resolveStreamOfficialUsage(message.stream);
+
+    if (!streamUsage) {
+      return current;
+    }
+
+    return aggregateUsage(current, streamUsage);
+  }, undefined);
+
+  return usage ? { source: 'official', usage } : undefined;
 };
 
 const resolveLatestAssistantOutputTokens = (
@@ -280,7 +389,7 @@ export const useAiTokenContext = (options: IUseAiTokenContextOptions) => {
 
   const estimationMessages = computed(() => options.estimationMessages?.value ?? options.messages.value);
 
-  const latestStreamUsage = computed(() => resolveLatestStreamUsage(options.messages.value));
+  const accumulatedStreamUsage = computed(() => resolveAccumulatedStreamUsage(options.messages.value));
   const latestOfficialUsage = computed<IResolvedTokenUsage | undefined>(() => {
     const usage = options.officialUsage?.value;
 
@@ -293,7 +402,7 @@ export const useAiTokenContext = (options: IUseAiTokenContextOptions) => {
       usage,
     };
   });
-  const latestCompletedUsage = computed(() => latestOfficialUsage.value ?? latestStreamUsage.value);
+  const latestCompletedUsage = computed(() => latestOfficialUsage.value ?? accumulatedStreamUsage.value);
   const latestAssistantOutputTokens = computed(() => resolveLatestAssistantOutputTokens(options.messages.value));
 
   const estimateCurrentInputTokens = (): number => estimateInputTokens(

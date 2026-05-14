@@ -42,6 +42,10 @@ fn resolve_ai_edit_storage_root(app: &AppHandle) -> Result<PathBuf, String> {
         .join("edits"))
 }
 
+fn recover_ai_edit_storage(storage_root: &PathBuf) -> Result<(), String> {
+    ai_edit::recover_pending_file_transactions(storage_root)
+}
+
 #[tauri::command]
 pub fn ai_get_config() -> Result<AiConfigPayload, String> {
     Ok(gateway::get_config())
@@ -317,6 +321,7 @@ pub fn ai_apply_patch(
     state: State<AiEditState>,
 ) -> Result<AiApplyPatchPayload, String> {
     let snapshot_root = resolve_ai_edit_storage_root(&app)?;
+    recover_ai_edit_storage(&snapshot_root)?;
     ai_patch::apply_patch(payload, state.inner(), &snapshot_root)
 }
 
@@ -340,6 +345,7 @@ pub fn ai_edit_list_timeline(
     state: State<AiEditState>,
 ) -> Result<AiEditListTimelinePayload, String> {
     let snapshot_root = resolve_ai_edit_storage_root(&app)?;
+    recover_ai_edit_storage(&snapshot_root)?;
     let stored_snapshots = ai_edit::snapshot::list_stored_snapshots(&snapshot_root)?;
     let stored_operations = ai_edit::edit_journal::list_operations(&snapshot_root)?;
     ai_edit::list_timeline_with_state(payload, state.inner(), stored_snapshots, stored_operations)
@@ -352,6 +358,7 @@ pub fn ai_edit_get_diff(
     state: State<AiEditState>,
 ) -> Result<AiEditGetDiffPayload, String> {
     let snapshot_root = resolve_ai_edit_storage_root(&app)?;
+    recover_ai_edit_storage(&snapshot_root)?;
     ai_edit::get_diff(payload, &snapshot_root, state.inner())
 }
 
@@ -362,6 +369,7 @@ pub fn ai_edit_create_snapshot(
     state: State<AiEditState>,
 ) -> Result<AiEditCreateSnapshotPayload, String> {
     let snapshot_root = resolve_ai_edit_storage_root(&app)?;
+    recover_ai_edit_storage(&snapshot_root)?;
     ai_edit::create_snapshot(payload, &snapshot_root, state.inner())
 }
 
@@ -372,6 +380,7 @@ pub fn ai_edit_restore_snapshot(
     state: State<AiEditState>,
 ) -> Result<AiEditRestoreSnapshotPayload, String> {
     let snapshot_root = resolve_ai_edit_storage_root(&app)?;
+    recover_ai_edit_storage(&snapshot_root)?;
     ai_edit::restore_snapshot(payload, &snapshot_root, state.inner())
 }
 
@@ -382,6 +391,7 @@ pub fn ai_edit_undo_operation(
     state: State<AiEditState>,
 ) -> Result<AiEditUndoOperationPayload, String> {
     let snapshot_root = resolve_ai_edit_storage_root(&app)?;
+    recover_ai_edit_storage(&snapshot_root)?;
     ai_edit::undo_operation(payload, &snapshot_root, state.inner())
 }
 
@@ -392,6 +402,7 @@ pub fn ai_edit_revert_file(
     state: State<AiEditState>,
 ) -> Result<AiEditRevertFilePayload, String> {
     let snapshot_root = resolve_ai_edit_storage_root(&app)?;
+    recover_ai_edit_storage(&snapshot_root)?;
     ai_edit::revert_file(payload, &snapshot_root, state.inner())
 }
 
@@ -402,6 +413,7 @@ pub fn ai_edit_revert_hunk(
     state: State<AiEditState>,
 ) -> Result<AiEditRevertHunkPayload, String> {
     let snapshot_root = resolve_ai_edit_storage_root(&app)?;
+    recover_ai_edit_storage(&snapshot_root)?;
     ai_edit::revert_hunk(payload, &snapshot_root, state.inner())
 }
 
@@ -412,6 +424,7 @@ pub fn ai_edit_revert_task(
     state: State<AiEditState>,
 ) -> Result<AiEditRevertTaskPayload, String> {
     let snapshot_root = resolve_ai_edit_storage_root(&app)?;
+    recover_ai_edit_storage(&snapshot_root)?;
     ai_edit::revert_task(payload, &snapshot_root, state.inner())
 }
 

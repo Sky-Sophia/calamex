@@ -15,7 +15,12 @@ pub fn list_git_stashes(payload: GitRepositoryRootRequest) -> Result<GitStashLis
 
     let mut entries = Vec::with_capacity(stash_refs.len());
     for (index, summary, oid) in stash_refs {
-        entries.push(build_git_stash_entry_payload(&repository, index, &summary, oid)?);
+        entries.push(build_git_stash_entry_payload(
+            &repository,
+            index,
+            &summary,
+            oid,
+        )?);
     }
 
     Ok(GitStashListPayload { entries })

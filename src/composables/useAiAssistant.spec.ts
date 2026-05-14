@@ -1173,6 +1173,59 @@ describe('useAiAssistant streaming integration', () => {
     await sendPromise;
   });
 
+  it('同一输入框内为同名图片生成递增展示名', async () => {
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn(async () => ({
+        width: 640,
+        height: 480,
+        close: vi.fn(),
+      })),
+    );
+
+    const assistant = createAssistantHarness();
+
+    await assistant.attachFile(new File(['first-image'], 'image.png', { type: 'image/png' }));
+    await assistant.attachFile(new File(['second-image'], 'image.png', { type: 'image/png' }));
+    await assistant.attachFile(new File(['third-image'], 'image.png', { type: 'image/png' }));
+
+    expect(assistant.attachedFiles.value.map((file) => file.name)).toEqual([
+      'image.png',
+      'image1.png',
+      'image2.png',
+    ]);
+    expect(assistant.attachedFiles.value.map((file) => file.reference.path)).toEqual([
+      'image.png',
+      'image1.png',
+      'image2.png',
+    ]);
+  });
+
+  it('同一输入框内重复粘贴相同图片时不重复添加', async () => {
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn(async () => ({
+        width: 640,
+        height: 480,
+        close: vi.fn(),
+      })),
+    );
+
+    const assistant = createAssistantHarness();
+
+    await assistant.attachFile(new File(['same-image'], 'image.png', { type: 'image/png' }));
+    await assistant.attachFile(new File(['same-image'], 'image.png', { type: 'image/png' }));
+
+    expect(assistant.attachedFiles.value).toHaveLength(1);
+    expect(assistant.attachedFiles.value[0]?.name).toBe('image.png');
+
+    assistant.startNewConversation();
+    await assistant.attachFile(new File(['same-image'], 'image.png', { type: 'image/png' }));
+
+    expect(assistant.attachedFiles.value).toHaveLength(1);
+    expect(assistant.attachedFiles.value[0]?.name).toBe('image.png');
+  });
+
   it('keeps durable image preview sources when removing attachments', async () => {
     const createObjectURL = vi.fn(() => 'blob:attachment-preview-2');
     const revokeObjectURL = vi.fn();

@@ -96,6 +96,30 @@ const getEmittedEvent = (events: unknown[][] | undefined, index = 0): unknown[] 
   return event;
 };
 
+const openRoleEditor = async (
+  wrapper: ReturnType<typeof mount>,
+  role: 'main' | 'narrator' = 'main',
+): Promise<void> => {
+  await wrapper.get(`[data-open-edit="${role}"]`).trigger('click');
+  await nextTick();
+};
+
+const selectPlatform = async (
+  wrapper: ReturnType<typeof mount>,
+  platformId: string,
+): Promise<void> => {
+  await wrapper.get('[data-field="platform"]').setValue(platformId);
+  await nextTick();
+};
+
+const selectModel = async (
+  wrapper: ReturnType<typeof mount>,
+  modelId: string,
+): Promise<void> => {
+  await wrapper.get('[data-field="model"]').setValue(modelId);
+  await nextTick();
+};
+
 describe('AiProviderSettings', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -111,12 +135,13 @@ describe('AiProviderSettings', () => {
       ...createGlobalMountOptions(),
     });
 
-    await wrapper.get('[data-provider-id="deepseek"]').trigger('click');
+    await openRoleEditor(wrapper);
+    await selectPlatform(wrapper, 'deepseek');
 
     expect(draft.providerType).toBe('litellm');
     expect(draft.baseUrl).toBe('http://127.0.0.1:4000/v1');
     expect(draft.selectedModel).toBe('deepseek/deepseek-v4-pro');
-    expect(wrapper.find('[data-provider-id="litellm"]').exists()).toBe(false);
+    expect(wrapper.find('[data-field="platform"] option[value="litellm"]').exists()).toBe(false);
   });
 
   it('switches model options by platform without rendering a custom model input', async () => {
@@ -129,22 +154,24 @@ describe('AiProviderSettings', () => {
       ...createGlobalMountOptions(),
     });
 
-    await wrapper.get('[data-provider-id="anthropic"]').trigger('click');
+    await openRoleEditor(wrapper);
+    await selectPlatform(wrapper, 'anthropic');
 
     expect(draft.providerType).toBe('litellm');
     expect(draft.baseUrl).toBe('http://127.0.0.1:4000/v1');
     expect(draft.selectedModel).toBe('anthropic/claude-opus-4-6');
     expect(wrapper.find('.model-alias-input').exists()).toBe(false);
 
-    await wrapper.get('[data-key="model"] .lr-select-trigger').trigger('click');
-    expect(wrapper.text()).toContain('Claude Opus 4.7');
-    expect(wrapper.text()).toContain('Claude Sonnet 4.6');
+    const modelOptions = wrapper
+      .get('[data-field="model"]')
+      .findAll('option')
+      .map((option) => option.text());
+
+    expect(modelOptions).toContain('Claude Opus 4.7');
+    expect(modelOptions).toContain('Claude Sonnet 4.6');
     expect(wrapper.find('.lr-option-meta').exists()).toBe(false);
 
-    await wrapper
-      .findAll('[role="option"]')
-      .find((option) => option.text().includes('Claude Opus 4.7'))
-      ?.trigger('click');
+    await selectModel(wrapper, 'anthropic/claude-opus-4-7');
 
     expect(draft.selectedModel).toBe('anthropic/claude-opus-4-7');
   });
@@ -155,14 +182,18 @@ describe('AiProviderSettings', () => {
       ...createGlobalMountOptions(),
     });
 
-    await wrapper.get('[data-provider-id="deepseek"]').trigger('click');
-    await wrapper.get('[data-key="model"] .lr-select-trigger').trigger('click');
+    await openRoleEditor(wrapper);
+    await selectPlatform(wrapper, 'deepseek');
 
-    const text = wrapper.text();
-    expect(text).toContain('DeepSeek-v4-pro');
-    expect(text).toContain('DeepSeek-v4-flash');
-    expect(text).not.toContain('deepseek-chat');
-    expect(text).not.toContain('deepseek-reasoner');
+    const modelOptions = wrapper
+      .get('[data-field="model"]')
+      .findAll('option')
+      .map((option) => option.text());
+
+    expect(modelOptions).toContain('DeepSeek-v4-pro');
+    expect(modelOptions).toContain('DeepSeek-v4-flash');
+    expect(modelOptions).not.toContain('deepseek-chat');
+    expect(modelOptions).not.toContain('deepseek-reasoner');
   });
 
   it('keeps narrator model config independent from the main model config', async () => {
@@ -175,17 +206,9 @@ describe('AiProviderSettings', () => {
       ...createGlobalMountOptions(),
     });
 
-    const narratorButton = wrapper
-      .findAll('.model-role-card')
-      .find((button) => button.text().includes('小模型'));
-
-    if (!narratorButton) {
-      throw new Error('未找到小模型切换按钮');
-    }
-
-    await narratorButton.trigger('click');
+    await openRoleEditor(wrapper, 'narrator');
     await wrapper.get('input[type="password"]').setValue('sk-narrator-test');
-    await wrapper.get('[data-provider-id="deepseek"]').trigger('click');
+    await selectPlatform(wrapper, 'deepseek');
 
     expect(draft.selectedModel).toBe('openai/gpt-5.5');
     expect(draft.narrator.selectedModel).toBe('deepseek/deepseek-v4-pro');
@@ -204,15 +227,6 @@ describe('AiProviderSettings', () => {
       ...createGlobalMountOptions(),
     });
 
-    const narratorButton = wrapper
-      .findAll('.model-role-card')
-      .find((button) => button.text().includes('小模型'));
-
-    if (!narratorButton) {
-      throw new Error('未找到小模型切换按钮');
-    }
-
-    await narratorButton.trigger('click');
     await wrapper.get('[aria-label="进入配置记录"]').trigger('click');
 
     expect(wrapper.text()).toContain('AI 配置记录');
@@ -343,6 +357,7 @@ describe('AiProviderSettings', () => {
       ...createGlobalMountOptions(),
     });
 
+    await openRoleEditor(wrapper);
     const testButton = findButtonByText(wrapper.findAll('button'), '测试连接');
 
     await testButton.trigger('click');
@@ -362,7 +377,7 @@ describe('AiProviderSettings', () => {
     expect(wrapper.emitted('close')).toBeUndefined();
   });
 
-  it('renders copy button without exposing the API Key visibility toggle', () => {
+  it('renders copy button without exposing the API Key visibility toggle', async () => {
     const wrapper = mount(AiProviderSettings, {
       props: createSettingsProps({
         apiKey: 'sk-test-secret-value',
@@ -370,9 +385,25 @@ describe('AiProviderSettings', () => {
       ...createGlobalMountOptions(),
     });
 
+    await openRoleEditor(wrapper);
+
     expect(wrapper.find('[aria-label="复制"]').exists()).toBe(true);
     expect(wrapper.find('[aria-label="显示 / 隐藏"]').exists()).toBe(false);
     expect(wrapper.find('input[type="password"]').exists()).toBe(true);
+  });
+
+  it('emits tavily key save action from the summary list', async () => {
+    const wrapper = mount(AiProviderSettings, {
+      props: createSettingsProps(),
+      ...createGlobalMountOptions(),
+    });
+
+    await wrapper.get('[data-tavily-input]').setValue('tvly-test-key');
+    await wrapper.get('[data-save-tavily]').trigger('click');
+
+    const emitted = wrapper.emitted('saveTavilyKey');
+
+    expect(getEmittedEvent(emitted)[0]).toBe('tvly-test-key');
   });
 
   it('renders field-level validation instead of emitting when API Key is required', async () => {
@@ -390,6 +421,7 @@ describe('AiProviderSettings', () => {
       ...createGlobalMountOptions(),
     });
 
+    await openRoleEditor(wrapper);
     const saveButton = findButtonByText(wrapper.findAll('button'), '开始连接');
 
     await saveButton.trigger('click');
@@ -406,6 +438,7 @@ describe('AiProviderSettings', () => {
       ...createGlobalMountOptions(),
     });
 
+    await openRoleEditor(wrapper);
     const testButton = findButtonByText(wrapper.findAll('button'), '测试连接');
 
     await testButton.trigger('click');
@@ -428,6 +461,7 @@ describe('AiProviderSettings', () => {
       ...createGlobalMountOptions(),
     });
 
+    await openRoleEditor(wrapper);
     const saveButton = findButtonByText(wrapper.findAll('button'), '开始连接');
 
     await saveButton.trigger('click');

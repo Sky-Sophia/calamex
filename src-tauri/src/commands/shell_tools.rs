@@ -209,8 +209,7 @@ fn resolve_analysis_script_name(path: Option<&str>, name: Option<&str>) -> Strin
 }
 
 fn infer_script_name(path: Option<&str>, name: Option<&str>) -> String {
-    path
-        .and_then(|value| Path::new(value).file_name())
+    path.and_then(|value| Path::new(value).file_name())
         .and_then(|value| value.to_str())
         .or(name)
         .unwrap_or_default()
@@ -582,24 +581,64 @@ mod tests {
 
     #[test]
     fn shellcheck_runs_for_common_shell_extensions() {
-        assert!(should_run_shellcheck(Some("scripts/install.sh"), None, "echo ok"));
-        assert!(should_run_shellcheck(Some("scripts/install.bash"), None, "echo ok"));
-        assert!(should_run_shellcheck(Some("scripts/install.dash"), None, "echo ok"));
-        assert!(should_run_shellcheck(Some("scripts/install.ksh"), None, "echo ok"));
-        assert!(should_run_shellcheck(Some("tests/install.bats"), None, "echo ok"));
+        assert!(should_run_shellcheck(
+            Some("scripts/install.sh"),
+            None,
+            "echo ok"
+        ));
+        assert!(should_run_shellcheck(
+            Some("scripts/install.bash"),
+            None,
+            "echo ok"
+        ));
+        assert!(should_run_shellcheck(
+            Some("scripts/install.dash"),
+            None,
+            "echo ok"
+        ));
+        assert!(should_run_shellcheck(
+            Some("scripts/install.ksh"),
+            None,
+            "echo ok"
+        ));
+        assert!(should_run_shellcheck(
+            Some("tests/install.bats"),
+            None,
+            "echo ok"
+        ));
     }
 
     #[test]
     fn shellcheck_runs_for_shell_dotfiles_and_shebangs() {
-        assert!(should_run_shellcheck(Some("C:/Users/me/.bashrc"), None, "alias ll='ls -la'"));
-        assert!(should_run_shellcheck(None, Some(".profile"), "export PATH=\"$PATH:/opt/bin\""));
-        assert!(should_run_shellcheck(None, Some("run"), "#!/usr/bin/env bash\necho ok"));
-        assert!(should_run_shellcheck(None, Some("run"), "#!/bin/sh -e\necho ok"));
+        assert!(should_run_shellcheck(
+            Some("C:/Users/me/.bashrc"),
+            None,
+            "alias ll='ls -la'"
+        ));
+        assert!(should_run_shellcheck(
+            None,
+            Some(".profile"),
+            "export PATH=\"$PATH:/opt/bin\""
+        ));
+        assert!(should_run_shellcheck(
+            None,
+            Some("run"),
+            "#!/usr/bin/env bash\necho ok"
+        ));
+        assert!(should_run_shellcheck(
+            None,
+            Some("run"),
+            "#!/bin/sh -e\necho ok"
+        ));
     }
 
     #[test]
     fn shellcheck_skips_non_shell_files_without_shell_shebang() {
-        assert!(!should_run_shellcheck(Some("src/main.rs"), None, "fn main() {}"));
+        assert!(!should_run_shellcheck(
+            Some("src/main.rs"),
+            None,
+            "fn main() {}"
+        ));
         assert!(!should_run_shellcheck(
             Some("README.md"),
             None,
@@ -609,7 +648,10 @@ mod tests {
 
     #[test]
     fn shellcheck_dialect_prefers_shebang_then_filename() {
-        assert_eq!(shell_from_shebang("#!/usr/bin/env bash\necho ok"), Some("bash"));
+        assert_eq!(
+            shell_from_shebang("#!/usr/bin/env bash\necho ok"),
+            Some("bash")
+        );
         assert_eq!(shell_from_shebang("#!/bin/dash\necho ok"), Some("dash"));
         assert_eq!(
             detect_shellcheck_dialect(Some("scripts/install.sh"), None, "#!/bin/ksh\necho ok"),
@@ -619,6 +661,9 @@ mod tests {
             detect_shellcheck_dialect(Some("scripts/install.dash"), None, "echo ok"),
             "dash"
         );
-        assert_eq!(detect_shellcheck_dialect(Some(".bashrc"), None, "alias ll='ls -la'"), "bash");
+        assert_eq!(
+            detect_shellcheck_dialect(Some(".bashrc"), None, "alias ll='ls -la'"),
+            "bash"
+        );
     }
 }

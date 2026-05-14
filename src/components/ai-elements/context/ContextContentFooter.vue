@@ -10,7 +10,7 @@ const props = defineProps<{
 }>();
 
 const { modelId, usage, usageSource } = useContextValue();
-const costLabel = computed(() => (usageSource.value === 'official' ? '按官方 usage 估算' : '预计成本'));
+const costLabel = computed(() => (usageSource.value === 'official' ? 'usage 成本' : '预计成本'));
 
 const totalCost = computed(() => {
   const pricing = computeDeepSeekCostBreakdown(modelId.value, usage.value);
