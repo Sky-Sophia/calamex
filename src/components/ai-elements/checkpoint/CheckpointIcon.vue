@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { cn } from '@/lib/utils';
-import { BookmarkIcon } from 'lucide-vue-next';
+import BookmarkIcon from '~icons/lucide/bookmark';
 import type { HTMLAttributes } from 'vue';
 
 const props = withDefaults(defineProps<{

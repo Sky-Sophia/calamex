@@ -2,7 +2,8 @@
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { reactiveOmit } from '@vueuse/core';
-import { CheckIcon, CopyIcon } from 'lucide-vue-next';
+import CheckIcon from '~icons/lucide/check';
+import CopyIcon from '~icons/lucide/copy';
 import type { HTMLAttributes } from 'vue';
 import { computed, onBeforeUnmount, ref } from 'vue';
 import { useCodeBlockContext } from './context';

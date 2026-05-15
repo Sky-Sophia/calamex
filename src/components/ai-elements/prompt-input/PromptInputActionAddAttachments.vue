@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { DropdownMenuItemProps } from 'reka-ui';
 import DropdownMenuItem from '@/components/ui/dropdown-menu/DropdownMenuItem.vue';
-import { ImageIcon } from 'lucide-vue-next';
+import ImageIcon from '~icons/lucide/image';
 import { usePromptInput } from './context';
 
 interface Props extends DropdownMenuItemProps {

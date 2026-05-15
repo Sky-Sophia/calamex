@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Shimmer } from '@/components/ai-elements/shimmer';
-import { BrainIcon } from 'lucide-vue-next';
+import BrainIcon from '~icons/lucide/brain';
 
 defineProps<{
   label: string;

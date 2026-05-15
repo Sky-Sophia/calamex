@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { XIcon } from 'lucide-vue-next';
+import XIcon from '~icons/lucide/x';
 import type { HTMLAttributes } from 'vue';
 import { useAttachmentContext } from './context';
 

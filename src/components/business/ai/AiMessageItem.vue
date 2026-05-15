@@ -21,7 +21,8 @@ import type {
   TAiChatMessageActionId,
 } from '@/types/ai';
 import { tryWriteClipboardText } from '@/utils/clipboard';
-import { Check, Copy } from 'lucide-vue-next';
+import Check from '~icons/lucide/check';
+import Copy from '~icons/lucide/copy';
 import { computed, onBeforeUnmount, ref } from 'vue';
 import AiThinkingStatus from './AiThinkingStatus.vue';
 

@@ -2,7 +2,7 @@
 import type { HTMLAttributes } from 'vue';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { ArrowDownIcon } from 'lucide-vue-next';
+import ArrowDownIcon from '~icons/lucide/arrow-down';
 import { computed } from 'vue';
 import { useStickToBottomContext } from 'vue-stick-to-bottom';
 

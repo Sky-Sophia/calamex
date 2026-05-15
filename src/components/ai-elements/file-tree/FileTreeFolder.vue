@@ -5,12 +5,9 @@ import {
     CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
-import {
-    ChevronRightIcon,
-    FolderIcon,
-    FolderOpenIcon,
-} from 'lucide-vue-next'
-import type { HTMLAttributes } from 'vue'
+import ChevronRightIcon from '~icons/lucide/chevron-right';
+import FolderIcon from '~icons/lucide/folder';
+import FolderOpenIcon from '~icons/lucide/folder-open';import type { HTMLAttributes } from 'vue'
 import { computed, provide } from 'vue'
 import { FileTreeFolderKey, useFileTreeContext } from './context'
 import FileTreeIcon from './FileTreeIcon.vue'

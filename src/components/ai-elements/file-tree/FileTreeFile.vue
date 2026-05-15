@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { cn } from '@/lib/utils'
-import { FileIcon } from 'lucide-vue-next'
-import type { HTMLAttributes, VNode } from 'vue'
+import FileIcon from '~icons/lucide/file';import type { HTMLAttributes, VNode } from 'vue'
 import { computed, provide } from 'vue'
 import { FileTreeFileKey, useFileTreeContext } from './context'
 import FileTreeIcon from './FileTreeIcon.vue'

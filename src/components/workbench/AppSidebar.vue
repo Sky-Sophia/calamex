@@ -177,7 +177,7 @@ import {
   resolveWorkspaceKey,
   resolveWorkspaceRootPayload,
 } from '@/utils/workspace';
-import { FolderOpen } from 'lucide-vue-next';
+import FolderOpen from '~icons/lucide/folder-open';
 import {
   computed,
   defineAsyncComponent,

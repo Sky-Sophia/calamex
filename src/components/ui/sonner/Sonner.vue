@@ -1,13 +1,11 @@
 <script lang="ts" setup>
 import type { ToasterProps } from 'vue-sonner';
-import {
-  CircleCheckIcon,
-  InfoIcon,
-  Loader2Icon,
-  OctagonXIcon,
-  TriangleAlertIcon,
-  XIcon,
-} from 'lucide-vue-next';
+import CircleCheckIcon from '~icons/lucide/circle-check';
+import InfoIcon from '~icons/lucide/info';
+import Loader2Icon from '~icons/lucide/loader2';
+import OctagonXIcon from '~icons/lucide/octagon-x';
+import TriangleAlertIcon from '~icons/lucide/triangle-alert';
+import XIcon from '~icons/lucide/x';
 import { Toaster as Sonner } from 'vue-sonner';
 import { cn } from '@/lib/utils';
 

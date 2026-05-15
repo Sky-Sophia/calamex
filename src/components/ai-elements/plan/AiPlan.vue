@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import {
-  Check,
-  ChevronUp,
-  FileText,
-  RotateCw,
-  Trash2,
-  X,
-} from 'lucide-vue-next';
+import Check from '~icons/lucide/check';
+import ChevronUp from '~icons/lucide/chevron-up';
+import FileText from '~icons/lucide/file-text';
+import RotateCw from '~icons/lucide/rotate-cw';
+import Trash2 from '~icons/lucide/trash2';
+import X from '~icons/lucide/x';
 import { computed, ref } from 'vue';
 
 import type { TAgentPlanStatus } from '@/types/agent-sidecar';

@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import {
-  AlertCircle,
-  Check,
-  Circle,
-  LoaderCircle,
-  Trash2,
-} from 'lucide-vue-next';
+import AlertCircle from '~icons/lucide/alert-circle';
+import Check from '~icons/lucide/check';
+import Circle from '~icons/lucide/circle';
+import LoaderCircle from '~icons/lucide/loader-circle';
+import Trash2 from '~icons/lucide/trash2';
 
 export type TAiQueueItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'cancelled';
 

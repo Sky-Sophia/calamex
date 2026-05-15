@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { cn } from '@/lib/utils'
-import { Ellipsis } from 'lucide-vue-next'
-import type { HTMLAttributes } from 'vue'
+import Ellipsis from '~icons/lucide/ellipsis';import type { HTMLAttributes } from 'vue'
 
 const props = defineProps<{
   class?: HTMLAttributes['class']

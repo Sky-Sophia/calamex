@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import {
-  ChevronDownIcon,
-  ExternalLinkIcon,
-  Maximize2Icon,
-  Undo2Icon,
-} from 'lucide-vue-next';
+import ChevronDownIcon from '~icons/lucide/chevron-down';
+import ExternalLinkIcon from '~icons/lucide/external-link';
+import Maximize2Icon from '~icons/lucide/maximize2';
+import Undo2Icon from '~icons/lucide/undo2';
 import { computed, ref } from 'vue';
 
 import type {

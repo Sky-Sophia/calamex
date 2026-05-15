@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CopyIcon } from 'lucide-vue-next';
+import CopyIcon from '~icons/lucide/copy';
 import { computed } from 'vue';
 
 import AiDiffHunkViewer from '@/components/business/ai/AiDiffHunkViewer.vue';

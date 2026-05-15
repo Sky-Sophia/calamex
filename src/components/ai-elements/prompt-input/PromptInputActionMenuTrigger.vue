@@ -2,7 +2,7 @@
 import type { DropdownMenuTriggerProps } from 'reka-ui';
 import type { HTMLAttributes } from 'vue';
 import { DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { PlusIcon } from 'lucide-vue-next';
+import PlusIcon from '~icons/lucide/plus';
 import PromptInputButton from './PromptInputButton.vue';
 
 interface Props extends DropdownMenuTriggerProps {

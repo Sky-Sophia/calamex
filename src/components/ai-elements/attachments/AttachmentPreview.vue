@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { cn } from '@/lib/utils';
-import {
-  FileTextIcon,
-  GlobeIcon,
-  ImageIcon,
-  Music2Icon,
-  PaperclipIcon,
-  VideoIcon,
-} from 'lucide-vue-next';
+import FileTextIcon from '~icons/lucide/file-text';
+import GlobeIcon from '~icons/lucide/globe';
+import ImageIcon from '~icons/lucide/image';
+import Music2Icon from '~icons/lucide/music2';
+import PaperclipIcon from '~icons/lucide/paperclip';
+import VideoIcon from '~icons/lucide/video';
 import { computed, type HTMLAttributes, type VNode } from 'vue';
 import { useAttachmentContext } from './context';
 import type { TAttachmentMediaCategory } from './types';

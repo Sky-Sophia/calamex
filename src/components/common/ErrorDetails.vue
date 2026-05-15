@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown } from 'lucide-vue-next';
+import ChevronDown from '~icons/lucide/chevron-down';
 import { ref } from 'vue';
 
 const props = withDefaults(

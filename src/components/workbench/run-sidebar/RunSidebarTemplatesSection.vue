@@ -11,16 +11,14 @@ import {
     type TRunOpsTemplateCategoryId,
     type TRunOpsTemplateRisk,
 } from '@/components/workbench/run-sidebar/runOpsTemplateCatalog';
-import {
-    ChevronRight,
-    Clock3,
-    FileCode,
-    FolderClosed,
-    FolderOpen,
-    Layers3,
-    Search,
-    ShieldCheck,
-} from 'lucide-vue-next';
+import ChevronRight from '~icons/lucide/chevron-right';
+import Clock3 from '~icons/lucide/clock3';
+import FileCode from '~icons/lucide/file-code';
+import FolderClosed from '~icons/lucide/folder-closed';
+import FolderOpen from '~icons/lucide/folder-open';
+import Layers3 from '~icons/lucide/layers3';
+import Search from '~icons/lucide/search';
+import ShieldCheck from '~icons/lucide/shield-check';
 import { computed, ref, watch } from 'vue';
 
 interface ICategoryFolder {

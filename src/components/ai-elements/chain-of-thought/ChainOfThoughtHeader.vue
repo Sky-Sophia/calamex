@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Collapsible, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import { BrainIcon, ChevronDownIcon } from 'lucide-vue-next';
+import BrainIcon from '~icons/lucide/brain';
+import ChevronDownIcon from '~icons/lucide/chevron-down';
 import type { HTMLAttributes } from 'vue';
 import { useChainOfThought } from './context';
 

@@ -7,7 +7,9 @@ import {
     CodeBlockHeader,
     CodeBlockTitle,
 } from '@/components/ai-elements/code-block';
-import { ChevronDown, ChevronUp, FileIcon } from 'lucide-vue-next';
+import ChevronDown from '~icons/lucide/chevron-down';
+import ChevronUp from '~icons/lucide/chevron-up';
+import FileIcon from '~icons/lucide/file';
 import type { BundledLanguage } from 'shiki';
 import { computed, ref } from 'vue';
 

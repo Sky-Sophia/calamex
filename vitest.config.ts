@@ -11,7 +11,7 @@ export default defineConfig({
     },
     test: {
         globals: true,
-        environment: 'jsdom',
+        environment: 'happy-dom',
         include: ['src/**/*.{spec,test}.ts', 'src/**/*.{spec,test}.vue'],
         exclude: ['node_modules', 'dist', 'target'],
         server: {

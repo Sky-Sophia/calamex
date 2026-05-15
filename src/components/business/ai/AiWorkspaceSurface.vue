@@ -11,7 +11,8 @@ import type {
 } from '@/types/editor';
 import type { IGitDiffPreviewPayload, IGitRepositoryStatusPayload } from '@/types/git';
 import { toErrorMessage } from '@/utils/error';
-import { PanelRight, RotateCw } from 'lucide-vue-next';
+import PanelRight from '~icons/lucide/panel-right';
+import RotateCw from '~icons/lucide/rotate-cw';
 import { ref } from 'vue';
 
 defineProps<{

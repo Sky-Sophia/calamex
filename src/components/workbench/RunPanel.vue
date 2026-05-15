@@ -143,7 +143,11 @@ import type {
     ITerminalStatusChangePayload,
 } from '@/types/terminal';
 import { toErrorMessage } from '@/utils/error';
-import { Eraser, Maximize2, Minimize2, RefreshCcw, X } from 'lucide-vue-next';
+import Eraser from '~icons/lucide/eraser';
+import Maximize2 from '~icons/lucide/maximize2';
+import Minimize2 from '~icons/lucide/minimize2';
+import RefreshCcw from '~icons/lucide/refresh-ccw';
+import X from '~icons/lucide/x';
 import { computed, ref } from 'vue';
 
 const props = defineProps<{

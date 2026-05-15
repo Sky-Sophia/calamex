@@ -236,18 +236,16 @@ import type {
   TWorkspaceSearchScope,
 } from '@/types/search';
 import { toErrorMessage } from '@/utils/error';
-import {
-  Braces,
-  CaseSensitive,
-  Check,
-  ListFilter,
-  LoaderCircle,
-  Regex,
-  Replace,
-  Search,
-  WholeWord,
-  X,
-} from 'lucide-vue-next';
+import Braces from '~icons/lucide/braces';
+import CaseSensitive from '~icons/lucide/case-sensitive';
+import Check from '~icons/lucide/check';
+import ListFilter from '~icons/lucide/list-filter';
+import LoaderCircle from '~icons/lucide/loader-circle';
+import Regex from '~icons/lucide/regex';
+import Replace from '~icons/lucide/replace';
+import Search from '~icons/lucide/search';
+import WholeWord from '~icons/lucide/whole-word';
+import X from '~icons/lucide/x';
 import { computed, onScopeDispose, ref, watch } from 'vue';
 
 type TSearchReason = TWorkspaceSearchResultKind;

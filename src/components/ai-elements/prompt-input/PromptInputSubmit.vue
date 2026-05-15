@@ -5,7 +5,10 @@ import type { HTMLAttributes } from 'vue';
 import type { InputGroupButtonVariants } from '@/components/ui/input-group';
 import { InputGroupButton } from '@/components/ui/input-group';
 import { cn } from '@/lib/utils';
-import { CornerDownLeftIcon, Loader2Icon, SquareIcon, XIcon } from 'lucide-vue-next';
+import CornerDownLeftIcon from '~icons/lucide/corner-down-left';
+import Loader2Icon from '~icons/lucide/loader2';
+import SquareIcon from '~icons/lucide/square';
+import XIcon from '~icons/lucide/x';
 import { computed } from 'vue';
 
 type TPromptInputButtonVariant = 'default' | 'outline' | 'ghost';

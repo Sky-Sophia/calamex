@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import {
-    ChevronDown,
-    Play,
-} from 'lucide-vue-next';
+import ChevronDown from '~icons/lucide/chevron-down';
+import Play from '~icons/lucide/play';
 import { computed, ref } from 'vue';
 
 import { AiQueue, type IAiQueueItem } from '@/components/ai-elements/queue';

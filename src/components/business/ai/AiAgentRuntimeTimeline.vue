@@ -16,31 +16,29 @@ import {
   type TAiRuntimeToolKind,
 } from '@/constants/ai-runtime-tools';
 import type { TAgentRuntimeEvent } from '@/types/agent-sidecar';
-import {
-  Activity,
-  BadgeCheck,
-  BookOpen,
-  Brain,
-  ChartColumn,
-  CircleAlert,
-  Clock3,
-  Coffee,
-  Dot,
-  FileCode,
-  FileText,
-  Files,
-  FolderTree,
-  GitBranch,
-  Globe,
-  HardDrive,
-  Image as ImageIcon,
-  ListTodo,
-  Pencil,
-  Play,
-  Search,
-  Terminal,
-  Workflow,
-} from 'lucide-vue-next';
+import Activity from '~icons/lucide/activity';
+import BadgeCheck from '~icons/lucide/badge-check';
+import BookOpen from '~icons/lucide/book-open';
+import Brain from '~icons/lucide/brain';
+import ChartColumn from '~icons/lucide/chart-column';
+import CircleAlert from '~icons/lucide/circle-alert';
+import Clock3 from '~icons/lucide/clock3';
+import Coffee from '~icons/lucide/coffee';
+import Dot from '~icons/lucide/dot';
+import FileCode from '~icons/lucide/file-code';
+import FileText from '~icons/lucide/file-text';
+import Files from '~icons/lucide/files';
+import FolderTree from '~icons/lucide/folder-tree';
+import GitBranch from '~icons/lucide/git-branch';
+import Globe from '~icons/lucide/globe';
+import HardDrive from '~icons/lucide/hard-drive';
+import ImageIcon from '~icons/lucide/image';
+import ListTodo from '~icons/lucide/list-todo';
+import Pencil from '~icons/lucide/pencil';
+import Play from '~icons/lucide/play';
+import Search from '~icons/lucide/search';
+import Terminal from '~icons/lucide/terminal';
+import Workflow from '~icons/lucide/workflow';
 import { computed, type Component } from 'vue';
 
 const REASONING_SEGMENT_CHARS = 420;

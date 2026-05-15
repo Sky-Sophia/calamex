@@ -73,7 +73,7 @@ viewBox="0 0 16 16" class="activity-settings-icon h-4.5 w-4.5" fill="currentColo
 
 <script setup lang="ts">
 import type { TWorkbenchSidebarView } from '@/types/app';
-import { LibraryBig } from 'lucide-vue-next';
+import LibraryBig from '~icons/lucide/library-big';
 import { computed, ref } from 'vue';
 
 defineProps<{

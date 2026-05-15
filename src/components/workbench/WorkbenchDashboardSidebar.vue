@@ -11,13 +11,11 @@ import type {
     TWorkbenchOpenFilePayload,
 } from '@/types/editor';
 import type { IGitDiffPreviewRequest } from '@/types/git';
-import {
-    FolderTree,
-    GitBranch,
-    LibraryBig,
-    Search,
-    TerminalSquare,
-} from 'lucide-vue-next';
+import FolderTree from '~icons/lucide/folder-tree';
+import GitBranch from '~icons/lucide/git-branch';
+import LibraryBig from '~icons/lucide/library-big';
+import Search from '~icons/lucide/search';
+import TerminalSquare from '~icons/lucide/terminal-square';
 import { computed, ref, watch } from 'vue';
 import appBrandIcon from '../../../resources/logo.svg';
 

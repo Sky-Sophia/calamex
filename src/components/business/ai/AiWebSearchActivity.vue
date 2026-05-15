@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LoaderCircle } from 'lucide-vue-next';
+import LoaderCircle from '~icons/lucide/loader-circle';
 import { computed } from 'vue';
 
 import type { IAiWebActivity } from '@/types/ai';

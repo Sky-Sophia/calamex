@@ -8,7 +8,8 @@ import {
 import { Message } from '@/components/ai-elements/message';
 import type { TAiServicePlatformId } from '@/constants/ai-providers';
 import type { IAiChatMessage, TAiChatMessageActionId } from '@/types/ai';
-import { ArchiveIcon, MessageSquareIcon } from 'lucide-vue-next';
+import ArchiveIcon from '~icons/lucide/archive';
+import MessageSquareIcon from '~icons/lucide/message-square';
 import { computed } from 'vue';
 import AiMessageItem from './AiMessageItem.vue';
 import AiThinkingStatus from './AiThinkingStatus.vue';

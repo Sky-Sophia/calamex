@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CircleAlert } from 'lucide-vue-next';
+import CircleAlert from '~icons/lucide/circle-alert';
 
 const props = defineProps<{
   message: string;

@@ -450,7 +450,7 @@ import {
   getPathBaseName,
   getPathDirectory,
 } from '@/utils/path';
-import { RefreshCw } from 'lucide-vue-next';
+import RefreshCw from '~icons/lucide/refresh-cw';
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 
 const GIT_GETTING_STARTED_URL = 'https://git-scm.com/book/zh/v2';

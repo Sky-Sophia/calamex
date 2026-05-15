@@ -41,7 +41,8 @@ import type {
 import type { IGitDiffPreviewPayload, IGitRepositoryStatusPayload } from '@/types/git';
 import { cloneAiConfigPayload } from '@/utils/ai-config';
 import { toErrorMessage } from '@/utils/error';
-import { SquarePen, Trash2 } from 'lucide-vue-next';
+import SquarePen from '~icons/lucide/square-pen';
+import Trash2 from '~icons/lucide/trash2';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 const MAX_HISTORY_MESSAGES = 20;

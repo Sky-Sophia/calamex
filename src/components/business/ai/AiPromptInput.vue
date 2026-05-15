@@ -27,7 +27,9 @@ import {
 } from '@/components/ui/select';
 import type { IAiTokenContextProps } from '@/composables/useAiTokenContext';
 import type { IAiAttachedFile } from '@/types/ai';
-import { ArrowUpIcon, PlusIcon, SquareIcon } from 'lucide-vue-next';
+import ArrowUpIcon from '~icons/lucide/arrow-up';
+import PlusIcon from '~icons/lucide/plus';
+import SquareIcon from '~icons/lucide/square';
 import { computed, ref } from 'vue';
 
 type TAiPromptInputMode = 'chat' | 'agent' | 'plan';

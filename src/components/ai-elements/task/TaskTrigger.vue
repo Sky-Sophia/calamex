@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import { CollapsibleTrigger } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
-import {
-  AlertCircle,
-  Check,
-  ChevronDown,
-  Circle,
-  Loader2,
-} from 'lucide-vue-next'
-import type { Component, HTMLAttributes } from 'vue'
+import AlertCircle from '~icons/lucide/alert-circle';
+import Check from '~icons/lucide/check';
+import ChevronDown from '~icons/lucide/chevron-down';
+import Circle from '~icons/lucide/circle';
+import Loader2 from '~icons/lucide/loader2';import type { Component, HTMLAttributes } from 'vue'
 
 type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'error'
 

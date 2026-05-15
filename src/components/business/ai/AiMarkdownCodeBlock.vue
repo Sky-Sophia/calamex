@@ -9,7 +9,9 @@ import {
 } from '@/components/ai-elements/code-block';
 import type { CodeBlockNodeProps } from 'markstream-vue';
 import type { BundledLanguage } from 'shiki';
-import { ChevronDown, ChevronUp, FileIcon } from 'lucide-vue-next';
+import ChevronDown from '~icons/lucide/chevron-down';
+import ChevronUp from '~icons/lucide/chevron-up';
+import FileIcon from '~icons/lucide/file';
 import { computed, ref, watch } from 'vue';
 
 const props = defineProps<Pick<CodeBlockNodeProps, 'node'>>();
