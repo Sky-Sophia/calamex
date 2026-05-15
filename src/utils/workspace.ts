@@ -41,16 +41,6 @@ export const resolveWorkspaceRootPayload = async (
   return listWorkspaceEntries(undefined, workspaceRootPath);
 };
 
-const createWorkspaceDirectoryPayload = (
-  rootPath: string,
-  rootName: string,
-  entries: IWorkspaceEntry[] = [],
-): IWorkspaceDirectoryPayload => ({
-  rootPath,
-  rootName,
-  entries,
-});
-
 export const isWorkspaceRootAccessible = async (
   workspaceRootPath: string,
   listWorkspaceEntries: TListWorkspaceEntries,
