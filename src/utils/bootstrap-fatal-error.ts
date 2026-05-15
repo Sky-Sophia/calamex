@@ -3,7 +3,7 @@ const FATAL_BOOTSTRAP_ERROR_LABEL = 'Application bootstrap failed';
 /**
  * 将未知错误转换为可展示文本。
  */
-export const resolveErrorDetail = (error: unknown): string => {
+const resolveErrorDetail = (error: unknown): string => {
     if (error instanceof Error) {
         return error.stack ?? error.message;
     }

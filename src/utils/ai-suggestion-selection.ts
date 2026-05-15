@@ -84,7 +84,7 @@ const clampRandomValue = (value: number): number => {
   return Math.min(0.999999999, Math.max(0, value));
 };
 
-export const normalizeSuggestionText = (value: string): string =>
+const normalizeSuggestionText = (value: string): string =>
   value
     .normalize('NFC')
     .replace(/\s+/gu, ' ')
@@ -234,7 +234,7 @@ export const resolveSuggestionHead = (
   return `${shape}:${lead}`;
 };
 
-export const suggestionSimilarity = (
+const suggestionSimilarity = (
   first: IAiSuggestionSelectionItem,
   second: IAiSuggestionSelectionItem,
 ): 0 | 1 => (first.head === second.head ? 1 : 0);
@@ -294,7 +294,7 @@ const shuffleItems = <T>(items: readonly T[], random: () => number): T[] => {
  * 注意:random 默认使用 Math.random,跨次调用结果不稳定。
  * 若需要"输入相同→输出相同",传入基于内容 hash 的可重放 PRNG。
  */
-export const pickSuggestionBatchDetailed = (
+const pickSuggestionBatchDetailed = (
   pool: readonly string[],
   fallback: readonly string[],
   options: IPickSuggestionBatchOptions = {},

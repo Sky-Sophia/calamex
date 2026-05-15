@@ -80,7 +80,7 @@ export const setRuntimeError = (title: string, error: unknown): void => {
   };
 };
 
-export const disposeRuntimeDiagnostics = (): void => {
+const disposeRuntimeDiagnostics = (): void => {
   if (typeof window === 'undefined') {
     return;
   }

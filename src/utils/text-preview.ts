@@ -219,7 +219,7 @@ export const splitTextGraphemes = (
   locale?: TTextPreviewLocale,
 ): string[] => segmentText(value.normalize('NFC'), 'grapheme', locale);
 
-export const normalizePreviewText = (value: string): string =>
+const normalizePreviewText = (value: string): string =>
   value.normalize('NFC').replace(/\s+/gu, ' ').trim();
 
 const normalizeOptionalPreviewText = (value: string | undefined): string | undefined => {

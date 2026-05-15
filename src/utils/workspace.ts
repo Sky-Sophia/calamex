@@ -7,11 +7,11 @@ export type TListWorkspaceEntries = (
   rootPath?: string,
 ) => Promise<IWorkspaceDirectoryPayload>;
 
-export interface IWorkspaceTraversalOptions {
+interface IWorkspaceTraversalOptions {
   shouldContinue?: () => boolean;
 }
 
-export const EMPTY_WORKSPACE_KEY = '__empty_workspace__';
+const EMPTY_WORKSPACE_KEY = '__empty_workspace__';
 
 const normalizeWorkspaceQuery = (query: string): string => query.trim().toLowerCase();
 const isWorkspaceDirectoryEntry = (entry: IWorkspaceEntry): boolean => entry.kind === 'directory';
@@ -20,7 +20,7 @@ const isWorkspaceFileEntry = (entry: IWorkspaceEntry): boolean => entry.kind ===
 export const resolveWorkspaceKey = (workspaceRootPath: string | null): string =>
   workspaceRootPath ?? EMPTY_WORKSPACE_KEY;
 
-export const resolvePreloadedWorkspaceRoot = (
+const resolvePreloadedWorkspaceRoot = (
   workspaceRootPath: string | null,
   preloadedWorkspaceRoot: IWorkspaceDirectoryPayload | null,
 ): IWorkspaceDirectoryPayload | null => {
@@ -47,7 +47,7 @@ export const resolveWorkspaceRootPayload = async (
   return listWorkspaceEntries(undefined, workspaceRootPath);
 };
 
-export const createWorkspaceDirectoryPayload = (
+const createWorkspaceDirectoryPayload = (
   rootPath: string,
   rootName: string,
   entries: IWorkspaceEntry[] = [],
@@ -124,7 +124,7 @@ export const collectWorkspaceFileEntries = async (
 export const countLoadedWorkspaceEntries = (childrenMap: TWorkspaceChildrenMap): number =>
   Object.values(childrenMap).reduce((total, entries) => total + entries.length, 0);
 
-export const workspaceEntryMatchesSearch = (entry: IWorkspaceEntry, query: string): boolean => {
+const workspaceEntryMatchesSearch = (entry: IWorkspaceEntry, query: string): boolean => {
   const normalizedQuery = normalizeWorkspaceQuery(query);
   if (!normalizedQuery) {
     return true;
@@ -136,7 +136,7 @@ export const workspaceEntryMatchesSearch = (entry: IWorkspaceEntry, query: strin
   );
 };
 
-export const workspaceEntryMatchesTree = (
+const workspaceEntryMatchesTree = (
   entry: IWorkspaceEntry,
   query: string,
   childrenMap: TWorkspaceChildrenMap,

@@ -249,7 +249,7 @@ const resolveRequiredThemeIconAsset = (key: string): IFileIconAsset => {
 
 const DEFAULT_FILE_ICON_ASSET = resolveRequiredThemeIconAsset(PIERRE_ICON_THEME.file);
 
-export const resolveFileIconKey = ({
+const resolveFileIconKey = ({
   kind,
   path,
   expanded = false,

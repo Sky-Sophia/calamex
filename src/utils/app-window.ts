@@ -1,8 +1,8 @@
 export const MAIN_WINDOW_LABEL = 'main';
 
-export type TAppWindowLabel = typeof MAIN_WINDOW_LABEL;
+type TAppWindowLabel = typeof MAIN_WINDOW_LABEL;
 
-export const normalizeAppWindowLabel = (): TAppWindowLabel => MAIN_WINDOW_LABEL;
+const normalizeAppWindowLabel = (): TAppWindowLabel => MAIN_WINDOW_LABEL;
 
 export const getCurrentAppWindowLabel = (): TAppWindowLabel => {
   if (typeof window === 'undefined') {

@@ -211,7 +211,7 @@ export const isTerminalRunDispatchedLog = (
   item.code === TERMINAL_RUN_LOG_CODES.dispatched
   || item.title === TERMINAL_RUN_LOG_TITLES.dispatched;
 
-export const isTerminalRunTempFileLog = (
+const isTerminalRunTempFileLog = (
   item: Pick<IRunLogEntry, 'title' | 'code'>,
 ): boolean =>
   item.code === TERMINAL_RUN_LOG_CODES.tempFile

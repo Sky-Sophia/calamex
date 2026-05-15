@@ -17,7 +17,7 @@ const resolveTauriInternals = (): ITauriInternals | null => {
   return (window as Window & { __TAURI_INTERNALS__?: ITauriInternals }).__TAURI_INTERNALS__ ?? null;
 };
 
-export const syncDesktopRuntime = (): boolean => {
+const syncDesktopRuntime = (): boolean => {
   const available = typeof resolveTauriInternals()?.invoke === 'function';
   desktopRuntimeReady.value = available;
   return available;

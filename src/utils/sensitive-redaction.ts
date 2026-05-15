@@ -38,7 +38,7 @@ export const createRedactedTextSummary = (value: string): IRedactedTextSummary =
   estimatedBytes: estimateTextBytes(value),
 });
 
-export const isSensitiveFieldName = (field: string): boolean =>
+const isSensitiveFieldName = (field: string): boolean =>
   SENSITIVE_FIELD_NAMES.has(normalizeFieldName(field));
 
 export const redactSensitiveText = (value: string): string =>

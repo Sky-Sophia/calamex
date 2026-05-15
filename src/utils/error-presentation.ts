@@ -64,7 +64,7 @@ const stringifyUnknown = (value: unknown): string | null => {
   }
 };
 
-export const resolveErrorTechnicalDetails = (error: unknown): string | undefined => {
+const resolveErrorTechnicalDetails = (error: unknown): string | undefined => {
   if (isAppError(error)) {
     const causeDetail = stringifyUnknown(error.cause);
     const stackDetail = error.stack;
