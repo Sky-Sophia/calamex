@@ -4,7 +4,6 @@ import {
   aiConfigPayloadSchema,
   aiProviderProfilePayloadSchema,
   aiProviderTypeSchema,
-  aiToolDefinitionPayloadSchema,
 } from '@/types/ai.schema';
 import { describe, expect, it } from 'vitest';
 
@@ -155,21 +154,5 @@ describe('AI schema', () => {
     });
 
     expect(parsed.message.role).toBe('assistant');
-  });
-
-  it('将 Rust 工具白名单字段转换为前端 camelCase', () => {
-    const parsed = aiToolDefinitionPayloadSchema.parse({
-      name: 'propose_patch',
-      read_only: false,
-      destructive: false,
-      requires_confirmation: true,
-    });
-
-    expect(parsed).toEqual({
-      name: 'propose_patch',
-      readOnly: false,
-      destructive: false,
-      requiresConfirmation: true,
-    });
   });
 });

@@ -13,7 +13,8 @@ use crate::commands::contracts::{
     AgentSidecarCheckpointRestoreRequest, AgentSidecarExecuteRequest, AgentSidecarHealthPayload,
     AgentSidecarPlanApproveRequest, AgentSidecarPlanFinishRequest, AgentSidecarPlanQueryRequest,
     AgentSidecarPlanRejectRequest, AgentSidecarPlanReplanRequest, AgentSidecarPlanRequest,
-    AgentSidecarPlanValidateRequest, AgentSidecarResponsePayload,
+    AgentSidecarPlanValidateRequest, AgentSidecarResponsePayload, AiWebFetchInput,
+    AiWebFetchPayload, AiWebSearchInput, AiWebSearchPayload,
 };
 
 const DEFAULT_SIDECAR_URL: &str = "http://127.0.0.1:39871";
@@ -893,6 +894,30 @@ pub async fn restore_checkpoint(
         &session_id,
     )
     .await
+}
+
+#[derive(Debug, Deserialize)]
+struct SidecarWebTextRefPayload {
+    text: Option<String>,
+}
+
+pub async fn web_search(payload: AiWebSearchInput) -> Result<AiWebSearchPayload, String> {
+    post_json("/web/search", &payload).await
+}
+
+pub async fn web_fetch(payload: AiWebFetchInput) -> Result<AiWebFetchPayload, String> {
+    post_json("/web/fetch", &payload).await
+}
+
+pub async fn load_web_text_ref(ref_id: &str) -> Result<Option<String>, String> {
+    let normalized = ref_id.trim();
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+
+    let payload: SidecarWebTextRefPayload =
+        get_json(&format!("/web/text-ref/{normalized}")).await?;
+    Ok(payload.text)
 }
 
 #[cfg(test)]

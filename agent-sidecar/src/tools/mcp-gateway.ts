@@ -160,6 +160,29 @@ const GIT_NATIVE_FILE_DUPLICATE_TOOL_PATTERN =
 const PROBE_NATIVE_FILE_DUPLICATE_TOOL_PATTERN =
   /(?:^|[_*-])(?:grep|search_code|search_files|extract_code|read_file|list_files)(?:$|[_*-])/iu;
 
+const MCP_APPROVAL_EXACT_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
+  'git_commit',
+  'git_push',
+  'git_merge',
+  'git_rebase',
+  'git_reset',
+  'git_checkout',
+  'git_add',
+  'git_stash',
+  'bash',
+  'sh',
+  'run_command',
+  'exec_command',
+  'execute_command',
+  'send_message',
+  'send_email',
+  'send_request',
+  'send_notification',
+  'post_message',
+  'post_comment',
+  'reply',
+]);
+
 export const MCP_GATEWAY_TOOL_NAMES = ['mcp_list_tools', 'mcp_call_tool'] as const;
 
 const mcpGatewayServerNameSchema = z.enum(MCP_SERVER_NAMES);
@@ -273,6 +296,38 @@ const isWriteishToolName = (toolName: string): boolean => {
     return true;
   }
   return READONLY_MCP_TOOL_DENY_PREFIX_PATTERN.test(toolName);
+};
+
+const requiresMcpToolApproval = (
+  serverName: TMcpServerName,
+  toolName: string,
+): boolean => {
+  const normalizedToolName = toolName.trim().toLowerCase();
+
+  if (MCP_APPROVAL_EXACT_TOOL_NAMES.has(normalizedToolName)) {
+    return true;
+  }
+
+  switch (serverName) {
+    case 'git':
+    case 'hooks-mcp':
+    case 'sqlite-mcp':
+      return isWriteishToolName(normalizedToolName);
+    case 'probe':
+      return isWriteishToolName(normalizedToolName)
+        || /(?:command|shell|exec|write|edit|delete|move|create|patch)/iu.test(normalizedToolName);
+    case 'github':
+      return isWriteishToolName(normalizedToolName)
+        || /(?:issue|pull|comment|review|merge|branch|commit|release|label|secret)/iu.test(normalizedToolName);
+    case 'memory':
+    case 'sequential-thinking':
+    case 'context7':
+    case 'logoscope':
+    case 'tavily-mcp':
+      return isWriteishToolName(normalizedToolName);
+    default:
+      return isWriteishToolName(normalizedToolName);
+  }
 };
 
 const filterMcpToolsForProfile = (
@@ -554,6 +609,7 @@ export class McpGatewayWarmPool {
           '已知道 tool 名称时应直接调用，只有不确定名称时才先用 mcp_list_tools 探索。',
         ].join('\n'),
         inputSchema: mcpGatewayCallInputSchema,
+        requireApproval: async (input) => requiresMcpToolApproval(input.serverName, input.toolName),
         execute: async (inputData) => {
           const parsed = mcpGatewayCallInputSchema.parse(unwrapGatewayToolInput(inputData));
           return await this.callTool({

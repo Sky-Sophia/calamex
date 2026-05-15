@@ -169,15 +169,6 @@ export const aiTaskPlanStepSchema = z.object({
   rollbackStrategy: nullableOptionalTextSchema,
 });
 
-export const aiAgentPlanRequestSchema = z.object({
-  goal: z.string().trim().min(1),
-  context: z.array(aiContextReferenceSchema),
-});
-
-export const aiAgentPlanPayloadSchema = z.object({
-  steps: z.array(aiTaskPlanStepSchema).min(2).max(6),
-});
-
 export const aiAgentClassifyTaskRequestSchema = z.object({
   goal: z.string().trim().min(1),
   context: z.array(aiContextReferenceSchema),
@@ -187,16 +178,6 @@ export const aiAgentClassifyTaskPayloadSchema = z.object({
   classification: aiAgentTaskClassificationSchema,
   shouldEnterPlanMode: z.boolean(),
   reason: z.string().trim().min(1),
-});
-
-export const aiAgentApprovePlanRequestSchema = z.object({
-  goal: z.string().trim().min(1),
-  steps: z.array(aiTaskPlanStepSchema).min(2).max(6),
-});
-
-export const aiAgentApprovePlanPayloadSchema = z.object({
-  approvedAt: z.string().min(1),
-  stepCount: z.number().int().min(2).max(6),
 });
 
 export const aiAgentRunSchema = z.object({

@@ -8,11 +8,6 @@ import type { ITauriService } from '@/types/tauri';
 import { wslLinkStatusPayloadSchema } from '@/types/wsl-link.schema';
 import { assertDesktopRuntime } from '@/utils/desktop-runtime';
 import { toErrorMessage } from '@/utils/error';
-import {
-  createRedactedTextSummary,
-  redactForLog,
-  redactSensitiveText,
-} from '@/utils/sensitive-redaction';
 import { z } from 'zod';
 import { tauriContracts } from './tauri.contracts';
 
@@ -47,12 +42,10 @@ interface IIpcLogRecord {
   outputBytes: number;
   outcome: 'ok' | 'error';
   errorCode?: string;
-  payloadSummary?: string;
 }
 
 interface IPayloadMetrics {
   bytes: number;
-  summary?: string;
 }
 
 interface IDefineIpcOptions<TInSchema extends z.ZodTypeAny, TOutSchema extends z.ZodTypeAny> {
@@ -83,7 +76,6 @@ type TIpcFactoryOptions<TInSchema extends z.ZodTypeAny, TOutSchema extends z.Zod
 
 const TAURI_IPC_DEFAULT_TIMEOUT_MS = 10_000;
 const AGENT_SIDECAR_TASK_TIMEOUT_MS = 30 * 60 * 1000;
-const LOG_PAYLOAD_SUMMARY_LIMIT = 320;
 const textEncoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
 
 const openFileFilters = [
@@ -143,9 +135,9 @@ const serializeForLog = (value: unknown): string => {
   }
 
   try {
-    return JSON.stringify(redactForLog(value));
+    return JSON.stringify(value);
   } catch {
-    return String(redactForLog(value));
+    return String(value);
   }
 };
 
@@ -156,10 +148,6 @@ const buildPayloadMetricsFromSerialized = (serialized: string): IPayloadMetrics 
 
   return {
     bytes: textEncoder ? textEncoder.encode(serialized).length : serialized.length,
-    summary:
-      serialized.length > LOG_PAYLOAD_SUMMARY_LIMIT
-        ? `${serialized.slice(0, LOG_PAYLOAD_SUMMARY_LIMIT)}...`
-        : serialized,
   };
 };
 
@@ -184,24 +172,20 @@ const buildPayloadMetricsOmittingTextFields = <T extends Record<string, unknown>
 ): IPayloadMetrics => {
   const omittedFieldSet = new Set(omittedFields);
   let omittedBytes = 0;
-  const summaryValue: Record<string, unknown> = {};
+  const valueWithoutOmittedText: Record<string, unknown> = {};
 
   for (const [field, fieldValue] of Object.entries(value)) {
     if (omittedFieldSet.has(field) && typeof fieldValue === 'string') {
-      const summary = createRedactedTextSummary(fieldValue);
-      const bytes = summary.estimatedBytes;
-      omittedBytes += bytes;
-      summaryValue[field] = summary;
+      omittedBytes += textEncoder ? textEncoder.encode(fieldValue).length : fieldValue.length;
       continue;
     }
 
-    summaryValue[field] = fieldValue;
+    valueWithoutOmittedText[field] = fieldValue;
   }
 
-  const summaryMetrics = buildPayloadMetrics(summaryValue);
+  const baseMetrics = buildPayloadMetrics(valueWithoutOmittedText);
   return {
-    bytes: summaryMetrics.bytes + omittedBytes,
-    summary: summaryMetrics.summary,
+    bytes: baseMetrics.bytes + omittedBytes,
   };
 };
 
@@ -351,7 +335,7 @@ const normalizeIpcError = (
     return error;
   }
 
-  const baseMessage = redactSensitiveText(toErrorMessage(error, 'IPC 调用失败'));
+  const baseMessage = toErrorMessage(error, 'IPC 调用失败');
 
   if (baseMessage.includes('浏览器预览模式')) {
     return new AppError({
@@ -407,7 +391,6 @@ export const defineIpc = <TInSchema extends z.ZodTypeAny, TOutSchema extends z.Z
     let inputMetrics: IPayloadMetrics | null = null;
     let inputBytes = 0;
     let outputBytes = 0;
-    let payloadSummary: string | undefined;
     const ensureInputMetrics = (): IPayloadMetrics => {
       if (inputMetrics) {
         return inputMetrics;
@@ -457,7 +440,9 @@ export const defineIpc = <TInSchema extends z.ZodTypeAny, TOutSchema extends z.Z
       };
 
       if (!parsedOutput.success) {
-        payloadSummary = shouldAudit ? ensureOutputMetrics().summary : undefined;
+        if (shouldAudit) {
+          ensureOutputMetrics();
+        }
         const issueSummary = formatZodIssueSummary(parsedOutput.error.issues);
         throw new AppError({
           code: 'ipc.contract-violation',
@@ -466,7 +451,6 @@ export const defineIpc = <TInSchema extends z.ZodTypeAny, TOutSchema extends z.Z
           traceId,
           cause: {
             issues: parsedOutput.error.issues,
-            payloadSummary,
           },
         });
       }
@@ -500,13 +484,12 @@ export const defineIpc = <TInSchema extends z.ZodTypeAny, TOutSchema extends z.Z
             traceId,
             cause: {
               issues: error.issues,
-              payloadSummary: shouldAudit ? ensureInputMetrics().summary : undefined,
             },
           })
           : normalizeIpcError(error, { traceId, errorMap });
 
       if (shouldAudit) {
-        const fallbackInputMetrics = inputMetrics ?? ensureInputMetrics();
+        inputMetrics ??= ensureInputMetrics();
         emitIpcLog({
           timestamp: new Date().toISOString(),
           level: 'error',
@@ -521,10 +504,6 @@ export const defineIpc = <TInSchema extends z.ZodTypeAny, TOutSchema extends z.Z
           outputBytes,
           outcome: 'error',
           errorCode: normalizedError.code,
-          payloadSummary:
-            payloadSummary ??
-            buildPayloadMetrics(normalizedError.cause).summary ??
-            fallbackInputMetrics.summary,
         });
       }
 
@@ -1282,13 +1261,6 @@ const aiEditRevertTaskIpc = definePayloadIpc(
   { audit: 'sensitive', timeoutMs: 30_000 },
 );
 
-const aiListToolsIpc = defineContractIpc(
-  'ai_list_tools',
-  '读取 AI 工具白名单',
-  tauriContracts.aiListTools,
-  { idempotent: true, audit: 'sensitive' },
-);
-
 const ensureTerminalSessionIpc = definePayloadIpc(
   'ensure_terminal_session',
   '连接 WSL2 终端',
@@ -1647,5 +1619,4 @@ export const tauriService: ITauriService & {
 
   aiEditRevertTask: aiEditRevertTaskIpc,
 
-  aiListTools: () => aiListToolsIpc(undefined),
 };

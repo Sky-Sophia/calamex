@@ -60,7 +60,6 @@ import {
   aiProviderTypeSchema,
   aiSuggestionPoolPayloadSchema,
   aiSuggestionPoolRequestSchema,
-  aiToolDefinitionPayloadSchema,
   aiWebFetchInputSchema,
   aiWebFetchPayloadSchema,
   aiWebSearchInputSchema,
@@ -1079,10 +1078,6 @@ export const tauriContracts = {
   aiEditRevertTask: {
     inSchema: aiEditRevertTaskRequestSchema,
     outSchema: aiEditRevertTaskPayloadSchema,
-  },
-  aiListTools: {
-    inSchema: z.void(),
-    outSchema: z.array(aiToolDefinitionPayloadSchema),
   },
   ensureTerminalSession: {
     inSchema: z.object({

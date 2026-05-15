@@ -2,7 +2,6 @@ import type { TAgentRuntimeOutputEvent } from '../engines/runtime-contracts.js';
 import type { TJsonValue } from '../schemas/events.js';
 import { createAgentStreamAdapter } from './stream-adapter.js';
 import type { AgentStreamEventBus } from './stream-event-bus.js';
-import { redactForStream } from './stream-redaction.js';
 import type {
   IAgentEventStreamSource,
   IAgentStreamResult,
@@ -49,7 +48,7 @@ export const runAgentStream = async <TResult extends IAgentStreamResult>(
     type: 'agent.run.started',
     visibility: 'user',
     level: 'info',
-    inputPreview: redactForStream(clipPreview(params.prompt, RUN_INPUT_PREVIEW_CHARS)),
+    inputPreview: clipPreview(params.prompt, RUN_INPUT_PREVIEW_CHARS),
   });
 
   try {
@@ -60,7 +59,7 @@ export const runAgentStream = async <TResult extends IAgentStreamResult>(
       if (next.done) {
         const visibleText = adapter.complete();
         const outputPreview = visibleText.trim()
-          ? redactForStream(clipPreview(visibleText, RUN_OUTPUT_PREVIEW_CHARS))
+          ? clipPreview(visibleText, RUN_OUTPUT_PREVIEW_CHARS)
           : undefined;
 
         params.eventBus.emitDraft({

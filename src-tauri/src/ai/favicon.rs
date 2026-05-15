@@ -12,7 +12,7 @@ use tokio::fs;
 use tokio::net::lookup_host;
 use tokio::task::JoinSet;
 
-use crate::ai_tools::web_fetch::validate_fetch_url;
+use crate::ai_tools::web_safety::validate_public_http_url;
 
 const CACHE_DIR_NAME: &str = "favicons";
 const CACHE_TTL_SUCCESS_SECS: i64 = 30 * 24 * 60 * 60;
@@ -325,7 +325,7 @@ async fn resolve_html_icon_url(host: &str) -> Option<Url> {
 }
 
 async fn try_fetch_icon(candidate_url: &str) -> Result<(Vec<u8>, String), String> {
-    let url = validate_fetch_url(candidate_url)?;
+    let url = validate_public_http_url(candidate_url)?;
     let pinned = resolve_and_validate(&url).await?;
     let client = build_pinned_client(&pinned)?;
 

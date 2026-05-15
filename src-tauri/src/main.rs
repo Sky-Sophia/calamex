@@ -6,7 +6,6 @@ mod ai_agent;
 mod ai_edit;
 mod ai_index;
 mod ai_patch;
-mod ai_security;
 mod ai_tools;
 mod commands;
 mod error;
@@ -25,7 +24,7 @@ use commands::{
     ai_edit_restore_snapshot, ai_edit_revert_file, ai_edit_revert_hunk, ai_edit_revert_task,
     ai_edit_set_auth_level, ai_edit_undo_operation, ai_generate_conversation_title,
     ai_generate_suggestion_pool, ai_get_config, ai_get_provider_profile_detail,
-    ai_get_suggestion_pool_cache, ai_inline_complete, ai_list_provider_profiles, ai_list_tools,
+    ai_get_suggestion_pool_cache, ai_inline_complete, ai_list_provider_profiles,
     ai_narrate_activity, ai_narrate_activity_stream, ai_propose_patch, ai_query_index,
     ai_save_config, ai_save_credentials, ai_switch_provider_profile, ai_test_provider,
     ai_test_provider_config, ai_web_fetch, ai_web_search, analyze_script, apply_git_stash,
@@ -389,8 +388,7 @@ fn main() {
             ai_edit_undo_operation,
             ai_edit_revert_file,
             ai_edit_revert_hunk,
-            ai_edit_revert_task,
-            ai_list_tools
+            ai_edit_revert_task
         ]);
     emit_startup_step("tauri.builder.ready", app_started_at, builder_started_at);
     emit_startup_event("tauri.run.start", app_started_at);

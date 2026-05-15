@@ -72,8 +72,6 @@ export type {
 } from '@/types/ai-stream';
 
 export type {
-  IAiAgentApprovePlanPayload,
-  IAiAgentApprovePlanRequest,
   IAiAgentClassifyTaskPayload,
   IAiAgentClassifyTaskRequest,
   IAiAgentListRunsPayload,
@@ -81,9 +79,7 @@ export type {
   IAiAgentPlanMetadata,
   IAiAgentPlanVersionSummary,
   IAiAgentPermissionState,
-  IAiAgentPlanPayload,
   IAiAgentPlanReference,
-  IAiAgentPlanRequest,
   IAiAgentResolveToolConfirmationRequest,
   IAiAgentRun,
   IAiAgentRunIdRequest,
@@ -169,13 +165,6 @@ export interface IAiToolCall {
   targetPreview?: string;
   detailItems?: string[];
   elapsedMs?: number;
-}
-
-export interface IAiToolDefinitionPayload {
-  name: string;
-  readOnly: boolean;
-  destructive: boolean;
-  requiresConfirmation: boolean;
 }
 
 export interface IAiModelEndpointConfigPayload {

@@ -2,8 +2,6 @@ import { z } from 'zod';
 
 import { agentRuntimeEventSchema } from '@/types/agent-sidecar.schema';
 import {
-  aiAgentApprovePlanPayloadSchema,
-  aiAgentApprovePlanRequestSchema,
   aiAgentClassifyTaskPayloadSchema,
   aiAgentClassifyTaskRequestSchema,
   aiAgentListRunsPayloadSchema,
@@ -12,10 +10,8 @@ import {
   aiAgentPermissionLevelSchema,
   aiAgentPermissionScopeSchema,
   aiAgentPermissionStateSchema,
-  aiAgentPlanPayloadSchema,
   aiAgentPlanReferenceSchema,
   aiAgentPlanReferenceTypeSchema,
-  aiAgentPlanRequestSchema,
   aiAgentPlanRiskLevelSchema,
   aiAgentPlanStepKindSchema,
   aiAgentPlanStepStatusSchema,
@@ -365,28 +361,6 @@ export const aiChatStreamEventPayloadSchema = z.object({
   usage: aiLanguageModelUsageSchema.nullable().optional(),
 });
 
-export const aiToolDefinitionPayloadSchema = z.union([
-  z.object({
-    name: z.string().min(1),
-    readOnly: z.boolean(),
-    destructive: z.boolean(),
-    requiresConfirmation: z.boolean(),
-  }),
-  z
-    .object({
-      name: z.string().min(1),
-      read_only: z.boolean(),
-      destructive: z.boolean(),
-      requires_confirmation: z.boolean(),
-    })
-    .transform((value) => ({
-      name: value.name,
-      readOnly: value.read_only,
-      destructive: value.destructive,
-      requiresConfirmation: value.requires_confirmation,
-    })),
-]);
-
 export const aiSaveCredentialsRequestSchema = z.object({
   role: aiModelRoleSchema.optional(),
   providerType: aiProviderTypeSchema,
@@ -472,8 +446,6 @@ export const aiCodeActionPayloadSchema = z.object({
 });
 
 export {
-  aiAgentApprovePlanPayloadSchema,
-  aiAgentApprovePlanRequestSchema,
   aiAgentChangedFileSchema,
   aiAgentChangedFileStatusSchema,
   aiAgentClassifyTaskPayloadSchema,
@@ -485,10 +457,8 @@ export {
   aiAgentPermissionLevelSchema,
   aiAgentPermissionScopeSchema,
   aiAgentPermissionStateSchema,
-  aiAgentPlanPayloadSchema,
   aiAgentPlanReferenceSchema,
   aiAgentPlanReferenceTypeSchema,
-  aiAgentPlanRequestSchema,
   aiAgentPlanRiskLevelSchema,
   aiAgentPlanStepKindSchema,
   aiAgentPlanStepStatusSchema,

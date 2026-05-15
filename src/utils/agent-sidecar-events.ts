@@ -218,6 +218,7 @@ const FILE_READ_TOOL_NAMES = new Set<string>([
 ]);
 
 const DIRECTORY_TOOL_NAMES = new Set<string>([
+  'mastra_workspace_list_files',
   'list_dir',
   'list_directory',
   'list_directory_with_sizes',
@@ -272,9 +273,13 @@ const SIDECAR_TOOL_TO_AI_TOOL: Readonly<Record<string, TAiAgentToolName>> = {
   mastra_workspace_edit_file: 'auto_apply_patch',
   mastra_workspace_write_file: 'auto_apply_patch',
   mastra_workspace_ast_edit: 'auto_apply_patch',
+  mastra_workspace_list_files: 'get_project_tree',
   mastra_workspace_lsp_inspect: 'get_diagnostics',
   mastra_workspace_grep: 'search_text',
   mastra_workspace_read_file: 'read_file',
+  mastra_workspace_execute_command: 'run_command',
+  mastra_workspace_delete: 'run_command',
+  mastra_workspace_mkdir: 'auto_apply_patch',
   write_file: 'auto_apply_patch',
   edit_file: 'auto_apply_patch',
   create_directory: 'auto_apply_patch',
@@ -1190,9 +1195,9 @@ const applyRuntimeToolEventToToolCalls = (
 
 const WEB_TOOL_NAME_PATTERN = /(?:web|tavily)/iu;
 const FILE_SEARCH_TOOL_NAME_PATTERN = /(?:search_(?:project_)?files|search_text|search_symbols|grep_in_files|mastra_workspace_grep)/iu;
-const DIRECTORY_TOOL_NAME_PATTERN = /(?:list_dir|list_directory|directory_tree|get_project_tree|list_project_files)/iu;
+const DIRECTORY_TOOL_NAME_PATTERN = /(?:list_dir|list_directory|directory_tree|get_project_tree|list_project_files|mastra_workspace_list_files)/iu;
 const FILE_READ_TOOL_NAME_PATTERN = /(?:read_|get_file_info|open_nodes|mastra_workspace_lsp_inspect)/iu;
-const FILE_MUTATION_TOOL_NAME_PATTERN = /(?:write_file|edit_file|create_directory|move_file|delete_file|patch|mastra_workspace_ast_edit)/iu;
+const FILE_MUTATION_TOOL_NAME_PATTERN = /(?:write_file|edit_file|create_directory|move_file|delete_file|patch|mastra_workspace_write_file|mastra_workspace_edit_file|mastra_workspace_ast_edit|mastra_workspace_mkdir|mastra_workspace_delete)/iu;
 const COMMAND_TOOL_NAME_PATTERN = /(?:run_|shell|command|install_package)/iu;
 const GIT_TOOL_NAME_PATTERN = /(?:^git_|get_git_|create_commit|stage_file)/iu;
 const TIME_TOOL_NAME_PATTERN = /(?:time)/iu;

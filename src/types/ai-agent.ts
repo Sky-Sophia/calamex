@@ -186,15 +186,6 @@ export interface IAiTaskPlanStep {
   rollbackStrategy?: string;
 }
 
-export interface IAiAgentPlanRequest {
-  goal: string;
-  context: IAiContextReference[];
-}
-
-export interface IAiAgentPlanPayload {
-  steps: IAiTaskPlanStep[];
-}
-
 export interface IAiAgentPlanMetadata {
   planId: string;
   threadId?: string;
@@ -223,16 +214,6 @@ export interface IAiAgentClassifyTaskPayload {
   classification: TAiAgentTaskClassification;
   shouldEnterPlanMode: boolean;
   reason: string;
-}
-
-export interface IAiAgentApprovePlanRequest {
-  goal: string;
-  steps: IAiTaskPlanStep[];
-}
-
-export interface IAiAgentApprovePlanPayload {
-  approvedAt: string;
-  stepCount: number;
 }
 
 export interface IAiAgentRun {

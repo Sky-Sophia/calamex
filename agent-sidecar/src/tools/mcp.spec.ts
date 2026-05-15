@@ -11,6 +11,7 @@ import { createMcpGatewayWarmPool } from './mcp-gateway.js';
 import {
   createMastraMcpClientBundle,
   getMcpRuntimeStatus,
+  type IMcpServerConfig,
   loadMcpServerConfigs,
 } from './mcp.js';
 
@@ -34,6 +35,31 @@ const defaultEnv = {
   TAVILY_API_KEY: 'tvly-test-key',
 };
 
+const createMockStdioConfig = (name: string): IMcpServerConfig => ({
+  name,
+  transportType: 'stdio',
+  command: 'mock-command',
+  args: [],
+  env: {},
+  cwd: WORKSPACE_ROOT,
+});
+
+function assertStdioConfig(
+  config: IMcpServerConfig | undefined,
+  name: string,
+): asserts config is Extract<IMcpServerConfig, { transportType: 'stdio' }> {
+  assert.ok(config, `应找到 ${name} MCP 配置`);
+  assert.equal(config.transportType, 'stdio');
+}
+
+function assertHttpConfig(
+  config: IMcpServerConfig | undefined,
+  name: string,
+): asserts config is Extract<IMcpServerConfig, { transportType: 'http' }> {
+  assert.ok(config, `应找到 ${name} MCP 配置`);
+  assert.equal(config.transportType, 'http');
+}
+
 describe('MCP gateway warm pool', () => {
   it('reuses a warm bundle for repeated MCP tool calls', async () => {
     let createBundleCalls = 0;
@@ -43,7 +69,7 @@ describe('MCP gateway warm pool', () => {
         createBundleCalls += 1;
 
         return {
-          configs: [{ name: options?.serverNames?.[0] ?? 'git', transportType: 'stdio' }],
+          configs: [createMockStdioConfig(options?.serverNames?.[0] ?? 'git')],
           errors: [],
           tools: {
             git_status: createTool({
@@ -117,7 +143,7 @@ describe('MCP gateway warm pool', () => {
         createBundleCalls += 1;
 
         return {
-          configs: [{ name: 'probe', transportType: 'stdio' }],
+          configs: [createMockStdioConfig('probe')],
           errors: [],
           tools: {
             probe_search_code: createTool({
@@ -154,7 +180,7 @@ describe('MCP gateway warm pool', () => {
   it('caps catalog descriptions returned to the model', async () => {
     const pool = createMcpGatewayWarmPool({
       createBundle: async () => ({
-        configs: [{ name: 'context7', transportType: 'stdio' }],
+        configs: [createMockStdioConfig('context7')],
         errors: [],
         tools: {
           context7_query_docs: createTool({
@@ -191,7 +217,7 @@ describe('MCP gateway warm pool', () => {
   it('caps MCP call results before replaying them to the model', async () => {
     const pool = createMcpGatewayWarmPool({
       createBundle: async () => ({
-        configs: [{ name: 'git', transportType: 'stdio' }],
+        configs: [createMockStdioConfig('git')],
         errors: [],
         tools: {
           git_diff_unstaged: createTool({
@@ -235,7 +261,7 @@ describe('MCP gateway warm pool', () => {
   it('reports readonly profile filtering separately from an empty MCP server', async () => {
     const pool = createMcpGatewayWarmPool({
       createBundle: async () => ({
-        configs: [{ name: 'git', transportType: 'stdio' }],
+        configs: [createMockStdioConfig('git')],
         errors: [],
         tools: {
           git_commit: createTool({
@@ -274,7 +300,7 @@ describe('MCP gateway warm pool', () => {
   it('filters local file primitive duplicates out of MCP catalog and calls', async () => {
     const pool = createMcpGatewayWarmPool({
       createBundle: async () => ({
-        configs: [{ name: 'git', transportType: 'stdio' }],
+        configs: [createMockStdioConfig('git')],
         errors: [],
         tools: {
           git_read_file: createTool({
@@ -369,21 +395,29 @@ describe('MCP sidecar config', () => {
     const sqliteMcp = loaded.configs.find((config) => config.name === 'sqlite-mcp');
     const tavily = loaded.configs.find((config) => config.name === 'tavily-mcp');
 
-    assert.equal(git?.command, UVX_FIXTURE_PATH);
-    assert.deepEqual(git?.args, ['mcp-server-git==2026.1.14', '--repository', WORKSPACE_ROOT]);
-    assert.equal(git?.env?.GIT_PYTHON_GIT_EXECUTABLE, GIT_FIXTURE_PATH);
-    assert.equal(probe?.command, 'npx.cmd');
-    assert.deepEqual(probe?.args, ['-y', '@probelabs/probe@0.6.0-rc315', 'mcp']);
-    assert.equal(memory?.env?.MEMORY_FILE_PATH, MEMORY_FILE_PATH);
-    assert.equal(github?.transportType, 'http');
-    assert.equal(github?.url, 'https://api.githubcopilot.com/mcp/');
-    assert.match(github?.headers?.Authorization ?? '', /^Bearer\s+/u);
-    assert.deepEqual(context7?.args, []);
-    assert.deepEqual(hooksMcp?.args, ['hooks-mcp==0.2.4', '--working-directory', WORKSPACE_ROOT]);
-    assert.equal(sqliteMcp?.env?.SQLITE_DB_PATH, resolve(join(WORKSPACE_ROOT, 'tmp', 'agent-sidecar.sqlite')));
-    assert.equal(sqliteMcp?.env?.SQLITE_READ_ONLY, 'true');
-    assert.equal(sqliteMcp?.env?.SQLITE_TIMEOUT, '30');
-    assert.equal(tavily?.env?.TAVILY_API_KEY, 'tvly-test-key');
+    assertStdioConfig(git, 'git');
+    assertStdioConfig(probe, 'probe');
+    assertStdioConfig(memory, 'memory');
+    assertHttpConfig(github, 'github');
+    assertStdioConfig(context7, 'context7');
+    assertStdioConfig(hooksMcp, 'hooks-mcp');
+    assertStdioConfig(sqliteMcp, 'sqlite-mcp');
+    assertStdioConfig(tavily, 'tavily-mcp');
+
+    assert.equal(git.command, UVX_FIXTURE_PATH);
+    assert.deepEqual(git.args, ['mcp-server-git==2026.1.14', '--repository', WORKSPACE_ROOT]);
+    assert.equal(git.env?.GIT_PYTHON_GIT_EXECUTABLE, GIT_FIXTURE_PATH);
+    assert.equal(probe.command, 'npx.cmd');
+    assert.deepEqual(probe.args, ['-y', '@probelabs/probe@0.6.0-rc315', 'mcp']);
+    assert.equal(memory.env?.MEMORY_FILE_PATH, MEMORY_FILE_PATH);
+    assert.equal(github.url, 'https://api.githubcopilot.com/mcp/');
+    assert.match(github.headers?.Authorization ?? '', /^Bearer\s+/u);
+    assert.deepEqual(context7.args, []);
+    assert.deepEqual(hooksMcp.args, ['hooks-mcp==0.2.4', '--working-directory', WORKSPACE_ROOT]);
+    assert.equal(sqliteMcp.env?.SQLITE_DB_PATH, resolve(join(WORKSPACE_ROOT, 'tmp', 'agent-sidecar.sqlite')));
+    assert.equal(sqliteMcp.env?.SQLITE_READ_ONLY, 'true');
+    assert.equal(sqliteMcp.env?.SQLITE_TIMEOUT, '30');
+    assert.equal(tavily.env?.TAVILY_API_KEY, 'tvly-test-key');
   });
 
   it('skips Tavily when its API key is missing', () => {

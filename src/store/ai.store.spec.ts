@@ -23,7 +23,6 @@ const tauriServiceMock = vi.hoisted(() => ({
   aiQueryIndex: vi.fn(),
   aiProposePatch: vi.fn(),
   aiApplyPatch: vi.fn(),
-  aiListTools: vi.fn(),
 }));
 
 vi.mock('@/services/tauri', () => ({

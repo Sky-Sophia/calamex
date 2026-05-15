@@ -8,6 +8,13 @@ import { createDurableAgent, DurableStepIds } from '@mastra/core/agent/durable';
 import type { MastraBrowser } from '@mastra/core/browser';
 import type { MastraModelConfig } from '@mastra/core/llm';
 import { Mastra } from '@mastra/core/mastra';
+import {
+    BatchPartsProcessor,
+    PIIDetector,
+    UnicodeNormalizer,
+    type OutputProcessorOrWorkflow,
+    type InputProcessorOrWorkflow,
+} from '@mastra/core/processors';
 import { RequestContext } from '@mastra/core/request-context';
 import type {
     AgentChunkType,
@@ -20,8 +27,15 @@ import type {
     ToolResultPayload,
 } from '@mastra/core/stream';
 import { createTool } from '@mastra/core/tools';
-import type { AnyWorkspace } from '@mastra/core/workspace';
+import {
+    LocalFilesystem,
+    LocalSandbox,
+    WORKSPACE_TOOLS,
+    Workspace,
+    type AnyWorkspace,
+} from '@mastra/core/workspace';
 import { LibSQLStore } from '@mastra/libsql';
+import { Observability, SensitiveDataFilter } from '@mastra/observability';
 import { z } from 'zod';
 
 import {
@@ -53,13 +67,11 @@ import {
     type TAgentPlan,
     type TAgentPlanStep,
 } from '../schemas/plan.js';
-import { redactForStream } from '../streaming/stream-redaction.js';
 import {
     createAgentRuntimeEvent,
     type IAgentRuntimeEventContext,
     type TAgentRuntimeEventDraft,
 } from '../streaming/stream-types.js';
-import { createMastraFileTools } from '../tools/file-primitives.js';
 import {
     createMastraFileLogger,
     createMastraLoggerRef,
@@ -115,6 +127,16 @@ const RUNTIME_TOOL_PREVIEW_CHARS = 1200;
 const CURRENT_FILE_TOOL_CONTENT_MAX_CHARS = 2_000;
 const CURRENT_FILE_TOOL_MODEL_OUTPUT_MAX_CHARS = 2_600;
 const EXPLICIT_CONTEXT_MESSAGE_LIMIT = 12;
+const TOOL_PREVIEW_REDACTED_TEXT = '[工具参数已收敛显示]';
+const MASTRA_GUARDRAIL_MODEL = 'openrouter/openai/gpt-oss-safeguard-20b';
+const MASTRA_WORKSPACE_APPROVAL_TOOL_NAMES = new Set<string>([
+    WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE,
+    WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE,
+    WORKSPACE_TOOLS.FILESYSTEM.AST_EDIT,
+    WORKSPACE_TOOLS.FILESYSTEM.DELETE,
+    WORKSPACE_TOOLS.FILESYSTEM.MKDIR,
+    WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND,
+]);
 const DEFAULT_ROLLBACK_STEP: TRollbackStepPath = [
     DurableStepIds.AGENTIC_EXECUTION,
     DurableStepIds.LLM_EXECUTION,
@@ -241,6 +263,8 @@ interface IMastraAgentConfig {
     tools?: ToolsInput;
     workspace?: AnyWorkspace;
     browser?: MastraBrowser;
+    inputProcessors?: InputProcessorOrWorkflow[];
+    outputProcessors?: OutputProcessorOrWorkflow[];
 }
 
 type IMastraMcpBundle = IMcpGatewayBundle;
@@ -453,7 +477,7 @@ const createRuntimePreview = (
         ? normalized
         : `${characters.slice(0, limit).join('')}...`;
 
-    return redactForStream(clipped);
+    return clipped;
 };
 
 const pushUiEvent = (
@@ -813,6 +837,119 @@ const resolveWorkspaceDirectory = (workspaceRootPath?: string | null): string | 
     }
 };
 
+const isWorkspaceMutationTool = (toolName: string): boolean =>
+    MASTRA_WORKSPACE_APPROVAL_TOOL_NAMES.has(toolName);
+
+const createMastraAgentInputProcessors = (): InputProcessorOrWorkflow[] => [
+    new UnicodeNormalizer({
+        stripControlChars: true,
+        preserveEmojis: true,
+        collapseWhitespace: false,
+        trim: false,
+    }),
+];
+
+const createMastraAgentOutputProcessors = (): OutputProcessorOrWorkflow[] => [
+    new BatchPartsProcessor({
+        batchSize: 10,
+        maxWaitTime: 120,
+        emitOnNonText: true,
+    }),
+    new PIIDetector({
+        model: MASTRA_GUARDRAIL_MODEL,
+        strategy: 'redact',
+        redactionMethod: 'mask',
+        preserveFormat: true,
+        threshold: 0.6,
+        lastMessageOnly: true,
+    }),
+];
+
+const createMastraObservability = (): Observability => new Observability({
+    configs: {
+        default: {
+            serviceName: 'agent-sidecar',
+            spanOutputProcessors: [new SensitiveDataFilter()],
+        },
+    },
+});
+
+const createMastraWorkspace = async (
+    workspaceRootPath?: string,
+    profile: TMastraToolProfile = 'write',
+): Promise<AnyWorkspace | undefined> => {
+    const workspaceDirectory = resolveWorkspaceDirectory(workspaceRootPath);
+
+    if (!workspaceDirectory) {
+        return undefined;
+    }
+
+    const workspace = new Workspace({
+        filesystem: new LocalFilesystem({
+            basePath: workspaceDirectory,
+            contained: true,
+            readOnly: profile === 'readonly',
+        }),
+        sandbox: new LocalSandbox({
+            workingDirectory: workspaceDirectory,
+            env: {
+                PATH: process.env.PATH,
+            },
+        }),
+        tools: {
+            [WORKSPACE_TOOLS.FILESYSTEM.READ_FILE]: {
+                enabled: true,
+            },
+            [WORKSPACE_TOOLS.FILESYSTEM.LIST_FILES]: {
+                enabled: true,
+            },
+            [WORKSPACE_TOOLS.FILESYSTEM.FILE_STAT]: {
+                enabled: true,
+            },
+            [WORKSPACE_TOOLS.FILESYSTEM.GREP]: {
+                enabled: true,
+            },
+            [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: {
+                enabled: profile === 'write',
+                requireApproval: true,
+                requireReadBeforeWrite: true,
+            },
+            [WORKSPACE_TOOLS.FILESYSTEM.EDIT_FILE]: {
+                enabled: profile === 'write',
+                requireApproval: true,
+                requireReadBeforeWrite: true,
+            },
+            [WORKSPACE_TOOLS.FILESYSTEM.AST_EDIT]: {
+                enabled: profile === 'write',
+                requireApproval: true,
+                requireReadBeforeWrite: true,
+            },
+            [WORKSPACE_TOOLS.FILESYSTEM.DELETE]: {
+                enabled: profile === 'write',
+                requireApproval: true,
+            },
+            [WORKSPACE_TOOLS.FILESYSTEM.MKDIR]: {
+                enabled: profile === 'write',
+                requireApproval: true,
+            },
+            [WORKSPACE_TOOLS.SANDBOX.EXECUTE_COMMAND]: {
+                enabled: profile === 'write',
+                requireApproval: true,
+            },
+            [WORKSPACE_TOOLS.SANDBOX.GET_PROCESS_OUTPUT]: {
+                enabled: profile === 'write',
+            },
+            [WORKSPACE_TOOLS.SANDBOX.KILL_PROCESS]: {
+                enabled: profile === 'write',
+                requireApproval: true,
+            },
+        },
+    });
+
+    await workspace.init();
+    return workspace;
+};
+
 const destroyMastraWorkspace = async (workspace: AnyWorkspace | undefined): Promise<void> => {
     if (!workspace || workspace.status === 'destroyed') {
         return;
@@ -843,9 +980,9 @@ const createMastraToolLoadPlan = (
     void contextReferences;
 
     return {
-        workspaceEnabled: false,
+        workspaceEnabled: workspaceAvailable,
         browserEnabled: false,
-        strategy: workspaceAvailable ? 'gateway+file-primitives' : 'gateway',
+        strategy: workspaceAvailable ? 'gateway+workspace' : 'gateway',
     };
 };
 
@@ -868,6 +1005,8 @@ const defaultCreateAgent = (config: IMastraAgentConfig): IMastraAgentLike => {
         ...(config.tools ? { tools: config.tools } : {}),
         ...(config.workspace ? { workspace: config.workspace } : {}),
         ...(config.browser ? { browser: config.browser } : {}),
+        ...(config.inputProcessors ? { inputProcessors: config.inputProcessors } : {}),
+        ...(config.outputProcessors ? { outputProcessors: config.outputProcessors } : {}),
     });
     const bridge = agent as unknown as IMastraAgentLike;
     const approveToolCall = typeof bridge.approveToolCall === 'function'
@@ -910,6 +1049,8 @@ const defaultCreateExecutionHandle = async (
         ...(config.tools ? { tools: config.tools } : {}),
         ...(config.workspace ? { workspace: config.workspace } : {}),
         ...(config.browser ? { browser: config.browser } : {}),
+        ...(config.inputProcessors ? { inputProcessors: config.inputProcessors } : {}),
+        ...(config.outputProcessors ? { outputProcessors: config.outputProcessors } : {}),
     });
     const durableAgent = createDurableAgent({ agent: baseAgent });
     const mastra = new Mastra({
@@ -919,6 +1060,7 @@ const defaultCreateExecutionHandle = async (
         ...(config.tools ? { tools: config.tools as never } : {}),
         storage: storage as never,
         logger: fileLogger,
+        observability: createMastraObservability(),
     });
     const registeredAgent = mastra.getAgentById(baseAgent.id) as unknown as IMastraDurableAgentLike;
 
@@ -983,7 +1125,7 @@ const createUiContextTools = (
     return {
         read_current_file: createTool({
             id: 'read_current_file',
-            description: 'Read the current editor file preview only when the user asks about the current file. Takes no arguments; output is capped, use read_file_window with line ranges when more content is needed.',
+            description: 'Read the current editor file preview only when the user asks about the current file. Takes no arguments; output is capped, use mastra_workspace_read_file with line ranges when more content is needed.',
             inputSchema: z.object({}).passthrough(),
             execute: async () => {
                 const content = truncateModelOutputText(
@@ -1034,7 +1176,9 @@ const loadMastraMcpTools = async (
 }> => {
     const toolLoadPlan = createMastraToolLoadPlan(input, workspaceRootPath, contextReferences);
     const bundle = createMcpGatewayRunBundle();
-    const workspace = undefined;
+    const workspace = toolLoadPlan.workspaceEnabled
+        ? await createMastraWorkspace(workspaceRootPath, profile)
+        : undefined;
     const browser = toolLoadPlan.browserEnabled ? createMastraBrowser() : undefined;
     const mcpGatewayMetrics = mcpGatewayPool.createMetricBuffer();
     const mcpGatewayTools = mcpGatewayPool.createTools({
@@ -1043,13 +1187,11 @@ const loadMastraMcpTools = async (
         metricSink: mcpGatewayMetrics,
     });
     const uiContextTools = createUiContextTools(contextReferences);
-    const nativeFileTools = createMastraFileTools(workspaceRootPath, profile);
     const nativeTimeTools = createMastraTimeTools();
     const logTools = loggerRef ? createMastraLogTools(loggerRef) : {};
     const tools: ToolsInput = {
         ...mcpGatewayTools,
         ...uiContextTools,
-        ...nativeFileTools,
         ...nativeTimeTools,
         ...logTools,
     };
@@ -1064,7 +1206,7 @@ const loadMastraMcpTools = async (
             mcpServerCount: 0,
             mcpServerNames: [],
             uiContextToolCount: Object.keys(uiContextTools).length,
-            nativeToolCount: Object.keys(nativeTimeTools).length + Object.keys(nativeFileTools).length,
+            nativeToolCount: Object.keys(nativeTimeTools).length + (workspace ? 1 : 0),
             logToolCount: Object.keys(logTools).length,
             toolSchemaCharCount: countProviderToolSchemaChars(tools),
             toolLoadStrategy: toolLoadPlan.strategy,
@@ -1147,8 +1289,7 @@ const formatApprovalSummary = (payload: ToolCallPayload): string => {
         return `${payload.toolName} 请求执行，但当前没有可展示的参数。`;
     }
 
-    const serializedArgs = JSON.stringify(toJsonValue(payload.args));
-    return `${payload.toolName} 请求执行，参数：${serializedArgs}`;
+    return `${payload.toolName} 请求执行，参数内容已收敛显示，请确认是否继续。`;
 };
 
 const normalizeMastraError = (error: unknown): string => {
@@ -1976,7 +2117,7 @@ export class MastraRuntime {
                         type: 'agent.reasoning.delta',
                         visibility: 'user',
                         level: 'info',
-                        text: redactForStream(reasoningDelta),
+                        text: reasoningDelta,
                     }), options);
                 }
                 continue;
@@ -2019,7 +2160,9 @@ export class MastraRuntime {
                 if (createRuntimeEvent) {
                     const inputPreview = chunk.payload.args === undefined
                         ? ''
-                        : createRuntimePreview(chunk.payload.args);
+                        : (isWorkspaceMutationTool(chunk.payload.toolName)
+                            ? TOOL_PREVIEW_REDACTED_TEXT
+                            : createRuntimePreview(chunk.payload.args));
 
                     pushUiEvent(events, createRuntimeEvent({
                         type: 'agent.tool.started',
@@ -2054,7 +2197,9 @@ export class MastraRuntime {
                 const toolUseId = chunk.payload.toolCallId ?? pendingToolCallIds.shift();
 
                 if (createRuntimeEvent) {
-                    const resultPreview = createRuntimePreview(chunk.payload.result);
+                    const resultPreview = isWorkspaceMutationTool(chunk.payload.toolName)
+                        ? TOOL_PREVIEW_REDACTED_TEXT
+                        : createRuntimePreview(chunk.payload.result);
 
                     pushUiEvent(events, createRuntimeEvent({
                         type: 'agent.tool.completed',
@@ -2247,6 +2392,8 @@ export class MastraRuntime {
                     ...(hasTools ? { tools: mastraTools } : {}),
                     ...(workspace ? { workspace } : {}),
                     ...(browser ? { browser } : {}),
+                    inputProcessors: createMastraAgentInputProcessors(),
+                    outputProcessors: createMastraAgentOutputProcessors(),
                 });
                 const toolChoice: IMastraGenerateOptions['toolChoice'] = hasAgentTools ? 'auto' : 'none';
                 const streamOptions: IMastraGenerateOptions = {
@@ -2409,6 +2556,8 @@ export class MastraRuntime {
                     ...(hasTools ? { tools: mastraTools } : {}),
                     ...(workspace ? { workspace } : {}),
                     ...(browser ? { browser } : {}),
+                    inputProcessors: createMastraAgentInputProcessors(),
+                    outputProcessors: createMastraAgentOutputProcessors(),
                 });
                 const toolChoice: IMastraGenerateOptions['toolChoice'] = hasAgentTools ? 'auto' : 'none';
                 const generateOptions: IMastraGenerateOptions = {
@@ -2684,6 +2833,8 @@ export class MastraRuntime {
                     ...(hasTools ? { tools: mastraTools } : {}),
                     ...(workspace ? { workspace } : {}),
                     ...(browser ? { browser } : {}),
+                    inputProcessors: createMastraAgentInputProcessors(),
+                    outputProcessors: createMastraAgentOutputProcessors(),
                 });
                 const prompt = [
                     '请验证这个已执行计划的结果，返回 json object。',
@@ -2868,6 +3019,8 @@ export class MastraRuntime {
                     ...(hasTools ? { tools: mastraTools } : {}),
                     ...(workspace ? { workspace } : {}),
                     ...(browser ? { browser } : {}),
+                    inputProcessors: createMastraAgentInputProcessors(),
+                    outputProcessors: createMastraAgentOutputProcessors(),
                 });
                 const prompt = [
                     '请基于验证结果生成最小 delta plan，返回 json object。',
@@ -3094,6 +3247,8 @@ export class MastraRuntime {
                     ...(hasTools ? { tools: mastraTools } : {}),
                     ...(workspace ? { workspace } : {}),
                     ...(browser ? { browser } : {}),
+                    inputProcessors: createMastraAgentInputProcessors(),
+                    outputProcessors: createMastraAgentOutputProcessors(),
                 });
                 const stream = await executionHandle.agent.stream(
                     buildMastraMessages(memoryInput),
@@ -3470,6 +3625,8 @@ export class MastraRuntime {
                     ...(hasTools ? { tools: mastraTools } : {}),
                     ...(workspace ? { workspace } : {}),
                     ...(browser ? { browser } : {}),
+                    inputProcessors: createMastraAgentInputProcessors(),
+                    outputProcessors: createMastraAgentOutputProcessors(),
                 });
                 const run = await executionHandle.workflow.createRun({ runId: input.runId });
                 const requestContextRecord = requestContextToRecord(snapshot.requestContext);

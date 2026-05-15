@@ -1422,7 +1422,7 @@ describe('useAiAssistant streaming integration', () => {
           type: 'tool_result',
           toolName: 'search_project_files',
           output: {
-            path: 'src-tauri/src/ai_agent/tool_loop.rs',
+            path: 'agent-sidecar/src/engines/mastra-runtime.ts',
             summary: 'found tool schema validation path',
           },
         },

@@ -15,6 +15,13 @@ import { createConfiguredRuntime, type IAgentSidecarRuntime } from './engines/ru
 import type { TAgentSidecarResponse } from './schemas/events.js';
 import { agentSidecarResponseSchema } from './schemas/events.js';
 import { getMcpRuntimeStatus } from './tools/mcp.js';
+import {
+  aiWebFetchInputSchema,
+  aiWebFetchPayloadSchema,
+  aiWebSearchInputSchema,
+  aiWebSearchPayloadSchema,
+} from './web/types.js';
+import { fetchWeb, searchWeb, webTextRefs } from './web/service.js';
 
 const DEFAULT_PORT = 39871;
 const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
@@ -276,6 +283,21 @@ const handleRuntimeResponse = async (
   }
 };
 
+const handlePlainPost = async <TPayload>(
+  request: IncomingMessage,
+  response: ServerResponse,
+  handler: (body: unknown) => Promise<TPayload>,
+): Promise<void> => {
+  try {
+    const body = await readBody(request);
+    writeJson(response, 200, await handler(body));
+  } catch (error) {
+    writeJson(response, 400, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
 const writeNdjsonFrame = (response: ServerResponse, payload: unknown): void => {
   if (response.writableEnded || response.destroyed) {
     return;
@@ -375,6 +397,14 @@ export const createAgentSidecarServer = (
         protocolVersion: SIDECAR_PROTOCOL_VERSION,
         implementationVersion: SIDECAR_IMPLEMENTATION_VERSION,
         mcp: getMcpRuntimeStatus(),
+      });
+      return;
+    }
+
+    if (request.method === 'GET' && parsedUrl.pathname.startsWith('/web/text-ref/')) {
+      const refId = decodeURIComponent(parsedUrl.pathname.slice('/web/text-ref/'.length));
+      writeJson(response, 200, {
+        text: webTextRefs.load(refId),
       });
       return;
     }
@@ -508,6 +538,24 @@ export const createAgentSidecarServer = (
         const payload = approvalResolutionSchema.parse(body);
         return runtime.resolveApproval(payload, options);
       });
+      return;
+    }
+
+    if (request.method === 'POST' && url === '/web/search') {
+      void handlePlainPost(request, response, async (body) =>
+        aiWebSearchPayloadSchema.parse(
+          await searchWeb(aiWebSearchInputSchema.parse(body)),
+        )
+      );
+      return;
+    }
+
+    if (request.method === 'POST' && url === '/web/fetch') {
+      void handlePlainPost(request, response, async (body) =>
+        aiWebFetchPayloadSchema.parse(
+          await fetchWeb(aiWebFetchInputSchema.parse(body)),
+        )
+      );
       return;
     }
 

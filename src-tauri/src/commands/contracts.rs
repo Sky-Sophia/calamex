@@ -1113,25 +1113,9 @@ pub struct AiEditRevertTaskPayload {
     pub(crate) restored_snapshots: Vec<AiSnapshotPayload>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiToolDefinitionPayload {
-    pub(crate) name: String,
-    pub(crate) read_only: bool,
-    pub(crate) destructive: bool,
-    pub(crate) requires_confirmation: bool,
-}
-
 // ============================================================================
 // AI – agent plan / index
 // ============================================================================
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiAgentPlanRequest {
-    pub(crate) goal: String,
-    pub(crate) context: Vec<AiContextReferencePayload>,
-}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1146,101 +1130,6 @@ pub struct AiAgentClassifyTaskPayload {
     pub(crate) classification: String,
     pub(crate) should_enter_plan_mode: bool,
     pub(crate) reason: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiTaskPlanReferencePayload {
-    pub(crate) r#type: String,
-    pub(crate) label: String,
-    pub(crate) uri: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiRunCommandToolInputPayload {
-    pub(crate) command: String,
-    pub(crate) reason: String,
-    pub(crate) cwd_policy: String,
-    pub(crate) timeout_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiStageFileToolInputPayload {
-    pub(crate) paths: Vec<String>,
-    pub(crate) reason: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiCreateCommitToolInputPayload {
-    pub(crate) message: String,
-    pub(crate) reason: String,
-    pub(crate) allow_empty: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiAgentToolInputsPayload {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) web_search: Option<AiWebSearchInput>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) web_fetch: Option<AiWebFetchInput>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) propose_patch: Option<AiProposePatchRequest>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) auto_apply_patch: Option<AiApplyPatchRequest>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) run_command: Option<AiRunCommandToolInputPayload>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) stage_file: Option<AiStageFileToolInputPayload>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) create_commit: Option<AiCreateCommitToolInputPayload>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiTaskPlanStepPayload {
-    pub(crate) id: String,
-    pub(crate) index: usize,
-    pub(crate) title: String,
-    pub(crate) goal: String,
-    pub(crate) kind: String,
-    /// 已知值："pending" | "running" | "done" | "failed" | "skipped" | "cancelled"。
-    pub(crate) status: String,
-    pub(crate) expected_output: String,
-    pub(crate) tools: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) tool_inputs: Option<AiAgentToolInputsPayload>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) references: Option<Vec<AiTaskPlanReferencePayload>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) is_active: Option<bool>,
-    pub(crate) requires_user_approval: bool,
-    pub(crate) risk_level: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) rollback_strategy: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiAgentPlanPayload {
-    pub(crate) steps: Vec<AiTaskPlanStepPayload>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiAgentApprovePlanRequest {
-    pub(crate) goal: String,
-    pub(crate) steps: Vec<AiTaskPlanStepPayload>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiAgentApprovePlanPayload {
-    pub(crate) approved_at: String,
-    pub(crate) step_count: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1264,7 +1153,7 @@ pub struct AiWebSearchInput {
     pub(crate) recency: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiWebSearchResultPayload {
     pub(crate) title: String,
@@ -1274,7 +1163,7 @@ pub struct AiWebSearchResultPayload {
     pub(crate) fetched_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiWebSearchPayload {
     pub(crate) results: Vec<AiWebSearchResultPayload>,
@@ -1288,7 +1177,7 @@ pub struct AiWebFetchInput {
     pub(crate) max_bytes: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiWebFetchResultPayload {
     pub(crate) url: String,
@@ -1300,7 +1189,7 @@ pub struct AiWebFetchResultPayload {
     pub(crate) truncated: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiWebFetchPayload {
     pub(crate) source: AiWebFetchResultPayload,

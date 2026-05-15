@@ -16,18 +16,19 @@ use super::contracts::{
     AiProviderProfileDetailPayload, AiProviderProfilePayload, AiProviderProfileSwitchRequest,
     AiProviderTestPayload, AiQueryIndexPayload, AiQueryIndexRequest, AiSaveConfigRequest,
     AiSaveCredentialsRequest, AiSuggestionPoolPayload, AiSuggestionPoolRequest,
-    AiToolDefinitionPayload, AiWebFetchInput, AiWebFetchPayload, AiWebSearchInput,
+    AiWebFetchInput, AiWebFetchPayload, AiWebSearchInput,
     AiWebSearchPayload,
 };
 use crate::ai::audit::{self, AiAuditEventKind};
 use crate::ai::gateway;
 use crate::ai::network_permission;
+use crate::ai::redaction::redact_text;
 use crate::ai::stream_manager;
 use crate::ai_edit;
 use crate::ai_edit::AiEditState;
 use crate::ai_index;
 use crate::ai_patch;
-use crate::ai_tools::registry;
+use crate::ai_tools::web_safety::validate_public_http_url;
 use std::path::PathBuf;
 use tauri::AppHandle;
 use tauri::Manager;
@@ -291,12 +292,51 @@ pub fn ai_agent_set_network_permission(
 
 #[tauri::command]
 pub async fn ai_web_search(payload: AiWebSearchInput) -> Result<AiWebSearchPayload, String> {
-    crate::ai_tools::web_search::search(payload).await
+    audit::emit(AiAuditEventKind::AgentWebSearchRequested);
+    if redact_text(payload.query.trim()).blocked {
+        audit::emit(AiAuditEventKind::AgentWebSearchDenied);
+        return Err(crate::ai::errors::error(
+            "AI_AGENT_WEB_SOURCE_BLOCKED",
+            "搜索 query 命中敏感信息规则，已阻止联网。",
+        ));
+    }
+
+    if let Err(error) = network_permission::ensure_network_allowed() {
+        audit::emit(AiAuditEventKind::AgentWebSearchDenied);
+        return Err(error);
+    }
+
+    let result = crate::agent_sidecar::web_search(payload).await;
+    if result.is_ok() {
+        audit::emit(AiAuditEventKind::AgentWebSearchApproved);
+    } else {
+        audit::emit(AiAuditEventKind::AgentWebSearchDenied);
+    }
+
+    result
 }
 
 #[tauri::command]
 pub async fn ai_web_fetch(payload: AiWebFetchInput) -> Result<AiWebFetchPayload, String> {
-    crate::ai_tools::web_fetch::fetch(payload).await
+    audit::emit(AiAuditEventKind::AgentWebFetchRequested);
+    if let Err(error) = validate_public_http_url(&payload.url) {
+        audit::emit(AiAuditEventKind::AgentWebFetchFailed);
+        return Err(error);
+    }
+
+    if let Err(error) = network_permission::ensure_network_allowed() {
+        audit::emit(AiAuditEventKind::AgentWebFetchFailed);
+        return Err(error);
+    }
+
+    let result = crate::agent_sidecar::web_fetch(payload).await;
+    if result.is_ok() {
+        audit::emit(AiAuditEventKind::AgentWebFetchCompleted);
+    } else {
+        audit::emit(AiAuditEventKind::AgentWebFetchFailed);
+    }
+
+    result
 }
 
 #[tauri::command]
@@ -426,17 +466,4 @@ pub fn ai_edit_revert_task(
     let snapshot_root = resolve_ai_edit_storage_root(&app)?;
     recover_ai_edit_storage(&snapshot_root)?;
     ai_edit::revert_task(payload, &snapshot_root, state.inner())
-}
-
-#[tauri::command]
-pub fn ai_list_tools() -> Result<Vec<AiToolDefinitionPayload>, String> {
-    Ok(registry::list_tools()
-        .into_iter()
-        .map(|tool| AiToolDefinitionPayload {
-            name: tool.name.to_string(),
-            read_only: tool.read_only,
-            destructive: tool.destructive,
-            requires_confirmation: tool.requires_confirmation,
-        })
-        .collect())
 }

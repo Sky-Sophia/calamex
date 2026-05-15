@@ -267,7 +267,6 @@ const createAssistantMock = (
         canPreviewPatch: computed(() => false),
         sendButtonLabel: computed(() => '发送'),
         loadConfig: vi.fn().mockResolvedValue(undefined),
-        loadTools: vi.fn().mockResolvedValue(undefined),
         loadProviderProfiles: vi.fn().mockResolvedValue(undefined),
         saveConfig: vi.fn().mockResolvedValue(undefined),
         saveCredentials: vi.fn().mockResolvedValue(undefined),

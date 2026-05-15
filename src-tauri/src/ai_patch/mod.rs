@@ -1,9 +1,3 @@
-pub mod apply;
-pub mod parser;
-pub mod preview;
-pub mod rollback;
-pub mod validator;
-
 use crate::ai::audit::{self, AiAuditEventKind};
 use crate::ai::errors;
 use crate::ai_edit::auto_apply::{self, AiAutoApplyOperationKind, AiAutoApplyOperationPlan};

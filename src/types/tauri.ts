@@ -52,7 +52,6 @@ import type {
   IAiSaveCredentialsRequest,
   IAiSuggestionPoolPayload,
   IAiSuggestionPoolRequest,
-  IAiToolDefinitionPayload,
   IAiWebFetchInput,
   IAiWebFetchPayload,
   IAiWebSearchInput,
@@ -429,5 +428,4 @@ export interface ITauriService {
   aiEditRevertFile(payload: IAiEditRevertFileRequest): Promise<IAiEditRevertFilePayload>;
   aiEditRevertHunk(payload: IAiEditRevertHunkRequest): Promise<IAiEditRevertHunkPayload>;
   aiEditRevertTask(payload: IAiEditRevertTaskRequest): Promise<IAiEditRevertTaskPayload>;
-  aiListTools(): Promise<IAiToolDefinitionPayload[]>;
 }

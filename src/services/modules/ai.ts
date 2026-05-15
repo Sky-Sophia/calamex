@@ -53,7 +53,6 @@ import type {
   IAiSaveCredentialsRequest,
   IAiSuggestionPoolPayload,
   IAiSuggestionPoolRequest,
-  IAiToolDefinitionPayload,
   IAiWebFetchInput,
   IAiWebFetchPayload,
   IAiWebSearchInput,
@@ -354,8 +353,5 @@ export const aiService = {
   },
   getEditDiff(payload: IAiEditGetDiffRequest): Promise<IAiEditGetDiffPayload> {
     return tauriService.aiEditGetDiff(payload);
-  },
-  listTools(): Promise<IAiToolDefinitionPayload[]> {
-    return tauriService.aiListTools();
   },
 };

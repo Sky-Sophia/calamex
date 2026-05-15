@@ -1035,7 +1035,6 @@ onMounted(() => {
   assistant.loadConfig().then(() => {
     settingsDraft.value = cloneAiConfigPayload(assistant.config.value);
   }).catch(() => undefined);
-  assistant.loadTools().catch(() => undefined);
   assistant.loadProviderProfiles().catch(() => undefined);
 });
 

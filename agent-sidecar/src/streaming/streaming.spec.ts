@@ -5,7 +5,6 @@ import type { TAgentRuntimeOutputEvent } from '../engines/runtime-contracts.js';
 import type { TJsonValue } from '../schemas/events.js';
 import { AgentStreamEventBus } from './stream-event-bus.js';
 import { normalizeAgentRuntimeStreamEvent } from './stream-normalizer.js';
-import { redactForStream } from './stream-redaction.js';
 import { runAgentStream } from './stream-runner.js';
 
 describe('streaming event layer', () => {
@@ -44,7 +43,7 @@ describe('streaming event layer', () => {
     }]);
   });
 
-  it('normalizes tool lifecycle events with redacted previews', () => {
+  it('normalizes tool lifecycle events with clipped previews', () => {
     const started = normalizeAgentRuntimeStreamEvent({
       type: 'beforeToolCallEvent',
       toolUse: {
@@ -78,7 +77,7 @@ describe('streaming event layer', () => {
     if (!startedEvent || startedEvent.type !== 'agent.tool.started') {
       throw new Error('tool started event was not normalized');
     }
-    assert.match(startedEvent.inputPreview ?? '', /\[REDACTED_SECRET\]/u);
+    assert.match(startedEvent.inputPreview ?? '', /secret-value/u);
     assert.equal(completedEvent?.type, 'agent.tool.completed');
     if (!completedEvent || completedEvent.type !== 'agent.tool.completed') {
       throw new Error('tool completed event was not normalized');
@@ -98,23 +97,6 @@ describe('streaming event layer', () => {
       throw new Error('model started event was not normalized');
     }
     assert.equal('projectedInputTokens' in (drafts[0] ?? {}), false);
-  });
-
-  it('redacts common secret shapes before events leave the sidecar', () => {
-    const input = [
-      'Authorization: Bearer abc.def',
-      'password="plain-text"',
-      'Cookie: sid=123',
-      '-----BEGIN PRIVATE KEY-----',
-      'abc',
-      '-----END PRIVATE KEY-----',
-    ].join('\n');
-    const redacted = redactForStream(input);
-
-    assert.doesNotMatch(redacted, /abc\.def/u);
-    assert.doesNotMatch(redacted, /plain-text/u);
-    assert.doesNotMatch(redacted, /sid=123/u);
-    assert.match(redacted, /\[REDACTED_PRIVATE_KEY\]/u);
   });
 
   it('assigns stable runtime metadata in emission order', () => {

@@ -1,14 +1,7 @@
 //! 工作区文件索引（轻量级）模块。
 //!
 //! 当前实现是"按需 grep"：每次 [`query_index`] 都会重新走一遍工作区，并对
-//! 文本文件做大小写不敏感的子串匹配。真正的持久化索引（向量、倒排、符号表
-//! 等）由本模块下的子模块各自实现：
-//!
-//! - [`embedding_index`]：向量索引
-//! - [`file_index`]：文件级索引
-//! - [`incremental`]：增量更新
-//! - [`symbol_index`]：符号索引
-//! - [`text_index`]：纯文本索引
+//! 文本文件做大小写不敏感的子串匹配。
 //!
 //! ## 安全过滤
 //!
@@ -25,12 +18,6 @@ use crate::commands::contracts::{
 use ignore::WalkBuilder;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-pub mod embedding_index;
-pub mod file_index;
-pub mod incremental;
-pub mod symbol_index;
-pub mod text_index;
 
 // ============================================================================
 // 调参常量

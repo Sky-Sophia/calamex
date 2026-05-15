@@ -1,4 +1,3 @@
-import { redactForStream } from './stream-redaction.js';
 import type { TAgentRuntimeEventDraft } from './stream-types.js';
 
 // -----------------------------------------------------------------------
@@ -124,14 +123,14 @@ const safeStringify = (value: unknown): string => {
 };
 
 /**
- * 关键顺序：safeStringify → **redact → clip**。
- * 先 redact 保证原始上下文（换行、引号、缩进）让 redactor 的正则能匹配；
- * 再 clip 截断长度。颠倒顺序可能导致 PII 泄露。
+ * 关键顺序：safeStringify → clip。
+ * 旧实现曾在这里做手写正则脱敏；当前主链已迁移到 Mastra 官方 processors /
+ * observability，旧 streaming 兼容层只保留裁剪预览，避免继续维护另一套自定义脱敏规则。
  */
 const previewUnknown = (
   value: unknown,
   options: IClipPreviewOptions = {},
-): string => clipPreview(redactForStream(safeStringify(value)), options);
+): string => clipPreview(safeStringify(value), options);
 
 // -----------------------------------------------------------------------
 // reasoning / text delta 提取
@@ -257,7 +256,7 @@ export const normalizeAgentRuntimeStreamEvent = (
           type: 'agent.reasoning.delta',
           visibility: 'user',
           level: 'info',
-          text: redactForStream(reasoningText),
+          text: reasoningText,
         }];
       }
       const text = extractRuntimeModelTextDelta(event);
@@ -266,7 +265,7 @@ export const normalizeAgentRuntimeStreamEvent = (
           type: 'agent.text.delta',
           visibility: 'debug',
           level: 'debug',
-          text: redactForStream(text),
+          text,
         }]
         : [];
     }

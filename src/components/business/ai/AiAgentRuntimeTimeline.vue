@@ -159,6 +159,7 @@ const TOOL_ICON_MATCHERS: readonly IToolIconMatcher[] = [
   {
     icon: 'folder',
     patterns: [
+      /mastra_workspace_list_files/u,
       /directory_tree/u,
       /list_dir/u,
       /list_directory/u,
@@ -194,6 +195,7 @@ const TOOL_ICON_MATCHERS: readonly IToolIconMatcher[] = [
       /get_file_info/u,
       /open_nodes/u,
       /mastra_list_logs/u,
+      /mastra_workspace_read_file/u,
     ],
   },
   {
@@ -205,6 +207,8 @@ const TOOL_ICON_MATCHERS: readonly IToolIconMatcher[] = [
       /propose_patch/u,
       /propose_file_patch/u,
       /auto_apply_patch/u,
+      /mastra_workspace_edit_file/u,
+      /mastra_workspace_write_file/u,
       /mastra_workspace_ast_edit/u,
       /vscode_renamesymbol/u,
     ],
@@ -623,11 +627,13 @@ const CURRENT_FILE_TOOL_NAMES = new Set([
 ]);
 
 const DIRECTORY_READ_TOOL_NAMES = new Set([
+  'mastra_workspace_list_files',
   'list_dir',
 ]);
 
 const TEXT_SEARCH_TOOL_NAMES = new Set([
   'grep_in_files',
+  'mastra_workspace_grep',
 ]);
 
 const SYMBOL_SEARCH_TOOL_NAMES = new Set([
@@ -641,10 +647,17 @@ const WRITE_FILE_TOOL_NAMES = new Set([
   'mastra_workspace_write_file',
   'mastra_workspace_edit_file',
   'mastra_workspace_ast_edit',
+  'mastra_workspace_mkdir',
+  'mastra_workspace_delete',
 ]);
 
 const APPLY_FILE_EDIT_TOOL_NAMES = new Set([
   'apply_file_edits',
+]);
+
+const COMMAND_TOOL_NAMES = new Set([
+  'run_command',
+  'mastra_workspace_execute_command',
 ]);
 
 const WEB_SEARCH_SOURCE_URL_KEYS = [
@@ -1239,6 +1252,28 @@ const describeToolAction = (
         ? `正在编辑 ${resourceLabel}`
         : `编辑完成 ${resourceLabel}`,
       resourceLabel,
+      suppressMeta: true,
+    };
+  }
+
+  if (COMMAND_TOOL_NAMES.has(toolName)) {
+    const command = fallbackResourceLabel
+      ?? (event.type === 'agent.tool.started' ? resolvePreviewQuery(event.inputPreview) : null)
+      ?? '命令';
+
+    if (event.type === 'agent.tool.completed' && !event.ok) {
+      return {
+        action: `执行失败 ${command}`,
+        resourceLabel: command,
+        suppressMeta: true,
+      };
+    }
+
+    return {
+      action: event.type === 'agent.tool.started'
+        ? `正在执行 ${command}`
+        : `执行完成 ${command}`,
+      resourceLabel: command,
       suppressMeta: true,
     };
   }

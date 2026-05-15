@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import type { MastraModelConfig } from '@mastra/core/llm';
 import { ModelRouterLanguageModel } from '@mastra/core/llm';
 import { createTool } from '@mastra/core/tools';
+import type { WorkspaceToolsConfig } from '@mastra/core/workspace';
 import { z } from 'zod';
 
 import { buildSystemPrompt, extractVisibleAgentResultText } from './engines/agent-runtime-helpers.js';
@@ -55,7 +56,6 @@ import {
   agentSidecarRollbackRestoreRequestSchema,
   createAgentSidecarServer,
 } from './server.js';
-import { createMastraFileTools } from './tools/file-primitives.js';
 import { ensureMastraLogFile } from './tools/log.js';
 import { createMastraTimeTools } from './tools/time.js';
 
@@ -173,7 +173,7 @@ const unsupportedPlanReplan = async (
 const createFakeRuntime = (
   overrides: Partial<IAgentSidecarRuntime> = {},
 ): IAgentSidecarRuntime => ({
-  name: 'fake-runtime',
+  name: 'mastra',
   version: 'test-version',
   chat: unsupportedRuntimeResponse,
   plan: unsupportedRuntimeResponse,
@@ -211,6 +211,7 @@ const createPlanRecordForTest = (
   });
 
   return {
+    schemaVersion: 1,
     planId: 'plan-1',
     threadId: 'thread-1',
     version: 1,
@@ -295,6 +296,7 @@ const createFakePlanStore = (
       step,
     };
   },
+  close: async () => undefined,
 });
 
 const createPlanWorkflowStoreForTest = (): {
@@ -755,27 +757,18 @@ const toRecordForTest = (value: unknown): Record<string, unknown> | null => (
     : null
 );
 
-type TExecutableToolForTest = {
-  execute?: (inputData: unknown, context: unknown) => Promise<unknown> | unknown;
-  toModelOutput?: (output: unknown) => unknown;
-};
+const toWorkspaceToolsConfigRecord = (value: WorkspaceToolsConfig | undefined): Record<string, unknown> =>
+  value
+    ? value as unknown as Record<string, unknown>
+    : {};
 
-const getExecutableToolForTest = (
-  tools: Record<string, unknown>,
-  name: string,
-): TExecutableToolForTest => {
-  const tool = tools[name];
-
-  assert.equal(Boolean(tool && typeof tool === 'object'), true);
-  return tool as TExecutableToolForTest;
-};
-
-const readJsonModelOutputValueForTest = (value: unknown): Record<string, unknown> | null => {
-  const output = toRecordForTest(value);
-
-  assert.equal(output?.type, 'json');
-  return toRecordForTest(output?.value);
-};
+const readWorkspaceToolsConfigForTest = (
+  workspace: { getToolsConfig?: () => WorkspaceToolsConfig | undefined } | null,
+): Record<string, unknown> => (
+  workspace && typeof workspace.getToolsConfig === 'function'
+    ? toWorkspaceToolsConfigRecord(workspace.getToolsConfig())
+    : {}
+);
 
 const isRuntimeEventType = (event: unknown, type: string): boolean => {
   const record = toRecordForTest(event);
@@ -1511,409 +1504,6 @@ describe('Model output budget helpers', () => {
   });
 });
 
-describe('Mastra file primitive tools', () => {
-  it('reads a bounded 1-indexed file window with navigation metadata', async () => {
-    const workspaceRoot = createTemporaryWorkspace();
-
-    try {
-      mkdirSync(join(workspaceRoot, 'src'), { recursive: true });
-      writeFileSync(
-        join(workspaceRoot, 'src', 'app.ts'),
-        ['alpha', 'beta', 'gamma', 'delta'].join('\n'),
-        'utf8',
-      );
-
-      const tools = createMastraFileTools(workspaceRoot);
-      const readTool = getExecutableToolForTest(tools, 'read_file_window');
-
-      if (!readTool.execute) {
-        throw new Error('read_file_window execute 不可用。');
-      }
-
-      const result = toRecordForTest(await readTool.execute({
-        path: 'src/app.ts',
-        startLine: 2,
-        limit: 2,
-      }, {}));
-
-      assert.notEqual(result, null);
-      assert.equal(result?.path, 'src/app.ts');
-      assert.equal(result?.totalLines, 4);
-      assert.equal(result?.totalLinesKnown, true);
-      assert.equal(result?.encoding, 'utf8');
-      assert.equal(result?.startLine, 2);
-      assert.equal(result?.endLine, 3);
-      assert.equal(result?.truncated, true);
-      assert.equal(result?.nextStartLine, 4);
-      assert.match(String(result?.content), /2 \| beta/u);
-      assert.match(String(result?.content), /3 \| gamma/u);
-    } finally {
-      rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('preserves read_file_window content payload when projecting output to the model', async () => {
-    const workspaceRoot = createTemporaryWorkspace();
-    const sentinel = 'READ_WINDOW_PAYLOAD_MUST_SURVIVE_MODEL_OUTPUT';
-
-    try {
-      mkdirSync(join(workspaceRoot, 'src'), { recursive: true });
-      writeFileSync(
-        join(workspaceRoot, 'src', 'payload.ts'),
-        Array.from({ length: 120 }, (_, index) => {
-          if (index === 119) {
-            return `export const marker = '${sentinel}';`;
-          }
-
-          return `export const value${index} = '${String(index).padStart(3, '0')}-abcdefghijklmnopqrstuvwxyz';`;
-        }).join('\n'),
-        'utf8',
-      );
-
-      const tools = createMastraFileTools(workspaceRoot);
-      const readTool = getExecutableToolForTest(tools, 'read_file_window');
-
-      if (!readTool.execute || !readTool.toModelOutput) {
-        throw new Error('read_file_window execute/toModelOutput 不可用。');
-      }
-
-      const rawResult = await readTool.execute({
-        path: 'src/payload.ts',
-        startLine: 1,
-        limit: 120,
-      }, {});
-      const rawRecord = toRecordForTest(rawResult);
-      const modelRecord = readJsonModelOutputValueForTest(readTool.toModelOutput(rawResult));
-      const modelSerialized = JSON.stringify(modelRecord) ?? '';
-
-      assert.equal(rawRecord?.contentTruncated, false);
-      assert.match(String(modelRecord?.content), new RegExp(sentinel, 'u'));
-      assert.equal(modelRecord?.encoding, 'utf8');
-      assert.equal(modelRecord?.startLine, 1);
-      assert.equal(modelRecord?.endLine, 120);
-      assert.doesNotMatch(modelSerialized, /modelOutputTruncated|内容已截断/u);
-    } finally {
-      rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('does not full-scan large files just to report totalLines', async () => {
-    const workspaceRoot = createTemporaryWorkspace();
-
-    try {
-      mkdirSync(join(workspaceRoot, 'src'), { recursive: true });
-      writeFileSync(
-        join(workspaceRoot, 'src', 'large.log'),
-        Array.from({ length: 40_000 }, (_, index) => `line-${index} abcdefghijklmnopqrstuvwxyz`).join('\n'),
-        'utf8',
-      );
-
-      const tools = createMastraFileTools(workspaceRoot);
-      const readTool = getExecutableToolForTest(tools, 'read_file_window');
-
-      if (!readTool.execute) {
-        throw new Error('read_file_window execute 不可用。');
-      }
-
-      const result = toRecordForTest(await readTool.execute({
-        path: 'src/large.log',
-        startLine: 1,
-        limit: 2,
-      }, {}));
-
-      assert.equal(result?.totalLines, -1);
-      assert.equal(result?.totalLinesKnown, false);
-      assert.equal(result?.startLine, 1);
-      assert.equal(result?.endLine, 2);
-      assert.equal(result?.truncated, true);
-      assert.equal(result?.nextStartLine, 3);
-    } finally {
-      rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('returns structured errors instead of throwing for invalid file reads', async () => {
-    const workspaceRoot = createTemporaryWorkspace();
-
-    try {
-      const tools = createMastraFileTools(workspaceRoot);
-      const readTool = getExecutableToolForTest(tools, 'read_file_window');
-
-      if (!readTool.execute) {
-        throw new Error('read_file_window execute 不可用。');
-      }
-
-      const result = toRecordForTest(await readTool.execute({
-        path: '../outside.ts',
-      }, {}));
-      const error = toRecordForTest(result?.error);
-
-      assert.equal(error?.code, 'INVALID_PATH');
-    } finally {
-      rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects file reads through symlinks that resolve outside the workspace', async (context) => {
-    const workspaceRoot = createTemporaryWorkspace();
-    const outsideRoot = mkdtempSync(join(tmpdir(), 'mastra-outside-'));
-
-    try {
-      writeFileSync(join(outsideRoot, 'secret.txt'), 'secret', 'utf8');
-
-      try {
-        symlinkSync(
-          outsideRoot,
-          join(workspaceRoot, 'escape'),
-          process.platform === 'win32' ? 'junction' : 'dir',
-        );
-      } catch (error) {
-        const code = error && typeof error === 'object' && 'code' in error
-          && typeof error.code === 'string'
-          ? error.code
-          : null;
-
-        if (code === 'EPERM' || code === 'EACCES') {
-          context.skip('当前系统不允许创建 symlink/junction，跳过真实路径逃逸测试。');
-          return;
-        }
-
-        throw error;
-      }
-
-      const tools = createMastraFileTools(workspaceRoot);
-      const readTool = getExecutableToolForTest(tools, 'read_file_window');
-
-      if (!readTool.execute) {
-        throw new Error('read_file_window execute 不可用。');
-      }
-
-      const result = toRecordForTest(await readTool.execute({
-        path: 'escape/secret.txt',
-      }, {}));
-      const error = toRecordForTest(result?.error);
-
-      assert.equal(error?.code, 'INVALID_PATH');
-    } finally {
-      rmSync(workspaceRoot, { recursive: true, force: true });
-      rmSync(outsideRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('searches files with a global match cap and reports truncation', async () => {
-    const workspaceRoot = createTemporaryWorkspace();
-
-    try {
-      writeFileSync(join(workspaceRoot, 'a.txt'), ['foo one', 'bar', 'foo two'].join('\n'), 'utf8');
-      writeFileSync(join(workspaceRoot, 'b.txt'), ['foo three', 'foo four'].join('\n'), 'utf8');
-
-      const tools = createMastraFileTools(workspaceRoot);
-      const grepTool = getExecutableToolForTest(tools, 'grep_in_files');
-
-      if (!grepTool.execute) {
-        throw new Error('grep_in_files execute 不可用。');
-      }
-
-      const result = toRecordForTest(await grepTool.execute({
-        pattern: 'foo',
-        paths: { include: ['**/*.txt'] },
-        contextLines: 0,
-        maxMatches: 2,
-        maxFilesScanned: 20,
-        caseSensitive: true,
-      }, {}));
-
-      assert.notEqual(result, null);
-      assert.equal(result?.matchesReturned, 2);
-      assert.equal(result?.totalMatches, -1);
-      assert.equal(result?.truncated, true);
-      assert.equal(toRecordForTest(result?.scanStats)?.filesScanned, 2);
-      assert.equal(Array.isArray(result?.files), true);
-    } finally {
-      rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('lists directories with bounded entries and default heavy-folder exclusions', async () => {
-    const workspaceRoot = createTemporaryWorkspace();
-
-    try {
-      mkdirSync(join(workspaceRoot, 'src'), { recursive: true });
-      mkdirSync(join(workspaceRoot, 'node_modules', 'pkg'), { recursive: true });
-      writeFileSync(join(workspaceRoot, 'src', 'app.ts'), ['one', 'two'].join('\n'), 'utf8');
-      writeFileSync(join(workspaceRoot, 'node_modules', 'pkg', 'ignored.js'), 'ignored', 'utf8');
-
-      const tools = createMastraFileTools(workspaceRoot);
-      const listTool = getExecutableToolForTest(tools, 'list_dir');
-
-      if (!listTool.execute) {
-        throw new Error('list_dir execute 不可用。');
-      }
-
-      const result = toRecordForTest(await listTool.execute({
-        path: '.',
-        recursive: true,
-        maxEntries: 20,
-      }, {}));
-      const entries = Array.isArray(result?.entries) ? result.entries : [];
-      const paths = entries
-        .map((entry) => toRecordForTest(entry)?.path)
-        .filter((path): path is string => typeof path === 'string');
-      const appEntry = entries
-        .map((entry) => toRecordForTest(entry))
-        .find((entry) => entry?.path === 'src/app.ts');
-
-      assert.equal(paths.includes('src/app.ts'), true);
-      assert.equal(paths.some((path) => path.includes('node_modules')), false);
-      assert.equal(appEntry?.lines, 2);
-    } finally {
-      rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('searches TypeScript and Vue script symbols without returning file payloads', async () => {
-    const workspaceRoot = createTemporaryWorkspace();
-
-    try {
-      mkdirSync(join(workspaceRoot, 'src'), { recursive: true });
-      writeFileSync(
-        join(workspaceRoot, 'src', 'app.ts'),
-        [
-          'export function loadUser() { return null; }',
-          'export class UserStore {',
-          '  refresh() { return loadUser(); }',
-          '}',
-        ].join('\n'),
-        'utf8',
-      );
-      writeFileSync(
-        join(workspaceRoot, 'src', 'Panel.vue'),
-        [
-          '<template><div /></template>',
-          '<script setup lang="ts">',
-          'const panelTitle = "设置";',
-          'function renderPanel() { return panelTitle; }',
-          '</script>',
-        ].join('\n'),
-        'utf8',
-      );
-
-      const tools = createMastraFileTools(workspaceRoot);
-      const symbolTool = getExecutableToolForTest(tools, 'search_symbols');
-
-      if (!symbolTool.execute) {
-        throw new Error('search_symbols execute 不可用。');
-      }
-
-      const result = toRecordForTest(await symbolTool.execute({
-        query: 'panel',
-        paths: { include: ['src/**/*'] },
-        maxSymbols: 20,
-        maxFilesScanned: 20,
-      }, {}));
-      const symbols = Array.isArray(result?.symbols) ? result.symbols.map(toRecordForTest) : [];
-
-      assert.equal(result?.query, 'panel');
-      assert.equal(symbols.some((symbol) => symbol?.name === 'panelTitle'), true);
-      assert.equal(symbols.some((symbol) => symbol?.name === 'renderPanel'), true);
-      assert.equal(symbols.some((symbol) => String(symbol?.preview).includes('<template>')), false);
-    } finally {
-      rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('searches Bash symbols through ast-grep dynamic language registration', async () => {
-    const workspaceRoot = createTemporaryWorkspace();
-
-    try {
-      mkdirSync(join(workspaceRoot, 'scripts'), { recursive: true });
-      writeFileSync(
-        join(workspaceRoot, 'scripts', 'deploy'),
-        [
-          '#!/usr/bin/env bash',
-          'APP_ENV=production',
-          'deploy_app() {',
-          '  echo "$APP_ENV"',
-          '}',
-        ].join('\n'),
-        'utf8',
-      );
-
-      const tools = createMastraFileTools(workspaceRoot);
-      const symbolTool = getExecutableToolForTest(tools, 'search_symbols');
-
-      if (!symbolTool.execute) {
-        throw new Error('search_symbols execute 不可用。');
-      }
-
-      const result = toRecordForTest(await symbolTool.execute({
-        query: 'deploy',
-        paths: { include: ['scripts/*'] },
-        maxSymbols: 20,
-        maxFilesScanned: 20,
-      }, {}));
-      const symbols = Array.isArray(result?.symbols) ? result.symbols.map(toRecordForTest) : [];
-
-      assert.equal(symbols.some((symbol) =>
-        symbol?.name === 'deploy_app' &&
-        symbol?.kind === 'function' &&
-        symbol?.path === 'scripts/deploy'
-      ), true);
-    } finally {
-      rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('exposes AED direct edit intent only in write profile', async () => {
-    const workspaceRoot = createTemporaryWorkspace();
-
-    try {
-      mkdirSync(join(workspaceRoot, 'src'), { recursive: true });
-      const filePath = join(workspaceRoot, 'src', 'app.ts');
-      writeFileSync(filePath, 'export const label = "old";', 'utf8');
-
-      const readonlyTools = createMastraFileTools(workspaceRoot, 'readonly');
-      const writeTools = createMastraFileTools(workspaceRoot, 'write');
-
-      assert.equal(Object.keys(readonlyTools).includes('apply_file_edits'), false);
-      assert.equal(Object.keys(writeTools).includes('apply_file_edits'), true);
-
-      const patchTool = getExecutableToolForTest(writeTools, 'apply_file_edits');
-
-      if (!patchTool.execute || !patchTool.toModelOutput) {
-        throw new Error('apply_file_edits execute/toModelOutput 不可用。');
-      }
-
-      const rawResult = await patchTool.execute({
-        path: 'src/app.ts',
-        edits: [{
-          oldString: '"old"',
-          newString: '"new"',
-        }],
-        summary: '更新 label',
-      }, {});
-      const result = toRecordForTest(rawResult);
-      const patch = toRecordForTest(result?.patch);
-      const files = Array.isArray(patch?.files) ? patch.files.map(toRecordForTest) : [];
-      const modelOutput = JSON.stringify(patchTool.toModelOutput(rawResult)) ?? '';
-
-      assert.equal(result?.path, 'src/app.ts');
-      assert.equal(result?.editCount, 1);
-      assert.equal(result?.replacements, 1);
-      assert.equal(result?.applied, true);
-      assert.match(String(result?.beforeHash), /^fnv64:/u);
-      assert.match(String(result?.afterHash), /^fnv64:/u);
-      assert.equal(files[0]?.path, filePath);
-      assert.equal(readFileSync(filePath, 'utf8'), 'export const label = "new";');
-      assert.equal(modelOutput.includes('export const label'), false);
-      assert.equal(modelOutput.includes('patchReady'), true);
-      assert.equal(modelOutput.includes('"applied":true'), true);
-    } finally {
-      rmSync(workspaceRoot, { recursive: true, force: true });
-    }
-  });
-});
-
 describe('Mastra file logger helpers', () => {
   it('creates the log file before FileTransport opens it', () => {
     const tempRoot = mkdtempSync(join(tmpdir(), 'mastra-log-'));
@@ -1989,7 +1579,7 @@ describe('Agent runtime configuration', () => {
 
   it('only accepts mastra and rejects unsupported runtime names', () => {
     assert.equal(resolveConfiguredRuntimeName({ AGENT_RUNTIME: 'mastra' }), 'mastra');
-    assert.equal(createConfiguredRuntime({ AGENT_RUNTIME: 'mastra' }).name, 'mastra');
+    assert.equal(createConfiguredRuntime({ env: { AGENT_RUNTIME: 'mastra' } }).name, 'mastra');
 
     assert.throws(
       () => resolveConfiguredRuntimeName({ AGENT_RUNTIME: 'legacy-runtime' }),
@@ -2441,9 +2031,11 @@ describe('Mastra runtime chat', () => {
     assert.equal(disconnectCalls, 0);
   });
 
-  it('uses native file primitives instead of Mastra Workspace tools for workspace-backed chats', async () => {
+  it('injects Mastra Workspace for workspace-backed chats', async () => {
     const workspaceRoot = createTemporaryWorkspace();
-    let capturedWorkspace: unknown;
+    let capturedWorkspace: {
+      getToolsConfig?: () => WorkspaceToolsConfig | undefined;
+    } | null = null;
     let capturedToolNames: string[] = [];
     let capturedStreamOptions: unknown;
     let disconnectCalls = 0;
@@ -2459,7 +2051,7 @@ describe('Mastra runtime chat', () => {
         },
       }),
       createAgent: (config) => {
-        capturedWorkspace = config.workspace;
+        capturedWorkspace = config.workspace ?? null;
         capturedToolNames = Object.keys(config.tools ?? {});
 
         return {
@@ -2496,15 +2088,33 @@ describe('Mastra runtime chat', () => {
       });
 
       assert.equal(response.result, 'Workspace tools ready.');
-      assert.equal(capturedWorkspace, undefined);
-      assert.equal(capturedToolNames.includes('read_file_window'), true);
-      assert.equal(capturedToolNames.includes('grep_in_files'), true);
-      assert.equal(capturedToolNames.includes('list_dir'), true);
-      assert.equal(capturedToolNames.includes('search_symbols'), true);
-      assert.equal(capturedToolNames.includes('apply_file_edits'), true);
-      assert.equal(capturedToolNames.includes('read_file'), false);
-      assert.equal(capturedToolNames.includes('grep'), false);
-      assert.equal(capturedToolNames.includes('lsp_inspect'), false);
+      assert.notEqual(capturedWorkspace, null);
+      const workspaceToolsConfig = readWorkspaceToolsConfigForTest(capturedWorkspace);
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(workspaceToolsConfig, 'mastra_workspace_read_file'),
+        true,
+      );
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(workspaceToolsConfig, 'mastra_workspace_list_files'),
+        true,
+      );
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(workspaceToolsConfig, 'mastra_workspace_grep'),
+        true,
+      );
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(workspaceToolsConfig, 'mastra_workspace_edit_file'),
+        true,
+      );
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(workspaceToolsConfig, 'mastra_workspace_execute_command'),
+        true,
+      );
+      assert.equal(capturedToolNames.includes('read_file_window'), false);
+      assert.equal(capturedToolNames.includes('grep_in_files'), false);
+      assert.equal(capturedToolNames.includes('list_dir'), false);
+      assert.equal(capturedToolNames.includes('search_symbols'), false);
+      assert.equal(capturedToolNames.includes('apply_file_edits'), false);
       const workspaceMemoryScope = createMastraMemoryScope({ workspaceRootPath: workspaceRoot }, response.sessionId);
       assert.deepEqual(capturedStreamOptions, {
         maxSteps: 10,
@@ -2520,8 +2130,11 @@ describe('Mastra runtime chat', () => {
     }
   });
 
-  it('uses native file primitives without exposing raw MCP tool schemas', async () => {
+  it('uses Mastra Workspace without exposing duplicated raw MCP file tools', async () => {
     const workspaceRoot = createTemporaryWorkspace();
+    let capturedWorkspace: {
+      getToolsConfig?: () => WorkspaceToolsConfig | undefined;
+    } | null = null;
     let capturedToolNames: string[] = [];
     const runtime = new MastraRuntime({
       readModelConfig: () => new ModelRouterLanguageModel({ providerId: 'deepseek', modelId: 'deepseek-chat', apiKey: 'test-key', url: 'https://example.com/v1' }),
@@ -2575,6 +2188,7 @@ describe('Mastra runtime chat', () => {
         disconnectAll: async () => undefined,
       }),
       createAgent: (config) => {
+        capturedWorkspace = config.workspace ?? null;
         capturedToolNames = Object.keys(config.tools ?? {});
 
         return {
@@ -2591,7 +2205,7 @@ describe('Mastra runtime chat', () => {
             })(),
           }),
           generate: async () => {
-            throw new Error('generate should not be used in workspace filesystem MCP filter test');
+            throw new Error('generate should not be used in workspace MCP duplicate filter test');
           },
         };
       },
@@ -2606,15 +2220,28 @@ describe('Mastra runtime chat', () => {
         context: [],
       });
 
+      const workspaceToolsConfig = readWorkspaceToolsConfigForTest(capturedWorkspace);
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(workspaceToolsConfig, 'mastra_workspace_read_file'),
+        true,
+      );
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(workspaceToolsConfig, 'mastra_workspace_list_files'),
+        true,
+      );
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(workspaceToolsConfig, 'mastra_workspace_grep'),
+        true,
+      );
       assert.equal(capturedToolNames.includes('read_text_file'), false);
       assert.equal(capturedToolNames.includes('probe_grep'), false);
       assert.equal(capturedToolNames.includes('probe_search_code'), false);
       assert.equal(capturedToolNames.includes('probe_extract_code'), false);
       assert.equal(capturedToolNames.includes('tavily_mcp_tavily_search'), false);
-      assert.equal(capturedToolNames.includes('read_file_window'), true);
-      assert.equal(capturedToolNames.includes('grep_in_files'), true);
-      assert.equal(capturedToolNames.includes('list_dir'), true);
-      assert.equal(capturedToolNames.includes('search_symbols'), true);
+      assert.equal(capturedToolNames.includes('read_file_window'), false);
+      assert.equal(capturedToolNames.includes('grep_in_files'), false);
+      assert.equal(capturedToolNames.includes('list_dir'), false);
+      assert.equal(capturedToolNames.includes('search_symbols'), false);
       assert.equal(capturedToolNames.includes('apply_file_edits'), false);
       assert.equal(capturedToolNames.includes('mcp_list_tools'), true);
       assert.equal(capturedToolNames.includes('mcp_call_tool'), true);
@@ -3743,7 +3370,7 @@ describe('Mastra runtime approval resolution', () => {
     const resumed = await runtime.resolveApproval({
       sessionId: initial.sessionId,
       requestId: approvalRequestId,
-      decision: 'approved',
+      decision: 'approve',
     });
 
     assert.deepEqual(capturedApprovalOptions, {
@@ -3806,7 +3433,7 @@ describe('Mastra runtime approval resolution', () => {
     const response = await runtime.resolveApproval({
       sessionId: 'approval-session',
       requestId: 'approval-1',
-      decision: 'approved',
+      decision: 'approve',
     }, {
       onEvent: (event) => {
         streamedEvents.push(event);
@@ -3819,7 +3446,7 @@ describe('Mastra runtime approval resolution', () => {
         toolName: 'approval',
         output: {
           requestId: 'approval-1',
-          decision: 'approved',
+          decision: 'approve',
         },
       },
       {

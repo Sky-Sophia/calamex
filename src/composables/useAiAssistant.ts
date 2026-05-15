@@ -54,7 +54,6 @@ import type {
   IAiProviderConnectionRequest,
   IAiProviderProfileDetailPayload,
   IAiProviderProfilePayload,
-  IAiToolDefinitionPayload,
   TAiModelRole,
   TAiToolConfirmationDecision,
 } from '@/types/ai';
@@ -1321,7 +1320,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     },
   });
   const agentSteps = shallowRef<IAgentExecutionStep[]>([]);
-  const toolDefinitions = shallowRef<IAiToolDefinitionPayload[]>([]);
   const providerProfiles = shallowRef<IAiProviderProfilePayload[]>([]);
   const attachedFiles = shallowRef<IAiAttachedFile[]>([]);
   const restoringCheckpointId = ref<string | null>(null);
@@ -2823,10 +2821,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     config.value = await aiService.getConfig();
   };
 
-  const loadTools = async (): Promise<void> => {
-    toolDefinitions.value = await aiService.listTools();
-  };
-
   const loadProviderProfiles = async (): Promise<void> => {
     providerProfiles.value = await aiService.listProviderProfiles();
   };
@@ -3847,14 +3841,12 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     revertingChangedFilesSummaryId,
     activeMode,
     agentSteps,
-    toolDefinitions,
     providerProfiles,
     attachedFiles,
     providerLabel,
     sendButtonLabel,
     canPreviewPatch,
     loadConfig,
-    loadTools,
     loadProviderProfiles,
     getProviderProfileDetail,
     saveConfig,
