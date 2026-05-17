@@ -1,3 +1,6 @@
+import { defineStore } from 'pinia';
+import { computed, ref, watch } from 'vue';
+
 import { tauriSessionStorage } from '@/store/plugins/tauriSessionStorage';
 import type { IAiDiffEditorPreview } from '@/types/ai-patch';
 import type {
@@ -19,8 +22,10 @@ import type { IGitDiffPreviewPayload } from '@/types/git';
 import type { TSessionSnapshot, TSessionWorkbenchState } from '@/types/session';
 import { formatFileSystemTextForDisplay, normalizeFileSystemPath } from '@/utils/path';
 import { DEFAULT_EXECUTOR, DEFAULT_SCRIPT } from '@/utils/templates';
-import { defineStore } from 'pinia';
-import { computed, ref, watch } from 'vue';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 const MAX_TERMINAL_OUTPUT_LENGTH = 120_000;
 const MAX_TERMINAL_OUTPUT_CHUNK_LENGTH = 4_096;
@@ -32,15 +37,27 @@ const MAX_RECENT_FILES = 50;
 const MAX_VIEW_STATE_ENTRIES = 30;
 const MAX_EXPLORER_EXPANDED_PATHS = 120;
 
+/**
+ * 只有 text / image 文档会进 sessionSnapshot.openTabs 持久化。
+ * 用 satisfies 把这个白名单与 TSessionSnapshot 的 union 绑死:
+ * 将来 openTabs.kind 加新成员时,此处会编译期报错提示同步。
+ */
+const PERSISTABLE_TAB_KINDS = ['text', 'image'] as const satisfies ReadonlyArray<
+  NonNullable<TSessionSnapshot['openTabs'][number]['kind']>
+>;
+type TPersistableTabKind = (typeof PERSISTABLE_TAB_KINDS)[number];
+
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
+
 const countCharacters = (content: string): number => Array.from(content).length;
 
-/**
- * 把可能在 UTF-16 代理对中间截断的字符串按 code point 边界修正。
- */
+/** 把可能在 UTF-16 代理对中间截断的字符串按 code point 边界修正。 */
 const clampToCodeUnitBoundary = (value: string, maxLength: number): string => {
   if (value.length <= maxLength) return value;
   let sliced = value.slice(value.length - maxLength);
-  // 若第一个 code unit 是低位代理项，则跳过一个字符，避免单独的半个代理对
+  // 若第一个 code unit 是低位代理项,则跳过一个字符,避免单独的半个代理对
   const firstCode = sliced.charCodeAt(0);
   if (firstCode >= 0xdc00 && firstCode <= 0xdfff) {
     sliced = sliced.slice(1);
@@ -51,18 +68,44 @@ const clampToCodeUnitBoundary = (value: string, maxLength: number): string => {
 const trimLeadingCodeUnitBoundary = (value: string, startIndex: number): string => {
   if (startIndex <= 0) return value;
   if (startIndex >= value.length) return '';
-
   let sliced = value.slice(startIndex);
   if (!sliced) {
     return '';
   }
-
   const firstCode = sliced.charCodeAt(0);
   if (firstCode >= 0xdc00 && firstCode <= 0xdfff) {
     sliced = sliced.slice(1);
   }
-
   return sliced;
+};
+
+const isPersistableTabKind = (
+  kind: IEditorDocument['kind'],
+): kind is TPersistableTabKind =>
+  (PERSISTABLE_TAB_KINDS as readonly string[]).includes(kind);
+
+const hasPath = (
+  item: IEditorDocument,
+): item is IEditorDocument & { path: string } =>
+  item.path !== null && item.path.length > 0;
+
+/**
+ * 把 path 推到 recent 列表头部 (去重 + 截断到 max)。
+ * pushRecentFile / pushRecentWorkspace 共用此实现。
+ *
+ * 返回 null 表示 path 不合法 (规范化后为空),调用方应不更新列表。
+ */
+const pushRecentEntry = (
+  list: readonly string[],
+  path: string,
+  max: number,
+): string[] | null => {
+  const normalized = normalizeFileSystemPath(path);
+  if (!normalized) return null;
+  return [
+    normalized,
+    ...list.filter((item) => normalizeFileSystemPath(item) !== normalized),
+  ].slice(0, max);
 };
 
 const EMPTY_DOCUMENT: Readonly<IEditorDocument> = Object.freeze({
@@ -86,10 +129,17 @@ const createEmptyScriptAnalysis = (): IAnalyzeScriptPayload => ({
   diagnostics: [],
 });
 
+// ---------------------------------------------------------------------------
+// ID generation
+// ---------------------------------------------------------------------------
+
 let idSequence = 0;
+
 const createUniqueId = (prefix: string): string => {
   const cryptoRef =
-    typeof globalThis !== 'undefined' ? (globalThis as { crypto?: Crypto }).crypto : undefined;
+    typeof globalThis !== 'undefined'
+      ? (globalThis as { crypto?: Crypto }).crypto
+      : undefined;
   if (cryptoRef && typeof cryptoRef.randomUUID === 'function') {
     return `${prefix}-${cryptoRef.randomUUID()}`;
   }
@@ -102,6 +152,10 @@ const createUniqueId = (prefix: string): string => {
 const createDocumentId = (): string => createUniqueId('document');
 const createLogId = (): string => createUniqueId('log');
 const createRunHistoryId = (): string => createUniqueId('run-history');
+
+// ---------------------------------------------------------------------------
+// Document helpers
+// ---------------------------------------------------------------------------
 
 const createEmptySessionSnapshot = (): TSessionSnapshot => ({
   schemaVersion: 1,
@@ -121,10 +175,12 @@ const createEmptySessionSnapshot = (): TSessionSnapshot => ({
 });
 
 const syncDocumentState = (document: IEditorDocument): IEditorDocument => {
-  document.lineCount = document.content.length === 0 ? 1 : document.content.split('\n').length;
+  document.lineCount =
+    document.content.length === 0 ? 1 : document.content.split('\n').length;
   document.charCount = countCharacters(document.content);
   document.isDirty =
-    document.content !== document.savedContent || document.encoding !== document.savedEncoding;
+    document.content !== document.savedContent ||
+    document.encoding !== document.savedEncoding;
   return document;
 };
 
@@ -135,7 +191,7 @@ const resolveUntitledName = (documents: IEditorDocument[]): string => {
   if (!occupiedNames.has('untitled.sh')) {
     return 'untitled.sh';
   }
-  // 从 1 开始，避免 untitled-1.sh 被显式创建后出现的歧义
+  // 从 1 开始,避免 untitled-1.sh 被显式创建后出现的歧义
   let index = 1;
   while (occupiedNames.has(`untitled-${index}.sh`)) {
     index += 1;
@@ -167,7 +223,12 @@ const createDocument = (
   });
 };
 
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+
 export const useEditorStore = defineStore('editor', () => {
+  // ── State ────────────────────────────────────────────────────────────────
   const documents = ref<IEditorDocument[]>([]);
   const sessionSnapshot = ref<TSessionSnapshot>(createEmptySessionSnapshot());
   const environment = ref<IExecutionEnvironment>({
@@ -193,51 +254,57 @@ export const useEditorStore = defineStore('editor', () => {
   const pendingTerminalRunId = ref<string | null>(null);
   const documentAnalysis = ref<Record<string, IAnalyzeScriptPayload>>({});
 
+  // ── Internal helpers ─────────────────────────────────────────────────────
+
   const touchSessionSnapshot = (): void => {
     sessionSnapshot.value.savedAt = new Date().toISOString();
   };
 
   const pushRecentFile = (path: string): void => {
-    const normalized = normalizeFileSystemPath(path);
-    if (!normalized) return;
-    const next = [
-      normalized,
-      ...sessionSnapshot.value.recentFiles.filter(
-        (item) => normalizeFileSystemPath(item) !== normalized,
-      ),
-    ].slice(0, MAX_RECENT_FILES);
-    sessionSnapshot.value.recentFiles = next;
+    const next = pushRecentEntry(
+      sessionSnapshot.value.recentFiles,
+      path,
+      MAX_RECENT_FILES,
+    );
+    if (next) {
+      sessionSnapshot.value.recentFiles = next;
+    }
   };
 
   const pushRecentWorkspace = (path: string): void => {
-    const normalized = normalizeFileSystemPath(path);
-    if (!normalized) return;
-    const next = [
-      normalized,
-      ...sessionSnapshot.value.recentWorkspaces.filter(
-        (item) => normalizeFileSystemPath(item) !== normalized,
-      ),
-    ].slice(0, MAX_RECENT_WORKSPACES);
-    sessionSnapshot.value.recentWorkspaces = next;
+    const next = pushRecentEntry(
+      sessionSnapshot.value.recentWorkspaces,
+      path,
+      MAX_RECENT_WORKSPACES,
+    );
+    if (next) {
+      sessionSnapshot.value.recentWorkspaces = next;
+    }
   };
 
   const syncSessionOpenTabs = (): void => {
+    // 用 type predicate 同时 narrow 掉 path === null 与 ai-diff/git-diff 文档,
+    // 让下面 .map 拿到的 item 是 { path: string; kind: TPersistableTabKind }。
     sessionSnapshot.value.openTabs = documents.value
-      .filter((item) => Boolean(item.path))
-      .filter((item) => item.kind !== 'ai-diff' && item.kind !== 'git-diff')
+      .filter(hasPath)
+      .filter(
+        (item): item is IEditorDocument & { path: string; kind: TPersistableTabKind } =>
+          isPersistableTabKind(item.kind),
+      )
       .slice(0, MAX_OPEN_TABS)
       .map((item, index) => ({
-        path: item.path as string,
+        path: item.path,
         pinned: false,
         order: index,
         kind: item.kind,
       }));
 
     if (
-      sessionSnapshot.value.activeTabPath
-      && !sessionSnapshot.value.openTabs.some(
+      sessionSnapshot.value.activeTabPath &&
+      !sessionSnapshot.value.openTabs.some(
         (tab) =>
-          normalizeFileSystemPath(tab.path) === normalizeFileSystemPath(sessionSnapshot.value.activeTabPath),
+          normalizeFileSystemPath(tab.path) ===
+          normalizeFileSystemPath(sessionSnapshot.value.activeTabPath!),
       )
     ) {
       sessionSnapshot.value.activeTabPath = sessionSnapshot.value.openTabs[0]?.path ?? null;
@@ -245,8 +312,8 @@ export const useEditorStore = defineStore('editor', () => {
   };
 
   /**
-   * 通过 watcher 维护 activeDocumentId，确保 activeDocumentId 始终指向
-   * documents 中实际存在的文档（或在空列表时为空字符串）。
+   * 通过 watcher 维护 activeDocumentId,确保 activeDocumentId 始终指向
+   * documents 中实际存在的文档 (或在空列表时为空字符串)。
    * 这样 computed getter 就不再需要写 ref。
    */
   watch(
@@ -283,18 +350,28 @@ export const useEditorStore = defineStore('editor', () => {
     );
   };
 
+  // ── Getters ──────────────────────────────────────────────────────────────
+
   const hasActiveDocument = computed(
     () => activeDocumentId.value !== '' && documents.value.length > 0,
   );
+
+  /**
+   * 注: 此名遮蔽了浏览器全局 `document`。setup 函数体内任何用到 DOM 的代码
+   * 都会取到这个 computed 而不是 window.document。如果以后此 store 要接触
+   * DOM,建议把 computed 改名为 activeDocument (会影响外部 API,谨慎)。
+   */
   const document = computed<IEditorDocument>(
     () =>
-      documents.value.find((item) => item.id === activeDocumentId.value) ?? EMPTY_DOCUMENT,
+      documents.value.find((item) => item.id === activeDocumentId.value) ??
+      EMPTY_DOCUMENT,
   );
   const documentTitle = computed(() =>
     document.value.isDirty ? `${document.value.name} · 未保存` : document.value.name,
   );
   const dirtyDocuments = computed(() => documents.value.filter((item) => item.isDirty));
   const hasDirtyDocuments = computed(() => dirtyDocuments.value.length > 0);
+
   const activeScriptAnalysis = computed<IAnalyzeScriptPayload>(
     () => documentAnalysis.value[document.value.id] ?? createEmptyScriptAnalysis(),
   );
@@ -307,23 +384,29 @@ export const useEditorStore = defineStore('editor', () => {
   );
   const activeDiagnosticInfos = computed(
     () =>
-      activeDiagnostics.value.filter((item) => item.level === 'info' || item.level === 'style')
-        .length,
+      activeDiagnostics.value.filter(
+        (item) => item.level === 'info' || item.level === 'style',
+      ).length,
   );
+
   const canOpenMoreTabs = computed(() => documents.value.length < MAX_OPEN_TABS);
   const hasRunArtifacts = computed(
     () =>
-      activeRunSummary.value !== null
-      || lastRunResult.value !== null
-      || runLogs.value.length > 0
-      || runHistory.value.length > 0
-      || terminalOutputLength.value > 0,
+      activeRunSummary.value !== null ||
+      lastRunResult.value !== null ||
+      runLogs.value.length > 0 ||
+      runHistory.value.length > 0 ||
+      terminalOutputLength.value > 0,
   );
 
-  const saveEditorViewState = (path: string, viewState: Record<string, unknown>): void => {
+  // ── Actions: view state & workbench ──────────────────────────────────────
+
+  const saveEditorViewState = (
+    path: string,
+    viewState: Record<string, unknown>,
+  ): void => {
     const normalized = normalizeFileSystemPath(path);
     if (!normalized) return;
-
     const nextEntries = [
       {
         path: normalized,
@@ -334,7 +417,6 @@ export const useEditorStore = defineStore('editor', () => {
         (item) => normalizeFileSystemPath(item.path) !== normalized,
       ),
     ].slice(0, MAX_VIEW_STATE_ENTRIES);
-
     sessionSnapshot.value.viewStates = nextEntries;
     touchSessionSnapshot();
   };
@@ -353,28 +435,32 @@ export const useEditorStore = defineStore('editor', () => {
       ?.map((path) => normalizeFileSystemPath(path))
       .filter(Boolean)
       .slice(0, MAX_EXPLORER_EXPANDED_PATHS);
-
     sessionSnapshot.value.workbench = {
       ...sessionSnapshot.value.workbench,
       ...patch,
       ...(explorerExpandedPaths ? { explorerExpandedPaths } : {}),
       ...(patch.explorerSelectedPath !== undefined
         ? {
-            explorerSelectedPath: patch.explorerSelectedPath
-              ? normalizeFileSystemPath(patch.explorerSelectedPath)
-              : null,
-          }
+          explorerSelectedPath: patch.explorerSelectedPath
+            ? normalizeFileSystemPath(patch.explorerSelectedPath)
+            : null,
+        }
         : {}),
     };
     touchSessionSnapshot();
   };
+
+  // ── Actions: terminal output ─────────────────────────────────────────────
 
   const getTerminalOutputSnapshot = (): string => terminalOutputChunks.value.join('');
 
   const setTerminalOutputChunks = (chunks: string[]): void => {
     const sanitizedChunks = chunks.filter((chunk) => chunk.length > 0);
     terminalOutputChunks.value = sanitizedChunks;
-    terminalOutputLength.value = sanitizedChunks.reduce((total, chunk) => total + chunk.length, 0);
+    terminalOutputLength.value = sanitizedChunks.reduce(
+      (total, chunk) => total + chunk.length,
+      0,
+    );
     terminalOutputVersion.value += 1;
   };
 
@@ -382,10 +468,8 @@ export const useEditorStore = defineStore('editor', () => {
     if (!value) {
       return;
     }
-
     const nextChunks = terminalOutputChunks.value;
     const lastChunkIndex = nextChunks.length - 1;
-
     if (
       lastChunkIndex >= 0 &&
       nextChunks[lastChunkIndex].length + value.length <= MAX_TERMINAL_OUTPUT_CHUNK_LENGTH
@@ -397,21 +481,17 @@ export const useEditorStore = defineStore('editor', () => {
 
     let nextLength = terminalOutputLength.value + value.length;
     let overflow = nextLength - MAX_TERMINAL_OUTPUT_LENGTH;
-
     while (overflow > 0 && nextChunks.length > 0) {
       const firstChunk = nextChunks[0];
-
       if (firstChunk.length <= overflow) {
         overflow -= firstChunk.length;
         nextLength -= firstChunk.length;
         nextChunks.shift();
         continue;
       }
-
       const trimmedChunk = trimLeadingCodeUnitBoundary(firstChunk, overflow);
       nextLength -= firstChunk.length - trimmedChunk.length;
       overflow = 0;
-
       if (trimmedChunk.length > 0) {
         nextChunks[0] = trimmedChunk;
       } else {
@@ -423,6 +503,18 @@ export const useEditorStore = defineStore('editor', () => {
     terminalOutputLength.value = nextLength;
     terminalOutputVersion.value += 1;
   };
+
+  const setTerminalOutput = (value: string): void => {
+    const clampedValue = clampToCodeUnitBoundary(value, MAX_TERMINAL_OUTPUT_LENGTH);
+    setTerminalOutputChunks(clampedValue ? [clampedValue] : []);
+  };
+
+  /** 历史 API 别名;与 appendTerminalOutputChunk 完全同义。新代码可任选其一。 */
+  const appendTerminalOutput = (value: string): void => {
+    appendTerminalOutputChunk(value);
+  };
+
+  // ── Actions: document open / close ───────────────────────────────────────
 
   const setActiveDocument = (documentId: string): void => {
     const targetDocument = documents.value.find((item) => item.id === documentId);
@@ -437,7 +529,9 @@ export const useEditorStore = defineStore('editor', () => {
     activeSelectionSummary.value = null;
   };
 
-  const createDocumentTab = (overrides: Partial<IEditorDocument> = {}): IEditorDocument => {
+  const createDocumentTab = (
+    overrides: Partial<IEditorDocument> = {},
+  ): IEditorDocument => {
     const nextDocument = createDocument(documents.value, overrides);
     documents.value.push(nextDocument);
     setActiveDocument(nextDocument.id);
@@ -545,7 +639,6 @@ export const useEditorStore = defineStore('editor', () => {
       touchSessionSnapshot();
       return { document: existingDocument, reusedExisting: true };
     }
-
     const nextDocument = createDocument(documents.value, {
       id: preview.id,
       path: `git-diff://${encodeURIComponent(preview.id)}`,
@@ -577,7 +670,7 @@ export const useEditorStore = defineStore('editor', () => {
     targetDocument.encoding = payload.encoding;
     targetDocument.savedContent = payload.content;
     targetDocument.savedEncoding = payload.encoding;
-    // 统一由本地计数器重新核算，避免与 payload.lineCount/charCount 不一致造成闪跳
+    // 统一由本地计数器重新核算,避免与 payload.lineCount/charCount 不一致造成闪跳
     syncDocumentState(targetDocument);
     if (payload.path) {
       pushRecentFile(payload.path);
@@ -600,7 +693,10 @@ export const useEditorStore = defineStore('editor', () => {
     updateDocumentContent(document.value.id, content);
   };
 
-  const updateDocumentEncoding = (documentId: string, encoding: TDocumentEncoding): void => {
+  const updateDocumentEncoding = (
+    documentId: string,
+    encoding: TDocumentEncoding,
+  ): void => {
     const targetDocument = getDocumentById(documentId);
     if (!targetDocument || targetDocument.kind !== 'text') {
       return;
@@ -622,7 +718,10 @@ export const useEditorStore = defineStore('editor', () => {
     documentAnalysis.value = nextValue;
   };
 
-  const setDocumentAnalysis = (documentId: string, payload: IAnalyzeScriptPayload): void => {
+  const setDocumentAnalysis = (
+    documentId: string,
+    payload: IAnalyzeScriptPayload,
+  ): void => {
     documentAnalysis.value = {
       ...documentAnalysis.value,
       [documentId]: payload,
@@ -648,7 +747,8 @@ export const useEditorStore = defineStore('editor', () => {
       return null;
     }
     if (wasActive) {
-      const fallbackDocument = documents.value[Math.max(0, targetIndex - 1)] ?? documents.value[0];
+      const fallbackDocument =
+        documents.value[Math.max(0, targetIndex - 1)] ?? documents.value[0];
       activeDocumentId.value = fallbackDocument.id;
       cursorLine.value = 1;
       cursorColumn.value = 1;
@@ -658,18 +758,14 @@ export const useEditorStore = defineStore('editor', () => {
     return getDocumentById();
   };
 
+  // ── Actions: environment / logs / run ────────────────────────────────────
+
+  // TODO: setEnvironment 与 clearWorkspaceSession 对 selectedExecutor 的处理不一致——
+  // 前者无条件重置为 DEFAULT_EXECUTOR,后者不动。如果是在同一会话内 environment 刷新
+  // (执行器集合未变),应该保留用户当前选择;切工作区才重置。两边语义需要对齐。
   const setEnvironment = (payload: IExecutionEnvironment): void => {
     environment.value = payload;
     selectedExecutor.value = DEFAULT_EXECUTOR;
-  };
-
-  const setTerminalOutput = (value: string): void => {
-    const clampedValue = clampToCodeUnitBoundary(value, MAX_TERMINAL_OUTPUT_LENGTH);
-    setTerminalOutputChunks(clampedValue ? [clampedValue] : []);
-  };
-
-  const appendTerminalOutput = (value: string): void => {
-    appendTerminalOutputChunk(value);
   };
 
   const setCursorPosition = (line: number, column: number): void => {
@@ -677,7 +773,9 @@ export const useEditorStore = defineStore('editor', () => {
     cursorColumn.value = Math.max(1, Math.floor(column));
   };
 
-  const setActiveSelectionSummary = (selection: IEditorSelectionSummary | null): void => {
+  const setActiveSelectionSummary = (
+    selection: IEditorSelectionSummary | null,
+  ): void => {
     activeSelectionSummary.value = selection;
   };
 
@@ -701,7 +799,6 @@ export const useEditorStore = defineStore('editor', () => {
       runId: options.runId,
       code: options.code,
     };
-
     runLogs.value.unshift(entry);
     if (runLogs.value.length > MAX_RUN_LOG_ENTRIES) {
       runLogs.value.length = MAX_RUN_LOG_ENTRIES;
@@ -714,7 +811,6 @@ export const useEditorStore = defineStore('editor', () => {
       id: createRunHistoryId(),
       ...entry,
     });
-
     if (runHistory.value.length > MAX_RUN_HISTORY_ENTRIES) {
       runHistory.value.length = MAX_RUN_HISTORY_ENTRIES;
     }
@@ -760,6 +856,8 @@ export const useEditorStore = defineStore('editor', () => {
     pendingTerminalRunId.value = value;
   };
 
+  // TODO: 与 setEnvironment 对齐——如果决定 setEnvironment 不再无条件重置 executor,
+  // 这里需要补一行 selectedExecutor.value = DEFAULT_EXECUTOR。
   const clearWorkspaceSession = (): void => {
     clearDocuments();
     workspaceRootPath.value = null;
@@ -774,9 +872,8 @@ export const useEditorStore = defineStore('editor', () => {
   };
 
   return {
+    // state
     documents,
-    document,
-    hasActiveDocument,
     activeDocumentId,
     environment,
     cursorLine,
@@ -794,7 +891,11 @@ export const useEditorStore = defineStore('editor', () => {
     protectedWorkspaceRootPaths,
     pendingTerminalRunId,
     documentAnalysis,
+    sessionSnapshot,
+    // getters
+    document,
     documentTitle,
+    hasActiveDocument,
     dirtyDocuments,
     hasDirtyDocuments,
     activeScriptAnalysis,
@@ -804,10 +905,12 @@ export const useEditorStore = defineStore('editor', () => {
     activeDiagnosticInfos,
     canOpenMoreTabs,
     hasRunArtifacts,
-    sessionSnapshot,
+    // queries
     getDocumentById,
     findDocumentByPath,
     getEditorViewState,
+    getTerminalOutputSnapshot,
+    // actions
     saveEditorViewState,
     setWorkbenchSessionState,
     setActiveDocument,
@@ -825,7 +928,6 @@ export const useEditorStore = defineStore('editor', () => {
     setEnvironment,
     setTerminalOutput,
     appendTerminalOutput,
-    getTerminalOutputSnapshot,
     setCursorPosition,
     setActiveSelectionSummary,
     appendLog,

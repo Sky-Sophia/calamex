@@ -1,14 +1,26 @@
+/**
+ * Agent sidecar IPC / event wire types.
+ *
+ * ⚠️ RFC 化警告:**整个文件是 wire 边界,目前为 handwritten,与 backend Rust
+ * + Vue 一侧的 zod schema 形成"三处 SoT 并存"格局,长期会漂移**。
+ *
+ * 待办:配合 `@/types/agent-sidecar.schema.ts` 完成后,将本文件改造为
+ * `z.infer<typeof xxxSchema>` 推断模式,与 `@/types/ai.ts` 同款,消除 SoT 漂移。
+ *
+ * 在重构完成之前,任何对本文件的修改都必须**同步**:
+ *   1. Rust backend(`src-tauri/.../agent_sidecar.rs` 或相关)
+ *   2. Zod schema(`@/types/agent-sidecar.schema.ts`)
+ *   3. 本文件(`@/types/agent-sidecar.ts`)
+ */
+
+import type { IAiLanguageModelUsage } from '@/types/ai';
 import type { IAiContextReference } from '@/types/ai-context';
-import type { LanguageModelUsage } from 'ai';
 
-export const AGENT_SIDECAR_MODES = [
-  'ask',
-  'plan',
-  'agent',
-  'patch',
-  'review',
-] as const;
+/* ============================================================================
+ * Mode / role / status enums
+ * ========================================================================== */
 
+export const AGENT_SIDECAR_MODES = ['ask', 'plan', 'agent', 'patch', 'review'] as const;
 export type TAgentSidecarMode = (typeof AGENT_SIDECAR_MODES)[number];
 
 export type TAgentSidecarMessageRole = 'user' | 'assistant' | 'system' | 'tool';
@@ -22,9 +34,15 @@ export const AGENT_PLAN_STATUSES = [
   'completed',
   'failed',
 ] as const;
-
 export type TAgentPlanStatus = (typeof AGENT_PLAN_STATUSES)[number];
 
+/**
+ * JSON-safe value. 用于 tool input / output 透传。
+ *
+ * 注意:object 子类型为 `readonly`,但 array 子类型不是 readonly,这是有意的:
+ * tool calls 内部常常需要原地构造 list payload(`as TJsonValue`)。如果未来发现
+ * caller 端有突变 array 的代码(常见 bug 源),可以收紧成 `readonly TJsonValue[]`。
+ */
 export type TJsonValue =
   | string
   | number
@@ -32,6 +50,10 @@ export type TJsonValue =
   | null
   | TJsonValue[]
   | { readonly [key: string]: TJsonValue };
+
+/* ============================================================================
+ * Base shapes
+ * ========================================================================== */
 
 export interface IAgentSidecarMessage {
   role: TAgentSidecarMessageRole;
@@ -44,18 +66,32 @@ export interface IAgentSidecarModelConfig {
   baseUrl?: string;
 }
 
+/* ============================================================================
+ * Plan
+ * ========================================================================== */
+
+export type TAgentPlanStepStatus =
+  | 'pending'
+  | 'running'
+  | 'done'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled';
+
+export type TAgentPlanStepRiskLevel = 'low' | 'medium' | 'high';
+
 export interface IAgentPlanStep {
   id: string;
   title: string;
   goal: string;
   description?: string;
-  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | 'cancelled';
+  status: TAgentPlanStepStatus;
   tools: string[];
   files?: string[];
   commands?: string[];
   risks?: string[];
   acceptanceCriteria?: string[];
-  riskLevel: 'low' | 'medium' | 'high';
+  riskLevel: TAgentPlanStepRiskLevel;
   requiresApproval: boolean;
   expectedOutput: string;
 }
@@ -82,26 +118,52 @@ export interface IAgentPlanRecord {
   errorMessage: string | null;
 }
 
+/* ============================================================================
+ * Approval / diff
+ * ========================================================================== */
+
+export type TToolRiskLevel = 'low' | 'medium' | 'high';
+
 export interface IApprovalRequest {
   id: string;
   toolName: string;
   question: string;
   summary: string;
-  riskLevel: 'low' | 'medium' | 'high';
+  riskLevel: TToolRiskLevel;
   reversible: boolean;
   createdAt: string;
 }
 
+/**
+ * Unified diff hunk. 与 `@/types/ai.ts.IAiPatchHunk` 形状相同,但语义不同:
+ * - `IAiPatchHunk` 是 AI 代码生成的 patch hunk(走 apply patch flow)
+ * - `IAgentDiffHunk` 是 agent 工具(如 file edit tool)反馈的实际 diff 预览
+ *
+ * 形状保持兼容,以便互相 cast。
+ */
+export interface IAgentDiffHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: string[];
+}
+
 export interface IDiffFile {
   path: string;
-  hunks: Array<{
-    oldStart: number;
-    oldLines: number;
-    newStart: number;
-    newLines: number;
-    lines: string[];
-  }>;
+  hunks: IAgentDiffHunk[];
 }
+
+/* ============================================================================
+ * Runtime events (backend → frontend, 22 variants, manual discriminated union)
+ *
+ * ⚠️ 这是高漂移风险区域。新增事件类型务必同步更新:
+ *    1. `AGENT_RUNTIME_EVENT_TYPES` 常量
+ *    2. 对应 `IAgentXxxEvent` interface
+ *    3. `TAgentRuntimeEvent` union
+ *    4. backend Rust 一侧的事件 emitter
+ *    5. zod schema(尚未创建)
+ * ========================================================================== */
 
 export const AGENT_RUNTIME_EVENT_SCHEMA_VERSION = 1 as const;
 
@@ -136,10 +198,7 @@ export const AGENT_RUNTIME_EVENT_TYPES = [
 export type TAgentRuntimeEventType = (typeof AGENT_RUNTIME_EVENT_TYPES)[number];
 
 export type TAgentRuntimeVisibility = 'user' | 'debug';
-
 export type TAgentRuntimeLevel = 'debug' | 'info' | 'warn' | 'error';
-
-export type TToolRiskLevel = 'low' | 'medium' | 'high';
 
 export interface IAgentRuntimeEventBase {
   id: string;
@@ -149,6 +208,10 @@ export interface IAgentRuntimeEventBase {
   agentId: string;
   timestamp: string;
   seq: number;
+  /**
+   * 当前协议版本固定为 `1`。未来发布 v2 时,需要把这里改成
+   * `1 | 2` 联合并在每个 event 上分别打 schemaVersion 区分。
+   */
   schemaVersion: typeof AGENT_RUNTIME_EVENT_SCHEMA_VERSION;
   redacted: true;
   visibility: TAgentRuntimeVisibility;
@@ -197,6 +260,7 @@ export interface IAgentToolProgressEvent extends IAgentRuntimeEventBase {
   type: 'agent.tool.progress';
   toolUseId?: string;
   toolName?: string;
+  /** 进度事件总有数据,因此必填(与其它事件的 *Preview 可选不同)。 */
   dataPreview: string;
 }
 
@@ -352,37 +416,69 @@ export type TAgentRuntimeEvent =
   | IAgentRunErrorEvent
   | IAgentDebugEvent;
 
+/**
+ * 用于从 union 中按 `type` 字面量取窄类型,例如:
+ *
+ *     const e: TAgentRuntimeEventByType<'agent.tool.started'> = ...
+ *     //   ^ IAgentToolStartedEvent
+ */
+export type TAgentRuntimeEventByType<TType extends TAgentRuntimeEventType> = Extract<
+  TAgentRuntimeEvent,
+  { type: TType }
+>;
+
+/* ============================================================================
+ * UI events (sidecar response stream)
+ * ========================================================================== */
+
+export type TAgentUiEventDone = {
+  type: 'done';
+  result: string;
+  /** @deprecated 使用 `usage.inputTokens`(由 wire schema 派生)。 */
+  promptTokens?: number;
+  /** @deprecated 使用 `usage.outputTokens`(由 wire schema 派生)。 */
+  completionTokens?: number;
+  /** @deprecated 使用 `usage.totalTokens`(由 wire schema 派生)。 */
+  totalTokens?: number;
+  usage?: IAiLanguageModelUsage | null;
+};
+
+export type TAgentUiEventPlanReady = {
+  type: 'plan_ready';
+  planId: string;
+  threadId?: string;
+  version: number;
+  status: TAgentPlanStatus;
+  createdAt?: string;
+  updatedAt?: string;
+  approvedAt?: string | null;
+  executedAt?: string | null;
+  rejectionReason?: string | null;
+  errorMessage?: string | null;
+  plan: IAgentPlan;
+};
+
 export type TAgentUiEvent =
   | { type: 'message_delta'; text: string; phase?: 'stage' | 'final' }
   | { type: 'agent_event'; event: TAgentRuntimeEvent }
-  | {
-    type: 'plan_ready';
-    planId: string;
-    threadId?: string;
-    version: number;
-    status: TAgentPlanStatus;
-    createdAt?: string;
-    updatedAt?: string;
-    approvedAt?: string | null;
-    executedAt?: string | null;
-    rejectionReason?: string | null;
-    errorMessage?: string | null;
-    plan: IAgentPlan;
-  }
+  | TAgentUiEventPlanReady
   | { type: 'plan_record'; record: IAgentPlanRecord; versions: IAgentPlanRecord[] }
   | { type: 'tool_start'; toolName: string; input: TJsonValue }
   | { type: 'tool_result'; toolName: string; output: TJsonValue }
   | { type: 'approval_required'; request: IApprovalRequest }
   | { type: 'diff_ready'; files: IDiffFile[] }
-  | {
-    type: 'done';
-    result: string;
-    promptTokens?: number;
-    completionTokens?: number;
-    totalTokens?: number;
-    usage?: LanguageModelUsage | null;
-  }
+  | TAgentUiEventDone
   | { type: 'error'; message: string };
+
+/** 同 runtime 事件,按 `type` 字面量取窄类型。 */
+export type TAgentUiEventByType<TType extends TAgentUiEvent['type']> = Extract<
+  TAgentUiEvent,
+  { type: TType }
+>;
+
+/* ============================================================================
+ * Sidecar request / response
+ * ========================================================================== */
 
 export interface IAgentSidecarBaseRequest {
   sessionId?: string;
@@ -398,6 +494,10 @@ export interface IAgentSidecarBaseRequest {
 }
 
 export interface IAgentSidecarChatRequest extends IAgentSidecarBaseRequest {
+  /**
+   * 未指定时由 backend 默认 `'ask'`(无工具仅对话)。
+   * 任何 `mode` 切换都会触发 session 重置:确保 caller 一致地传同一 `mode`。
+   */
   mode?: TAgentSidecarMode;
 }
 
@@ -412,12 +512,14 @@ export interface IAgentSidecarExecuteRequest extends Omit<IAgentSidecarBaseReque
   planStepId: string;
 }
 
-export interface IAgentSidecarPlanValidateRequest extends Omit<IAgentSidecarBaseRequest, 'planStepId'> {
+export interface IAgentSidecarPlanValidateRequest
+  extends Omit<IAgentSidecarBaseRequest, 'planStepId'> {
   planId: string;
   planVersion: number;
 }
 
-export interface IAgentSidecarPlanReplanRequest extends Omit<IAgentSidecarBaseRequest, 'goal' | 'planStepId'> {
+export interface IAgentSidecarPlanReplanRequest
+  extends Omit<IAgentSidecarBaseRequest, 'goal' | 'planStepId'> {
   goal: string;
   planId: string;
   planVersion: number;
@@ -444,7 +546,15 @@ export interface IAgentSidecarPlanFinishRequest extends IAgentSidecarPlanApprove
   errorMessage?: string;
 }
 
-export interface IAgentSidecarApprovalResolveRequest extends Partial<IAgentSidecarBaseRequest> {
+/**
+ * approval resolve 用 `Partial<IAgentSidecarBaseRequest>`,把所有 base 字段都
+ * 变成 optional(包括 `messages` / `context`)。这是有意的:resolve 调用一般
+ * 只需要 sessionId + requestId + decision,不重复发完整 chat payload。
+ *
+ * 缺点:类型层失去对 `messages` 必填的保护。如有需要可以拆成两条 request 类型。
+ */
+export interface IAgentSidecarApprovalResolveRequest
+  extends Partial<IAgentSidecarBaseRequest> {
   sessionId?: string;
   requestId: string;
   decision: string;
@@ -464,6 +574,10 @@ export interface IAgentSidecarHealthPayload {
   status: string;
   engine: string;
   version: string | null;
+  /**
+   * Optional + nullable 双编码:未知/未协商 vs 显式 null,需要语义统一。
+   * 当前实现:backend 缺省不发该字段(undefined);显式发 null 表示协商失败。
+   */
   protocolVersion?: string | null;
   implementationVersion?: string | null;
   mcp: {

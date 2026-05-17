@@ -1,3 +1,6 @@
+import { defineStore } from 'pinia';
+import { computed, ref } from 'vue';
+
 import { tauriService } from '@/services/tauri';
 import type {
   IGitBranchPayload,
@@ -9,8 +12,6 @@ import type {
   IGitStashEntryPayload,
 } from '@/types/git';
 import { areFileSystemPathsEqual, normalizeFileSystemPath } from '@/utils/path';
-import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
 
 // ---------------------------------------------------------------------------
 // Error messages
@@ -18,8 +19,9 @@ import { computed, ref } from 'vue';
 
 const MSG_GIT_INIT_NO_REPOSITORY = 'Git 初始化后仍未检测到仓库。';
 const MSG_GIT_NO_REPOSITORY_IN_WORKSPACE = '当前工作区未检测到 Git 仓库。';
+
 const formatGitInitMismatch = (expectedPath: string, actualPath: string): string =>
-  `Git 初始化目标不一致：期望 ${expectedPath}，实际 ${actualPath}。`;
+  `Git 初始化目标不一致:期望 ${expectedPath},实际 ${actualPath}。`;
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -46,6 +48,15 @@ const createEmptyGitRepositoryStatus = (): IGitRepositoryStatusPayload => ({
   lastCommit: null,
 });
 
+const createEmptyPullRequestSupport = (): IGitPullRequestSupportPayload => ({
+  available: false,
+  remoteName: null,
+  provider: 'unknown',
+  repositoryUrl: null,
+  pullRequestsUrl: null,
+  createPullRequestUrl: null,
+});
+
 const deduplicatePaths = (paths: string[]): string[] => {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -58,17 +69,8 @@ const deduplicatePaths = (paths: string[]): string[] => {
   return result;
 };
 
-const createEmptyPullRequestSupport = (): IGitPullRequestSupportPayload => ({
-  available: false,
-  remoteName: null,
-  provider: 'unknown',
-  repositoryUrl: null,
-  pullRequestsUrl: null,
-  createPullRequestUrl: null,
-});
-
 // ---------------------------------------------------------------------------
-// Store
+// Types
 // ---------------------------------------------------------------------------
 
 type TStatusFetcher = (
@@ -84,39 +86,54 @@ type TPathsMutator = (
   request: TPathsMutationRequest,
 ) => Promise<IGitRepositoryStatusPayload>;
 
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+
 export const useGitStore = defineStore('git', () => {
   // -- state -----------------------------------------------------------------
 
   const status = ref<IGitRepositoryStatusPayload>(createEmptyGitRepositoryStatus());
   const isLoading = ref(false);
+  const isCommitting = ref(false);
+
   const baselineCache = ref<Record<string, IGitFileBaselinePayload>>({});
   const baselineEpoch = ref(0);
+
   const commitHistory = ref<IGitCommitSummaryPayload[]>([]);
   const commitHistoryHasMore = ref(false);
   const commitHistoryNextOffset = ref<number | null>(0);
   const isCommitHistoryLoading = ref(false);
+
   const branches = ref<IGitBranchPayload[]>([]);
   const isBranchesLoading = ref(false);
+
   const stashes = ref<IGitStashEntryPayload[]>([]);
   const isStashesLoading = ref(false);
-  const pullRequestSupport = ref<IGitPullRequestSupportPayload>(createEmptyPullRequestSupport());
+
+  const pullRequestSupport = ref<IGitPullRequestSupportPayload>(
+    createEmptyPullRequestSupport(),
+  );
   const isPullRequestSupportLoading = ref(false);
 
-  // monotonically increasing id for status fetches; used to discard stale results.
+  // -- request-id staleness tokens -----------------------------------------
+  // 模块私有计数器,不是 reactive 状态。每个资源的并发 fetch 用 ++ 拿到自己的
+  // token,resolve 时与当前 token 比对——不等则视为 stale,既不写结果也不
+  // 清 isXxxLoading(把这俩交给最新 in-flight 的那次 finally 处理)。
   let statusRequestId = 0;
+  let commitHistoryRequestId = 0;
+  let branchesRequestId = 0;
+  let stashesRequestId = 0;
+  let pullRequestSupportRequestId = 0;
 
   // de-duplicates concurrent in-flight baseline fetches keyed by normalized path.
-  const pendingBaselineRequests = new Map<
-    string,
-    Promise<IGitFileBaselinePayload>
-  >();
+  const pendingBaselineRequests = new Map<string, Promise<IGitFileBaselinePayload>>();
 
   // -- getters ---------------------------------------------------------------
 
   const hasRepository = computed(
     () => status.value.available && Boolean(status.value.repositoryRootPath),
   );
-
   const totalChangeCount = computed(
     () =>
       status.value.stagedCount +
@@ -136,20 +153,24 @@ export const useGitStore = defineStore('git', () => {
   };
 
   const resetCommitHistory = (): void => {
+    commitHistoryRequestId += 1; // 让 in-flight loader resolve 后跳过写入
     commitHistory.value = [];
     commitHistoryHasMore.value = false;
     commitHistoryNextOffset.value = 0;
   };
 
   const resetBranches = (): void => {
+    branchesRequestId += 1;
     branches.value = [];
   };
 
   const resetStashes = (): void => {
+    stashesRequestId += 1;
     stashes.value = [];
   };
 
   const resetPullRequestSupport = (): void => {
+    pullRequestSupportRequestId += 1;
     pullRequestSupport.value = createEmptyPullRequestSupport();
   };
 
@@ -160,14 +181,25 @@ export const useGitStore = defineStore('git', () => {
     resetPullRequestSupport();
   };
 
+  /**
+   * 使指定路径的 baseline 缓存失效。
+   *
+   * 关键修复:必须同时考虑 in-flight 的 getFileBaseline——它 resolve 后
+   * 会基于 epochAtRequest 决定是否写缓存。即使当前没有缓存条目,只要
+   * pendingBaselineRequests 里有对应 entry,就必须 bump epoch,否则
+   * stale payload 会绕过失效写入缓存。
+   */
   const invalidateFileBaseline = (path?: string | null): void => {
     const cacheKey = normalizeFileSystemPath(path);
     if (!cacheKey) return;
-    if (!(cacheKey in baselineCache.value)) return;
-
-    const nextCache = { ...baselineCache.value };
-    delete nextCache[cacheKey];
-    baselineCache.value = nextCache;
+    const hasCached = cacheKey in baselineCache.value;
+    const hasPending = pendingBaselineRequests.has(cacheKey);
+    if (!hasCached && !hasPending) return;
+    if (hasCached) {
+      const nextCache = { ...baselineCache.value };
+      delete nextCache[cacheKey];
+      baselineCache.value = nextCache;
+    }
     baselineEpoch.value += 1;
   };
 
@@ -175,7 +207,6 @@ export const useGitStore = defineStore('git', () => {
     path: string,
   ): Promise<IGitFileBaselinePayload> => {
     const cacheKey = normalizeFileSystemPath(path);
-
     const cached = baselineCache.value[cacheKey];
     if (cached) return cached;
 
@@ -205,14 +236,26 @@ export const useGitStore = defineStore('git', () => {
   // -- status mutators -------------------------------------------------------
 
   const reset = (): void => {
+    // 把所有 in-flight 请求作废:loader 的 finally 会读 *RequestId,
+    // 发现已经被 bump 过就不会清 isXxxLoading;这里手动归零。
     statusRequestId += 1;
+    commitHistoryRequestId += 1;
+    branchesRequestId += 1;
+    stashesRequestId += 1;
+    pullRequestSupportRequestId += 1;
+
     isLoading.value = false;
+    isCommitting.value = false;
     isCommitHistoryLoading.value = false;
     isBranchesLoading.value = false;
     isStashesLoading.value = false;
     isPullRequestSupportLoading.value = false;
+
     status.value = createEmptyGitRepositoryStatus();
     clearBaselineCache();
+
+    // 注意:resetSupplementaryData 内部各 resetXxx 会再 bump 一次 RequestId,
+    // 这是无害的——只是再次把更老的 in-flight 关到门外。
     resetSupplementaryData();
   };
 
@@ -223,9 +266,7 @@ export const useGitStore = defineStore('git', () => {
       status.value.repositoryRootPath,
     );
     const nextRepositoryRoot = normalizeFileSystemPath(payload.repositoryRootPath);
-
     status.value = payload;
-
     if (previousRepositoryRoot !== nextRepositoryRoot || !payload.available) {
       clearBaselineCache();
       resetSupplementaryData();
@@ -248,7 +289,7 @@ export const useGitStore = defineStore('git', () => {
   };
 
   /**
-   * 共享骨架：刷新或初始化仓库状态时的请求竞争控制 + isLoading 切换 + 落盘。
+   * 共享骨架:刷新或初始化仓库状态时的请求竞争控制 + isLoading 切换 + 落盘。
    * `validatePayload` 在 staleness 检查通过、`applyStatus` 之前对 payload 做断言。
    */
   const runStatusRequest = async (
@@ -263,11 +304,8 @@ export const useGitStore = defineStore('git', () => {
       reset();
       return status.value;
     }
-
-    const requestId = statusRequestId + 1;
-    statusRequestId = requestId;
+    const requestId = ++statusRequestId;
     isLoading.value = true;
-
     try {
       const payload = await fetchPayload(workspaceRootPath);
       if (requestId !== statusRequestId) {
@@ -309,8 +347,8 @@ export const useGitStore = defineStore('git', () => {
   };
 
   /**
-   * 共享骨架：stage / unstage / discard 一类的"按路径列表改写工作区"操作。
-   * `onSuccess` 在 `applyStatus` 之前用去重后的路径执行副作用（例如基准缓存失效）。
+   * 共享骨架:stage / unstage / discard 一类的"按路径列表改写工作区"操作。
+   * `onSuccess` 在 `applyStatus` 之前用去重后的路径执行副作用 (例如基准缓存失效)。
    */
   const runPathsMutation = async (
     paths: string[],
@@ -321,12 +359,10 @@ export const useGitStore = defineStore('git', () => {
     if (deduplicatedPaths.length === 0) {
       return status.value;
     }
-
     const payload = await mutate({
       repositoryRootPath: requireRepositoryRootPath(),
       paths: deduplicatedPaths,
     });
-
     onSuccess?.(deduplicatedPaths);
     return applyStatus(payload);
   };
@@ -347,14 +383,25 @@ export const useGitStore = defineStore('git', () => {
   const commitIndex = async (
     message: string,
   ): Promise<IGitCommitResultPayload> => {
-    const payload = await tauriService.commitGitIndex({
-      repositoryRootPath: requireRepositoryRootPath(),
-      message,
-    });
-    applyStatus(payload.status);
-    clearBaselineCache();
-    return payload;
+    isCommitting.value = true;
+    try {
+      const payload = await tauriService.commitGitIndex({
+        repositoryRootPath: requireRepositoryRootPath(),
+        message,
+      });
+      applyStatus(payload.status);
+      clearBaselineCache();
+      return payload;
+    } finally {
+      isCommitting.value = false;
+    }
   };
+
+  // -- supplementary resource loaders ---------------------------------------
+  // 每个 loader 都用对应的 *RequestId 做 staleness 检查:
+  // 1. 并发同名 loader 时,只有最新一次能写结果;
+  // 2. reset() / resetXxx() 期间 in-flight 的 loader 不会污染重置后状态;
+  // 3. stale 路径不去清 isXxxLoading,留给最新 in-flight 的 finally。
 
   const loadCommitHistory = async (options?: {
     append?: boolean;
@@ -365,7 +412,7 @@ export const useGitStore = defineStore('git', () => {
     if (append && nextOffset === null) {
       return commitHistory.value;
     }
-
+    const requestId = ++commitHistoryRequestId;
     isCommitHistoryLoading.value = true;
     try {
       const payload = await tauriService.listGitCommitHistory({
@@ -373,7 +420,9 @@ export const useGitStore = defineStore('git', () => {
         offset: nextOffset ?? 0,
         limit: options?.limit,
       });
-
+      if (requestId !== commitHistoryRequestId) {
+        return commitHistory.value;
+      }
       commitHistory.value = append
         ? [...commitHistory.value, ...payload.entries]
         : payload.entries;
@@ -381,48 +430,70 @@ export const useGitStore = defineStore('git', () => {
       commitHistoryNextOffset.value = payload.nextOffset;
       return commitHistory.value;
     } finally {
-      isCommitHistoryLoading.value = false;
+      if (requestId === commitHistoryRequestId) {
+        isCommitHistoryLoading.value = false;
+      }
     }
   };
 
   const loadBranches = async (): Promise<IGitBranchPayload[]> => {
+    const requestId = ++branchesRequestId;
     isBranchesLoading.value = true;
     try {
       const payload = await tauriService.listGitBranches({
         repositoryRootPath: requireRepositoryRootPath(),
       });
+      if (requestId !== branchesRequestId) {
+        return branches.value;
+      }
       branches.value = payload.branches;
       return branches.value;
     } finally {
-      isBranchesLoading.value = false;
+      if (requestId === branchesRequestId) {
+        isBranchesLoading.value = false;
+      }
     }
   };
 
   const loadStashes = async (): Promise<IGitStashEntryPayload[]> => {
+    const requestId = ++stashesRequestId;
     isStashesLoading.value = true;
     try {
       const payload = await tauriService.listGitStashes({
         repositoryRootPath: requireRepositoryRootPath(),
       });
+      if (requestId !== stashesRequestId) {
+        return stashes.value;
+      }
       stashes.value = payload.entries;
       return stashes.value;
     } finally {
-      isStashesLoading.value = false;
+      if (requestId === stashesRequestId) {
+        isStashesLoading.value = false;
+      }
     }
   };
 
   const loadPullRequestSupport = async (): Promise<IGitPullRequestSupportPayload> => {
+    const requestId = ++pullRequestSupportRequestId;
     isPullRequestSupportLoading.value = true;
     try {
       const payload = await tauriService.getGitPullRequestSupport({
         repositoryRootPath: requireRepositoryRootPath(),
       });
+      if (requestId !== pullRequestSupportRequestId) {
+        return pullRequestSupport.value;
+      }
       pullRequestSupport.value = payload;
       return pullRequestSupport.value;
     } finally {
-      isPullRequestSupportLoading.value = false;
+      if (requestId === pullRequestSupportRequestId) {
+        isPullRequestSupportLoading.value = false;
+      }
     }
   };
+
+  // -- branch / stash write ops ---------------------------------------------
 
   const checkoutBranch = async (
     branchName: string,
@@ -492,40 +563,49 @@ export const useGitStore = defineStore('git', () => {
   };
 
   return {
+    // state
     status,
     isLoading,
-    hasRepository,
-    totalChangeCount,
+    isCommitting,
     baselineEpoch,
     commitHistory,
     commitHistoryHasMore,
     commitHistoryNextOffset,
     isCommitHistoryLoading,
-    canLoadMoreCommitHistory,
     branches,
     isBranchesLoading,
     stashes,
     isStashesLoading,
     pullRequestSupport,
     isPullRequestSupportLoading,
-    refreshRepositoryStatus,
-    initRepository,
+    // getters
+    hasRepository,
+    totalChangeCount,
+    canLoadMoreCommitHistory,
+    // baseline
     getFileBaseline,
     invalidateFileBaseline,
     clearBaselineCache,
+    // status
+    refreshRepositoryStatus,
+    initRepository,
+    // index / paths
     stagePaths,
     unstagePaths,
     discardPaths,
     commitIndex,
+    // supplementary loaders
     loadCommitHistory,
     loadBranches,
     loadStashes,
     loadPullRequestSupport,
+    // branch / stash write ops
     checkoutBranch,
     createBranch,
     saveStash,
     applyStash,
     dropStash,
+    // lifecycle
     reset,
   };
 });

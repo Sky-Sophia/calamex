@@ -1,8 +1,3 @@
-import { AI_AGENT_TOOL_NAMES, type TAiAgentToolName } from '@/types/ai-tools';
-import { normalizeFileSystemPath } from '@/utils/path';
-import { clipTextPreview } from '@/utils/text-preview';
-import type { LanguageModelUsage } from 'ai';
-
 import type {
   IAgentPlan,
   IAgentPlanRecord,
@@ -15,12 +10,38 @@ import type {
 import type {
   IAiAgentPlanMetadata,
   IAiAgentPlanVersionSummary,
+  IAiLanguageModelUsage,
   IAiTaskPlanStep,
   IAiToolCall,
   IAiToolConfirmationRequest,
+  TAiAgentPlanRiskLevel,
   TAiAgentPlanStepKind,
   TAiAgentPlanStepStatus,
 } from '@/types/ai';
+import { AI_AGENT_PLAN_RISK_LEVELS } from '@/types/ai-agent';
+import { AI_AGENT_TOOL_NAMES, type TAiAgentToolName } from '@/types/ai-tools';
+import { normalizeFileSystemPath } from '@/utils/path';
+import { clipTextPreview } from '@/utils/text-preview';
+
+/* ============================================================================
+ * Plan validation status
+ *
+ * passed       = 全部通过
+ * failed       = 检测出阻塞性问题
+ * needs_replan = 步骤之间冲突或依赖错位,需要重新生成计划
+ * ========================================================================== */
+
+export const AGENT_SIDECAR_PLAN_VALIDATION_STATUSES = [
+  'passed',
+  'failed',
+  'needs_replan',
+] as const;
+export type TAgentSidecarPlanValidationStatus =
+  (typeof AGENT_SIDECAR_PLAN_VALIDATION_STATUSES)[number];
+
+/* ============================================================================
+ * Public projection types
+ * ========================================================================== */
 
 export interface IAgentSidecarPlanProjection {
   goal: string;
@@ -50,7 +71,8 @@ export interface IAgentSidecarExecuteProjection {
 
 export interface IAgentSidecarPlanValidationFinding {
   stepId: string | null;
-  severity: 'low' | 'medium' | 'high';
+  /** 复用 ai-agent 域的 risk level —— low/medium/high 集合一致,避免双 SoT。 */
+  severity: TAiAgentPlanRiskLevel;
   title: string;
   detail: string;
   retryable: boolean;
@@ -63,7 +85,7 @@ export interface IAgentSidecarPlanValidationAcceptance {
 }
 
 export interface IAgentSidecarPlanValidationReport {
-  status: 'passed' | 'failed' | 'needs_replan';
+  status: TAgentSidecarPlanValidationStatus;
   summary: string;
   checkedStepIds: string[];
   needsReplan: boolean;
@@ -78,7 +100,8 @@ export interface IAgentSidecarPlanValidationProjection {
 
 export interface ISidecarOfficialUsageResolution {
   resolved: boolean;
-  usage: LanguageModelUsage | null;
+  /** 用项目自有的 schema-inferred 类型,不依赖外部 SDK 的 LanguageModelUsage 形状。 */
+  usage: IAiLanguageModelUsage | null;
 }
 
 export interface IAgentSidecarToolProjection {
@@ -92,10 +115,13 @@ type TAgentRuntimeToolEvent = Extract<
   TAgentRuntimeEvent,
   { type: 'agent.tool.started' | 'agent.tool.completed' }
 >;
-
 type TAgentUiRuntimeToolEvent = Extract<TAgentUiEvent, { type: 'agent_event' }> & {
   event: TAgentRuntimeToolEvent;
 };
+
+/* ============================================================================
+ * Tool name catalogs
+ * ========================================================================== */
 
 const AI_AGENT_TOOL_NAME_SET = new Set<string>(AI_AGENT_TOOL_NAMES);
 
@@ -328,9 +354,12 @@ export const mapSidecarToolNameToAiToolName = (toolName: string): TAiAgentToolNa
   if (isAiAgentToolName(toolName)) {
     return toolName;
   }
-
   return SIDECAR_TOOL_TO_AI_TOOL[toolName] ?? 'get_project_tree';
 };
+
+/* ============================================================================
+ * Plan step mapping
+ * ========================================================================== */
 
 const normalizeStatus = (status: IAgentPlanStep['status']): TAiAgentPlanStepStatus => status;
 
@@ -351,7 +380,6 @@ const inferStepKind = (tools: readonly string[]): TAiAgentPlanStepKind => {
   )) {
     return 'search';
   }
-
   if (tools.some((tool) =>
     tool === 'write_file' ||
     tool === 'edit_file' ||
@@ -368,7 +396,6 @@ const inferStepKind = (tools: readonly string[]): TAiAgentPlanStepKind => {
   )) {
     return 'edit';
   }
-
   if (tools.some((tool) =>
     tool === 'run_shell_command' ||
     tool === 'install_package' ||
@@ -377,7 +404,6 @@ const inferStepKind = (tools: readonly string[]): TAiAgentPlanStepKind => {
   )) {
     return 'verify';
   }
-
   if (tools.some((tool) =>
     tool === 'git_commit' ||
     tool === 'git_status' ||
@@ -390,7 +416,6 @@ const inferStepKind = (tools: readonly string[]): TAiAgentPlanStepKind => {
   )) {
     return 'summarize';
   }
-
   return 'inspect';
 };
 
@@ -416,6 +441,10 @@ export const mapSidecarPlanToTaskSteps = (plan: IAgentPlan): IAiTaskPlanStep[] =
       : {}),
   }));
 
+/* ============================================================================
+ * JSON helpers
+ * ========================================================================== */
+
 const stringifyJsonValue = (value: TJsonValue): string => JSON.stringify(value);
 
 const toJsonValueOrNull = (value: unknown): TJsonValue | null => {
@@ -427,17 +456,13 @@ const toJsonValueOrNull = (value: unknown): TJsonValue | null => {
   ) {
     return value;
   }
-
   if (Array.isArray(value)) {
     return value.map(toJsonValueOrNull).map((item) => item ?? null);
   }
-
   if (typeof value !== 'object') {
     return null;
   }
-
   const record = value as Record<string, unknown>;
-
   return Object.fromEntries(
     Object.entries(record).map(([key, item]) => [key, toJsonValueOrNull(item)]),
   );
@@ -445,11 +470,9 @@ const toJsonValueOrNull = (value: unknown): TJsonValue | null => {
 
 const parseJsonString = (value: string): TJsonValue | null => {
   const trimmed = value.trim();
-
   if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
     return null;
   }
-
   try {
     return toJsonValueOrNull(JSON.parse(trimmed));
   } catch {
@@ -468,7 +491,6 @@ const getRecordValue = (
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
   }
-
   return value[key];
 };
 
@@ -479,7 +501,6 @@ const getStringField = (value: TJsonValue, keys: readonly string[]): string | nu
       return candidate.trim();
     }
   }
-
   return null;
 };
 
@@ -488,7 +509,6 @@ const isJsonObject = (value: TJsonValue): value is { readonly [key: string]: TJs
 
 const getBooleanField = (value: TJsonValue, key: string): boolean | null => {
   const candidate = getRecordValue(value, key);
-
   return typeof candidate === 'boolean' ? candidate : null;
 };
 
@@ -497,7 +517,6 @@ const getStringArrayField = (value: TJsonValue, key: string): string[] => {
   if (!Array.isArray(candidate)) {
     return [];
   }
-
   return candidate.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
 };
 
@@ -509,20 +528,28 @@ const getObjectArrayField = (
   if (!Array.isArray(candidate)) {
     return [];
   }
-
   return candidate.filter(isJsonObject);
 };
 
-const toValidationSeverity = (value: string | null): IAgentSidecarPlanValidationFinding['severity'] =>
-  value === 'high' || value === 'medium' || value === 'low' ? value : 'medium';
+/* ============================================================================
+ * Validation report parsing
+ * ========================================================================== */
 
-const toValidationStatus = (value: string | null): IAgentSidecarPlanValidationReport['status'] | null => {
-  if (value === 'passed' || value === 'failed' || value === 'needs_replan') {
-    return value;
-  }
+const toValidationSeverity = (
+  value: string | null,
+): TAiAgentPlanRiskLevel =>
+  AI_AGENT_PLAN_RISK_LEVELS.includes(value as TAiAgentPlanRiskLevel)
+    ? (value as TAiAgentPlanRiskLevel)
+    : 'medium';
 
-  return null;
-};
+const toValidationStatus = (
+  value: string | null,
+): TAgentSidecarPlanValidationStatus | null =>
+  AGENT_SIDECAR_PLAN_VALIDATION_STATUSES.includes(
+    value as TAgentSidecarPlanValidationStatus,
+  )
+    ? (value as TAgentSidecarPlanValidationStatus)
+    : null;
 
 const parseValidationFinding = (
   value: { readonly [key: string]: TJsonValue },
@@ -546,19 +573,15 @@ const parseValidationReport = (value: TJsonValue): IAgentSidecarPlanValidationRe
   const reportValue = isJsonObject(value) && isJsonObject(value.report)
     ? value.report
     : value;
-
   if (!isJsonObject(reportValue)) {
     return null;
   }
-
   const status = toValidationStatus(getStringField(reportValue, ['status']));
   const summary = getStringField(reportValue, ['summary']);
   const needsReplan = getBooleanField(reportValue, 'needsReplan');
-
   if (!status || !summary || needsReplan === null) {
     return null;
   }
-
   return {
     status,
     summary,
@@ -569,6 +592,10 @@ const parseValidationReport = (value: TJsonValue): IAgentSidecarPlanValidationRe
   };
 };
 
+/* ============================================================================
+ * Tool payload introspection
+ * ========================================================================== */
+
 const collectStringValuesForKeys = (
   value: TJsonValue,
   keys: ReadonlySet<string>,
@@ -578,25 +605,21 @@ const collectStringValuesForKeys = (
   if (depth > 4 || value === null) {
     return;
   }
-
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return;
   }
-
   if (Array.isArray(value)) {
     for (const item of value) {
       collectStringValuesForKeys(item, keys, values, depth + 1);
     }
     return;
   }
-
   for (const [key, item] of Object.entries(value)) {
     if (keys.has(key)) {
       if (typeof item === 'string' && item.trim()) {
         values.push(item.trim());
         continue;
       }
-
       if (Array.isArray(item)) {
         for (const candidate of item) {
           if (typeof candidate === 'string' && candidate.trim()) {
@@ -606,7 +629,6 @@ const collectStringValuesForKeys = (
         continue;
       }
     }
-
     collectStringValuesForKeys(item, keys, values, depth + 1);
   }
 };
@@ -614,17 +636,14 @@ const collectStringValuesForKeys = (
 const uniqueNonEmptyStrings = (values: readonly string[]): string[] => {
   const seen = new Set<string>();
   const result: string[] = [];
-
   for (const value of values) {
     const normalized = value.replace(/\s+/gu, ' ').trim();
     if (!normalized || seen.has(normalized)) {
       continue;
     }
-
     seen.add(normalized);
     result.push(normalized);
   }
-
   return result;
 };
 
@@ -633,10 +652,8 @@ const formatStringList = (values: readonly string[], limit = 2): string | null =
   if (!normalized.length) {
     return null;
   }
-
   const visible = normalized.slice(0, limit).map((value) => clipSummary(value, 42));
   const restCount = normalized.length - visible.length;
-
   return restCount > 0 ? `${visible.join('、')} 等 ${normalized.length} 项` : visible.join('、');
 };
 
@@ -646,7 +663,6 @@ const collectFirstString = (
 ): string | null => {
   const values: string[] = [];
   collectStringValuesForKeys(value, keys, values);
-
   return formatStringList(values, 1);
 };
 
@@ -657,7 +673,6 @@ const collectStringList = (
 ): string | null => {
   const values: string[] = [];
   collectStringValuesForKeys(value, keys, values);
-
   return formatStringList(values, limit);
 };
 
@@ -665,12 +680,10 @@ const extractUrlHost = (value: string): string | null => {
   try {
     const url = new URL(value);
     const host = url.hostname.replace(/^www\./iu, '').trim();
-
     return host || null;
   } catch {
     const match = value.match(/^(?:https?:\/\/)?([^/\s?#]+)(?:[/?#]|$)/iu);
     const host = match?.[1]?.replace(/^www\./iu, '').trim();
-
     return host || null;
   }
 };
@@ -681,7 +694,6 @@ const collectUrlDomains = (
 ): string | null => {
   const urls: string[] = [];
   collectStringValuesForKeys(value, SIDECAR_URL_KEYS, urls);
-
   return formatStringList(urls.map(extractUrlHost).filter((host): host is string => Boolean(host)), limit);
 };
 
@@ -705,7 +717,6 @@ const joinTargetParts = (
   fallback: string,
 ): string => {
   const normalized = uniqueNonEmptyStrings(parts.filter((part): part is string => Boolean(part)));
-
   return normalized.length ? normalized.map((part) => clipSummary(part, 52)).join(' · ') : fallback;
 };
 
@@ -725,7 +736,6 @@ const describeToolPayload = (
       query,
       domains,
     ], '联网搜索');
-
     return {
       targetPreview,
       summary: targetPreview,
@@ -739,7 +749,6 @@ const describeToolPayload = (
 
   if (WEB_FETCH_TOOL_NAMES.has(toolName)) {
     const targetPreview = joinTargetParts([url ?? domains ?? query], '网页');
-
     return {
       targetPreview,
       summary: targetPreview,
@@ -753,7 +762,6 @@ const describeToolPayload = (
 
   if (FILE_SEARCH_TOOL_NAMES.has(toolName)) {
     const targetPreview = joinTargetParts([query, scope ?? '工作区'], '工作区');
-
     return {
       targetPreview,
       summary: targetPreview,
@@ -766,7 +774,6 @@ const describeToolPayload = (
 
   if (FILE_READ_TOOL_NAMES.has(toolName)) {
     const targetPreview = joinTargetParts([scope], '文件');
-
     return {
       targetPreview,
       summary: targetPreview,
@@ -778,7 +785,6 @@ const describeToolPayload = (
 
   if (DIRECTORY_TOOL_NAMES.has(toolName)) {
     const targetPreview = joinTargetParts([scope], '项目结构');
-
     return {
       targetPreview,
       summary: targetPreview,
@@ -790,7 +796,6 @@ const describeToolPayload = (
 
   if (GIT_TOOL_NAMES.has(toolName)) {
     const targetPreview = joinTargetParts([scope], 'Git 变更');
-
     return {
       targetPreview,
       summary: targetPreview,
@@ -811,13 +816,16 @@ const describeToolPayload = (
   }
 
   const fallback = summarizeJsonValue(value);
-
   return {
     targetPreview: fallback,
     summary: fallback,
     detailItems: [],
   };
 };
+
+/* ============================================================================
+ * Tool result text extraction
+ * ========================================================================== */
 
 const TOOL_RESULT_TEXT_KEYS = new Set([
   'text',
@@ -839,10 +847,8 @@ const TOOL_RESULT_CONTAINER_KEYS = new Set([
 
 const RESULT_HEADING_PATTERN =
   /^(?:Detailed Results?|Results?|Tool Result|Output)\s*:?\s*$/iu;
-
 const RESULT_FIELD_LABEL_PATTERN =
   /^(?:Title|Summary|Content|Result|Answer|Description)\s*:\s*/iu;
-
 const URL_FIELD_LABEL_PATTERN = /^URL\s*:\s*/iu;
 
 const cleanReadableToolText = (value: string): string | null => {
@@ -851,17 +857,13 @@ const cleanReadableToolText = (value: string): string | null => {
     .split('\n')
     .map((line) => line.replace(/\s+/gu, ' ').trim())
     .filter((line) => line && !RESULT_HEADING_PATTERN.test(line));
-
   const contentLine = lines.find((line) =>
     RESULT_FIELD_LABEL_PATTERN.test(line) && !URL_FIELD_LABEL_PATTERN.test(line)
   ) ?? lines.find((line) => !URL_FIELD_LABEL_PATTERN.test(line));
-
   if (!contentLine) {
     return null;
   }
-
   const normalized = contentLine.replace(RESULT_FIELD_LABEL_PATTERN, '').trim();
-
   return normalized ? clipSummary(normalized) : null;
 };
 
@@ -873,25 +875,21 @@ const collectReadableToolTexts = (
   if (depth > 5 || texts.length >= 4 || value === null) {
     return;
   }
-
   if (typeof value === 'string') {
     const parsed = parseJsonString(value);
     if (parsed) {
       collectReadableToolTexts(parsed, texts, depth + 1);
       return;
     }
-
     const cleaned = cleanReadableToolText(value);
     if (cleaned) {
       texts.push(cleaned);
     }
     return;
   }
-
   if (typeof value === 'number' || typeof value === 'boolean') {
     return;
   }
-
   if (Array.isArray(value)) {
     for (const item of value) {
       collectReadableToolTexts(item, texts, depth + 1);
@@ -901,13 +899,11 @@ const collectReadableToolTexts = (
     }
     return;
   }
-
   for (const [key, item] of Object.entries(value)) {
     if (TOOL_RESULT_TEXT_KEYS.has(key)) {
       collectReadableToolTexts(item, texts, depth + 1);
     }
   }
-
   for (const [key, item] of Object.entries(value)) {
     if (TOOL_RESULT_CONTAINER_KEYS.has(key)) {
       collectReadableToolTexts(item, texts, depth + 1);
@@ -919,23 +915,24 @@ const collectPathCandidates = (value: TJsonValue, paths: string[]): void => {
   if (!value || typeof value !== 'object') {
     return;
   }
-
   if (Array.isArray(value)) {
     for (const item of value) {
       collectPathCandidates(item, paths);
     }
     return;
   }
-
   for (const [key, item] of Object.entries(value)) {
     if (SIDECAR_FILE_PATH_KEYS.has(key) && typeof item === 'string' && item.trim()) {
       paths.push(item.trim());
       continue;
     }
-
     collectPathCandidates(item, paths);
   }
 };
+
+/* ============================================================================
+ * Event predicates & extraction
+ * ========================================================================== */
 
 const isSidecarFileMutationEvent = (
   event: TAgentUiEvent,
@@ -975,40 +972,38 @@ export const extractSidecarChangedFilePaths = (
 ): string[] => {
   const paths: string[] = [];
   const seen = new Set<string>();
-
   for (const event of events) {
     if (isSidecarFileMutationEvent(event)) {
       collectPathCandidates(event.type === 'tool_start' ? event.input : event.output, paths);
       continue;
     }
-
     if (isRuntimeFileMutationEvent(event)) {
       const runtimeEvent = event.event;
       const preview = runtimeEvent.type === 'agent.tool.started'
         ? runtimeEvent.inputPreview
         : runtimeEvent.resultPreview;
       const parsedPreview = preview ? parseJsonString(preview) ?? preview : null;
-
       if (parsedPreview !== null) {
         collectPathCandidates(parsedPreview, paths);
       }
     }
   }
-
   return paths.filter((path) => {
     const normalized = normalizeFileSystemPath(path, {
       collapseDuplicateSeparators: true,
       trimTrailingSeparator: true,
     });
-
     if (!normalized || seen.has(normalized)) {
       return false;
     }
-
     seen.add(normalized);
     return true;
   });
 };
+
+/* ============================================================================
+ * JSON summarization (for tool result preview)
+ * ========================================================================== */
 
 const summarizeJsonValue = (value: TJsonValue): string => {
   if (typeof value === 'string') {
@@ -1016,25 +1011,20 @@ const summarizeJsonValue = (value: TJsonValue): string => {
     if (parsed) {
       return summarizeJsonValue(parsed);
     }
-
     return cleanReadableToolText(value) ?? clipSummary(value);
   }
-
   if (value === null || typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
   }
-
   if (Array.isArray(value)) {
     const readableTexts: string[] = [];
     collectReadableToolTexts(value, readableTexts);
     if (readableTexts[0]) {
       return readableTexts[0];
     }
-
     const firstText = value.find((item): item is string => typeof item === 'string' && item.trim().length > 0);
     return firstText ? summarizeJsonValue(firstText) : clipSummary(stringifyJsonValue(value));
   }
-
   const priority = getStringField(value, [
     'path',
     'file',
@@ -1048,24 +1038,19 @@ const summarizeJsonValue = (value: TJsonValue): string => {
     'reason',
     'root',
   ]);
-
   if (priority) {
     return priority;
   }
-
   const readableTexts: string[] = [];
   collectReadableToolTexts(value, readableTexts);
-
   return readableTexts[0] ?? clipSummary(stringifyJsonValue(value));
 };
 
 const getRuntimePreviewValue = (preview: string | undefined): TJsonValue => {
   const normalized = preview?.trim();
-
   if (!normalized) {
     return '';
   }
-
   return parseJsonString(normalized) ?? normalized;
 };
 
@@ -1074,7 +1059,6 @@ const describeRuntimeToolPreview = (
   preview: string | undefined,
 ): IToolPayloadDescriptor => {
   const descriptor = describeToolPayload(toolName, getRuntimePreviewValue(preview));
-
   return {
     targetPreview: descriptor.targetPreview || '任务',
     summary: descriptor.summary || '正在执行',
@@ -1082,15 +1066,17 @@ const describeRuntimeToolPreview = (
   };
 };
 
+/* ============================================================================
+ * Tool call construction (sidecar lifecycle + runtime events)
+ * ========================================================================== */
+
 const createToolCallId = (event: TAgentUiEvent, index: number): string => {
   if (event.type === 'approval_required') {
     return `sidecar-approval:${event.request.id}`;
   }
-
   if (event.type === 'tool_start' || event.type === 'tool_result') {
     return `sidecar-tool:${index}:${event.toolName}`;
   }
-
   return `sidecar-event:${index}:${event.type}`;
 };
 
@@ -1104,18 +1090,15 @@ const findRuntimeToolCallIndex = (
 ): number => {
   const runtimeId = createRuntimeToolCallId(event);
   const idIndex = toolCalls.findIndex((toolCall) => toolCall.id === runtimeId);
-
   if (idIndex >= 0) {
     return idIndex;
   }
-
   for (let index = toolCalls.length - 1; index >= 0; index -= 1) {
     const toolCall = toolCalls[index];
     if (toolCall?.name === event.toolName && toolCall.status === 'running') {
       return index;
     }
   }
-
   return -1;
 };
 
@@ -1126,9 +1109,7 @@ const appendRuntimeToolStarted = (
   if (findRuntimeToolCallIndex(toolCalls, event) >= 0) {
     return;
   }
-
   const descriptor = describeRuntimeToolPreview(event.toolName, event.inputPreview);
-
   toolCalls.push({
     id: createRuntimeToolCallId(event),
     name: event.toolName,
@@ -1148,13 +1129,11 @@ const appendRuntimeToolCompleted = (
     ? summarizeJsonValue(getRuntimePreviewValue(event.resultPreview)) || descriptor.summary
     : event.errorMessage ?? '工具执行失败';
   const existingIndex = findRuntimeToolCallIndex(toolCalls, event);
-
   if (existingIndex >= 0) {
     const existing = toolCalls[existingIndex];
     if (!existing) {
       return;
     }
-
     toolCalls[existingIndex] = {
       ...existing,
       status: event.ok ? 'succeeded' : 'failed',
@@ -1168,7 +1147,6 @@ const appendRuntimeToolCompleted = (
     };
     return;
   }
-
   toolCalls.push({
     id: createRuntimeToolCallId(event),
     name: event.toolName,
@@ -1187,11 +1165,14 @@ const applyRuntimeToolEventToToolCalls = (
     appendRuntimeToolStarted(toolCalls, event);
     return;
   }
-
   if (event.type === 'agent.tool.completed') {
     appendRuntimeToolCompleted(toolCalls, event);
   }
 };
+
+/* ============================================================================
+ * Activity text generation
+ * ========================================================================== */
 
 const WEB_TOOL_NAME_PATTERN = /(?:web|tavily)/iu;
 const FILE_SEARCH_TOOL_NAME_PATTERN = /(?:search_(?:project_)?files|search_text|search_symbols|grep_in_files|mastra_workspace_grep)/iu;
@@ -1201,6 +1182,7 @@ const FILE_MUTATION_TOOL_NAME_PATTERN = /(?:write_file|edit_file|create_director
 const COMMAND_TOOL_NAME_PATTERN = /(?:run_|shell|command|install_package)/iu;
 const GIT_TOOL_NAME_PATTERN = /(?:^git_|get_git_|create_commit|stage_file)/iu;
 const TIME_TOOL_NAME_PATTERN = /(?:time)/iu;
+
 const COMMAND_ACTIVITY_TOOL_NAMES = new Set<string>([
   'run_command',
   'mastra_workspace_execute_command',
@@ -1209,7 +1191,6 @@ const COMMAND_ACTIVITY_TOOL_NAMES = new Set<string>([
 const getToolDetailValue = (toolCall: IAiToolCall, label: string): string | null => {
   const prefix = `${label}：`;
   const item = toolCall.detailItems?.find((detail) => detail.startsWith(prefix));
-
   return item ? item.slice(prefix.length).trim() || null : null;
 };
 
@@ -1246,11 +1227,9 @@ const buildToolActivityText = (toolCall: IAiToolCall): string => {
   if (isPendingToolCall(toolCall)) {
     return target ? `等待确认 ${target}` : '等待确认';
   }
-
   if (toolCall.status === 'failed') {
     return target ? `执行失败 ${target}` : '执行失败';
   }
-
   if (toolCall.status === 'denied') {
     return target ? `已停止 ${target}` : '已停止';
   }
@@ -1262,47 +1241,35 @@ const buildToolActivityText = (toolCall: IAiToolCall): string => {
       ? (isActiveToolCall(toolCall) ? '正在读取网页' : '读取网页')
       : (isActiveToolCall(toolCall) ? '正在联网搜索' : '联网搜索');
     const siteHint = site && query ? `，站点 ${site}` : '';
-
     return searchTarget ? `${verb}「${searchTarget}」${siteHint}` : verb;
   }
-
   if (FILE_SEARCH_TOOL_NAME_PATTERN.test(toolCall.name)) {
     const searchTarget = query ?? target;
     if (isActiveToolCall(toolCall)) {
       const scopeHint = scope ? `，范围 ${scope}` : '';
-
       return searchTarget ? `正在搜索「${searchTarget}」${scopeHint}` : '正在搜索工作区';
     }
-
     const scopeHint = scope ?? '工作区';
-
     return searchTarget ? `在 ${scopeHint} 搜索「${searchTarget}」` : `搜索 ${scopeHint}`;
   }
-
   if (DIRECTORY_TOOL_NAME_PATTERN.test(toolCall.name)) {
     return `${isActiveToolCall(toolCall) ? '正在查看目录' : '查看目录'} ${directory ?? target}`;
   }
-
   if (FILE_READ_TOOL_NAME_PATTERN.test(toolCall.name)) {
     return `${isActiveToolCall(toolCall) ? '正在读取' : '查看文件'} ${file ?? target}`;
   }
-
   if (FILE_MUTATION_TOOL_NAME_PATTERN.test(toolCall.name)) {
     return `${getMutationVerb(toolCall)} ${file ?? target}`;
   }
-
   if (GIT_TOOL_NAME_PATTERN.test(toolCall.name)) {
     return isActiveToolCall(toolCall) ? '正在检查 Git 变更' : '查看 Git 变更';
   }
-
   if (COMMAND_TOOL_NAME_PATTERN.test(toolCall.name)) {
     const commandTarget = COMMAND_ACTIVITY_TOOL_NAMES.has(toolCall.name)
       ? getToolDetailValue(toolCall, '命令') ?? '命令'
       : target;
-
     return `${isActiveToolCall(toolCall) ? '正在运行' : '运行'} ${commandTarget}`;
   }
-
   if (TIME_TOOL_NAME_PATTERN.test(toolCall.name)) {
     return isActiveToolCall(toolCall) ? '正在获取时间' : '获取时间';
   }
@@ -1319,19 +1286,15 @@ const buildSidecarLiveActivityText = (
   const activeToolCall = [...toolCalls]
     .reverse()
     .find((toolCall) => toolCall.status === 'running' || toolCall.status === 'pending');
-
   if (activeToolCall) {
     return buildToolActivityText(activeToolCall);
   }
-
   const completedToolCall = [...toolCalls]
     .reverse()
     .find((toolCall) => toolCall.status === 'succeeded');
-
   if (completedToolCall) {
     return buildToolActivityText(completedToolCall);
   }
-
   return fallback || '';
 };
 
@@ -1348,26 +1311,26 @@ const buildCompletedSidecarActivityText = (
       toolCall.status === 'pending' ||
       toolCall.status === 'running'
     );
-
   return lastToolCall ? buildToolActivityText(lastToolCall) : fallback || '请求处理中';
 };
+
+/* ============================================================================
+ * Tool call mapping (sidecar event stream → IAiToolCall[])
+ * ========================================================================== */
 
 export const mapSidecarEventsToToolCalls = (events: readonly TAgentUiEvent[]): IAiToolCall[] => {
   const toolCalls: IAiToolCall[] = [];
   const runtimeToolNames = new Set<string>();
-
   for (const event of events) {
     if (event.type === 'agent_event' && isAgentRuntimeToolEvent(event.event)) {
       runtimeToolNames.add(event.event.toolName);
     }
   }
-
   for (const [index, event] of events.entries()) {
     if (event.type === 'tool_start') {
       if (runtimeToolNames.has(event.toolName)) {
         continue;
       }
-
       const descriptor = describeToolPayload(event.toolName, event.input);
       toolCalls.push({
         id: createToolCallId(event, index),
@@ -1379,12 +1342,10 @@ export const mapSidecarEventsToToolCalls = (events: readonly TAgentUiEvent[]): I
       });
       continue;
     }
-
     if (event.type === 'tool_result') {
       if (runtimeToolNames.has(event.toolName)) {
         continue;
       }
-
       let existingIndex = -1;
       for (let itemIndex = toolCalls.length - 1; itemIndex >= 0; itemIndex -= 1) {
         const toolCall = toolCalls[itemIndex];
@@ -1394,7 +1355,6 @@ export const mapSidecarEventsToToolCalls = (events: readonly TAgentUiEvent[]): I
         }
       }
       const summary = summarizeJsonValue(event.output);
-
       if (existingIndex >= 0) {
         const existing = toolCalls[existingIndex];
         if (existing) {
@@ -1408,7 +1368,6 @@ export const mapSidecarEventsToToolCalls = (events: readonly TAgentUiEvent[]): I
         }
         continue;
       }
-
       const descriptor = describeToolPayload(event.toolName, event.output);
       toolCalls.push({
         id: createToolCallId(event, index),
@@ -1422,7 +1381,6 @@ export const mapSidecarEventsToToolCalls = (events: readonly TAgentUiEvent[]): I
       });
       continue;
     }
-
     if (event.type === 'approval_required') {
       toolCalls.push({
         id: createToolCallId(event, index),
@@ -1432,12 +1390,10 @@ export const mapSidecarEventsToToolCalls = (events: readonly TAgentUiEvent[]): I
         targetPreview: event.request.summary,
       });
     }
-
     if (event.type === 'agent_event') {
       applyRuntimeToolEventToToolCalls(toolCalls, event.event);
     }
   }
-
   return toolCalls;
 };
 
@@ -1450,11 +1406,30 @@ export const projectSidecarEventsToToolState = (params: {
   const activityText = params.streamStatus === 'streaming'
     ? buildSidecarLiveActivityText(toolCalls, params.fallbackActivityText)
     : buildCompletedSidecarActivityText(toolCalls, params.fallbackActivityText);
-
   return {
     toolCalls,
     activityText,
   };
+};
+
+/* ============================================================================
+ * Plan / record / done / message extraction
+ *
+ * `findLastEventByType` 统一封装"从尾向头扫,找最后一个匹配 type 的事件"的
+ * 模式 —— 之前三个 extractLatest* 函数各写了一遍同样的循环。
+ * ========================================================================== */
+
+const findLastEventByType = <K extends TAgentUiEvent['type']>(
+  events: readonly TAgentUiEvent[],
+  type: K,
+): Extract<TAgentUiEvent, { type: K }> | null => {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type === type) {
+      return event as Extract<TAgentUiEvent, { type: K }>;
+    }
+  }
+  return null;
 };
 
 const extractPlan = (events: readonly TAgentUiEvent[]): IAgentPlan | null =>
@@ -1526,27 +1501,12 @@ const hasMeaningfulText = (value: string | null | undefined): value is string =>
   typeof value === 'string' && value.trim().length > 0;
 
 const extractDoneResult = (events: readonly TAgentUiEvent[]): string | null => {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.type === 'done') {
-      return hasMeaningfulText(event.result) ? event.result : null;
-    }
-  }
-
-  return null;
+  const event = findLastEventByType(events, 'done');
+  return event && hasMeaningfulText(event.result) ? event.result : null;
 };
 
-const extractLatestDoneUsage = (events: readonly TAgentUiEvent[]): LanguageModelUsage | null => {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-
-    if (event?.type === 'done') {
-      return event.usage ?? null;
-    }
-  }
-
-  return null;
-};
+const extractLatestDoneUsage = (events: readonly TAgentUiEvent[]): IAiLanguageModelUsage | null =>
+  findLastEventByType(events, 'done')?.usage ?? null;
 
 export const resolveSidecarOfficialUsage = (
   response: IAgentSidecarResponsePayload,
@@ -1556,15 +1516,13 @@ export const resolveSidecarOfficialUsage = (
 });
 
 const extractLatestMessageDelta = (events: readonly TAgentUiEvent[]): string | null => {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.type === 'message_delta') {
-      return hasMeaningfulText(event.text) ? event.text : null;
-    }
-  }
-
-  return null;
+  const event = findLastEventByType(events, 'message_delta');
+  return event && hasMeaningfulText(event.text) ? event.text : null;
 };
+
+/* ============================================================================
+ * Assistant content composition
+ * ========================================================================== */
 
 const buildAssistantContent = (
   goal: string,
@@ -1574,17 +1532,19 @@ const buildAssistantContent = (
   if (doneResult) {
     return doneResult;
   }
-
   if (!plan) {
     return 'Plan 模式没有收到有效计划。';
   }
-
   return [
     `已生成计划：${goal}`,
     '',
     ...plan.steps.map((step, index) => `${index + 1}. ${step.title}`),
   ].join('\n');
 };
+
+/* ============================================================================
+ * Top-level response projections
+ * ========================================================================== */
 
 export const projectSidecarPlanResponse = (
   response: IAgentSidecarResponsePayload,
@@ -1594,7 +1554,6 @@ export const projectSidecarPlanResponse = (
   const plan = planReady?.plan ?? extractPlan(response.events);
   const errorMessage = extractErrorMessage(response.events);
   const goal = plan?.goal ?? fallbackGoal;
-
   return {
     goal,
     summary: plan?.summary ?? null,
@@ -1612,7 +1571,6 @@ export const projectSidecarPlanRecordResponse = (
   response: IAgentSidecarResponsePayload,
 ): IAgentSidecarPlanRecordProjection => {
   const event = extractPlanRecordEvent(response.events);
-
   return {
     record: event?.record ?? null,
     versions: event?.versions.map(planRecordToVersionSummary) ?? [],
@@ -1628,13 +1586,16 @@ export const projectSidecarPlanValidationResponse = (
     event.type === 'tool_result' && event.toolName === 'plan_validator'
   );
   const report = validatorResult ? parseValidationReport(validatorResult.output) : null;
-
   return {
     report,
     errorMessage: extractErrorMessage(response.events) ??
       (report ? null : 'sidecar 未返回有效的计划验证报告。'),
   };
 };
+
+/* ============================================================================
+ * Tool confirmation (approval) mapping
+ * ========================================================================== */
 
 const TOOL_CONFIRMATION_OPTIONS: IAiToolConfirmationRequest['options'] = [
   { id: 'allow-once', label: '允许', tone: 'primary' },
@@ -1664,7 +1625,6 @@ const extractPendingConfirmation = (
   const approval = response.events.find((event): event is Extract<TAgentUiEvent, { type: 'approval_required' }> =>
     event.type === 'approval_required'
   );
-
   return approval ? mapSidecarApprovalToToolConfirmation(approval, response.sessionId) : null;
 };
 
@@ -1681,7 +1641,6 @@ export const projectSidecarExecuteResponse = (
   const assistantContent = errorMessage
     ? `Agent 执行失败：${errorMessage}`
     : doneResult ?? responseResult ?? latestDelta ?? (pendingConfirmation ? '' : 'Agent 已完成。');
-
   return {
     toolCalls: mapSidecarEventsToToolCalls(response.events),
     assistantContent,

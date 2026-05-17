@@ -1,8 +1,8 @@
 import AiAssistantPanel from '@/components/business/ai/AiAssistantPanel.vue';
 import type { TAgentRuntimeEvent } from '@/types/agent-sidecar';
 import type {
-    IAiAgentRun,
     IAiAgentPlanMetadata,
+    IAiAgentRun,
     IAiAgentStepFinalAnswer,
     IAiChatMessage,
     IAiConfigPayload,
@@ -150,7 +150,7 @@ const createAssistantMock = (
         : [],
 ) => {
     const config = ref<IAiConfigPayload>({
-        providerType: 'litellm',
+        providerType: 'mastra',
         selectedModel: 'openai/gpt-5.5',
         baseUrl: 'http://127.0.0.1:4000/v1',
         isBaseUrlConfigured: true,

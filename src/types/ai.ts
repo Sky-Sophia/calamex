@@ -1,17 +1,53 @@
-import type { TAgentRuntimeEvent } from '@/types/agent-sidecar';
+import type { z } from 'zod';
+
 import type { IAiContextReference, IAiImageAttachmentPreview } from '@/types/ai-context';
 import type { IAiAgentPatchSummary } from '@/types/ai-patch';
-import type { LanguageModelUsage } from 'ai';
+import type {
+  aiAgentConfirmationStateSchema,
+  aiApplyPatchMetadataSchema,
+  aiChatMessageActionSchema,
+  aiChatMessageSchema,
+  aiChatMessageStreamSnapshotSchema,
+  aiChatMessageToolCallSchema,
+  aiChatRequestSchema,
+  aiChatStreamEventPayloadSchema,
+  aiChatStreamPayloadSchema,
+  aiCodeActionPayloadSchema,
+  aiCodeActionRequestSchema,
+  aiConfigPayloadSchema,
+  aiConversationTitlePayloadSchema,
+  aiConversationTitleRequestSchema,
+  aiLanguageModelUsageSchema,
+  aiModelEndpointConfigPayloadSchema,
+  aiPatchSetSchema,
+  aiProviderConnectionPayloadSchema,
+  aiProviderConnectionRequestSchema,
+  aiProviderProfileDetailPayloadSchema,
+  aiProviderProfilePayloadSchema,
+  aiProviderTestPayloadSchema,
+  aiSaveCredentialsRequestSchema,
+  aiSuggestionPoolPayloadSchema,
+  aiSuggestionPoolRequestSchema,
+} from '@/types/ai.schema';
+
+/* ============================================================================
+ * Plain enums / unions (no schema needed — primitive literal unions)
+ * ========================================================================== */
 
 export type TAiProviderType = 'mastra';
 export type TAiModelRole = 'main' | 'narrator';
 export type TAiStatus = 'idle' | 'generating' | 'streaming' | 'error';
 export type TAiChatRole = 'user' | 'assistant' | 'system' | 'tool';
+
+/* ============================================================================
+ * Re-exports from sibling type files
+ * ========================================================================== */
+
 export type {
   IAiContextRange,
   IAiContextReference,
   IAiImageAttachmentPreview,
-  TAiContextKind,
+  TAiContextKind
 } from '@/types/ai-context';
 
 export type {
@@ -27,7 +63,7 @@ export type {
   TAiWebSearchIntent,
   TAiWebSearchRecency,
   TAiWebSourceEntryStatus,
-  TAiWebSourceType,
+  TAiWebSourceType
 } from '@/types/ai-web';
 
 export type {
@@ -37,7 +73,7 @@ export type {
   IAiDiffHunkPreview,
   IAiDiffPreviewLine,
   TAiAgentChangedFileStatus,
-  TAiDiffPreviewLineKind,
+  TAiDiffPreviewLineKind
 } from '@/types/ai-patch';
 
 export type {
@@ -45,7 +81,7 @@ export type {
   IAiToolActivityInline,
   TAiAgentStreamEndReason,
   TAiAgentStreamEvent,
-  TAiToolActivityState,
+  TAiToolActivityState
 } from '@/types/ai-stream';
 
 export type {
@@ -53,10 +89,10 @@ export type {
   IAiAgentClassifyTaskRequest,
   IAiAgentListRunsPayload,
   IAiAgentNetworkPermissionPayload,
-  IAiAgentPlanMetadata,
-  IAiAgentPlanVersionSummary,
   IAiAgentPermissionState,
+  IAiAgentPlanMetadata,
   IAiAgentPlanReference,
+  IAiAgentPlanVersionSummary,
   IAiAgentResolveToolConfirmationRequest,
   IAiAgentRun,
   IAiAgentRunIdRequest,
@@ -82,32 +118,91 @@ export type {
   TAiAgentTimelineItemType,
   TAiToolConfirmationDecision,
   TAiToolConfirmationOptionId,
-  TAiToolConfirmationOptionTone,
+  TAiToolConfirmationOptionTone
 } from '@/types/ai-agent';
 
-export interface IAiChatStreamRenderState {
-  status: 'streaming' | 'waiting-confirmation' | 'completed' | 'cancelled';
-  activityText?: string;
-  runtimeEvents?: TAgentRuntimeEvent[];
-  finalAnswerStarted?: boolean;
-  promptTokens?: number;
-  completionTokens?: number;
-  totalTokens?: number;
-  usage?: LanguageModelUsage;
-}
+/* ============================================================================
+ * Schema-inferred wire types (single source of truth = ai.schema.ts)
+ *
+ * RFC-style 规范:所有跨 IPC / 事件 wire 边界的类型必须从 schema 推断,
+ * 严禁与 schema 并存的手写定义。需要 UI 层衍生字段时,通过 interface
+ * extension 加在 wire 类型之上,见下方 `IAiChatMessage`。
+ * ========================================================================== */
 
-export type TAiChatMessageActionId = 'allow-agent-execution';
+/**
+ * Language model token 使用量。
+ *
+ * **不要**从 `'ai'` 包直接 import `LanguageModelUsage`:
+ * - 该类型跟随 SDK 版本变化,与本项目 wire 协议形状不一致
+ * - 本项目额外携带 `inputTokenDetails / outputTokenDetails / raw` 字段
+ *
+ * 如需在 UI 层与 `'ai'` SDK 互操作,在调用点显式做一次形状映射。
+ */
+export type IAiLanguageModelUsage = z.infer<typeof aiLanguageModelUsageSchema>;
 
-export interface IAiChatMessageAction {
-  id: TAiChatMessageActionId;
-  label: string;
-  disabled?: boolean;
-}
+export type IAiChatStreamRenderState = z.infer<typeof aiChatMessageStreamSnapshotSchema>;
 
-export interface IAiAgentConfirmationState {
-  goal: string;
-  references: IAiContextReference[];
-  status: 'pending' | 'running';
+export type IAiToolCall = z.infer<typeof aiChatMessageToolCallSchema>;
+
+export type IAiChatMessageAction = z.infer<typeof aiChatMessageActionSchema>;
+export type TAiChatMessageActionId = IAiChatMessageAction['id'];
+
+export type IAiAgentConfirmationState = z.infer<typeof aiAgentConfirmationStateSchema>;
+
+/**
+ * Wire-side chat message — 跨 IPC 边界使用。
+ *
+ * 不要在此类型上添加 UI-only 衍生字段(如 `patches`、`changedFilesSummary`)。
+ * 那些字段属于 UI 状态层,请通过 `IAiChatMessage` 继承。
+ */
+export type IAiChatMessageWire = z.infer<typeof aiChatMessageSchema>;
+
+export type IAiModelEndpointConfigPayload = z.infer<typeof aiModelEndpointConfigPayloadSchema>;
+export type IAiConfigPayload = z.infer<typeof aiConfigPayloadSchema>;
+export type IAiProviderProfilePayload = z.infer<typeof aiProviderProfilePayloadSchema>;
+export type IAiProviderProfileDetailPayload = z.infer<typeof aiProviderProfileDetailPayloadSchema>;
+
+export type IAiChatRequest = z.infer<typeof aiChatRequestSchema>;
+export type IAiConversationTitleRequest = z.infer<typeof aiConversationTitleRequestSchema>;
+export type IAiConversationTitlePayload = z.infer<typeof aiConversationTitlePayloadSchema>;
+export type IAiSuggestionPoolRequest = z.infer<typeof aiSuggestionPoolRequestSchema>;
+export type IAiSuggestionPoolPayload = z.infer<typeof aiSuggestionPoolPayloadSchema>;
+
+export type IAiChatStreamPayload = z.infer<typeof aiChatStreamPayloadSchema>;
+export type IAiChatStreamEventPayload = z.infer<typeof aiChatStreamEventPayloadSchema>;
+
+export type IAiSaveCredentialsRequest = z.infer<typeof aiSaveCredentialsRequestSchema>;
+export type IAiProviderConnectionRequest = z.infer<typeof aiProviderConnectionRequestSchema>;
+export type IAiProviderTestPayload = z.infer<typeof aiProviderTestPayloadSchema>;
+export type IAiProviderConnectionPayload = z.infer<typeof aiProviderConnectionPayloadSchema>;
+
+export type IAiPatchSet = z.infer<typeof aiPatchSetSchema>;
+/** 从 IAiPatchSet narrow 出 file / hunk 元素类型,保持单一来源。 */
+export type IAiPatchFile = IAiPatchSet['files'][number];
+export type IAiPatchHunk = IAiPatchFile['hunks'][number];
+
+export type IAiCodeActionRequest = z.infer<typeof aiCodeActionRequestSchema>;
+export type IAiCodeActionResult = z.infer<typeof aiCodeActionPayloadSchema>;
+
+export type IAiApplyPatchMetadata = z.infer<typeof aiApplyPatchMetadataSchema>;
+
+/* ============================================================================
+ * UI-only types (no schema; UI state layer only — never sent over IPC)
+ * ========================================================================== */
+
+/**
+ * UI 层的 chat message:在 wire 形状之上挂载渲染所需的衍生字段。
+ *
+ * - `patches`:UI 当前显示的已应用 patch 列表
+ * - `changedFilesSummary`:Agent 改动文件汇总,sidebar / diff viewer 渲染用
+ *
+ * 这两个字段**绝对不要**发到 IPC。store 把 `IAiChatMessage[]` 赋给
+ * `IAiChatRequest.messages`(`IAiChatMessageWire[]`)时,structural subtyping
+ * 自动接受;schema parse 时会 strip 这两个字段,backend 不感知。
+ */
+export interface IAiChatMessage extends IAiChatMessageWire {
+  patches?: IAiPatchSet[];
+  changedFilesSummary?: IAiAgentPatchSummary;
 }
 
 export interface IAiAttachedFile {
@@ -120,53 +215,17 @@ export interface IAiAttachedFile {
   reference: IAiContextReference;
 }
 
-export interface IAiChatMessage {
-  id: string;
-  role: TAiChatRole;
-  content: string;
-  createdAt: string;
-  references: IAiContextReference[];
-  toolCalls?: IAiToolCall[];
-  actions?: IAiChatMessageAction[];
-  agentConfirmation?: IAiAgentConfirmationState;
-  patches?: IAiPatchSet[];
-  changedFilesSummary?: IAiAgentPatchSummary;
-  stream?: IAiChatStreamRenderState;
+export interface IAiProviderSettingsActionFeedback {
+  onSuccess(message?: string): void;
+  onError(message: string): void;
 }
 
-export interface IAiToolCall {
-  id: string;
-  name: string;
-  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'denied';
-  summary: string;
-  targetPreview?: string;
-  detailItems?: string[];
-  elapsedMs?: number;
-}
-
-export interface IAiModelEndpointConfigPayload {
-  providerType: TAiProviderType;
-  selectedModel: string | null;
-  baseUrl: string | null;
-  activeProfileId: string | null;
-  isBaseUrlConfigured: boolean;
-  hasCredentials: boolean;
-  isConfigured: boolean;
-}
-
-export interface IAiConfigPayload {
-  providerType: TAiProviderType;
-  selectedModel: string | null;
-  baseUrl: string | null;
-  activeProfileId: string | null;
-  isBaseUrlConfigured: boolean;
-  hasCredentials: boolean;
-  isConfigured: boolean;
-  inlineCompletionEnabled: boolean;
-  chatEnabled: boolean;
-  agentEnabled: boolean;
-  narrator: IAiModelEndpointConfigPayload;
-}
+/* ============================================================================
+ * Handwritten request / response types (no schema yet — TODO: align)
+ *
+ * 这些类型暂无对应 schema(可能因为 backend 直接拼 JSON 没走 zod 校验)。
+ * 长期目标:每一个跨 IPC / event 边界的类型都应该有 schema。
+ * ========================================================================== */
 
 export interface IAiSaveConfigRequest {
   role?: TAiModelRole;
@@ -178,104 +237,8 @@ export interface IAiSaveConfigRequest {
   agentEnabled: boolean;
 }
 
-export interface IAiSaveCredentialsRequest {
-  role?: TAiModelRole;
-  providerType: TAiProviderType;
-  apiKey: string;
-}
-
-export interface IAiProviderConnectionRequest extends IAiSaveConfigRequest {
-  apiKey: string | null;
-}
-
-export interface IAiProviderSettingsActionFeedback {
-  onSuccess(message?: string): void;
-  onError(message: string): void;
-}
-
-export interface IAiChatRequest {
-  threadId: string | null;
-  messages: IAiChatMessage[];
-  references: IAiContextReference[];
-}
-
-export interface IAiConversationTitleRequest {
-  userMessage: string;
-  assistantMessage: string;
-}
-
-export interface IAiConversationTitlePayload {
-  title: string;
-  model: string;
-}
-
-export interface IAiSuggestionPoolRequest {
-  count: number;
-  locale: string;
-  topics: string[];
-}
-
-export interface IAiSuggestionPoolPayload {
-  suggestions: string[];
-  model: string;
-  generatedAt: string;
-}
-
-export interface IAiChatStreamPayload {
-  streamId: string;
-  assistantMessageId: string;
-  providerType: TAiProviderType;
-  model: string;
-}
-
-export interface IAiChatStreamEventPayload {
-  streamId: string;
-  assistantMessageId: string;
-  kind: 'start' | 'delta' | 'done' | 'error' | 'cancelled';
-  delta: string | null;
-  message: string | null;
-  model: string | null;
-  promptTokens?: number | null;
-  completionTokens?: number | null;
-  totalTokens?: number | null;
-  usage?: LanguageModelUsage | null;
-}
-
 export interface IAiCancelRequest {
   streamId: string;
-}
-
-export interface IAiProviderTestPayload {
-  ok: boolean;
-  code: string;
-  message: string;
-}
-
-export interface IAiProviderConnectionPayload {
-  config: IAiConfigPayload;
-  test: IAiProviderTestPayload;
-}
-
-export interface IAiProviderProfilePayload {
-  id: string;
-  role: TAiModelRole;
-  name: string;
-  providerType: TAiProviderType;
-  selectedModel: string | null;
-  baseUrl: string | null;
-  inlineCompletionEnabled: boolean;
-  chatEnabled: boolean;
-  agentEnabled: boolean;
-  hasCredentials: boolean;
-  isConnected: boolean;
-  createdAt: string;
-  updatedAt: string;
-  lastUsedAt: string | null;
-}
-
-export interface IAiProviderProfileDetailPayload {
-  profile: IAiProviderProfilePayload;
-  apiKey: string | null;
 }
 
 export interface IAiProviderProfileSwitchRequest {
@@ -300,50 +263,6 @@ export interface IAiInlineCompletionResult {
   confidence: 'low' | 'medium' | 'high';
 }
 
-export interface IAiPatchHunk {
-  oldStart: number;
-  oldLines: number;
-  newStart: number;
-  newLines: number;
-  lines: string[];
-}
-
-export interface IAiPatchFile {
-  path: string;
-  originalHash: string;
-  originalModifiedAtMs?: number | null;
-  hunks: IAiPatchHunk[];
-}
-
-export interface IAiPatchSet {
-  summary: string;
-  files: IAiPatchFile[];
-}
-
-export interface IAiCodeActionResult {
-  explanation: string;
-  suggestedPatch: IAiPatchSet | null;
-  testSuggestion: string | null;
-  followUpQuestions: string[];
-}
-
-export interface IAiCodeActionRequest {
-  kind:
-    | 'explain_selection'
-    | 'rewrite_selection'
-    | 'generate_tests'
-    | 'fix_diagnostic'
-    | 'extract_function'
-    | 'add_error_handling'
-    | 'add_docs'
-    | 'simplify_code'
-    | 'convert_style';
-  filePath: string | null;
-  language: string;
-  selection: string;
-  diagnostics: string[];
-}
-
 export interface IAiProposePatchRequest {
   path: string;
   originalContent: string;
@@ -353,17 +272,6 @@ export interface IAiProposePatchRequest {
 
 export interface IAiProposePatchPayload {
   patch: IAiPatchSet;
-}
-
-export interface IAiApplyPatchMetadata {
-  taskId?: string | null;
-  turnId?: string | null;
-  reason?: string | null;
-  toolCallId?: string | null;
-  confirmedByUser?: boolean | null;
-  agentRunId?: string | null;
-  agentStepId?: string | null;
-  workspaceRootPath?: string | null;
 }
 
 export interface IAiApplyPatchRequest {

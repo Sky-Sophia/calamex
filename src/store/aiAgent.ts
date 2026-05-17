@@ -14,11 +14,11 @@ import type {
     IAiAgentStepFinalAnswer,
     IAiAgentStepToolResultSummary,
     IAiAgentStepWebSourceSummary,
+    IAiChatMessage,
+    IAiContextReference,
     IAiTaskPlanStep,
     IAiToolActivityInline,
     IAiToolConfirmationRequest,
-    IAiChatMessage,
-    IAiContextReference,
     TAiAgentNetworkPermission,
     TAiAgentTaskClassification,
 } from '@/types/ai';
@@ -27,12 +27,16 @@ import {
     aiAgentRunSchema,
     aiAgentStepDetailSchema,
     aiAgentTaskClassificationSchema,
-    aiToolConfirmationRequestSchema,
     aiTaskPlanStepSchema,
+    aiToolConfirmationRequestSchema,
 } from '@/types/ai-agent.schema';
+import { aiContextReferenceSchema } from '@/types/ai-context.schema';
 import { aiToolActivityInlineSchema } from '@/types/ai-stream.schema';
 import { aiChatMessageSchema, aiLanguageModelUsageSchema } from '@/types/ai.schema';
-import { aiContextReferenceSchema } from '@/types/ai-context.schema';
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
 
 export interface IAiPersistedSidecarAgentSession {
     sessionId: string;
@@ -45,6 +49,10 @@ export interface IAiPersistedSidecarAgentSession {
 }
 
 export type TAiAgentPanelMode = 'chat' | 'plan' | 'agent';
+
+// ---------------------------------------------------------------------------
+// Persistence schema
+// ---------------------------------------------------------------------------
 
 const aiAgentPanelModeSchema = z.enum(['chat', 'plan', 'agent']);
 const agentPlanStatusSchema = z.enum(AGENT_PLAN_STATUSES);
@@ -104,7 +112,16 @@ const aiAgentPersistSchema = z.object({
 
 type TAiAgentPersistState = z.infer<typeof aiAgentPersistSchema>;
 
-const normalizeHydratedRun = (run: IAiAgentRun): IAiAgentRun => {
+// hydrate 内部用 schema 推断的行类型，避免与手写接口 IAiAgentRun / IAiTaskPlanStep
+// 产生「同义但不同形」的 TS 漂移 (TS2322)。
+type TPersistedAgentRun = TAiAgentPersistState['runs'][number];
+type TPersistedPlanStep = TPersistedAgentRun['steps'][number];
+
+// ---------------------------------------------------------------------------
+// Hydrate helpers
+// ---------------------------------------------------------------------------
+
+const normalizeHydratedRun = (run: TPersistedAgentRun): TPersistedAgentRun => {
     if (
         run.status !== 'running-plan' &&
         run.status !== 'running-step' &&
@@ -112,11 +129,10 @@ const normalizeHydratedRun = (run: IAiAgentRun): IAiAgentRun => {
     ) {
         return run;
     }
-
     return {
         ...run,
         status: 'paused',
-        steps: run.steps.map((step) => ({
+        steps: run.steps.map((step): TPersistedPlanStep => ({
             ...step,
             status: step.status === 'running' ? 'pending' : step.status,
             isActive: false,
@@ -125,56 +141,36 @@ const normalizeHydratedRun = (run: IAiAgentRun): IAiAgentRun => {
     };
 };
 
-const normalizeHydratedAgentState = (state: TAiAgentPersistState): TAiAgentPersistState => {
+const normalizeHydratedAgentState = (
+    state: TAiAgentPersistState,
+): TAiAgentPersistState => {
     const runs = state.runs.map(normalizeHydratedRun);
-    const activeRunId = state.activeRunId && runs.some((run) => run.id === state.activeRunId)
-        ? state.activeRunId
-        : null;
-
+    const activeRunId =
+        state.activeRunId && runs.some((run) => run.id === state.activeRunId)
+            ? state.activeRunId
+            : null;
     return {
         ...state,
         activeRunId,
         runs,
-        pendingSidecarAgentSession: state.pendingToolConfirmation ? state.pendingSidecarAgentSession : null,
+        // 没有待确认工具时,顺手清掉 pending sidecar session,避免「确认窗口已关但 session 残留」
+        pendingSidecarAgentSession: state.pendingToolConfirmation
+            ? state.pendingSidecarAgentSession
+            : null,
     };
 };
 
+// store 与 source 同型,逐字段赋值改成 Object.assign,避免后续加字段时漏同步。
 const applyHydratedAgentState = (
     target: TAiAgentPersistState,
     source: TAiAgentPersistState,
 ): void => {
-    target.mode = source.mode;
-    target.networkPermission = source.networkPermission;
-    target.activeGoal = source.activeGoal;
-    target.steps = source.steps;
-    target.classification = source.classification;
-    target.classificationReason = source.classificationReason;
-    target.shouldEnterPlanMode = source.shouldEnterPlanMode;
-    target.approvedAt = source.approvedAt;
-    target.planId = source.planId;
-    target.planVersion = source.planVersion;
-    target.planStatus = source.planStatus;
-    target.planSummary = source.planSummary;
-    target.planRequiresApproval = source.planRequiresApproval;
-    target.planThreadId = source.planThreadId;
-    target.planCreatedAt = source.planCreatedAt;
-    target.planUpdatedAt = source.planUpdatedAt;
-    target.planExecutedAt = source.planExecutedAt;
-    target.planRejectionReason = source.planRejectionReason;
-    target.planErrorMessage = source.planErrorMessage;
-    target.activeRunId = source.activeRunId;
-    target.runs = source.runs;
-    target.latestOfficialUsageResolved = source.latestOfficialUsageResolved;
-    target.latestOfficialUsage = source.latestOfficialUsage;
-    target.totalOfficialUsageResolved = source.totalOfficialUsageResolved;
-    target.totalOfficialUsage = source.totalOfficialUsage;
-    target.stepDetails = source.stepDetails;
-    target.stepFinalAnswers = source.stepFinalAnswers;
-    target.toolActivities = source.toolActivities;
-    target.pendingToolConfirmation = source.pendingToolConfirmation;
-    target.pendingSidecarAgentSession = source.pendingSidecarAgentSession;
-    target.errorMessage = source.errorMessage;
+    Object.assign(target, source);
 };
+
+// ---------------------------------------------------------------------------
+// Usage aggregation helpers
+// ---------------------------------------------------------------------------
 
 const addTokenCounts = (
     left: number | undefined,
@@ -183,7 +179,6 @@ const addTokenCounts = (
     if (left === undefined && right === undefined) {
         return undefined;
     }
-
     return (left ?? 0) + (right ?? 0);
 };
 
@@ -222,7 +217,6 @@ const addOfficialUsage = (
     };
     const cachedInputTokens = addTokenCounts(current?.cachedInputTokens, next.cachedInputTokens);
     const reasoningTokens = addTokenCounts(current?.reasoningTokens, next.reasoningTokens);
-
     return {
         inputTokens: addRequiredTokenCounts(current?.inputTokens, next.inputTokens),
         inputTokenDetails,
@@ -234,7 +228,34 @@ const addOfficialUsage = (
     };
 };
 
+// ---------------------------------------------------------------------------
+// Tool activity helpers
+// ---------------------------------------------------------------------------
+
+const isActiveToolActivity = (activity: IAiToolActivityInline): boolean =>
+    activity.state === 'starting' ||
+    activity.state === 'running' ||
+    activity.state === 'waiting-confirmation';
+
+const findLatestActiveToolActivity = (
+    activities: IAiToolActivityInline[],
+): IAiToolActivityInline | null =>
+    [...activities].reverse().find(isActiveToolActivity) ?? null;
+
+// 同一 (stepId, toolName) 上只保留最新一条 activity;否则按 id 去重。
+const isSameToolActivity = (
+    a: IAiToolActivityInline,
+    b: IAiToolActivityInline,
+): boolean =>
+    a.id === b.id ||
+    (a.stepId === b.stepId && a.toolName === b.toolName);
+
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+
 export const useAiAgentStore = defineStore('ai-agent', () => {
+    // ── State ────────────────────────────────────────────────────────────────
     const mode = ref<TAiAgentPanelMode>('agent');
     const networkPermission = ref<TAiAgentNetworkPermission>('ask');
     const activeGoal = ref<string>('');
@@ -272,38 +293,31 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
     const pendingSidecarAgentSession = ref<IAiPersistedSidecarAgentSession | null>(null);
     const errorMessage = ref<string>('');
 
+    // ── Getters ──────────────────────────────────────────────────────────────
     const hasPlan = computed(() => steps.value.length > 0);
+
     const activeRun = computed(() =>
         runs.value.find((run) => run.id === activeRunId.value) ?? null,
     );
-    const isActiveToolActivity = (activity: IAiToolActivityInline): boolean =>
-        activity.state === 'starting' ||
-        activity.state === 'running' ||
-        activity.state === 'waiting-confirmation';
-
-    const findLatestActiveToolActivity = (
-        activities: IAiToolActivityInline[],
-    ): IAiToolActivityInline | null =>
-        [...activities].reverse().find(isActiveToolActivity) ?? null;
 
     const activeToolActivity = computed(() => {
         if (pendingToolConfirmation.value) {
             return null;
         }
-
         const runId = activeRunId.value;
         const currentRunActivity = runId
             ? findLatestActiveToolActivity(toolActivities.value[runId] ?? [])
             : null;
-
         if (currentRunActivity) {
             return currentRunActivity;
         }
-
         return findLatestActiveToolActivity(Object.values(toolActivities.value).flat());
     });
 
-    const getStepDetailKey = (runId: string, stepId: string): string => `${runId}:${stepId}`;
+    // ── Internal helpers ─────────────────────────────────────────────────────
+
+    const getStepDetailKey = (runId: string, stepId: string): string =>
+        `${runId}:${stepId}`;
 
     const createStepDetail = (runId: string, stepId: string): IAiAgentStepDetail => ({
         runId,
@@ -313,14 +327,12 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         updatedAt: new Date().toISOString(),
     });
 
-    const setClassification = (payload: IAiAgentClassifyTaskPayload): void => {
-        classification.value = payload.classification;
-        shouldEnterPlanMode.value = payload.shouldEnterPlanMode;
-        classificationReason.value = payload.reason;
-    };
-
-    const beginPlanning = (goal: string): void => {
-        activeGoal.value = goal;
+    /**
+     * 把所有 plan/run/usage 相关字段归零。
+     * 三个入口 (beginPlanning / failPlanning / clearPlan) 都需要这套基础重置,
+     * 各自再叠加自己的 errorMessage / mode / classification 等差异化逻辑。
+     */
+    const resetPlanScaffold = (): void => {
         steps.value = [];
         approvedAt.value = null;
         planId.value = null;
@@ -340,6 +352,19 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         latestOfficialUsage.value = null;
         totalOfficialUsageResolved.value = false;
         totalOfficialUsage.value = null;
+    };
+
+    // ── Actions: classification & plan lifecycle ─────────────────────────────
+
+    const setClassification = (payload: IAiAgentClassifyTaskPayload): void => {
+        classification.value = payload.classification;
+        shouldEnterPlanMode.value = payload.shouldEnterPlanMode;
+        classificationReason.value = payload.reason;
+    };
+
+    const beginPlanning = (goal: string): void => {
+        resetPlanScaffold();
+        activeGoal.value = goal;
         classification.value = null;
         classificationReason.value = '';
         shouldEnterPlanMode.value = false;
@@ -349,31 +374,25 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
     };
 
     const failPlanning = (goal: string, message: string): void => {
+        resetPlanScaffold();
         activeGoal.value = goal;
-        steps.value = [];
-        approvedAt.value = null;
-        planId.value = null;
-        planVersion.value = null;
-        planStatus.value = null;
-        planSummary.value = '';
-        planRequiresApproval.value = true;
-        planThreadId.value = null;
-        planCreatedAt.value = null;
-        planUpdatedAt.value = null;
-        planExecutedAt.value = null;
-        planRejectionReason.value = null;
-        planErrorMessage.value = null;
-        planVersions.value = [];
-        activeRunId.value = null;
-        latestOfficialUsageResolved.value = false;
-        latestOfficialUsage.value = null;
-        totalOfficialUsageResolved.value = false;
-        totalOfficialUsage.value = null;
         shouldEnterPlanMode.value = false;
         pendingToolConfirmation.value = null;
         pendingSidecarAgentSession.value = null;
         errorMessage.value = message;
         mode.value = 'plan';
+    };
+
+    const clearPlan = (): void => {
+        resetPlanScaffold();
+        activeGoal.value = '';
+        classification.value = null;
+        classificationReason.value = '';
+        shouldEnterPlanMode.value = false;
+        isClassifying.value = false;
+        isPlanning.value = false;
+        isApproving.value = false;
+        errorMessage.value = '';
     };
 
     const setNetworkPermission = (permission: TAiAgentNetworkPermission): void => {
@@ -399,29 +418,8 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         planExecutedAt.value = metadata?.executedAt ?? null;
         planRejectionReason.value = metadata?.rejectionReason ?? null;
         planErrorMessage.value = metadata?.errorMessage ?? null;
-        planVersions.value = metadata ? [{
-            ...metadata,
-        }] : [];
+        planVersions.value = metadata ? [{ ...metadata }] : [];
         activeRunId.value = null;
-    };
-
-    const setLatestOfficialUsage = (usage: LanguageModelUsage | null): void => {
-        latestOfficialUsageResolved.value = true;
-        latestOfficialUsage.value = usage;
-
-        if (usage) {
-            totalOfficialUsageResolved.value = true;
-            totalOfficialUsage.value = addOfficialUsage(totalOfficialUsage.value, usage);
-        }
-    };
-
-    const clearLatestOfficialUsage = (): void => {
-        latestOfficialUsageResolved.value = false;
-        latestOfficialUsage.value = null;
-        totalOfficialUsageResolved.value = false;
-        totalOfficialUsage.value = null;
-        pendingToolConfirmation.value = null;
-        pendingSidecarAgentSession.value = null;
     };
 
     const applyPlanMetadata = (
@@ -436,14 +434,18 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         planThreadId.value = metadata.threadId ?? planThreadId.value;
         planCreatedAt.value = metadata.createdAt ?? planCreatedAt.value;
         planUpdatedAt.value = metadata.updatedAt ?? planUpdatedAt.value;
-        approvedAt.value = metadata.approvedAt !== undefined ? metadata.approvedAt : approvedAt.value;
-        planExecutedAt.value = metadata.executedAt !== undefined ? metadata.executedAt : planExecutedAt.value;
-        planRejectionReason.value = metadata.rejectionReason !== undefined
-            ? metadata.rejectionReason
-            : planRejectionReason.value;
-        planErrorMessage.value = metadata.errorMessage !== undefined
-            ? metadata.errorMessage
-            : planErrorMessage.value;
+        approvedAt.value =
+            metadata.approvedAt !== undefined ? metadata.approvedAt : approvedAt.value;
+        planExecutedAt.value =
+            metadata.executedAt !== undefined ? metadata.executedAt : planExecutedAt.value;
+        planRejectionReason.value =
+            metadata.rejectionReason !== undefined
+                ? metadata.rejectionReason
+                : planRejectionReason.value;
+        planErrorMessage.value =
+            metadata.errorMessage !== undefined
+                ? metadata.errorMessage
+                : planErrorMessage.value;
         planVersions.value = versions;
     };
 
@@ -458,46 +460,20 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
     const replaceStep = (stepId: string, nextStep: IAiTaskPlanStep): void => {
         steps.value = steps.value.map((step) => (step.id === stepId ? nextStep : step));
         approvedAt.value = null;
-        planStatus.value = planStatus.value === 'approved' ? 'pending_approval' : planStatus.value;
+        planStatus.value =
+            planStatus.value === 'approved' ? 'pending_approval' : planStatus.value;
         activeRunId.value = null;
     };
 
     const removeStep = (stepId: string): void => {
         steps.value = steps.value.filter((step) => step.id !== stepId);
         approvedAt.value = null;
-        planStatus.value = planStatus.value === 'approved' ? 'pending_approval' : planStatus.value;
+        planStatus.value =
+            planStatus.value === 'approved' ? 'pending_approval' : planStatus.value;
         activeRunId.value = null;
     };
 
-    const clearPlan = (): void => {
-        activeGoal.value = '';
-        steps.value = [];
-        approvedAt.value = null;
-        planId.value = null;
-        planVersion.value = null;
-        planStatus.value = null;
-        planSummary.value = '';
-        planRequiresApproval.value = true;
-        planThreadId.value = null;
-        planCreatedAt.value = null;
-        planUpdatedAt.value = null;
-        planExecutedAt.value = null;
-        planRejectionReason.value = null;
-        planErrorMessage.value = null;
-        planVersions.value = [];
-        classificationReason.value = '';
-        classification.value = null;
-        shouldEnterPlanMode.value = false;
-        isClassifying.value = false;
-        isPlanning.value = false;
-        isApproving.value = false;
-        errorMessage.value = '';
-        activeRunId.value = null;
-        latestOfficialUsageResolved.value = false;
-        latestOfficialUsage.value = null;
-        totalOfficialUsageResolved.value = false;
-        totalOfficialUsage.value = null;
-    };
+    // ── Actions: runs ────────────────────────────────────────────────────────
 
     const upsertRun = (run: IAiAgentRun): void => {
         activeRunId.value = run.id;
@@ -514,6 +490,55 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
             activeRunId.value = null;
         }
     };
+
+    const upsertRunStep = (runId: string, step: IAiTaskPlanStep): void => {
+        const targetRun = runs.value.find((run) => run.id === runId);
+        if (!targetRun) {
+            steps.value = steps.value.map((item) => (item.id === step.id ? step : item));
+            return;
+        }
+        // 优先级:
+        //   step 正在运行 → currentStepId 指向它
+        //   否则 step 是上一次的 currentStep → 清空
+        //   否则保持不动
+        const nextCurrentStepId =
+            step.status === 'running'
+                ? step.id
+                : targetRun.currentStepId === step.id
+                    ? null
+                    : targetRun.currentStepId;
+        upsertRun({
+            ...targetRun,
+            steps: targetRun.steps.map((item) => (item.id === step.id ? step : item)),
+            currentStepId: nextCurrentStepId,
+            updatedAt: new Date().toISOString(),
+        });
+    };
+
+    // ── Actions: usage ───────────────────────────────────────────────────────
+
+    const setLatestOfficialUsage = (usage: LanguageModelUsage | null): void => {
+        latestOfficialUsageResolved.value = true;
+        latestOfficialUsage.value = usage;
+        if (usage) {
+            totalOfficialUsageResolved.value = true;
+            totalOfficialUsage.value = addOfficialUsage(totalOfficialUsage.value, usage);
+        }
+    };
+
+    /**
+     * 只清空 usage 统计;不再连带清空 pendingToolConfirmation /
+     * pendingSidecarAgentSession (那是独立的待确认工具调用,与 token 计数无关)。
+     * 如需同时清待确认工具,显式调用 clearPendingToolConfirmation()。
+     */
+    const clearLatestOfficialUsage = (): void => {
+        latestOfficialUsageResolved.value = false;
+        latestOfficialUsage.value = null;
+        totalOfficialUsageResolved.value = false;
+        totalOfficialUsage.value = null;
+    };
+
+    // ── Actions: step details / final answers / patches ─────────────────────
 
     const getStepDetail = (runId: string, stepId: string): IAiAgentStepDetail | null =>
         stepDetails.value[getStepDetailKey(runId, stepId)] ?? null;
@@ -548,7 +573,6 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         if (!toolResults.length) {
             return;
         }
-
         const previous = getStepDetail(runId, stepId) ?? createStepDetail(runId, stepId);
         upsertStepDetail({
             ...previous,
@@ -587,6 +611,8 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         };
     };
 
+    // ── Actions: tool activities & confirmations ─────────────────────────────
+
     const getToolActivities = (runId: string): IAiToolActivityInline[] =>
         toolActivities.value[runId] ?? [];
 
@@ -595,10 +621,7 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         toolActivities.value = {
             ...toolActivities.value,
             [runId]: [
-                ...previous.filter((item) =>
-                    item.id !== activity.id &&
-                    !(item.stepId === activity.stepId && item.toolName === activity.toolName),
-                ),
+                ...previous.filter((item) => !isSameToolActivity(item, activity)),
                 activity,
             ].slice(-50),
         };
@@ -623,25 +646,8 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         pendingSidecarAgentSession.value = null;
     };
 
-    const upsertRunStep = (runId: string, step: IAiTaskPlanStep): void => {
-        const targetRun = runs.value.find((run) => run.id === runId);
-
-        if (!targetRun) {
-            steps.value = steps.value.map((item) => (item.id === step.id ? step : item));
-            return;
-        }
-
-        upsertRun({
-            ...targetRun,
-            steps: targetRun.steps.map((item) => (item.id === step.id ? step : item)),
-            currentStepId: step.status === 'running'
-                ? step.id
-                : targetRun.currentStepId === step.id ? null : targetRun.currentStepId,
-            updatedAt: new Date().toISOString(),
-        });
-    };
-
     return {
+        // state
         mode,
         networkPermission,
         activeGoal,
@@ -678,13 +684,16 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         pendingToolConfirmation,
         pendingSidecarAgentSession,
         errorMessage,
+        // getters
         hasPlan,
         activeRun,
         activeToolActivity,
+        // queries
         getStepDetail,
         getPatchSummaries,
         getStepFinalAnswers,
         getToolActivities,
+        // actions
         setNetworkPermission,
         setClassification,
         beginPlanning,
@@ -749,44 +758,12 @@ export const useAiAgentStore = defineStore('ai-agent', () => {
         ],
         afterHydrate(ctx) {
             const store = ctx.store as unknown as TAiAgentPersistState;
-            const parsed = aiAgentPersistSchema.safeParse({
-                mode: store.mode,
-                networkPermission: store.networkPermission,
-                activeGoal: store.activeGoal,
-                steps: store.steps,
-                classification: store.classification,
-                classificationReason: store.classificationReason,
-                shouldEnterPlanMode: store.shouldEnterPlanMode,
-                approvedAt: store.approvedAt,
-                planId: store.planId,
-                planVersion: store.planVersion,
-                planStatus: store.planStatus,
-                planSummary: store.planSummary,
-                planRequiresApproval: store.planRequiresApproval,
-                planThreadId: store.planThreadId,
-                planCreatedAt: store.planCreatedAt,
-                planUpdatedAt: store.planUpdatedAt,
-                planExecutedAt: store.planExecutedAt,
-                planRejectionReason: store.planRejectionReason,
-                planErrorMessage: store.planErrorMessage,
-                activeRunId: store.activeRunId,
-                runs: store.runs,
-                latestOfficialUsageResolved: store.latestOfficialUsageResolved,
-                latestOfficialUsage: store.latestOfficialUsage,
-                totalOfficialUsageResolved: store.totalOfficialUsageResolved,
-                totalOfficialUsage: store.totalOfficialUsage,
-                stepDetails: store.stepDetails,
-                stepFinalAnswers: store.stepFinalAnswers,
-                toolActivities: store.toolActivities,
-                pendingToolConfirmation: store.pendingToolConfirmation,
-                pendingSidecarAgentSession: store.pendingSidecarAgentSession,
-                errorMessage: store.errorMessage,
-            });
-
+            // store 上额外挂的 method / getter 在 .object() 默认 strip 行为下会被忽略,
+            // 不必再手工 picking 31 个字段拼对象。
+            const parsed = aiAgentPersistSchema.safeParse(store);
             if (!parsed.success) {
                 return;
             }
-
             applyHydratedAgentState(store, normalizeHydratedAgentState(parsed.data));
         },
     },
