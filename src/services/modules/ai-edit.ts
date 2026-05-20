@@ -16,6 +16,8 @@ import type {
     IAiEditRevertTaskPayload,
     IAiEditRevertTaskRequest,
     IAiEditSetAuthLevelRequest,
+    IAiEditSetPinPayload,
+    IAiEditSetPinRequest,
     IAiEditUndoOperationPayload,
     IAiEditUndoOperationRequest,
 } from '@/types/ai-edit';
@@ -34,6 +36,9 @@ export const aiEditService = {
         payload: IAiEditCreateSnapshotRequest,
     ): Promise<IAiEditCreateSnapshotPayload> {
         return tauriService.aiEditCreateSnapshot(payload);
+    },
+    setPin(payload: IAiEditSetPinRequest): Promise<IAiEditSetPinPayload> {
+        return tauriService.aiEditSetPin(payload);
     },
     getDiff(payload: IAiEditGetDiffRequest): Promise<IAiEditGetDiffPayload> {
         return tauriService.aiEditGetDiff(payload);

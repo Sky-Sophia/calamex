@@ -28,6 +28,7 @@ export const aiAgentPatchSummarySchema = z.object({
   patchRef: z.string().min(1),
   appliedAt: z.string().min(1).optional(),
   revertedAt: z.string().min(1).optional(),
+  pinned: z.boolean().optional(),
 });
 
 export const aiDiffPreviewLineSchema = z.object({

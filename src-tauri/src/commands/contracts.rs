@@ -885,6 +885,8 @@ pub struct AiEditOperationPayload {
     pub(crate) applied_at: String,
     pub(crate) reason: String,
     pub(crate) tool_call_id: Option<String>,
+    pub(crate) diff_text: Option<String>,
+    pub(crate) pinned: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -900,6 +902,26 @@ pub struct AiSnapshotPayload {
     pub(crate) file_refs: Vec<String>,
     pub(crate) storage_key: String,
     pub(crate) size_bytes: u64,
+    pub(crate) content_available: bool,
+    pub(crate) pinned: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiEditSetPinRequest {
+    /// 已知值："operation" | "snapshot" | "task"。
+    pub(crate) target_type: String,
+    pub(crate) target_id: String,
+    pub(crate) pinned: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiEditSetPinPayload {
+    pub(crate) target_type: String,
+    pub(crate) target_id: String,
+    pub(crate) pinned: bool,
+    pub(crate) pinned_at: Option<String>,
 }
 
 /// 与前端 `aiEditTimelineEntrySchema` 一一对齐的判别联合，

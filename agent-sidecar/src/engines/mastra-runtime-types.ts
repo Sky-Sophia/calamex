@@ -249,6 +249,7 @@ export interface IMastraPendingApproval {
     sessionId: string;
     toolCallId: string;
     kind: 'approval' | 'suspended';
+    approvedPath?: string | undefined;
     workspace?: AnyWorkspace;
     browser?: MastraBrowser;
 }

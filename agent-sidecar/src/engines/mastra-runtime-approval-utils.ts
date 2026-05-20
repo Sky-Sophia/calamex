@@ -8,6 +8,11 @@ export interface IEncodedApprovalRequestPayload {
     path?: string | undefined;
 }
 
+export const extractApprovalToolPath = (args: unknown): string | undefined => {
+    const path = toRecord(args)?.path;
+    return typeof path === 'string' && path.trim().length > 0 ? path : undefined;
+};
+
 export const encodeApprovalRequestId = (
     runId: string,
     toolCallId: string,

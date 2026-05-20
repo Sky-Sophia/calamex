@@ -1,12 +1,12 @@
 import { SHIKI_THEME } from '@/constants/shiki'
 import { monaco } from '@/utils/monaco'
+import { shikiToMonaco } from '@shikijs/monaco'
+import type * as MonacoApi from 'monaco-editor'
 import {
     bundledLanguagesInfo,
     createHighlighter,
     type BundledLanguage,
-    type GrammarState,
     type Highlighter,
-    type ThemeRegistrationResolved,
 } from 'shiki'
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -37,85 +37,6 @@ const SHIKI_LANGUAGE_LOOKUP: ReadonlyMap<string, BundledLanguage> = (() => {
 const BOOTSTRAP_LANGUAGES: BundledLanguage[] = ['typescript']
 
 // ──────────────────────────────────────────────────────────────────────────────
-// === 内联工具函数 ===
-// ──────────────────────────────────────────────────────────────────────────────
-
-/**
- * Monaco 只接受 6 位无 `#` 的 hex 作为 token 颜色。
- * 把 shiki 主题里可能出现的形态都归一化掉:
- *   "#fff"      → "ffffff"
- *   "#FFAA00"   → "ffaa00"
- *   "#FFAA0080" → "ffaa00"   (丢掉 alpha)
- *   "transparent" / 非法值 → null(调用方应跳过这条 rule)
- */
-function normalizeMonacoColor(input: unknown): string | null {
-    if (typeof input !== 'string') return null
-    let c = input.trim().toLowerCase()
-    if (!c) return null
-    if (c.startsWith('#')) c = c.slice(1)
-
-    if (/^[0-9a-f]{3}$/.test(c)) {
-        c = c[0]! + c[0]! + c[1]! + c[1]! + c[2]! + c[2]!
-    } else if (/^[0-9a-f]{4}$/.test(c)) {
-        c = c[0]! + c[0]! + c[1]! + c[1]! + c[2]! + c[2]!
-    } else if (/^[0-9a-f]{8}$/.test(c)) {
-        c = c.slice(0, 6)
-    }
-
-    return /^[0-9a-f]{6}$/.test(c) ? c : null
-}
-
-/**
- * 把 shiki 解析后的 textmate 主题转成 Monaco 的 IStandaloneThemeData。
- * 这里只取 fg / bg / fontStyle 三件套,够覆盖绝大多数主题。
- */
-function textmateThemeToMonacoTheme(
-    theme: ThemeRegistrationResolved,
-): monaco.editor.IStandaloneThemeData {
-    const rules: monaco.editor.ITokenThemeRule[] = []
-    const settings = theme.settings ?? theme.tokenColors ?? []
-
-    for (const setting of settings) {
-        const style = setting.settings
-        if (!style) continue
-
-        const scopes =
-            setting.scope === undefined
-                ? ['']
-                : Array.isArray(setting.scope)
-                    ? setting.scope
-                    : String(setting.scope)
-                        .split(',')
-                        .map((s) => s.trim())
-
-        const fg = normalizeMonacoColor(style.foreground)
-        const bg = normalizeMonacoColor(style.background)
-        const fontStyle = typeof style.fontStyle === 'string' ? style.fontStyle : undefined
-
-        if (!fg && !bg && !fontStyle) continue
-
-        for (const scope of scopes) {
-            const rule: monaco.editor.ITokenThemeRule = { token: scope }
-            if (fg) rule.foreground = fg
-            if (bg) rule.background = bg
-            if (fontStyle) rule.fontStyle = fontStyle
-            rules.push(rule)
-        }
-    }
-
-    const colors: Record<string, string> = {}
-    for (const [k, v] of Object.entries(theme.colors ?? {})) {
-        if (typeof v === 'string') colors[k] = v
-    }
-
-    const themeType = theme.type as string
-    const base: monaco.editor.BuiltinTheme =
-        themeType === 'light' ? 'vs' : themeType === 'hc' ? 'hc-black' : 'vs-dark'
-
-    return { base, inherit: false, rules, colors }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
 // === 模块级状态 ===
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -128,70 +49,20 @@ let installState: 'idle' | 'installing' | 'ready' | 'failed' = 'idle'
 const registeredMonacoIds = new Set<string>()
 let registeredMonacoIdsBootstrapped = false
 
-/** 语言 → token provider 的 disposable,用于热更新 / dispose 时回收。 */
-const monacoTokenProviders = new Map<string, monaco.IDisposable>()
+/** 已同步给官方 @shikijs/monaco provider 的 Monaco language id。 */
+const monacoTokenProviderLanguages = new Set<string>()
 
 /** shikiLanguage → 加载 Promise,做去重。 */
 const languageLoadPromises = new Map<BundledLanguage, Promise<void>>()
 
 /** install 时挂上的全局 model 生命周期监听器(onDidCreateModel 等)。 */
-const modelLifecycleDisposables: monaco.IDisposable[] = []
+const modelLifecycleDisposables: MonacoApi.IDisposable[] = []
 
-let tokenizeErrorWarned = false
-
-// ──────────────────────────────────────────────────────────────────────────────
-// === Tokenizer state ===
-// ──────────────────────────────────────────────────────────────────────────────
-
-const SHIKI_STATE_TAG = Symbol.for('aster.monaco-shiki.tokenizer-state')
-
-class ShikiTokenizerState implements monaco.languages.IState {
-    readonly [SHIKI_STATE_TAG]: true = true
-
-    constructor(private readonly ruleStack: GrammarState | null) { }
-
-    clone(): monaco.languages.IState {
-        return new ShikiTokenizerState(this.ruleStack)
-    }
-
-    equals(other: monaco.languages.IState): boolean {
-        if (!isShikiTokenizerState(other)) return false
-        if (this.ruleStack === other.ruleStack) return true
-        if (!this.ruleStack || !other.ruleStack) return false
-
-        const selfEquals = (this.ruleStack as unknown as { equals?: (o: GrammarState) => boolean })
-            .equals
-        if (typeof selfEquals === 'function') {
-            try {
-                return selfEquals.call(this.ruleStack, other.ruleStack)
-            } catch {
-                /* 落到结构化签名比较 */
-            }
-        }
-
-        return grammarStateSignature(this.ruleStack) === grammarStateSignature(other.ruleStack)
-    }
-
-    getRuleStack(): GrammarState | null {
-        return this.ruleStack
-    }
-}
-
-function isShikiTokenizerState(value: unknown): value is ShikiTokenizerState {
-    return (
-        typeof value === 'object' &&
-        value !== null &&
-        (value as Record<symbol, unknown>)[SHIKI_STATE_TAG] === true
-    )
-}
-
-function grammarStateSignature(state: GrammarState): string {
-    try {
-        return JSON.stringify(state)
-    } catch {
-        return Object.prototype.toString.call(state)
-    }
-}
+const SHIKI_TO_MONACO_LANGUAGE_ALIASES: Readonly<Record<string, readonly string[]>> = {
+    docker: ['dockerfile'],
+    make: ['makefile'],
+    shellscript: ['bash', 'shell', 'sh', 'zsh'],
+} as const
 
 // ──────────────────────────────────────────────────────────────────────────────
 // === 语言 / 主题工具 ===
@@ -220,24 +91,32 @@ const registerMonacoLanguageId = (language: string): void => {
     }
 }
 
-const syncMonacoTheme = (nextHighlighter: Highlighter): void => {
-    const monacoTheme = textmateThemeToMonacoTheme(nextHighlighter.getTheme(SHIKI_THEME))
-    const colors = new Set<string>()
-
-    for (const rule of monacoTheme.rules) {
-        if (rule.foreground) {
-            colors.add(rule.foreground)
-        }
+const registerMonacoLanguageAlias = (language: string): void => {
+    bootstrapRegisteredMonacoIds()
+    if (!registeredMonacoIds.has(language)) {
+        monaco.languages.register({ id: language })
+        registeredMonacoIds.add(language)
     }
+}
 
-    monacoTheme.rules.push(
-        ...[...colors].map((color) => ({
-            token: `shiki.${color}`,
-            foreground: color,
-        })),
-    )
+const registerMonacoAliasesForShikiLanguage = (shikiLanguage: BundledLanguage): void => {
+    const aliases = SHIKI_TO_MONACO_LANGUAGE_ALIASES[shikiLanguage] ?? []
+    for (const alias of aliases) {
+        registerMonacoLanguageAlias(alias)
+    }
+}
 
-    monaco.editor.defineTheme(SHIKI_THEME, monacoTheme)
+const registerLoadedShikiLanguagesInMonaco = (nextHighlighter: Highlighter): void => {
+    for (const language of nextHighlighter.getLoadedLanguages()) {
+        registerMonacoLanguageAlias(language)
+        registerMonacoAliasesForShikiLanguage(language as BundledLanguage)
+    }
+}
+
+const syncMonacoTheme = (nextHighlighter: Highlighter): void => {
+    registerLoadedShikiLanguagesInMonaco(nextHighlighter)
+    shikiToMonaco(nextHighlighter, monaco)
+    monaco.editor.setTheme(SHIKI_THEME)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -245,7 +124,7 @@ const syncMonacoTheme = (nextHighlighter: Highlighter): void => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 const registerMonacoTokenProvider = (language: string): void => {
-    if (!highlighter || !monacoBridgeInstalled || monacoTokenProviders.has(language)) {
+    if (!highlighter || !monacoBridgeInstalled || monacoTokenProviderLanguages.has(language)) {
         return
     }
 
@@ -253,77 +132,9 @@ const registerMonacoTokenProvider = (language: string): void => {
     const shikiLanguage = toShikiLanguage(language)
     if (!shikiLanguage) return
 
-    const disposable = monaco.languages.setTokensProvider(language, {
-        getInitialState() {
-            return new ShikiTokenizerState(null)
-        },
-
-        tokenize(line, state): monaco.languages.ILineTokens {
-            if (!isShikiTokenizerState(state)) {
-                return {
-                    endState: new ShikiTokenizerState(null),
-                    tokens: [{ startIndex: 0, scopes: '' }],
-                }
-            }
-
-            const hl = highlighter
-            if (!hl) {
-                return {
-                    endState: new ShikiTokenizerState(null),
-                    tokens: [{ startIndex: 0, scopes: '' }],
-                }
-            }
-
-            const grammarState = state.getRuleStack()
-            const options = {
-                lang: shikiLanguage,
-                theme: SHIKI_THEME,
-                grammarState: grammarState ?? undefined,
-            }
-
-            let tokenResult: ReturnType<Highlighter['codeToTokens']> | undefined
-            let nextGrammarState: GrammarState | undefined
-            try {
-                tokenResult = hl.codeToTokens(line, options)
-                nextGrammarState = hl.getLastGrammarState(line, options)
-            } catch (error) {
-                if (!tokenizeErrorWarned) {
-                    tokenizeErrorWarned = true
-                    console.warn('[monaco-shiki] tokenize failed; falling back to clean state', error)
-                }
-            }
-
-            if (!tokenResult || !nextGrammarState) {
-                return {
-                    endState: new ShikiTokenizerState(null),
-                    tokens: [{ startIndex: 0, scopes: '' }],
-                }
-            }
-
-            const tokens: monaco.languages.IToken[] = []
-            let startIndex = 0
-
-            for (const token of tokenResult.tokens[0] ?? []) {
-                const color = normalizeMonacoColor(token.color)
-                tokens.push({
-                    startIndex,
-                    scopes: color ? `shiki.${color}` : '',
-                })
-                startIndex += token.content.length
-            }
-
-            if (tokens.length === 0) {
-                tokens.push({ startIndex: 0, scopes: '' })
-            }
-
-            return {
-                endState: new ShikiTokenizerState(nextGrammarState),
-                tokens,
-            }
-        },
-    })
-
-    monacoTokenProviders.set(language, disposable)
+    registerMonacoAliasesForShikiLanguage(shikiLanguage)
+    syncMonacoTheme(highlighter)
+    monacoTokenProviderLanguages.add(language)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -336,7 +147,7 @@ const registerMonacoTokenProvider = (language: string): void => {
  * - 监听后续的语言切换,切到支持的语言再加载。
  * - model 销毁时一并清理订阅,避免泄漏。
  */
-function attachShikiToModel(model: monaco.editor.ITextModel): void {
+function attachShikiToModel(model: MonacoApi.editor.ITextModel): void {
     const tryLoad = (language: string): void => {
         if (!toShikiLanguage(language)) return
         registerMonacoLanguageId(language)
@@ -345,7 +156,7 @@ function attachShikiToModel(model: monaco.editor.ITextModel): void {
 
     tryLoad(model.getLanguageId())
 
-    const langSub = model.onDidChangeLanguage((e) => {
+    const langSub = model.onDidChangeLanguage((e: MonacoApi.editor.IModelLanguageChangedEvent) => {
         tryLoad(e.newLanguage ?? model.getLanguageId())
     })
 
@@ -372,13 +183,12 @@ async function install(): Promise<void> {
             themes: [SHIKI_THEME],
             langs: [...BOOTSTRAP_LANGUAGES] as BundledLanguage[],
         })
-        syncMonacoTheme(nextHighlighter)
-
         // 先把模块级引用切到新 highlighter,再 dispose 旧的,
         // 避免 token provider 闭包里读到正在释放的 WASM 资源。
         const previous = highlighter
         highlighter = nextHighlighter
         monacoBridgeInstalled = true
+        syncMonacoTheme(nextHighlighter)
 
         if (previous && previous !== nextHighlighter) {
             try {
@@ -515,8 +325,7 @@ export async function setShikiTheme(themeName: string): Promise<void> {
         await (highlighter.loadTheme as (t: string) => Promise<void>)(themeName)
     }
 
-    const monacoTheme = textmateThemeToMonacoTheme(highlighter.getTheme(themeName))
-    monaco.editor.defineTheme(themeName, monacoTheme)
+    shikiToMonaco(highlighter, monaco)
     monaco.editor.setTheme(themeName)
     activeShikiTheme = themeName
 }
@@ -539,14 +348,7 @@ export function disposeMonacoShikiBridge(): void {
     }
     modelLifecycleDisposables.length = 0
 
-    for (const disposable of monacoTokenProviders.values()) {
-        try {
-            disposable.dispose()
-        } catch (error) {
-            console.warn('[monaco-shiki] dispose token provider failed', error)
-        }
-    }
-    monacoTokenProviders.clear()
+    monacoTokenProviderLanguages.clear()
     languageLoadPromises.clear()
 
     if (highlighter) {
@@ -563,5 +365,4 @@ export function disposeMonacoShikiBridge(): void {
     installState = 'idle'
     registeredMonacoIdsBootstrapped = false
     registeredMonacoIds.clear()
-    tokenizeErrorWarned = false
 }

@@ -7,10 +7,10 @@ const SHIKI_LANGUAGE_MAP = {
   plain: 'text',
   plaintext: 'text',
 
-  shell: 'shell',
-  sh: 'shell',
-  zsh: 'shell',
-  bash: 'shell',
+  shell: 'shellscript',
+  sh: 'shellscript',
+  zsh: 'shellscript',
+  bash: 'shellscript',
 
   ps: 'powershell',
   pwsh: 'powershell',
@@ -71,19 +71,19 @@ const SHIKI_LANGUAGE_MAP = {
 
   sql: 'sql',
   xml: 'xml',
-  dockerfile: 'dockerfile',
+  dockerfile: 'docker',
   diff: 'diff',
   patch: 'diff',
 } satisfies Partial<Record<string, BundledLanguage>>;
 
 export const SHIKI_LANGUAGE_LABELS: Partial<Record<BundledLanguage, string>> = {
   bat: 'Batch',
-  shell: 'Shell',
+  shellscript: 'Shell',
   c: 'C',
   cpp: 'C++',
   css: 'CSS',
   diff: 'Diff',
-  dockerfile: 'Dockerfile',
+  docker: 'Dockerfile',
   go: 'Go',
   html: 'HTML',
   java: 'Java',

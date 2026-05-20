@@ -3,11 +3,13 @@ import type { TAgentPlan } from '../schemas/plan.js';
 import type { TAgentPlanRecord } from './plan-store.js';
 import type { IAgentRuntimeResponse, IAgentRuntimeRunOptions, TAgentRuntimeOutputEvent } from './runtime-contracts.js';
 import { pushUiEvent } from './mastra-runtime-utils.js';
-import { encodeApprovalRequestId } from './mastra-runtime-approval-utils.js';
+import { encodeApprovalRequestId, extractApprovalToolPath } from './mastra-runtime-approval-utils.js';
 import { formatApprovalSummary } from './mastra-runtime-messages.js';
 
 export const createApprovalRequest = (payload: ToolCallPayload, runId?: string | null) => ({
-    id: runId ? encodeApprovalRequestId(runId, payload.toolCallId) : payload.toolCallId,
+    id: runId
+        ? encodeApprovalRequestId(runId, payload.toolCallId, extractApprovalToolPath(payload.args))
+        : payload.toolCallId,
     toolName: payload.toolName,
     question: `${payload.toolName} 需要你的确认后才能继续执行`,
     summary: formatApprovalSummary(payload),

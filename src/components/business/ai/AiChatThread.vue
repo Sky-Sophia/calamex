@@ -32,6 +32,7 @@ const props = withDefaults(defineProps<{
   scrollState?: IAiChatScrollState | null;
   hasExtraContent?: boolean;
   revertingChangedFilesSummaryId?: string | null;
+  pinningChangedFilesSummaryId?: string | null;
 }>(), {
   typingLabel: '正在准备回复',
   conversationId: null,
@@ -39,11 +40,13 @@ const props = withDefaults(defineProps<{
   scrollState: null,
   hasExtraContent: false,
   revertingChangedFilesSummaryId: null,
+  pinningChangedFilesSummaryId: null,
 });
 
 const emit = defineEmits<{
   messageAction: [messageId: string, actionId: TAiChatMessageActionId];
   changedFilesRollback: [messageId: string, summaryId: string];
+  changedFilesPin: [messageId: string, summaryId: string, pinned: boolean];
   scrollStateChange: [state: IAiChatScrollState];
 }>();
 
@@ -101,6 +104,10 @@ const handleChangedFilesRollback = (messageId: string, summaryId: string): void 
   emit('changedFilesRollback', messageId, summaryId);
 };
 
+const handleChangedFilesPin = (messageId: string, summaryId: string, pinned: boolean): void => {
+  emit('changedFilesPin', messageId, summaryId, pinned);
+};
+
 const handleScrollStateChange = (state: IAiChatScrollState): void => {
   emit('scrollStateChange', state);
 };
@@ -138,8 +145,10 @@ const hasContextCompressionMarker = (message: IAiChatMessage): boolean =>
             :provider-label="providerLabel"
             :workspace-root-path="workspaceRootPath"
             :reverting-changed-files-summary-id="revertingChangedFilesSummaryId"
+            :pinning-changed-files-summary-id="pinningChangedFilesSummaryId"
             @message-action="handleMessageAction"
             @changed-files-rollback="handleChangedFilesRollback"
+            @changed-files-pin="handleChangedFilesPin"
           />
           <div
             v-if="hasContextCompressionMarker(message)"

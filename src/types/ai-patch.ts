@@ -37,6 +37,7 @@ export interface IAiAgentPatchSummary {
   patchRef: string;
   appliedAt?: string;
   revertedAt?: string;
+  pinned?: boolean;
 }
 
 export interface IAiDiffPreviewLine {

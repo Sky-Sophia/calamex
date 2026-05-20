@@ -81,6 +81,8 @@ export interface IAiEditOperation {
     appliedAt: string;
     reason: string;
     toolCallId: string | null;
+    diffText?: string | null;
+    pinned: boolean;
 }
 
 /**
@@ -95,6 +97,8 @@ export interface IAiSnapshot {
     fileRefs: string[];
     storageKey: string;
     sizeBytes: number;
+    contentAvailable: boolean;
+    pinned: boolean;
 }
 
 /**
@@ -151,6 +155,27 @@ export interface IAiEditCreateSnapshotRequest {
  */
 export interface IAiEditCreateSnapshotPayload {
     snapshot: IAiSnapshot;
+}
+
+export type TAiEditPinTargetType = 'operation' | 'snapshot' | 'task';
+
+/**
+ * AED Pin 状态更新请求。
+ */
+export interface IAiEditSetPinRequest {
+    targetType: TAiEditPinTargetType;
+    targetId: string;
+    pinned: boolean;
+}
+
+/**
+ * AED Pin 状态更新结果。
+ */
+export interface IAiEditSetPinPayload {
+    targetType: TAiEditPinTargetType;
+    targetId: string;
+    pinned: boolean;
+    pinnedAt: string | null;
 }
 
 /**

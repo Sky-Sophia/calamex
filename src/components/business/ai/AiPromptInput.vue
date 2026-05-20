@@ -72,7 +72,7 @@ interface IAiPromptModelOption {
 }
 
 interface IAiPromptModelSection {
-  key: 'recommended' | 'open';
+  key: TAiServicePlatformId;
   label: string;
   badge: string;
   models: IAiPromptModelOption[];
@@ -115,9 +115,9 @@ const isComposing = ref(false);
 const isModeSubmenuOpen = ref(false);
 
 const modeOptions: IAiPromptModeOption[] = [
-  { key: 'agent', label: '默认', description: '可以搜索、编辑等' },
-  { key: 'chat', label: '询问', description: '仅回答，不进行编辑' },
-  { key: 'plan', label: '计划', description: '先规划，然后在获得批准后执行' },
+  { key: 'chat', label: 'chat', description: '仅回答，不进行编辑' },
+  { key: 'agent', label: 'agent', description: '可以搜索、编辑等' },
+  { key: 'plan', label: 'plan', description: '先规划，然后在获得批准后执行' },
 ];
 const emptyTokenContext: IAiTokenContextProps = {
   usedTokens: 0,
@@ -152,41 +152,24 @@ const selectedModelLabel = computed(() => {
 
   const matched = selectedPlatform.value.models.find((model) => model.id === modelId);
   if (matched) {
-    return formatModelLabel(matched.label);
+    return formatSelectedModelLabel(modelId, matched.label);
   }
 
-  return formatModelLabel(modelId.split('/').filter(Boolean).at(-1) ?? modelId);
+  return formatSelectedModelLabel(modelId, modelId.split('/').filter(Boolean).at(-1) ?? modelId);
 });
 const selectedPlatformId = computed<TAiServicePlatformId>(() => selectedPlatform.value.id);
 
-const modelSections = computed<IAiPromptModelSection[]>(() => [
-  {
-    key: 'recommended',
-    label: '选择模型',
-    badge: '测试版',
-    models: [
-      ...getPlatformModels('anthropic', [
-        'anthropic/claude-sonnet-4-6',
-        'anthropic/claude-opus-4-6',
-        'anthropic/claude-opus-4-7',
-      ]),
-      ...getPlatformModels('google', ['google/gemini-3.1-pro-preview']),
-      ...getPlatformModels('openai', [
-        'openai/gpt-5.4',
-        'openai/gpt-5.5',
-      ]),
-    ],
-  },
-  {
-    key: 'open',
-    label: '开源模型（美国提供商托管）',
-    badge: '测试版',
-    models: [
-      ...getPlatformModels('moonshotai', ['moonshotai/kimi-k2.6']),
-      ...getPlatformModels('deepseek', ['deepseek/deepseek-v4-pro']),
-    ],
-  },
-]);
+const modelSections = computed<IAiPromptModelSection[]>(() =>
+  AI_SERVICE_PLATFORM_PRESETS.map((platform) => ({
+    key: platform.id,
+    label: platform.label,
+    badge: '已接入',
+    models: platform.models.map((model) => ({
+      id: model.id,
+      label: formatModelLabel(model.label),
+    })),
+  })).filter((section) => section.models.length > 0),
+);
 
 const isPromptInputMode = (value: unknown): value is TAiPromptInputMode =>
   value === 'chat' || value === 'agent' || value === 'plan';
@@ -215,22 +198,15 @@ const formatModelLabel = (label: string): string =>
     .replace(/\s+/gu, ' ')
     .trim();
 
-const getPlatformModels = (
-  platformId: TAiServicePlatformId,
-  modelIds: readonly string[],
-): IAiPromptModelOption[] => {
-  const platform = AI_SERVICE_PLATFORM_PRESETS.find((item) => item.id === platformId);
-  if (!platform) {
-    return [];
+const formatSelectedModelLabel = (modelId: string, label: string): string => {
+  const normalizedModelId = modelId.trim().toLowerCase();
+  if (normalizedModelId === 'deepseek/deepseek-v4-pro') {
+    return 'v4-pro';
   }
-
-  return modelIds
-    .map((modelId) => platform.models.find((model) => model.id === modelId))
-    .filter((model): model is NonNullable<typeof model> => Boolean(model))
-    .map((model) => ({
-      id: model.id,
-      label: formatModelLabel(model.label),
-    }));
+  if (normalizedModelId === 'deepseek/deepseek-v4-flash') {
+    return 'v4-flash';
+  }
+  return formatModelLabel(label);
 };
 
 const getModelPlatformId = (modelId: string): TAiServicePlatformId =>
@@ -494,7 +470,7 @@ const handleStop = (): void => {
   max-width: 860px;
   box-sizing: border-box;
   margin-inline: auto;
-  padding: 0 12px 20px;
+  padding: 0 12px 28px;
 }
 
 .ai-composer-surface {
@@ -515,6 +491,13 @@ const handleStop = (): void => {
   overflow: hidden;
 }
 
+.ai-prompt-shell:focus-within {
+  border-color: #efeeec;
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--text-primary) 8%, transparent),
+    0 14px 30px color-mix(in srgb, var(--text-primary) 6%, transparent);
+}
+
 .ai-prompt-shell :deep([data-slot='input-group-control']:focus-visible),
 .ai-prompt-shell :deep(button:focus-visible) {
   outline: none;
@@ -529,11 +512,11 @@ const handleStop = (): void => {
 .ai-prompt-textarea {
   --ai-prompt-line-box: 20.4px;
   --ai-prompt-scrollbar-thumb: color-mix(in srgb, var(--text-primary) 12%, transparent);
-  min-height: 50px;
+  min-height: 56px;
   max-height: 192px;
   border: 0;
   background: var(--panel-bg);
-  padding: 12px 20px 6px;
+  padding: 14px 20px 7px;
   color: var(--text-primary);
   font-size: 16px;
   line-height: var(--ai-prompt-line-box);
@@ -576,9 +559,9 @@ const handleStop = (): void => {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 32px;
-  margin-top: 8px;
-  padding: 0 10px 9px 14px;
+  min-height: 34px;
+  margin-top: 10px;
+  padding: 0 10px 10px 14px;
   background: var(--panel-bg);
 }
 
@@ -633,6 +616,11 @@ const handleStop = (): void => {
   line-height: 1;
   box-shadow: none;
   transform: translate(3px, 3px);
+}
+
+.ai-token-trigger :deep(svg) {
+  color: var(--text-secondary);
+  stroke-width: 1.9;
 }
 
 .ai-token-trigger:hover {
@@ -693,7 +681,7 @@ const handleStop = (): void => {
   transform: translate(3px, 3px);
   transition:
     background-color 140ms cubic-bezier(0.23, 1, 0.32, 1),
-    color 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    color 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .ai-model-trigger:hover,
@@ -712,6 +700,14 @@ const handleStop = (): void => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ai-model-trigger :deep([data-slot='select-icon']) {
+  display: none;
+}
+
+.ai-model-trigger > :deep(svg:last-child) {
+  display: none;
 }
 
 .ai-composer-tooltip {
@@ -749,47 +745,54 @@ const handleStop = (): void => {
 .ai-settings-menu,
 .ai-model-content,
 .ai-token-content {
-  border: 1px solid color-mix(in srgb, var(--shell-divider) 88%, transparent);
-  border-radius: 14px;
-  background: var(--panel-bg);
-  color: var(--text-primary);
+  --ai-menu-bg: var(--workbench-content-bg);
+  --ai-menu-text: #1f2328;
+  --ai-menu-muted: #818b98;
+  --ai-menu-border: #d1d9e0b3;
+  --ai-menu-hover: #818b981f;
+  --ai-menu-shadow: 0 12px 30px rgb(31 35 40 / 12%);
+  color-scheme: light;
+  border: 1px solid var(--ai-menu-border);
+  border-radius: 12px;
+  background: var(--ai-menu-bg);
+  color: var(--ai-menu-text);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--text-primary) 3%, transparent),
-    0 18px 42px color-mix(in srgb, var(--text-primary) 10%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--text-primary) 2%, transparent),
+    var(--ai-menu-shadow);
 }
 
 .ai-settings-menu {
   position: relative;
-  width: 300px;
-  padding: 6px;
+  width: min(300px, calc(100vw - 24px));
+  padding: 5px;
   overflow: visible;
 }
 
 .ai-settings-menu-item {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto auto;
-  gap: 12px;
-  min-height: 43px;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  gap: 9px;
+  min-height: 34px;
   align-items: center;
-  border-radius: 8px;
-  color: var(--text-primary);
-  font-size: 18px;
+  border-radius: 7px;
+  color: var(--ai-menu-text);
+  font-size: 14px;
   line-height: 1.2;
-  padding: 0 10px;
+  padding: 0 8px;
 }
 
 .ai-settings-menu-item[data-highlighted],
 .ai-settings-menu-item[data-state='open'],
 .ai-settings-menu-item.is-mode:hover {
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
-  color: var(--text-primary);
+  background: var(--ai-menu-hover);
+  color: var(--ai-menu-text);
 }
 
 .ai-settings-menu-icon,
 .ai-settings-menu-chevron {
-  width: 22px;
-  height: 22px;
-  color: var(--text-primary);
+  width: 18px;
+  height: 18px;
+  color: var(--ai-menu-text);
   stroke-width: 1.8;
 }
 
@@ -801,17 +804,18 @@ const handleStop = (): void => {
 }
 
 .ai-settings-menu-value {
-  color: var(--text-tertiary);
-  font-size: 17px;
+  color: var(--ai-menu-muted);
+  font-size: 13px;
+  text-transform: lowercase;
 }
 
 .ai-network-switch {
   position: relative;
-  width: 46px;
-  height: 26px;
+  width: 36px;
+  height: 20px;
   border: 0;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  background: var(--ai-menu-border);
   padding: 0;
 }
 
@@ -821,60 +825,63 @@ const handleStop = (): void => {
 
 .ai-network-switch__thumb {
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 20px;
-  height: 20px;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
   border-radius: 999px;
-  background: var(--panel-bg);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 14%, transparent);
+  background: var(--ai-menu-bg);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 16%, transparent);
   transition: transform 150ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .ai-network-switch.is-on .ai-network-switch__thumb {
-  transform: translateX(20px);
+  transform: translateX(16px);
 }
 
 .ai-mode-submenu {
   position: absolute;
-  left: calc(100% + 4px);
-  top: 28px;
+  left: calc(100% + 6px);
+  top: auto;
+  bottom: 0;
   z-index: 70;
   display: grid;
-  width: 420px;
+  width: min(300px, calc(100vw - 24px));
+  max-height: min(240px, calc(100vh - 32px));
+  overflow-y: auto;
   gap: 2px;
-  border: 1px solid color-mix(in srgb, var(--shell-divider) 88%, transparent);
-  border-radius: 14px;
-  background: var(--panel-bg);
-  padding: 6px;
+  border: 1px solid var(--ai-menu-border);
+  border-radius: 12px;
+  background: var(--ai-menu-bg);
+  padding: 5px;
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--text-primary) 3%, transparent),
-    0 18px 42px color-mix(in srgb, var(--text-primary) 10%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--text-primary) 2%, transparent),
+    var(--ai-menu-shadow);
 }
 
 .ai-mode-submenu-item {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 22px;
-  gap: 12px;
-  min-height: 68px;
+  grid-template-columns: 20px minmax(0, 1fr) 18px;
+  gap: 9px;
+  min-height: 50px;
   align-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
-  color: var(--text-primary);
-  padding: 8px 12px;
+  color: var(--ai-menu-text);
+  padding: 6px 8px;
   text-align: left;
 }
 
 .ai-mode-submenu-item:hover,
 .ai-mode-submenu-item.is-active {
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  background: var(--ai-menu-hover);
 }
 
 .ai-mode-submenu-icon,
 .ai-mode-submenu-check {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   stroke-width: 1.8;
 }
 
@@ -885,56 +892,58 @@ const handleStop = (): void => {
 }
 
 .ai-mode-submenu-label {
-  color: var(--text-primary);
-  font-size: 18px;
+  color: var(--ai-menu-text);
+  font-size: 14px;
   line-height: 1.2;
 }
 
 .ai-mode-submenu-description {
-  color: var(--text-tertiary);
-  font-size: 15px;
+  color: var(--ai-menu-muted);
+  font-size: 12px;
   line-height: 1.25;
 }
 
 .ai-model-content {
-  width: 452px;
-  padding: 14px 14px 12px;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(520px, calc(100vh - 112px));
+  overflow-y: auto;
+  padding: 9px;
 }
 
 .ai-model-section-label {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--text-tertiary);
-  font-size: 16px;
-  padding: 8px 4px 10px;
+  gap: 6px;
+  color: var(--ai-menu-muted);
+  font-size: 12px;
+  padding: 6px 3px 7px;
 }
 
 .ai-model-beta {
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
-  color: var(--text-tertiary);
-  padding: 2px 5px;
-  font-size: 13px;
+  border-radius: 4px;
+  background: var(--ai-menu-hover);
+  color: var(--ai-menu-muted);
+  padding: 1px 5px;
+  font-size: 11px;
   line-height: 1.2;
 }
 
 .ai-model-item {
-  min-height: 43px;
-  border-radius: 8px;
-  color: var(--text-primary);
-  font-size: 18px;
-  padding: 0 34px 0 8px;
+  min-height: 34px;
+  border-radius: 7px;
+  color: var(--ai-menu-text);
+  font-size: 14px;
+  padding: 0 28px 0 7px;
 }
 
 .ai-model-item[data-highlighted],
 .ai-model-item[data-state='checked'] {
-  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  background: var(--ai-menu-hover);
 }
 
 .ai-model-item__icon {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
 }
 
 .ai-model-item__label {
@@ -945,8 +954,8 @@ const handleStop = (): void => {
 }
 
 .ai-model-separator {
-  margin: 12px 0;
-  background: color-mix(in srgb, var(--shell-divider) 88%, transparent);
+  margin: 8px 0;
+  background: var(--ai-menu-border);
 }
 
 .ai-token-content {

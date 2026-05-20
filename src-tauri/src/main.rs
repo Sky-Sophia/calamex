@@ -21,7 +21,8 @@ use commands::{
     ai_cancel, ai_chat_stream, ai_clear_credentials, ai_code_action, ai_connect_provider,
     ai_edit_create_snapshot, ai_edit_get_auth_level, ai_edit_get_diff, ai_edit_list_timeline,
     ai_edit_restore_snapshot, ai_edit_revert_file, ai_edit_revert_hunk, ai_edit_revert_task,
-    ai_edit_set_auth_level, ai_edit_undo_operation, ai_generate_conversation_title,
+    ai_edit_set_auth_level, ai_edit_set_pin, ai_edit_undo_operation,
+    ai_generate_conversation_title,
     ai_generate_suggestion_pool, ai_get_config, ai_get_provider_profile_detail,
     ai_get_suggestion_pool_cache, ai_inline_complete, ai_list_provider_profiles,
     ai_propose_patch, ai_save_config, ai_save_credentials, ai_switch_provider_profile,
@@ -383,7 +384,8 @@ fn main() {
             ai_edit_undo_operation,
             ai_edit_revert_file,
             ai_edit_revert_hunk,
-            ai_edit_revert_task
+            ai_edit_revert_task,
+            ai_edit_set_pin
         ]);
     emit_startup_step("tauri.builder.ready", app_started_at, builder_started_at);
     emit_startup_event("tauri.run.start", app_started_at);

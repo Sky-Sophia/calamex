@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,6 +27,8 @@ import {
 import {
   MastraRuntime,
 } from './engines/mastra-runtime.js';
+import { decodeApprovalRequestId } from './engines/mastra-runtime-approval-utils.js';
+import { allowWorkspaceWriteAfterVerifiedRead } from './engines/mastra-runtime-workspace.js';
 import {
   LibsqlAgentPlanStore,
   type IAgentPlanStore,
@@ -2352,6 +2354,50 @@ describe('Mastra runtime chat', () => {
     }
   });
 
+  it('allows a verified approved write path once while preserving stale-file protection', async () => {
+    const workspaceRoot = createTemporaryWorkspace();
+    writeFileSync(join(workspaceRoot, 'test.sh'), '#!/usr/bin/env bash\nprintf test\n', 'utf8');
+    writeFileSync(join(workspaceRoot, 'other.sh'), '#!/usr/bin/env bash\nprintf other\n', 'utf8');
+
+    try {
+      const { createMastraWorkspace } = await import('./engines/mastra-runtime-workspace.js');
+      const workspace = await createMastraWorkspace(workspaceRoot, 'write');
+      assert.notEqual(workspace, undefined);
+
+      if (!workspace) {
+        throw new Error('expected workspace');
+      }
+
+      await allowWorkspaceWriteAfterVerifiedRead(workspace, 'test.sh');
+      const writeFileConfig = workspace.getToolsConfig()?.mastra_workspace_write_file;
+      assert.equal(typeof writeFileConfig?.requireReadBeforeWrite, 'function');
+
+      if (typeof writeFileConfig?.requireReadBeforeWrite !== 'function') {
+        throw new Error('expected dynamic requireReadBeforeWrite');
+      }
+
+      assert.equal(await writeFileConfig.requireReadBeforeWrite({
+        args: { path: 'test.sh' },
+        requestContext: {},
+        workspace,
+      }), false);
+      assert.equal(await writeFileConfig.requireReadBeforeWrite({
+        args: { path: 'other.sh' },
+        requestContext: {},
+        workspace,
+      }), true);
+
+      writeFileSync(join(workspaceRoot, 'test.sh'), '#!/usr/bin/env bash\nprintf changed\n', 'utf8');
+      assert.equal(await writeFileConfig.requireReadBeforeWrite({
+        args: { path: 'test.sh' },
+        requestContext: {},
+        workspace,
+      }), true);
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it('keeps MCP access behind the gateway when no Mastra workspace is available', async () => {
     let capturedToolNames: string[] = [];
     const runtime = new MastraRuntime({
@@ -3564,6 +3610,11 @@ describe('Mastra runtime approval resolution', () => {
 
     const approvalRequestId = initial.events[2].request.id;
     assert.match(approvalRequestId, /^mastra-approval\./u);
+    assert.deepEqual(decodeApprovalRequestId(approvalRequestId), {
+      runId: 'approval-run-1',
+      toolCallId: 'tool-approval-1',
+      path: 'README.md',
+    });
 
     const resumed = await runtime.resolveApproval({
       sessionId: initial.sessionId,
@@ -3746,6 +3797,110 @@ describe('Mastra runtime approval resolution', () => {
     assert.match(String(resumeOptions.requestContext.get('systemPrompt')), /审批拒绝/u);
     assert.equal(response.result, '已从持久化审批继续。');
     assert.equal(disconnectCalls, 0);
+  });
+
+  it('verifies the approved target path before resuming a persisted write approval', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'mastra-approval-workspace-'));
+    writeFileSync(join(workspaceRoot, 'test.sh'), '#!/usr/bin/env bash\nprintf test\n', 'utf8');
+    let capturedResumeData: unknown;
+
+    try {
+      const createRuntime = (): MastraRuntime => new MastraRuntime({
+        readModelConfig: () => createTestModelConfig(),
+        createMcpClientBundle: async () => ({
+          clients: [],
+          configs: [],
+          errors: [],
+          tools: {},
+          disconnectAll: async () => undefined,
+        }),
+        now: () => '2026-05-03T00:00:00.000Z',
+        createResumableAgentHandle: async () => ({
+          agent: {
+            stream: async () => ({
+              runId: 'approval-run-read-before-write',
+              cleanup: () => undefined,
+              fullStream: (async function* () {
+                yield {
+                  type: 'tool-call-approval',
+                  runId: 'approval-run-read-before-write',
+                  from: 'AGENT',
+                  payload: {
+                    toolCallId: 'tool-read-before-write',
+                    toolName: 'write_file',
+                    args: {
+                      path: 'test.sh',
+                    },
+                  },
+                };
+              })(),
+            }),
+            generate: async () => {
+              throw new Error('generate should not be used when resuming persisted approval');
+            },
+            resumeStream: async (resumeData) => {
+              capturedResumeData = resumeData;
+
+              return {
+                runId: 'approval-run-read-before-write',
+                cleanup: () => undefined,
+                fullStream: (async function* () {
+                  yield {
+                    type: 'text-delta',
+                    runId: 'approval-run-read-before-write',
+                    from: 'AGENT',
+                    payload: {
+                      id: 'approval-read-before-write-text',
+                      text: '已恢复写文件审批。',
+                    },
+                  };
+                })(),
+              };
+            },
+          },
+        }),
+      });
+      const initialRuntime = createRuntime();
+      const initial = await initialRuntime.chat({
+        mode: 'agent',
+        goal: '修改 test.sh',
+        messages: [{ role: 'user', content: '修改 test.sh' }],
+        context: [],
+        threadId: 'thread-read-before-write',
+        workspaceRootPath: workspaceRoot,
+      });
+      const approvalEvent = initial.events.find((event) => event.type === 'approval_required');
+      assert.equal(approvalEvent?.type, 'approval_required');
+
+      if (approvalEvent?.type !== 'approval_required') {
+        throw new Error('expected approval_required event');
+      }
+
+      assert.deepEqual(decodeApprovalRequestId(approvalEvent.request.id), {
+        runId: 'approval-run-read-before-write',
+        toolCallId: 'tool-read-before-write',
+        path: 'test.sh',
+      });
+
+      const restartedRuntime = createRuntime();
+      const response = await restartedRuntime.resolveApproval({
+        sessionId: 'sidecar-read-before-write-session',
+        requestId: approvalEvent.request.id,
+        decision: 'approve',
+        goal: '修改 test.sh',
+        messages: [{ role: 'user', content: '修改 test.sh' }],
+        context: [],
+        threadId: 'thread-read-before-write',
+        workspaceRootPath: workspaceRoot,
+      });
+
+      assert.deepEqual(capturedResumeData, {
+        approved: true,
+      });
+      assert.equal(response.result, '已恢复写文件审批。');
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   });
 
   it('keeps the existing approval tool_result plus done contract instead of returning a runtime-specific placeholder error', async () => {

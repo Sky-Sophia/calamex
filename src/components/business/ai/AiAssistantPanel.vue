@@ -1175,8 +1175,10 @@ onBeforeUnmount(() => {
       :workspace-root-path="workspaceRootPath" :scroll-state="assistant.activeConversationScrollState.value"
       :typing-label="assistantTypingLabel" :has-extra-content="planConfirmationVisible || directToolConfirmationVisible"
       :reverting-changed-files-summary-id="assistant.revertingChangedFilesSummaryId.value"
+      :pinning-changed-files-summary-id="assistant.pinningChangedFilesSummaryId.value"
       @scroll-state-change="handleConversationScrollStateChange"
-      @changed-files-rollback="assistant.rollbackChangedFilesSummary">
+      @changed-files-rollback="assistant.rollbackChangedFilesSummary"
+      @changed-files-pin="assistant.setChangedFilesSummaryPin">
       <template #empty>
         <AiFloatingSuggestions :suggestions="suggestionPool.suggestions.value" :disabled="assistant.isSending.value"
           @select="handleSuggestionSelect" />

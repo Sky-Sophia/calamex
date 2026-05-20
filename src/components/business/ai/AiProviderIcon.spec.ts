@@ -23,8 +23,8 @@ describe('AiProviderIcon', () => {
         },
       });
 
-      expect(wrapper.get('svg').attributes('viewBox')).toBeTruthy();
-      expect(wrapper.findAll('path').length).toBeGreaterThan(0);
+      expect(wrapper.get('.ai-provider-icon').exists()).toBe(true);
+      expect(wrapper.find('img').exists() || wrapper.find('.ai-provider-icon__fallback').exists()).toBeTruthy();
     }
   });
 
@@ -32,7 +32,7 @@ describe('AiProviderIcon', () => {
     const iconDefinition = findAiProviderIconDefinition('unknown-platform');
 
     expect(iconDefinition.label).toBe('未知平台');
-    expect(iconDefinition.viewBox).toBe('0 0 24 24');
-    expect(iconDefinition.paths.length).toBeGreaterThan(0);
+    expect(iconDefinition.iconUrl).toBeNull();
+    expect(iconDefinition.background).toBeTruthy();
   });
 });

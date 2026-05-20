@@ -9,7 +9,7 @@ import type { TMcpServerName } from '../tools/mcp.js';
 import { buildSystemPrompt } from './agent-runtime-helpers.js';
 import { createMastraMemoryReference, createMastraMemoryScope } from './mastra-memory.js';
 import { createMastraMemoryForModel, createMastraModelConfig, defaultCreateAgent, defaultCreateExecutionHandle, defaultCreateResumableAgentHandle, defaultCreateStorage, resolveMastraModelConfig } from './mastra-runtime-agent-factory.js';
-import { encodeApprovalRequestId, getChunkRunId } from './mastra-runtime-approval-utils.js';
+import { encodeApprovalRequestId, extractApprovalToolPath, getChunkRunId } from './mastra-runtime-approval-utils.js';
 import { normalizeMastraError } from './mastra-runtime-messages.js';
 import { createApprovalRequest, createApprovedPlanExecutionContext } from './mastra-runtime-responses.js';
 import { aggregateDoneTokenSnapshot, createOmMemoryCompressedEventDraft, createSandboxToolProgressPreview, extractFinishTokenSnapshot, getReasoningDelta, getTextDelta, isErrorChunk, isSandboxDataChunk, isTextDeltaChunk, isToolCallChunk, isToolCallSuspendedChunk, isToolErrorChunk, isToolResultChunk } from './mastra-runtime-stream-utils.js';
@@ -114,7 +114,8 @@ export class MastraRuntimeBase {
             return null;
         }
 
-        const requestId = encodeApprovalRequestId(runId, chunk.payload.toolCallId);
+        const approvedPath = extractApprovalToolPath(chunk.payload.args);
+        const requestId = encodeApprovalRequestId(runId, chunk.payload.toolCallId, approvedPath);
         this.pendingApprovals.set(requestId, {
             agent,
             bundle,
@@ -122,6 +123,7 @@ export class MastraRuntimeBase {
             sessionId,
             toolCallId: chunk.payload.toolCallId,
             kind: chunk.type === 'tool-call-suspended' ? 'suspended' : 'approval',
+            ...(approvedPath ? { approvedPath } : {}),
             ...(workspace ? { workspace } : {}),
             ...(browser ? { browser } : {}),
         });
@@ -132,7 +134,7 @@ export class MastraRuntimeBase {
     protected async createResumableApprovalContext(
         input: IApprovalResolutionInput,
         sessionId: string,
-        decodedRequest: { runId: string; toolCallId: string },
+        decodedRequest: { runId: string; toolCallId: string; path?: string | undefined },
     ): Promise<IMastraApprovalExecutionContext | null> {
         const mode: IAgentRuntimeInput['mode'] = input.planId ? 'agent' : 'agent';
         const normalizedInput: IAgentRuntimeInput = {
@@ -224,6 +226,7 @@ export class MastraRuntimeBase {
                 sessionId,
                 toolCallId: decodedRequest.toolCallId,
                 kind: 'suspended',
+                ...(decodedRequest.path ? { approvedPath: decodedRequest.path } : {}),
                 ...(workspace ? { workspace } : {}),
                 ...(browser ? { browser } : {}),
             },

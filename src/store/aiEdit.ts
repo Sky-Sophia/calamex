@@ -5,6 +5,8 @@ import { aiEditService } from '@/services/modules/ai-edit';
 import type {
     IAiEditAuthState,
     IAiEditListTimelineRequest,
+    IAiEditSetPinPayload,
+    IAiEditSetPinRequest,
     IAiEditSetAuthLevelRequest,
     IAiEditTimelineEntry,
     TAiEditAuthLevel,
@@ -129,6 +131,37 @@ export const useAiEditStore = defineStore('ai-edit', () => {
             return timelineEntries.value;
         }, '读取 AED 时间线失败。');
 
+    const setPin = (
+        payload: IAiEditSetPinRequest,
+    ): Promise<IAiEditSetPinPayload> =>
+        withStatus(async () => {
+            const result = await aiEditService.setPin(payload);
+            timelineEntries.value = timelineEntries.value.map((entry) => {
+                if (entry.type === 'snapshot' && result.targetType === 'snapshot') {
+                    return entry.data.id === result.targetId
+                        ? { ...entry, data: { ...entry.data, pinned: result.pinned } }
+                        : entry;
+                }
+                if (entry.type === 'snapshot' && result.targetType === 'task') {
+                    return entry.data.taskId === result.targetId
+                        ? { ...entry, data: { ...entry.data, pinned: result.pinned } }
+                        : entry;
+                }
+                if (entry.type === 'operation' && result.targetType === 'operation') {
+                    return entry.data.id === result.targetId
+                        ? { ...entry, data: { ...entry.data, pinned: result.pinned } }
+                        : entry;
+                }
+                if (entry.type === 'operation' && result.targetType === 'task') {
+                    return entry.data.taskId === result.targetId
+                        ? { ...entry, data: { ...entry.data, pinned: result.pinned } }
+                        : entry;
+                }
+                return entry;
+            });
+            return result;
+        }, '更新 AED Pin 状态失败。');
+
     const clearTimeline = (): void => {
         timelineEntries.value = [];
     };
@@ -164,6 +197,7 @@ export const useAiEditStore = defineStore('ai-edit', () => {
         loadAuthState,
         setAuthLevel,
         loadTimeline,
+        setPin,
         clearTimeline,
         setStatus,
         reset,

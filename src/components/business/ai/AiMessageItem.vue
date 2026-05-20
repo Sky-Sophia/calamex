@@ -32,6 +32,7 @@ const props = defineProps<{
   providerLabel: string;
   workspaceRootPath?: string | null;
   revertingChangedFilesSummaryId?: string | null;
+  pinningChangedFilesSummaryId?: string | null;
 }>();
 
 const HIDDEN_RUNTIME_TIMELINE_EVENT_TYPES = new Set<TAgentRuntimeEvent['type']>([
@@ -42,6 +43,7 @@ const HIDDEN_RUNTIME_TIMELINE_EVENT_TYPES = new Set<TAgentRuntimeEvent['type']>(
 const emit = defineEmits<{
   messageAction: [messageId: string, actionId: TAiChatMessageActionId];
   changedFilesRollback: [messageId: string, summaryId: string];
+  changedFilesPin: [messageId: string, summaryId: string, pinned: boolean];
 }>();
 
 const notifier = useMessage();
@@ -376,7 +378,9 @@ onBeforeUnmount(() => {
     <AiChangedFilesSummary v-if="message.changedFilesSummary" class="ai-message-changed-files"
       :summary="message.changedFilesSummary" :patches="message.patches ?? []" :workspace-root-path="workspaceRootPath"
       :is-reverting="revertingChangedFilesSummaryId === message.changedFilesSummary.id" variant="message"
-      @undo="emit('changedFilesRollback', message.id, $event)" />
+      :is-pinning="pinningChangedFilesSummaryId === message.changedFilesSummary.id"
+      @undo="emit('changedFilesRollback', message.id, $event)"
+      @pin="(summaryId, pinned) => emit('changedFilesPin', message.id, summaryId, pinned)" />
     <div v-if="shouldShowStreamTokenProgress" class="ai-message-token-progress" aria-live="polite">
       {{ streamTokenProgressLabel }}
     </div>

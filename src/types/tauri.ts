@@ -65,6 +65,8 @@ import type {
   IAiEditRevertTaskPayload,
   IAiEditRevertTaskRequest,
   IAiEditSetAuthLevelRequest,
+  IAiEditSetPinPayload,
+  IAiEditSetPinRequest,
   IAiEditUndoOperationPayload,
   IAiEditUndoOperationRequest,
 } from './ai-edit';
@@ -420,6 +422,7 @@ export interface ITauriService {
   aiEditCreateSnapshot(
     payload: IAiEditCreateSnapshotRequest,
   ): Promise<IAiEditCreateSnapshotPayload>;
+  aiEditSetPin(payload: IAiEditSetPinRequest): Promise<IAiEditSetPinPayload>;
   aiEditGetDiff(payload: IAiEditGetDiffRequest): Promise<IAiEditGetDiffPayload>;
   aiEditRestoreSnapshot(
     payload: IAiEditRestoreSnapshotRequest,

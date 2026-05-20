@@ -34,6 +34,11 @@ export const aiEditTimelineEntryTypeSchema = z.enum(AI_EDIT_TIMELINE_ENTRY_TYPES
 export const aiEditRevertGranularitySchema = z.enum(AI_EDIT_REVERT_GRANULARITIES);
 
 /**
+ * AED Pin 目标类型 schema。
+ */
+export const aiEditPinTargetTypeSchema = z.enum(['operation', 'snapshot', 'task']);
+
+/**
  * AED 单次编辑操作 schema。
  */
 export const aiEditOperationSchema = z.object({
@@ -51,6 +56,8 @@ export const aiEditOperationSchema = z.object({
     appliedAt: z.string().min(1),
     reason: z.string().min(1),
     toolCallId: z.string().min(1).nullable(),
+    diffText: z.string().nullable().optional(),
+    pinned: z.boolean().default(false),
 });
 
 /**
@@ -65,6 +72,8 @@ export const aiSnapshotSchema = z.object({
     fileRefs: z.array(z.string().min(1)),
     storageKey: z.string().min(1),
     sizeBytes: z.number().int().nonnegative(),
+    contentAvailable: z.boolean().default(true),
+    pinned: z.boolean().default(false),
 });
 
 /**
@@ -127,6 +136,25 @@ export const aiEditCreateSnapshotRequestSchema = z.object({
  */
 export const aiEditCreateSnapshotPayloadSchema = z.object({
     snapshot: aiSnapshotSchema,
+});
+
+/**
+ * AED Pin 状态更新请求 schema。
+ */
+export const aiEditSetPinRequestSchema = z.object({
+    targetType: aiEditPinTargetTypeSchema,
+    targetId: z.string().min(1),
+    pinned: z.boolean(),
+});
+
+/**
+ * AED Pin 状态更新结果 schema。
+ */
+export const aiEditSetPinPayloadSchema = z.object({
+    targetType: aiEditPinTargetTypeSchema,
+    targetId: z.string().min(1),
+    pinned: z.boolean(),
+    pinnedAt: z.string().min(1).nullable(),
 });
 
 /**

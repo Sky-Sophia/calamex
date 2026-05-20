@@ -44,19 +44,31 @@ pub fn save_config(
 
     match role {
         AiResolvedModelRole::Main => {
+            let active_profile_id = resolve_retained_profile_id(
+                &guard,
+                AiResolvedModelRole::Main,
+                provider_type,
+                normalized_base_url.as_deref(),
+            );
             guard.provider_type = provider_type.to_string();
             guard.selected_model = model;
             guard.base_url = normalized_base_url;
-            guard.active_profile_id = None;
+            guard.active_profile_id = active_profile_id;
             guard.inline_completion_enabled = inline_completion_enabled;
             guard.chat_enabled = chat_enabled;
             guard.agent_enabled = agent_enabled;
         }
         AiResolvedModelRole::Narrator => {
+            let active_profile_id = resolve_retained_profile_id(
+                &guard,
+                AiResolvedModelRole::Narrator,
+                provider_type,
+                normalized_base_url.as_deref(),
+            );
             guard.narrator.provider_type = provider_type.to_string();
             guard.narrator.selected_model = model;
             guard.narrator.base_url = normalized_base_url;
-            guard.narrator.active_profile_id = None;
+            guard.narrator.active_profile_id = active_profile_id;
         }
     }
 
@@ -66,6 +78,32 @@ pub fn save_config(
     audit::emit(AiAuditEventKind::ConfigUpdated);
 
     Ok(payload)
+}
+
+pub(super) fn resolve_retained_profile_id(
+    config: &AiRuntimeConfig,
+    role: AiResolvedModelRole,
+    provider_type: &str,
+    base_url: Option<&str>,
+) -> Option<String> {
+    let active_profile_id = match role {
+        AiResolvedModelRole::Main => config.active_profile_id.as_deref(),
+        AiResolvedModelRole::Narrator => config.narrator.active_profile_id.as_deref(),
+    }?;
+    let active_profile = config
+        .profiles
+        .iter()
+        .find(|profile| profile.id == active_profile_id)?;
+
+    if active_profile.role != role.as_str()
+        || active_profile.provider_type != provider_type
+        || active_profile.base_url.as_deref() != base_url
+        || !CredentialStore::has_profile_secret(&active_profile.id)
+    {
+        return None;
+    }
+
+    Some(active_profile.id.clone())
 }
 
 pub fn save_credentials(

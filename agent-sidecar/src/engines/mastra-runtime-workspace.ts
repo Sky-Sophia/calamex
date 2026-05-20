@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { AgentBrowser } from '@mastra/agent-browser';
 import type { MastraBrowser } from '@mastra/core/browser';
 import { BatchPartsProcessor, PIIDetector, UnicodeNormalizer, type InputProcessorOrWorkflow, type OutputProcessorOrWorkflow } from '@mastra/core/processors';
-import { LocalFilesystem, LocalSandbox, Workspace, WORKSPACE_TOOLS, type AnyWorkspace, type CommandResult, type ExecuteCommandOptions } from '@mastra/core/workspace';
+import { LocalFilesystem, LocalSandbox, Workspace, WORKSPACE_TOOLS, type AnyWorkspace, type CommandResult, type ExecuteCommandOptions, type WorkspaceToolsConfig } from '@mastra/core/workspace';
 import { MastraStorageExporter, Observability, SensitiveDataFilter } from '@mastra/observability';
 import type { IAgentContextReferenceInput, IAgentRuntimeInput } from './runtime-input.js';
 import type { IMastraTextModeExecutionPlan, IMastraToolLoadPlan, TMastraToolProfile } from './mastra-runtime-types.js';
@@ -378,6 +378,48 @@ export const destroyMastraBrowser = async (browser: MastraBrowser | undefined): 
     }
 
     await browser.close().catch(() => undefined);
+};
+
+export const allowWorkspaceWriteAfterVerifiedRead = async (
+    workspace: AnyWorkspace | undefined,
+    path: string | undefined,
+): Promise<void> => {
+    if (!workspace || !path) {
+        return;
+    }
+
+    const filesystem = workspace.filesystem;
+    const originalToolsConfig = workspace.getToolsConfig();
+    if (!filesystem) {
+        return;
+    }
+
+    const statAtApproval = await filesystem.stat(path);
+    await filesystem.readFile(path, { encoding: 'utf-8' });
+
+    const toolConfig = originalToolsConfig?.[WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE];
+    const writeFileConfig = toolConfig && typeof toolConfig === 'object'
+        ? toolConfig
+        : {};
+    const relaxedToolsConfig: WorkspaceToolsConfig = {
+        ...(originalToolsConfig ?? {}),
+        [WORKSPACE_TOOLS.FILESYSTEM.WRITE_FILE]: {
+            ...writeFileConfig,
+            requireReadBeforeWrite: async ({ args }): Promise<boolean> => {
+                const requestedPath = typeof args === 'object' && args !== null && 'path' in args
+                    ? args.path
+                    : undefined;
+                if (requestedPath !== path) {
+                    return true;
+                }
+
+                const currentStat = await filesystem.stat(path);
+                return currentStat.modifiedAt.getTime() !== statAtApproval.modifiedAt.getTime();
+            },
+        },
+    };
+
+    workspace.setToolsConfig(relaxedToolsConfig);
 };
 
 export const createMastraToolLoadPlan = (

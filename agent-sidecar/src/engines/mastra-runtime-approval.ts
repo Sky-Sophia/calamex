@@ -8,7 +8,7 @@ import { createErrorResponse } from './mastra-runtime-responses.js';
 import { DEFAULT_EXECUTION_AGENT_ID } from './mastra-runtime-types.js';
 import type { IMastraAgentStreamLike, IMastraApprovalOptions } from './mastra-runtime-types.js';
 import { createRuntimeEventFactory, createSessionId, pushUiEvent } from './mastra-runtime-utils.js';
-import { destroyMastraBrowser, destroyMastraWorkspace } from './mastra-runtime-workspace.js';
+import { allowWorkspaceWriteAfterVerifiedRead, destroyMastraBrowser, destroyMastraWorkspace } from './mastra-runtime-workspace.js';
 import type { IAgentRuntimeResponse, IAgentRuntimeRunOptions, TAgentRuntimeOutputEvent } from './runtime-contracts.js';
 import type { IApprovalResolutionInput } from './runtime-input.js';
 
@@ -114,6 +114,10 @@ export class MastraRuntimeApproval extends MastraRuntimeExecution {
                         ),
                     } : {}),
                 };
+
+                if (isApprovedDecision(input.decision)) {
+                    await allowWorkspaceWriteAfterVerifiedRead(pending.workspace, pending.approvedPath);
+                }
 
                 if (pending.kind === 'suspended') {
                     if (typeof resumeSuspendedTool !== 'function') {

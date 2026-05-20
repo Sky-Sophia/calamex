@@ -1,4 +1,5 @@
 use crate::ai_edit::{errors, storage_lock};
+use crate::ai_edit::pins::PinIndex;
 use crate::commands::contracts::AiEditOperationPayload;
 use fjall::{Database, Keyspace, KeyspaceCreateOptions, PersistMode};
 use std::collections::HashSet;
@@ -50,6 +51,22 @@ pub fn list_operations(storage_root: &Path) -> Result<Vec<AiEditOperationPayload
     storage_lock::with_storage_read_lock(storage_root, "读取 AED 操作日志", || {
         list_operations_locked(storage_root)
     })
+}
+
+pub fn list_operations_with_pins(
+    storage_root: &Path,
+    pin_index: &PinIndex,
+) -> Result<Vec<AiEditOperationPayload>, String> {
+    let mut operations = list_operations(storage_root)?;
+    merge_operation_pins(&mut operations, pin_index);
+    Ok(operations)
+}
+
+pub fn merge_operation_pins(operations: &mut [AiEditOperationPayload], pin_index: &PinIndex) {
+    for operation in operations {
+        operation.pinned = pin_index.pinned_operations.contains(&operation.id)
+            || pin_index.pinned_tasks.contains(&operation.task_id);
+    }
 }
 
 fn list_operations_locked(storage_root: &Path) -> Result<Vec<AiEditOperationPayload>, String> {
@@ -235,6 +252,8 @@ mod tests {
             applied_at: format!("2026-04-28T10:00:0{}.000Z", &id[id.len() - 1..]),
             reason: "测试日志".to_string(),
             tool_call_id: None,
+            diff_text: None,
+            pinned: false,
         }
     }
 

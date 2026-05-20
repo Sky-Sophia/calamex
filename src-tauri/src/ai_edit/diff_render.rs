@@ -64,6 +64,17 @@ pub fn render_patch_hunks(before: &str, after: &str) -> RenderedDiff {
     }
 }
 
+pub fn render_unified_diff_text(before_path: &str, after_path: &str, before: &str, after: &str) -> String {
+    let mut options = DiffOptions::new();
+    options.set_context_len(3);
+    let patch = options.create_patch(before, after);
+    let mut text = String::new();
+    text.push_str(&format!("--- {before_path}\n"));
+    text.push_str(&format!("+++ {after_path}\n"));
+    text.push_str(&patch.to_string());
+    text
+}
+
 /// 将单个 hunk 反向作用到「应用后」文本上，恢复对应区段为 before 状态。
 ///
 /// 严格校验：当前文件 `[new_start, new_start + new_lines)` 区段必须与 hunk

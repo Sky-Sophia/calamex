@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { createRawTokens, highlightCode, isBold, isItalic, isUnderline, type ITokenizedCode } from '@/components/ai-elements/code-block/utils';
 import { useMessage } from '@/composables/useMessage';
+import { light as lightThemeRoles } from '@/themes/variants/light';
 import { writeClipboardText } from '@/utils/clipboard';
 import {
   buildSshPreviewMatchHits,
@@ -60,6 +61,8 @@ interface IIndexedPreviewMatchHit extends ISshPreviewMatchHit {
   globalIndex: number;
 }
 
+type TSshPreviewThemeStyle = CSSProperties & Record<`--${string}`, string>;
+
 const props = defineProps<{
   fileItem: ISshFileItem;
   payload: ISshFileReadPayload | null;
@@ -78,6 +81,8 @@ const message = useMessage();
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const editorRef = ref<HTMLTextAreaElement | null>(null);
 const codeViewportRef = ref<HTMLElement | null>(null);
+const editorScrollLeft = ref(0);
+const editorScrollTop = ref(0);
 const isSearchOpen = ref(false);
 const isWrapped = ref(false);
 const isEditing = ref(false);
@@ -188,6 +193,8 @@ watch(
     isEditing.value = false;
     searchQuery.value = '';
     activeHitIndex.value = -1;
+    editorScrollLeft.value = 0;
+    editorScrollTop.value = 0;
     cursorPosition.value = { line: 1, column: 1 };
   },
   { immediate: true },
@@ -198,6 +205,8 @@ watch(
   (payload) => {
     draftContent.value = payload ? normalizeSshPreviewContent(payload.content) : '';
     isEditing.value = false;
+    editorScrollLeft.value = 0;
+    editorScrollTop.value = 0;
     cursorPosition.value = { line: 1, column: 1 };
   },
   { immediate: true },
@@ -265,6 +274,7 @@ watch(
 
     void nextTick(() => {
       editorRef.value?.focus();
+      syncEditorScroll();
       updateCursorFromEditor();
     });
   },
@@ -286,6 +296,31 @@ const renderedLines = computed<IRenderedPreviewLine[]>(() =>
 const previewFileIcon = computed(() =>
   languageInfo.value.shikiLanguage === 'text' ? FileText : FileCode2,
 );
+const editorHighlightStyle = computed<CSSProperties>(() => ({
+  transform: `translate(${-editorScrollLeft.value}px, ${-editorScrollTop.value}px)`,
+}));
+const editorGutterStyle = computed<CSSProperties>(() => ({
+  transform: `translateY(${-editorScrollTop.value}px)`,
+}));
+const previewThemeStyle = computed<TSshPreviewThemeStyle>(() => ({
+  '--ssh-preview-background': lightThemeRoles.surface.app,
+  '--ssh-preview-panel': lightThemeRoles.surface.panel,
+  '--ssh-preview-panel-soft': lightThemeRoles.surface.sidebar,
+  '--ssh-preview-hover': lightThemeRoles.surface.hover,
+  '--ssh-preview-active': lightThemeRoles.surface.softStrong,
+  '--ssh-preview-selection': lightThemeRoles.surface.selection,
+  '--ssh-preview-border': lightThemeRoles.border.divider,
+  '--ssh-preview-border-strong': lightThemeRoles.border.strong,
+  '--ssh-preview-text-primary': lightThemeRoles.text.primary,
+  '--ssh-preview-text-secondary': lightThemeRoles.text.secondary,
+  '--ssh-preview-text-tertiary': lightThemeRoles.text.tertiary,
+  '--ssh-preview-text-quaternary': lightThemeRoles.text.quaternary,
+  '--ssh-preview-accent': lightThemeRoles.accent.strong,
+  '--ssh-preview-accent-muted': lightThemeRoles.accent.muted,
+  '--ssh-preview-accent-foreground': lightThemeRoles.text.onAccent,
+  '--ssh-preview-success': lightThemeRoles.status.success,
+  '--ssh-preview-warning': lightThemeRoles.status.warningMuted,
+}));
 
 function formatRemoteFileSize(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -460,6 +495,7 @@ function selectActiveHitInEditor(): void {
     const targetTop =
       activeHit.lineIndex * lineHeight - editor.clientHeight / 2 + lineHeight;
     editor.scrollTop = Math.max(0, targetTop);
+    syncEditorScroll(editor);
   }
 }
 
@@ -470,6 +506,20 @@ function updateCursorFromEditor(target = editorRef.value): void {
 
   const beforeCursor = target.value.slice(0, target.selectionStart);
   cursorPosition.value = resolveSshPreviewCursorPosition(beforeCursor);
+}
+
+function syncEditorScroll(target = editorRef.value): void {
+  if (!target) {
+    return;
+  }
+
+  editorScrollLeft.value = target.scrollLeft;
+  editorScrollTop.value = target.scrollTop;
+}
+
+function handleEditorScroll(): void {
+  syncEditorScroll();
+  updateCursorFromEditor();
 }
 
 function updateCursorFromPreviewSelection(): void {
@@ -530,6 +580,8 @@ function openEditMode(): void {
   }
 
   draftContent.value = previewContent.value;
+  editorScrollLeft.value = 0;
+  editorScrollTop.value = 0;
   isEditing.value = true;
 }
 
@@ -551,6 +603,8 @@ function cancelEditMode(): void {
   }
 
   draftContent.value = previewContent.value;
+  editorScrollLeft.value = 0;
+  editorScrollTop.value = 0;
   isEditing.value = false;
   cursorPosition.value = { line: 1, column: 1 };
 }
@@ -658,7 +712,11 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div class="ssh-preview-dialog__scrim" @click.self="requestClose">
+    <div
+      class="ssh-preview-dialog__scrim"
+      :style="previewThemeStyle"
+      @click.self="requestClose"
+    >
       <section class="ssh-preview-dialog" role="dialog" aria-modal="true" aria-label="SSH 文件预览">
         <header class="ssh-preview-dialog__header">
           <div class="ssh-preview-dialog__file-icon" aria-hidden="true">
@@ -877,27 +935,70 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-if="isEditing" class="ssh-preview-dialog__editor-grid">
-              <div class="ssh-preview-dialog__gutter" aria-hidden="true">
-                <span
-                  v-for="lineIndex in currentContentLines.length"
-                  :key="`editor-line-${lineIndex}`"
+              <div
+                class="ssh-preview-dialog__gutter ssh-preview-dialog__editor-gutter"
+                aria-hidden="true"
+              >
+                <div
+                  class="ssh-preview-dialog__editor-gutter-lines"
+                  :style="editorGutterStyle"
                 >
-                  {{ lineIndex }}
-                </span>
+                  <span
+                    v-for="lineIndex in currentContentLines.length"
+                    :key="`editor-line-${lineIndex}`"
+                  >
+                    {{ lineIndex }}
+                  </span>
+                </div>
               </div>
 
-              <textarea
-                ref="editorRef"
-                v-model="draftContent"
-                class="ssh-preview-dialog__editor"
-                :class="{ 'is-wrapped': isWrapped }"
-                :wrap="isWrapped ? 'soft' : 'off'"
-                spellcheck="false"
-                @click="updateCursorFromEditor()"
-                @keyup="updateCursorFromEditor()"
-                @select="updateCursorFromEditor()"
-                @scroll.passive="updateCursorFromEditor()"
-              />
+              <div class="ssh-preview-dialog__editor-shell">
+                <div
+                  class="ssh-preview-dialog__editor-highlight"
+                  :style="editorHighlightStyle"
+                  aria-hidden="true"
+                >
+                  <div
+                    v-for="line in renderedLines"
+                    :key="`editor-highlight-${line.key}`"
+                    class="ssh-preview-dialog__line-code ssh-preview-dialog__line-code--editor"
+                    data-ssh-preview-line-code="true"
+                  >
+                    <template v-if="line.segments.length === 0">
+                      <span class="ssh-preview-dialog__empty-line">&nbsp;</span>
+                    </template>
+
+                    <template v-else>
+                      <span
+                        v-for="segment in line.segments"
+                        :key="segment.key"
+                        class="ssh-preview-dialog__segment"
+                        :class="{
+                          'is-match': segment.matched,
+                          'is-active-match': segment.active,
+                        }"
+                        :data-ssh-preview-active-hit="segment.active ? 'true' : undefined"
+                        :style="segment.style"
+                      >
+                        {{ segment.text }}
+                      </span>
+                    </template>
+                  </div>
+                </div>
+
+                <textarea
+                  ref="editorRef"
+                  v-model="draftContent"
+                  class="ssh-preview-dialog__editor"
+                  :class="{ 'is-wrapped': isWrapped }"
+                  :wrap="isWrapped ? 'soft' : 'off'"
+                  spellcheck="false"
+                  @click="updateCursorFromEditor()"
+                  @keyup="updateCursorFromEditor()"
+                  @select="updateCursorFromEditor()"
+                  @scroll.passive="handleEditorScroll"
+                />
+              </div>
             </div>
 
             <div v-else class="ssh-preview-dialog__preview-grid" @mouseup="handlePreviewMouseUp">
@@ -978,7 +1079,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: color-mix(in srgb, var(--background) 70%, transparent);
+  background: color-mix(in srgb, var(--ssh-preview-background) 58%, transparent);
   backdrop-filter: blur(6px);
 }
 
@@ -989,12 +1090,12 @@ onBeforeUnmount(() => {
   min-height: 420px;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--border-strong);
+  border: 1px solid color-mix(in srgb, var(--ssh-preview-border) 92%, transparent);
   border-radius: calc(var(--radius) + 2px);
-  background: color-mix(in srgb, var(--panel-bg) 98%, var(--background));
+  background: var(--ssh-preview-panel);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--shell-divider) 26%, transparent),
-    0 24px 60px color-mix(in srgb, var(--text-primary) 14%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--ssh-preview-border) 26%, transparent),
+    0 24px 60px color-mix(in srgb, var(--ssh-preview-text-primary) 14%, transparent);
 }
 
 .ssh-preview-dialog__header {
@@ -1002,8 +1103,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--shell-divider) 84%, transparent);
-  background: color-mix(in srgb, var(--panel-bg) 98%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--ssh-preview-border) 84%, transparent);
+  background: var(--ssh-preview-panel);
 }
 
 .ssh-preview-dialog__file-icon {
@@ -1013,8 +1114,8 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   place-items: center;
   border-radius: calc(var(--radius) - 4px);
-  background: color-mix(in srgb, var(--accent-strong) 12%, var(--panel-bg));
-  color: var(--accent-strong);
+  background: color-mix(in srgb, var(--ssh-preview-accent) 12%, var(--ssh-preview-panel));
+  color: var(--ssh-preview-accent);
 }
 
 .ssh-preview-dialog__file-icon :deep(svg) {
@@ -1032,7 +1133,7 @@ onBeforeUnmount(() => {
 .ssh-preview-dialog__filename {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-primary);
+  color: var(--ssh-preview-text-primary);
   font-size: 14px;
   font-weight: 600;
   line-height: 1.25;
@@ -1043,7 +1144,7 @@ onBeforeUnmount(() => {
 .ssh-preview-dialog__filepath {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-tertiary);
+  color: var(--ssh-preview-text-tertiary);
   direction: rtl;
   font-family: var(--font-mono);
   font-size: 11.5px;
@@ -1065,7 +1166,7 @@ onBeforeUnmount(() => {
   height: 18px;
   flex: 0 0 auto;
   margin: 0 3px;
-  background: color-mix(in srgb, var(--shell-divider) 86%, transparent);
+  background: color-mix(in srgb, var(--ssh-preview-border) 86%, transparent);
 }
 
 .ssh-preview-dialog__icon-button,
@@ -1077,7 +1178,7 @@ onBeforeUnmount(() => {
   border: 1px solid transparent;
   border-radius: calc(var(--radius) - 4px);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--ssh-preview-text-secondary);
   cursor: pointer;
   transition:
     background-color 160ms cubic-bezier(0.23, 1, 0.32, 1),
@@ -1103,8 +1204,8 @@ onBeforeUnmount(() => {
 .ssh-preview-dialog__icon-button:hover:not(:disabled),
 .ssh-preview-dialog__action-button:hover:not(:disabled),
 .ssh-preview-dialog__footer-segment--button:hover:not(:disabled) {
-  background: var(--surface-hover);
-  color: var(--text-primary);
+  background: var(--ssh-preview-hover);
+  color: var(--ssh-preview-text-primary);
 }
 
 .ssh-preview-dialog__icon-button:active:not(:disabled),
@@ -1116,18 +1217,18 @@ onBeforeUnmount(() => {
 .ssh-preview-dialog__icon-button:focus-visible,
 .ssh-preview-dialog__action-button:focus-visible,
 .ssh-preview-dialog__footer-segment--button:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent-strong) 42%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--ssh-preview-accent) 42%, transparent);
   outline-offset: 2px;
 }
 
 .ssh-preview-dialog__action-button--primary {
-  background: var(--accent-strong);
-  color: var(--accent-foreground);
+  background: var(--ssh-preview-accent);
+  color: var(--ssh-preview-accent-foreground);
 }
 
 .ssh-preview-dialog__action-button--primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent-strong) 90%, var(--text-primary));
-  color: var(--accent-foreground);
+  background: color-mix(in srgb, var(--ssh-preview-accent) 90%, var(--ssh-preview-text-primary));
+  color: var(--ssh-preview-accent-foreground);
 }
 
 .ssh-preview-dialog__icon-button:disabled,
@@ -1152,9 +1253,9 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px 14px;
   padding: 10px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--shell-divider) 84%, transparent);
-  background: color-mix(in srgb, var(--panel-bg) 98%, transparent);
-  color: var(--text-secondary);
+  border-bottom: 1px solid color-mix(in srgb, var(--ssh-preview-border) 84%, transparent);
+  background: var(--ssh-preview-panel);
+  color: var(--ssh-preview-text-secondary);
   font-size: 12px;
 }
 
@@ -1165,16 +1266,16 @@ onBeforeUnmount(() => {
 }
 
 .ssh-preview-dialog__meta-item :deep(svg) {
-  color: var(--text-quaternary);
+  color: var(--ssh-preview-text-quaternary);
 }
 
 .ssh-preview-dialog__meta-label {
-  color: var(--text-tertiary);
+  color: var(--ssh-preview-text-tertiary);
 }
 
 .ssh-preview-dialog__meta-item b,
 .ssh-preview-dialog__mono {
-  color: var(--text-primary);
+  color: var(--ssh-preview-text-primary);
   font-size: 11.5px;
   font-weight: 500;
   font-family: var(--font-mono);
@@ -1185,8 +1286,8 @@ onBeforeUnmount(() => {
   align-items: center;
   padding: 2px 6px;
   border-radius: calc(var(--radius) - 7px);
-  background: color-mix(in srgb, var(--surface-hover) 92%, transparent);
-  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--ssh-preview-hover) 92%, transparent);
+  color: var(--ssh-preview-text-secondary);
   font-family: var(--font-mono);
   font-size: 10.5px;
 }
@@ -1196,7 +1297,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   margin-left: auto;
-  color: color-mix(in srgb, var(--success) 80%, var(--text-primary));
+  color: color-mix(in srgb, var(--ssh-preview-success) 80%, var(--ssh-preview-text-primary));
 }
 
 .ssh-preview-dialog__status::before {
@@ -1209,7 +1310,7 @@ onBeforeUnmount(() => {
 }
 
 .ssh-preview-dialog__status.is-editing {
-  color: color-mix(in srgb, var(--accent-strong) 78%, var(--text-primary));
+  color: color-mix(in srgb, var(--ssh-preview-accent) 78%, var(--ssh-preview-text-primary));
 }
 
 .ssh-preview-dialog__toolbar {
@@ -1217,8 +1318,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--shell-divider) 82%, transparent);
-  background: color-mix(in srgb, var(--sidebar-bg) 42%, var(--panel-bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--ssh-preview-border) 82%, transparent);
+  background: color-mix(in srgb, var(--ssh-preview-panel) 94%, var(--ssh-preview-panel-soft));
 }
 
 .ssh-preview-dialog__toolbar.is-open {
@@ -1231,9 +1332,9 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--ssh-preview-border);
   border-radius: calc(var(--radius) - 4px);
-  background: color-mix(in srgb, var(--panel-bg) 98%, transparent);
+  background: color-mix(in srgb, var(--ssh-preview-panel) 98%, transparent);
   padding: 0 10px;
   transition:
     border-color 160ms cubic-bezier(0.23, 1, 0.32, 1),
@@ -1241,15 +1342,15 @@ onBeforeUnmount(() => {
 }
 
 .ssh-preview-dialog__search:focus-within {
-  border-color: color-mix(in srgb, var(--accent-strong) 70%, var(--border-strong));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-strong) 16%, transparent);
+  border-color: color-mix(in srgb, var(--ssh-preview-accent) 70%, var(--ssh-preview-border-strong));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ssh-preview-accent) 16%, transparent);
 }
 
 .ssh-preview-dialog__search :deep(svg) {
   width: 14px;
   height: 14px;
   flex: 0 0 auto;
-  color: var(--text-quaternary);
+  color: var(--ssh-preview-text-quaternary);
 }
 
 .ssh-preview-dialog__search input {
@@ -1258,7 +1359,7 @@ onBeforeUnmount(() => {
   height: 32px;
   border: 0;
   background: transparent;
-  color: var(--text-primary);
+  color: var(--ssh-preview-text-primary);
   font-family: var(--font-mono);
   font-size: 12.5px;
   outline: none;
@@ -1266,7 +1367,7 @@ onBeforeUnmount(() => {
 
 .ssh-preview-dialog__search-count {
   flex: 0 0 auto;
-  color: var(--text-tertiary);
+  color: var(--ssh-preview-text-tertiary);
   font-family: var(--font-mono);
   font-size: 11px;
   white-space: nowrap;
@@ -1277,9 +1378,9 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  background: color-mix(in srgb, var(--panel-bg) 99%, transparent);
+  background: var(--ssh-preview-panel);
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--text-quaternary) 56%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--ssh-preview-text-quaternary) 56%, transparent) transparent;
 }
 
 .ssh-preview-dialog__code::-webkit-scrollbar {
@@ -1289,7 +1390,7 @@ onBeforeUnmount(() => {
 
 .ssh-preview-dialog__code::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: color-mix(in srgb, var(--text-quaternary) 54%, transparent);
+  background: color-mix(in srgb, var(--ssh-preview-text-quaternary) 54%, transparent);
 }
 
 .ssh-preview-dialog__code::-webkit-scrollbar-track {
@@ -1301,7 +1402,7 @@ onBeforeUnmount(() => {
   min-height: 100%;
   place-items: center;
   padding: 24px;
-  color: var(--text-secondary);
+  color: var(--ssh-preview-text-secondary);
   font-size: 13px;
 }
 
@@ -1311,17 +1412,16 @@ onBeforeUnmount(() => {
   z-index: 2;
   width: fit-content;
   margin: 12px auto 0;
-  border: 1px solid color-mix(in srgb, var(--accent-strong) 18%, var(--border-subtle));
+  border: 1px solid color-mix(in srgb, var(--ssh-preview-accent) 18%, var(--ssh-preview-border));
   border-radius: calc(var(--radius) - 2px);
-  background: color-mix(in srgb, var(--panel-bg) 92%, var(--background));
+  background: color-mix(in srgb, var(--ssh-preview-panel) 96%, var(--ssh-preview-background));
   padding: 4px 10px;
-  color: var(--text-secondary);
+  color: var(--ssh-preview-text-secondary);
   font-size: 11.5px;
   backdrop-filter: blur(4px);
 }
 
-.ssh-preview-dialog__preview-grid,
-.ssh-preview-dialog__editor-grid {
+.ssh-preview-dialog__preview-grid {
   min-width: 100%;
 }
 
@@ -1329,6 +1429,12 @@ onBeforeUnmount(() => {
 .ssh-preview-dialog__editor-grid {
   display: grid;
   grid-template-columns: auto 1fr;
+}
+
+.ssh-preview-dialog__editor-grid {
+  min-width: 100%;
+  height: 100%;
+  min-height: 0;
 }
 
 .ssh-preview-dialog__gutter {
@@ -1339,9 +1445,9 @@ onBeforeUnmount(() => {
   align-content: start;
   min-width: 64px;
   padding: 0 12px 0 18px;
-  border-right: 1px solid color-mix(in srgb, var(--shell-divider) 82%, transparent);
-  background: color-mix(in srgb, var(--panel-bg) 98%, transparent);
-  color: var(--text-tertiary);
+  border-right: 1px solid color-mix(in srgb, var(--ssh-preview-border) 82%, transparent);
+  background: var(--ssh-preview-panel);
+  color: var(--ssh-preview-text-tertiary);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.7;
@@ -1354,19 +1460,37 @@ onBeforeUnmount(() => {
   padding-bottom: 0;
 }
 
-.ssh-preview-dialog__editor-grid .ssh-preview-dialog__gutter {
+.ssh-preview-dialog__editor-gutter {
+  height: 100%;
+  min-height: 0;
   padding-top: 14px;
   padding-bottom: 14px;
+  overflow: hidden;
+}
+
+.ssh-preview-dialog__editor-gutter-lines {
+  position: absolute;
+  top: 14px;
+  right: 12px;
+  left: 18px;
+  display: grid;
+  align-content: start;
+  will-change: transform;
 }
 
 .ssh-preview-dialog__line-code,
-.ssh-preview-dialog__editor {
+.ssh-preview-dialog__editor,
+.ssh-preview-dialog__editor-highlight {
   min-height: 20px;
-  padding: 0 18px;
-  color: var(--text-primary);
+  color: var(--ssh-preview-text-primary);
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.7;
+  tab-size: 2;
+}
+
+.ssh-preview-dialog__line-code {
+  padding: 0 18px;
 }
 
 .ssh-preview-dialog__line-code {
@@ -1384,12 +1508,12 @@ onBeforeUnmount(() => {
 }
 
 .ssh-preview-dialog__segment.is-match {
-  background: color-mix(in srgb, var(--warning) 42%, transparent);
+  background: color-mix(in srgb, var(--ssh-preview-warning) 72%, transparent);
 }
 
 .ssh-preview-dialog__segment.is-active-match {
-  background: color-mix(in srgb, var(--warning) 68%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 34%, transparent);
+  background: color-mix(in srgb, var(--ssh-preview-warning) 92%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ssh-preview-warning) 64%, transparent);
 }
 
 .ssh-preview-dialog__empty-line {
@@ -1397,17 +1521,53 @@ onBeforeUnmount(() => {
   width: 1px;
 }
 
+.ssh-preview-dialog__editor-shell {
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  background: var(--ssh-preview-panel);
+}
+
+.ssh-preview-dialog__editor-highlight {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  min-width: max-content;
+  padding: 14px 18px;
+  overflow: hidden;
+  pointer-events: none;
+  white-space: pre;
+  will-change: transform;
+}
+
+.ssh-preview-dialog__line-code--editor {
+  padding: 0;
+}
+
+.ssh-preview-dialog__code.is-wrapped .ssh-preview-dialog__editor-highlight {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .ssh-preview-dialog__editor {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   width: 100%;
-  min-height: calc(100% - 0px);
+  height: 100%;
+  min-height: 0;
+  padding: 14px 18px;
   border: 0;
   background: transparent;
-  color: var(--text-primary);
+  color: transparent;
+  caret-color: var(--ssh-preview-text-primary);
   resize: none;
   outline: none;
   overflow: auto;
   white-space: pre;
-  tab-size: 2;
+  -webkit-text-fill-color: transparent;
 }
 
 .ssh-preview-dialog__editor.is-wrapped {
@@ -1416,7 +1576,7 @@ onBeforeUnmount(() => {
 }
 
 .ssh-preview-dialog__editor::selection {
-  background: color-mix(in srgb, var(--accent-strong) 24%, transparent);
+  background: color-mix(in srgb, var(--ssh-preview-accent) 24%, transparent);
 }
 
 .ssh-preview-dialog__footer {
@@ -1424,9 +1584,9 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px 10px;
   padding: 8px 14px;
-  border-top: 1px solid color-mix(in srgb, var(--shell-divider) 84%, transparent);
-  background: color-mix(in srgb, var(--sidebar-bg) 44%, var(--panel-bg));
-  color: var(--text-secondary);
+  border-top: 1px solid color-mix(in srgb, var(--ssh-preview-border) 84%, transparent);
+  background: color-mix(in srgb, var(--ssh-preview-panel) 94%, var(--ssh-preview-panel-soft));
+  color: var(--ssh-preview-text-secondary);
   font-family: var(--font-mono);
   font-size: 11.5px;
   flex-wrap: wrap;
@@ -1441,7 +1601,7 @@ onBeforeUnmount(() => {
 }
 
 .ssh-preview-dialog__footer-segment b {
-  color: var(--text-primary);
+  color: var(--ssh-preview-text-primary);
   font-weight: 500;
 }
 

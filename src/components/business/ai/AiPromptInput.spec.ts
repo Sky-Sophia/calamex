@@ -175,6 +175,26 @@ describe('AiPromptInput', () => {
     expect(wrapper.find('[data-slot="input-group"]').exists()).toBe(true);
   });
 
+  it('uses compact DeepSeek model labels on the outer trigger', () => {
+    const baseConfig = createDefaultAiConfigPayload();
+
+    const proWrapper = mountPromptInput({
+      config: {
+        ...baseConfig,
+        selectedModel: 'deepseek/deepseek-v4-pro',
+      },
+    });
+    const flashWrapper = mountPromptInput({
+      config: {
+        ...baseConfig,
+        selectedModel: 'deepseek/deepseek-v4-flash',
+      },
+    });
+
+    expect(proWrapper.get('.ai-model-trigger__label').text()).toBe('v4-pro');
+    expect(flashWrapper.get('.ai-model-trigger__label').text()).toBe('v4-flash');
+  });
+
   it('renders token usage before the send button', () => {
     const wrapper = mountPromptInput({
       tokenContext: {

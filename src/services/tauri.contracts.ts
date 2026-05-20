@@ -30,6 +30,8 @@ import {
   aiEditRevertTaskPayloadSchema,
   aiEditRevertTaskRequestSchema,
   aiEditSetAuthLevelRequestSchema,
+  aiEditSetPinPayloadSchema,
+  aiEditSetPinRequestSchema,
   aiEditUndoOperationPayloadSchema,
   aiEditUndoOperationRequestSchema,
 } from '@/types/ai-edit.schema';
@@ -1033,6 +1035,10 @@ export const tauriContracts = {
   aiEditCreateSnapshot: {
     inSchema: aiEditCreateSnapshotRequestSchema,
     outSchema: aiEditCreateSnapshotPayloadSchema,
+  },
+  aiEditSetPin: {
+    inSchema: aiEditSetPinRequestSchema,
+    outSchema: aiEditSetPinPayloadSchema,
   },
   aiEditGetDiff: {
     inSchema: aiEditGetDiffRequestSchema,

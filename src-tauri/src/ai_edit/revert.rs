@@ -607,7 +607,20 @@ fn resolve_diff_preview(
         }
         matched_operation = true;
 
-        let context = build_operation_diff_context(storage_root, &operation)?;
+        let context = match build_operation_diff_context(storage_root, &operation) {
+            Ok(context) => context,
+            Err(error) => {
+                if let Some(preview) = build_preview_from_stored_diff(&operation)? {
+                    if !preview.hunks.is_empty() {
+                        return Ok(preview);
+                    }
+                    last_preview = Some(preview);
+                    continue;
+                } else {
+                    return Err(error);
+                }
+            }
+        };
         let rendered =
             diff_render::render_patch_hunks(&context.before_content, &context.after_content);
 
@@ -651,6 +664,109 @@ fn resolve_diff_preview(
     Err(errors::restore_conflict(format!(
         "任务 {task_id} 中未找到文件 {target_path} 的 AED 编辑记录。"
     )))
+}
+
+fn build_preview_from_stored_diff(
+    operation: &AiEditOperationPayload,
+) -> Result<Option<ResolvedDiffPreview>, String> {
+    let Some(diff_text) = operation.diff_text.as_deref() else {
+        return Ok(None);
+    };
+    let (additions, deletions, hunks) = parse_stored_unified_diff_hunks(diff_text)?;
+    Ok(Some(ResolvedDiffPreview {
+        operation: operation.clone(),
+        path: operation_effective_path(operation).to_string(),
+        kind: operation.kind.clone(),
+        additions,
+        deletions,
+        hunks,
+    }))
+}
+
+fn parse_stored_unified_diff_hunks(
+    diff_text: &str,
+) -> Result<(u32, u32, Vec<AiEditDiffHunkPayload>), String> {
+    let mut additions = 0;
+    let mut deletions = 0;
+    let mut hunks = Vec::new();
+    let mut current: Option<AiEditDiffHunkPayload> = None;
+
+    for line in diff_text.lines() {
+        if let Some(header) = line.strip_prefix("@@ ") {
+            if let Some(hunk) = current.take() {
+                hunks.push(hunk);
+            }
+            let (old_start, old_lines, new_start, new_lines) = parse_unified_hunk_header(header)?;
+            current = Some(AiEditDiffHunkPayload {
+                hunk_index: hunks.len() as u32,
+                old_start,
+                old_lines,
+                new_start,
+                new_lines,
+                lines: Vec::new(),
+            });
+            continue;
+        }
+
+        let Some(hunk) = current.as_mut() else {
+            continue;
+        };
+        if line == "\\ No newline at end of file" {
+            hunk.lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with('+') {
+            additions += 1;
+            hunk.lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with('-') {
+            deletions += 1;
+            hunk.lines.push(line.to_string());
+            continue;
+        }
+        if line.starts_with(' ') {
+            hunk.lines.push(line.to_string());
+        }
+    }
+
+    if let Some(hunk) = current {
+        hunks.push(hunk);
+    }
+
+    Ok((additions, deletions, hunks))
+}
+
+fn parse_unified_hunk_header(header: &str) -> Result<(u32, u32, u32, u32), String> {
+    let range_part = header
+        .split(" @@")
+        .next()
+        .unwrap_or(header)
+        .trim();
+    let mut parts = range_part.split_whitespace();
+    let old_range = parts
+        .next()
+        .ok_or_else(|| errors::restore_conflict("存档 diff hunk 缺少旧范围。"))?;
+    let new_range = parts
+        .next()
+        .ok_or_else(|| errors::restore_conflict("存档 diff hunk 缺少新范围。"))?;
+    let (old_start, old_lines) = parse_unified_range(old_range, '-')?;
+    let (new_start, new_lines) = parse_unified_range(new_range, '+')?;
+    Ok((old_start, old_lines, new_start, new_lines))
+}
+
+fn parse_unified_range(value: &str, prefix: char) -> Result<(u32, u32), String> {
+    let raw = value
+        .strip_prefix(prefix)
+        .ok_or_else(|| errors::restore_conflict("存档 diff hunk 范围格式无效。"))?;
+    let (start, lines) = raw.split_once(',').unwrap_or((raw, "1"));
+    let start = start
+        .parse::<u32>()
+        .map_err(|error| errors::restore_conflict(format!("解析 hunk 起点失败：{error}")))?;
+    let lines = lines
+        .parse::<u32>()
+        .map_err(|error| errors::restore_conflict(format!("解析 hunk 行数失败：{error}")))?;
+    Ok((start, lines))
 }
 
 fn build_operation_diff_context(

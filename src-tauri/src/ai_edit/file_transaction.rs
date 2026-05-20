@@ -551,6 +551,8 @@ mod tests {
             applied_at: format!("2026-04-28T10:00:0{}.000Z", &id[id.len() - 1..]),
             reason: "事务测试".to_string(),
             tool_call_id: None,
+            diff_text: None,
+            pinned: false,
         }
     }
 

@@ -5,6 +5,7 @@ pub mod edit_journal;
 pub mod errors;
 pub mod file_transaction;
 pub mod path_security;
+pub mod pins;
 pub mod protected_paths;
 pub mod revert;
 pub mod snapshot;
@@ -19,6 +20,7 @@ use crate::commands::contracts::{
     AiEditRestoreSnapshotPayload, AiEditRestoreSnapshotRequest, AiEditRevertFilePayload,
     AiEditRevertFileRequest, AiEditRevertHunkPayload, AiEditRevertHunkRequest,
     AiEditRevertTaskPayload, AiEditRevertTaskRequest, AiEditSetAuthLevelRequest,
+    AiEditSetPinPayload, AiEditSetPinRequest,
     AiEditTimelineEntryPayload, AiEditUndoOperationPayload, AiEditUndoOperationRequest,
     AiSnapshotPayload,
 };
@@ -28,8 +30,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Mutex;
 
-const RETAINED_OPERATION_LIMIT: usize = 256;
-const RETAINED_SNAPSHOT_LIMIT: usize = 192;
+const OPERATION_METADATA_TTL_DAYS: i64 = 30;
 
 #[derive(Debug, Clone, Copy)]
 enum AiEditAuthLevel {
@@ -214,6 +215,19 @@ pub fn list_timeline_with_state(
     Ok(AiEditListTimelinePayload { entries })
 }
 
+pub fn list_timeline(
+    payload: AiEditListTimelineRequest,
+    state: &AiEditState,
+    storage_root: &Path,
+) -> Result<AiEditListTimelinePayload, String> {
+    let pin_records = pins::list_pin_records(storage_root)?;
+    let pin_index = pins::build_pin_index(&pin_records);
+    let mut stored_snapshots = snapshot::list_stored_snapshots(storage_root)?;
+    merge_snapshot_pins(&mut stored_snapshots, &pin_index);
+    let stored_operations = edit_journal::list_operations_with_pins(storage_root, &pin_index)?;
+    list_timeline_with_state(payload, state, stored_snapshots, stored_operations)
+}
+
 pub fn recover_pending_file_transactions(storage_root: &Path) -> Result<(), String> {
     file_transaction::recover_pending(storage_root)
 }
@@ -239,19 +253,16 @@ pub(crate) fn run_retention_policy_best_effort(state: &AiEditState, storage_root
         tracing::warn!(
             target: "ai.edit",
             error = %error,
-            retained_operation_limit = RETAINED_OPERATION_LIMIT,
-            retained_snapshot_limit = RETAINED_SNAPSHOT_LIMIT,
             "skip AED retention prune because pruning failed"
         );
     }
 }
 
 fn apply_retention_policy(state: &AiEditState, storage_root: &Path) -> Result<(), String> {
-    let Some(outcome) = apply_retention_policy_with_limits(
+    let Some(outcome) = apply_retention_policy_with_policy(
         state,
         storage_root,
-        RETAINED_SNAPSHOT_LIMIT,
-        RETAINED_OPERATION_LIMIT,
+        snapshot::SnapshotRetentionPolicy::default(),
     )?
     else {
         return Ok(());
@@ -264,8 +275,6 @@ fn apply_retention_policy(state: &AiEditState, storage_root: &Path) -> Result<()
         pruned_snapshot_count = outcome.pruned_snapshot_count,
         pruned_blob_count = outcome.pruned_blob_count,
         reclaimed_bytes = outcome.reclaimed_bytes,
-        retained_operation_limit = RETAINED_OPERATION_LIMIT,
-        retained_snapshot_limit = RETAINED_SNAPSHOT_LIMIT,
         "AI edit retention pruned stale local history"
     );
     audit::emit(AiAuditEventKind::AiEditPruned);
@@ -273,23 +282,25 @@ fn apply_retention_policy(state: &AiEditState, storage_root: &Path) -> Result<()
     Ok(())
 }
 
-fn apply_retention_policy_with_limits(
+fn apply_retention_policy_with_policy(
     state: &AiEditState,
     storage_root: &Path,
-    snapshot_limit: usize,
-    operation_limit: usize,
+    snapshot_policy: snapshot::SnapshotRetentionPolicy,
 ) -> Result<Option<AiEditRetentionOutcome>, String> {
     let stored_operations = edit_journal::list_operations(storage_root)?;
-    let retained_operations = if operation_limit == 0 {
-        Vec::new()
-    } else {
-        stored_operations
-            .iter()
-            .rev()
-            .take(operation_limit)
-            .cloned()
-            .collect::<Vec<_>>()
-    };
+    let pin_records = pins::list_pin_records(storage_root)?;
+    let pin_index = pins::build_pin_index(&pin_records);
+    let metadata_cutoff = snapshot_policy.now - chrono::Duration::days(OPERATION_METADATA_TTL_DAYS);
+    let retained_operations = stored_operations
+        .iter()
+        .filter(|operation| {
+            operation_is_pinned(operation, &pin_index)
+                || parse_rfc3339_utc(&operation.applied_at)
+                    .map(|applied_at| applied_at >= metadata_cutoff)
+                    .unwrap_or(true)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
     let retained_operation_ids = retained_operations
         .iter()
         .map(|operation| operation.id.clone())
@@ -299,30 +310,14 @@ fn apply_retention_policy_with_limits(
         .filter_map(|operation| operation.source_snapshot_id.clone())
         .collect::<HashSet<_>>();
 
-    let mut stored_snapshots = snapshot::list_stored_snapshots(storage_root)?;
-    stored_snapshots.sort_by(|left, right| {
-        left.created_at
-            .cmp(&right.created_at)
-            .then_with(|| left.id.cmp(&right.id))
-    });
-
-    let mut retained_snapshot_ids = if snapshot_limit == 0 {
-        HashSet::new()
-    } else {
-        stored_snapshots
-            .iter()
-            .rev()
-            .take(snapshot_limit)
-            .map(|snapshot| snapshot.id.clone())
-            .collect::<HashSet<_>>()
-    };
-    retained_snapshot_ids.extend(referenced_snapshot_ids);
-
     let journal_outcome = edit_journal::prune_operations(storage_root, &retained_operation_ids)?;
-    let snapshot_outcome = snapshot::prune_stored_snapshots(storage_root, &retained_snapshot_ids)?;
+    let snapshot_outcome =
+        snapshot::apply_snapshot_retention(storage_root, &pin_index, snapshot_policy)?;
 
     if journal_outcome.removed_operation_ids.is_empty()
         && snapshot_outcome.removed_snapshot_ids.is_empty()
+        && snapshot_outcome.removed_blob_count == 0
+        && snapshot_outcome.downgraded_snapshot_count == 0
     {
         return Ok(None);
     }
@@ -335,6 +330,9 @@ fn apply_retention_policy_with_limits(
         guard.retain(|entry| match entry {
             AiEditTimelineEntryPayload::Snapshot(snapshot) => {
                 !snapshot_outcome.removed_snapshot_ids.contains(&snapshot.id)
+                    && (referenced_snapshot_ids.contains(&snapshot.id)
+                        || snapshot.pinned
+                        || snapshot.content_available)
             }
             AiEditTimelineEntryPayload::Operation(operation) => !journal_outcome
                 .removed_operation_ids
@@ -350,6 +348,27 @@ fn apply_retention_policy_with_limits(
         pruned_operation_ids: journal_outcome.removed_operation_ids,
         pruned_snapshot_ids: snapshot_outcome.removed_snapshot_ids,
     }))
+}
+
+pub fn set_pin(
+    payload: AiEditSetPinRequest,
+    storage_root: &Path,
+    state: &AiEditState,
+) -> Result<AiEditSetPinPayload, String> {
+    let record = pins::set_pin(
+        storage_root,
+        &payload.target_type,
+        &payload.target_id,
+        payload.pinned,
+    )?;
+    refresh_timeline_pin_state(state, storage_root)?;
+    run_retention_policy_best_effort(state, storage_root);
+    Ok(AiEditSetPinPayload {
+        target_type: record.target_type,
+        target_id: record.target_id,
+        pinned: record.pinned,
+        pinned_at: record.pinned_at,
+    })
 }
 
 pub fn restore_snapshot(
@@ -540,10 +559,49 @@ fn normalize_optional_str<'a>(value: Option<&'a str>) -> Option<&'a str> {
     })
 }
 
+fn merge_snapshot_pins(snapshots: &mut [AiSnapshotPayload], pin_index: &pins::PinIndex) {
+    for snapshot in snapshots {
+        snapshot.pinned = pin_index.pinned_snapshots.contains(&snapshot.id)
+            || pin_index.pinned_tasks.contains(&snapshot.task_id);
+    }
+}
+
+fn operation_is_pinned(operation: &AiEditOperationPayload, pin_index: &pins::PinIndex) -> bool {
+    pin_index.pinned_operations.contains(&operation.id)
+        || pin_index.pinned_tasks.contains(&operation.task_id)
+}
+
+fn refresh_timeline_pin_state(state: &AiEditState, storage_root: &Path) -> Result<(), String> {
+    let pin_records = pins::list_pin_records(storage_root)?;
+    let pin_index = pins::build_pin_index(&pin_records);
+    let mut guard = state
+        .timeline
+        .lock()
+        .map_err(|_| errors::state_poisoned())?;
+    for entry in &mut *guard {
+        match entry {
+            AiEditTimelineEntryPayload::Snapshot(snapshot) => {
+                snapshot.pinned = pin_index.pinned_snapshots.contains(&snapshot.id)
+                    || pin_index.pinned_tasks.contains(&snapshot.task_id);
+            }
+            AiEditTimelineEntryPayload::Operation(operation) => {
+                operation.pinned = operation_is_pinned(operation, &pin_index);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_rfc3339_utc(value: &str) -> Option<chrono::DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|value| value.with_timezone(&Utc))
+        .ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_retention_policy_with_limits, create_snapshot, ensure_patch_authorized, errors,
+        apply_retention_policy_with_policy, create_snapshot, ensure_patch_authorized, errors,
         set_auth_level, AiEditState,
     };
     use crate::ai_edit::snapshot;
@@ -722,7 +780,15 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
 
-        let outcome = apply_retention_policy_with_limits(&state, &storage_root, 2, 0)
+        let outcome = apply_retention_policy_with_policy(
+            &state,
+            &storage_root,
+            snapshot::SnapshotRetentionPolicy {
+                now: chrono::Utc::now() + chrono::Duration::days(31),
+                total_blob_quota_bytes: 0,
+                ..snapshot::SnapshotRetentionPolicy::default()
+            },
+        )
             .expect("retention should succeed")
             .expect("retention should prune stale snapshots");
         let stored_snapshots =
@@ -736,11 +802,12 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(outcome.pruned_snapshot_count, 1);
-        assert_eq!(stored_snapshots.len(), 2);
-        assert_eq!(timeline_snapshot_ids.len(), 2);
+        assert_eq!(outcome.pruned_snapshot_count, 0);
+        assert_eq!(outcome.pruned_blob_count, 3);
+        assert_eq!(stored_snapshots.len(), 3);
+        assert_eq!(timeline_snapshot_ids.len(), 0);
         assert_eq!(outcome.pruned_operation_ids.len(), 0);
-        assert_eq!(outcome.pruned_snapshot_ids.len(), 1);
+        assert_eq!(outcome.pruned_snapshot_ids.len(), 0);
 
         let _ = fs::remove_dir_all(&storage_root);
     }

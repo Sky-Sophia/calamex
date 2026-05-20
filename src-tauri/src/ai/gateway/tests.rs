@@ -1,4 +1,5 @@
 use super::connection::{resolve_direct_upstream_endpoint, should_try_direct_upstream_fallback};
+use super::config::resolve_retained_profile_id;
 use super::conversation::{
     build_conversation_title_prompt, build_identity_system_prompt, normalize_conversation_title,
     with_identity_system_message,
@@ -6,8 +7,8 @@ use super::conversation::{
 use super::suggestions::{normalize_suggestion_text, parse_suggestion_pool_response};
 use super::{
     default_base_url, default_model, validate_provider, AiModelEndpointRuntimeConfig,
-    AiRuntimeConfig, DEFAULT_LITELLM_BASE_URL, DEFAULT_LITELLM_MODEL, DEFAULT_NARRATOR_MODEL,
-    MAX_GENERATED_TITLE_CHARS,
+    AiProviderProfile, AiResolvedModelRole, AiRuntimeConfig, DEFAULT_LITELLM_BASE_URL,
+    DEFAULT_LITELLM_MODEL, DEFAULT_NARRATOR_MODEL, MAX_GENERATED_TITLE_CHARS,
 };
 use crate::ai::provider::AiProviderMessage;
 
@@ -140,6 +141,33 @@ fn conversation_title_generation_prefers_narrator_model() {
             .selected_model
             .as_deref()
             .unwrap_or(DEFAULT_LITELLM_MODEL)
+    );
+}
+
+#[test]
+fn model_switch_does_not_retain_profile_without_matching_profile_secret() {
+    let config = AiRuntimeConfig {
+        active_profile_id: Some("ai-profile-openai".to_string()),
+        profiles: vec![AiProviderProfile {
+            id: "ai-profile-openai".to_string(),
+            role: "main".to_string(),
+            name: "openai/gpt-5.5".to_string(),
+            provider_type: "mastra".to_string(),
+            selected_model: Some("openai/gpt-5.5".to_string()),
+            base_url: None,
+            inline_completion_enabled: false,
+            chat_enabled: true,
+            agent_enabled: false,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            last_used_at: None,
+        }],
+        ..AiRuntimeConfig::default()
+    };
+
+    assert_eq!(
+        resolve_retained_profile_id(&config, AiResolvedModelRole::Main, "mastra", None),
+        None,
     );
 }
 

@@ -2,6 +2,8 @@
 import ChevronDownIcon from '~icons/lucide/chevron-down';
 import ExternalLinkIcon from '~icons/lucide/external-link';
 import Maximize2Icon from '~icons/lucide/maximize2';
+import PinIcon from '~icons/lucide/pin';
+import PinOffIcon from '~icons/lucide/pin-off';
 import Undo2Icon from '~icons/lucide/undo2';
 import { computed, ref } from 'vue';
 
@@ -26,17 +28,20 @@ const props = defineProps<{
   patches?: readonly IAiPatchSet[];
   workspaceRootPath?: string | null;
   isReverting?: boolean;
+  isPinning?: boolean;
 }>();
 
 const emit = defineEmits<{
   viewDiff: [diffRef: string, filePath: string];
   undo: [summaryId: string];
+  pin: [summaryId: string, pinned: boolean];
 }>();
 
 const isMessageVariant = computed(() => props.variant === 'message');
 const changedFileCountLabel = computed(() => `${props.summary.files.length} 个文件已更改`);
 const openFileKeys = ref<ReadonlySet<string>>(new Set());
 const isReverted = computed(() => Boolean(props.summary.revertedAt));
+const isPinned = computed(() => Boolean(props.summary.pinned));
 const undoLabel = computed(() => {
   if (props.isReverting) {
     return '撤销中';
@@ -44,6 +49,7 @@ const undoLabel = computed(() => {
 
   return isReverted.value ? '已撤销' : '撤销';
 });
+const pinLabel = computed(() => (isPinned.value ? '取消钉住' : '钉住'));
 
 const getFileKey = (file: IAiAgentChangedFile): string =>
   `${props.summary.id}:${file.path}:${file.diffRef}`;
@@ -140,6 +146,14 @@ const handleUndo = (): void => {
 
   emit('undo', props.summary.id);
 };
+
+const handlePin = (): void => {
+  if (props.isPinning) {
+    return;
+  }
+
+  emit('pin', props.summary.id, !isPinned.value);
+};
 </script>
 
 <template>
@@ -155,6 +169,18 @@ const handleUndo = (): void => {
         <span class="ai-changed-files-stat is-delete">-{{ summary.totalDeletions }}</span>
       </div>
       <div class="ai-changed-files-actions">
+        <button
+          type="button"
+          class="ai-changed-files-action is-icon-only"
+          :class="{ 'is-active': isPinned }"
+          :disabled="isPinning"
+          :aria-label="pinLabel"
+          :title="pinLabel"
+          @click="handlePin"
+        >
+          <PinOffIcon v-if="isPinned" aria-hidden="true" />
+          <PinIcon v-else aria-hidden="true" />
+        </button>
         <button
           type="button"
           class="ai-changed-files-action"
@@ -281,6 +307,10 @@ const handleUndo = (): void => {
   font-size: 13px;
   line-height: 18px;
   white-space: nowrap;
+}
+
+.ai-changed-files-action.is-active {
+  color: var(--text-primary);
 }
 
 button.ai-changed-files-action {

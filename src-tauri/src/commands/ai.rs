@@ -9,9 +9,10 @@ use super::contracts::{
     AiEditRestoreSnapshotPayload, AiEditRestoreSnapshotRequest, AiEditRevertFilePayload,
     AiEditRevertFileRequest, AiEditRevertHunkPayload, AiEditRevertHunkRequest,
     AiEditRevertTaskPayload, AiEditRevertTaskRequest, AiEditSetAuthLevelRequest,
-    AiEditUndoOperationPayload, AiEditUndoOperationRequest, AiInlineCompletionRangePayload,
-    AiInlineCompletionRequest, AiInlineCompletionResult, AiProposePatchPayload,
-    AiProposePatchRequest, AiProviderConnectionPayload, AiProviderConnectionRequest,
+    AiEditSetPinPayload, AiEditSetPinRequest, AiEditUndoOperationPayload,
+    AiEditUndoOperationRequest, AiInlineCompletionRangePayload, AiInlineCompletionRequest,
+    AiInlineCompletionResult, AiProposePatchPayload, AiProposePatchRequest,
+    AiProviderConnectionPayload, AiProviderConnectionRequest,
     AiProviderProfileDetailPayload, AiProviderProfilePayload, AiProviderProfileSwitchRequest,
     AiProviderTestPayload, AiSaveConfigRequest, AiSaveCredentialsRequest,
     AiSuggestionPoolPayload, AiSuggestionPoolRequest, AiWebFetchInput, AiWebFetchPayload,
@@ -331,9 +332,18 @@ pub fn ai_edit_list_timeline(
 ) -> Result<AiEditListTimelinePayload, String> {
     let snapshot_root = resolve_ai_edit_storage_root(&app)?;
     recover_ai_edit_storage(&snapshot_root)?;
-    let stored_snapshots = ai_edit::snapshot::list_stored_snapshots(&snapshot_root)?;
-    let stored_operations = ai_edit::edit_journal::list_operations(&snapshot_root)?;
-    ai_edit::list_timeline_with_state(payload, state.inner(), stored_snapshots, stored_operations)
+    ai_edit::list_timeline(payload, state.inner(), &snapshot_root)
+}
+
+#[tauri::command]
+pub fn ai_edit_set_pin(
+    app: AppHandle,
+    payload: AiEditSetPinRequest,
+    state: State<AiEditState>,
+) -> Result<AiEditSetPinPayload, String> {
+    let snapshot_root = resolve_ai_edit_storage_root(&app)?;
+    recover_ai_edit_storage(&snapshot_root)?;
+    ai_edit::set_pin(payload, &snapshot_root, state.inner())
 }
 
 #[tauri::command]

@@ -1,9 +1,10 @@
 use crate::ai_edit::{atomic_write, errors, storage_lock};
+use crate::ai_edit::pins::PinIndex;
 use crate::commands::contracts::{AiApplyPatchMetadataRequest, AiSnapshotPayload};
-use chrono::Utc;
+use chrono::{DateTime, Duration, Utc};
 use fjall::{Database, Keyspace, KeyspaceCreateOptions, PersistMode};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -18,12 +19,35 @@ const SNAPSHOT_SCOPE_PRE_REVERT: &str = "pre-revert";
 const SNAPSHOT_SCOPE_REVERT: &str = "revert";
 const SNAPSHOT_MANIFEST_VERSION: u32 = 2;
 const SMALL_BLOB_MAX_BYTES: usize = 256 * 1024;
+pub const FULL_BLOB_TTL_DAYS: i64 = 14;
+pub const PINNED_FULL_BLOB_TTL_DAYS: i64 = 30;
+pub const DEFAULT_TOTAL_BLOB_QUOTA_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[derive(Debug, Default)]
 pub struct SnapshotPruneOutcome {
     pub removed_snapshot_ids: HashSet<String>,
     pub removed_blob_count: usize,
     pub reclaimed_bytes: u64,
+    pub downgraded_snapshot_count: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SnapshotRetentionPolicy {
+    pub now: DateTime<Utc>,
+    pub full_blob_ttl: Duration,
+    pub pinned_full_blob_ttl: Duration,
+    pub total_blob_quota_bytes: u64,
+}
+
+impl Default for SnapshotRetentionPolicy {
+    fn default() -> Self {
+        Self {
+            now: Utc::now(),
+            full_blob_ttl: Duration::days(FULL_BLOB_TTL_DAYS),
+            pinned_full_blob_ttl: Duration::days(PINNED_FULL_BLOB_TTL_DAYS),
+            total_blob_quota_bytes: DEFAULT_TOTAL_BLOB_QUOTA_BYTES,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -64,7 +88,7 @@ struct SnapshotManifest {
 struct SnapshotManifestFile {
     path: String,
     content_hash: String,
-    blob_key: String,
+    blob_key: Option<String>,
     byte_size: u64,
 }
 
@@ -228,6 +252,16 @@ pub fn prune_stored_snapshots(
     })
 }
 
+pub fn apply_snapshot_retention(
+    storage_root: &Path,
+    pin_index: &PinIndex,
+    policy: SnapshotRetentionPolicy,
+) -> Result<SnapshotPruneOutcome, String> {
+    storage_lock::with_storage_write_lock(storage_root, "执行 AED 快照 GC", || {
+        apply_snapshot_retention_locked(storage_root, pin_index, policy)
+    })
+}
+
 fn prune_stored_snapshots_locked(
     storage_root: &Path,
     retained_snapshot_ids: &HashSet<String>,
@@ -237,7 +271,12 @@ fn prune_stored_snapshots_locked(
     let retained_blob_keys = manifests
         .iter()
         .filter(|manifest| retained_snapshot_ids.contains(&manifest.id))
-        .flat_map(|manifest| manifest.files.iter().map(|file| file.blob_key.clone()))
+        .flat_map(|manifest| {
+            manifest
+                .files
+                .iter()
+                .filter_map(|file| file.blob_key.clone())
+        })
         .collect::<HashSet<_>>();
 
     let mut blob_keys_to_remove = HashSet::new();
@@ -254,8 +293,11 @@ fn prune_stored_snapshots_locked(
         batch.remove(&store.snapshots, manifest.id.as_bytes().to_vec());
 
         for file in manifest.files {
-            if !retained_blob_keys.contains(&file.blob_key) {
-                blob_keys_to_remove.insert(file.blob_key);
+            let Some(blob_key) = file.blob_key else {
+                continue;
+            };
+            if !retained_blob_keys.contains(&blob_key) {
+                blob_keys_to_remove.insert(blob_key);
             }
         }
     }
@@ -305,6 +347,88 @@ fn prune_stored_snapshots_locked(
     Ok(outcome)
 }
 
+fn apply_snapshot_retention_locked(
+    storage_root: &Path,
+    pin_index: &PinIndex,
+    policy: SnapshotRetentionPolicy,
+) -> Result<SnapshotPruneOutcome, String> {
+    let store = open_store(storage_root)?;
+    let mut manifests = list_manifests(&store.snapshots)?;
+    let mut outcome = SnapshotPruneOutcome::default();
+    let mut batch = store.db.batch();
+    let mut blob_ref_counts = build_blob_ref_counts(&manifests);
+    let mut active_blob_bytes = build_active_blob_bytes(&manifests);
+
+    manifests.sort_by(|left, right| {
+        left.created_at
+            .cmp(&right.created_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    for manifest in &mut manifests {
+        let should_strip = should_strip_full_blobs(manifest, pin_index, policy);
+        if !should_strip || !manifest.has_live_blob() {
+            continue;
+        }
+
+        strip_manifest_blobs(
+            storage_root,
+            &store,
+            &mut batch,
+            manifest,
+            &mut blob_ref_counts,
+            &mut active_blob_bytes,
+            &mut outcome,
+        )?;
+    }
+
+    if policy.total_blob_quota_bytes > 0 {
+        let mut current_total = active_blob_bytes.values().copied().sum::<u64>();
+        for manifest in &mut manifests {
+            if current_total <= policy.total_blob_quota_bytes {
+                break;
+            }
+            if !manifest.has_live_blob() || is_full_blob_pin_protected(manifest, pin_index, policy)
+            {
+                continue;
+            }
+
+            let before_total = active_blob_bytes.values().copied().sum::<u64>();
+            strip_manifest_blobs(
+                storage_root,
+                &store,
+                &mut batch,
+                manifest,
+                &mut blob_ref_counts,
+                &mut active_blob_bytes,
+                &mut outcome,
+            )?;
+            current_total = active_blob_bytes.values().copied().sum::<u64>();
+            if current_total == before_total {
+                break;
+            }
+        }
+    }
+
+    if outcome.downgraded_snapshot_count == 0 && outcome.removed_blob_count == 0 {
+        return Ok(outcome);
+    }
+
+    for manifest in manifests {
+        let manifest_json = serde_json::to_vec(&manifest).map_err(|error| {
+            errors::snapshot_store_failed(format!("序列化快照清单失败：{error}"))
+        })?;
+        batch.insert(&store.snapshots, manifest.id.as_bytes().to_vec(), manifest_json);
+    }
+
+    batch
+        .commit()
+        .map_err(|error| errors::snapshot_store_failed(format!("执行 AED 快照 GC 失败：{error}")))?;
+    persist(&store.db)?;
+
+    Ok(outcome)
+}
+
 fn store_snapshot(
     storage_root: &Path,
     scope: &str,
@@ -346,7 +470,7 @@ fn store_snapshot_locked(
         manifest_files.push(SnapshotManifestFile {
             path: file.path.to_string(),
             content_hash: file.content_hash.to_string(),
-            blob_key,
+            blob_key: Some(blob_key),
             byte_size,
         });
     }
@@ -374,15 +498,17 @@ fn store_snapshot_locked(
     persist(&store.db)?;
 
     Ok(AiSnapshotPayload {
-        id: snapshot_id,
-        scope: scope.to_string(),
-        task_id: task_id.to_string(),
-        created_at: timestamp.to_rfc3339(),
-        label: label.to_string(),
-        file_refs,
-        storage_key: manifest.storage_key(),
-        size_bytes,
-    })
+            id: snapshot_id,
+            scope: scope.to_string(),
+            task_id: task_id.to_string(),
+            created_at: timestamp.to_rfc3339(),
+            label: label.to_string(),
+            file_refs,
+            storage_key: manifest.storage_key(),
+            size_bytes,
+            content_available: true,
+            pinned: false,
+        })
 }
 
 fn store_blob(
@@ -518,6 +644,144 @@ fn serialized_manifest_len(manifest: &SnapshotManifest) -> Result<u64, String> {
         .map_err(|error| errors::snapshot_store_failed(format!("序列化快照清单失败：{error}")))
 }
 
+fn build_blob_ref_counts(manifests: &[SnapshotManifest]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for manifest in manifests {
+        for blob_key in manifest.files.iter().filter_map(|file| file.blob_key.as_ref()) {
+            *counts.entry(blob_key.clone()).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+fn build_active_blob_bytes(manifests: &[SnapshotManifest]) -> HashMap<String, u64> {
+    let mut bytes_by_key = HashMap::new();
+    for manifest in manifests {
+        for file in &manifest.files {
+            if let Some(blob_key) = file.blob_key.as_ref() {
+                bytes_by_key.entry(blob_key.clone()).or_insert(file.byte_size);
+            }
+        }
+    }
+    bytes_by_key
+}
+
+fn should_strip_full_blobs(
+    manifest: &SnapshotManifest,
+    pin_index: &PinIndex,
+    policy: SnapshotRetentionPolicy,
+) -> bool {
+    let Some(age) = snapshot_age(manifest, policy.now) else {
+        return false;
+    };
+    if is_snapshot_pinned(manifest, pin_index) {
+        age > policy.pinned_full_blob_ttl
+    } else {
+        age > policy.full_blob_ttl
+    }
+}
+
+fn is_full_blob_pin_protected(
+    manifest: &SnapshotManifest,
+    pin_index: &PinIndex,
+    policy: SnapshotRetentionPolicy,
+) -> bool {
+    if !is_snapshot_pinned(manifest, pin_index) {
+        return false;
+    }
+    snapshot_age(manifest, policy.now)
+        .map(|age| age <= policy.pinned_full_blob_ttl)
+        .unwrap_or(true)
+}
+
+fn is_snapshot_pinned(manifest: &SnapshotManifest, pin_index: &PinIndex) -> bool {
+    pin_index.pinned_snapshots.contains(&manifest.id)
+        || pin_index.pinned_tasks.contains(&manifest.task_id)
+}
+
+fn snapshot_age(manifest: &SnapshotManifest, now: DateTime<Utc>) -> Option<Duration> {
+    parse_rfc3339_utc(&manifest.created_at).map(|created_at| now - created_at)
+}
+
+fn parse_rfc3339_utc(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|value| value.with_timezone(&Utc))
+        .ok()
+}
+
+fn strip_manifest_blobs(
+    storage_root: &Path,
+    store: &SnapshotStore,
+    batch: &mut fjall::OwnedWriteBatch,
+    manifest: &mut SnapshotManifest,
+    blob_ref_counts: &mut HashMap<String, usize>,
+    active_blob_bytes: &mut HashMap<String, u64>,
+    outcome: &mut SnapshotPruneOutcome,
+) -> Result<(), String> {
+    let mut changed = false;
+    let mut candidate_blob_keys = Vec::new();
+
+    for file in &mut manifest.files {
+        let Some(blob_key) = file.blob_key.take() else {
+            continue;
+        };
+        changed = true;
+        candidate_blob_keys.push(blob_key);
+    }
+
+    if !changed {
+        return Ok(());
+    }
+
+    for blob_key in candidate_blob_keys {
+        let Some(count) = blob_ref_counts.get_mut(&blob_key) else {
+            continue;
+        };
+        *count = count.saturating_sub(1);
+        if *count > 0 {
+            continue;
+        }
+
+        blob_ref_counts.remove(&blob_key);
+        active_blob_bytes.remove(&blob_key);
+        let removed_bytes = remove_blob(storage_root, store, batch, &blob_key)?;
+        if removed_bytes > 0 {
+            outcome.removed_blob_count += 1;
+            outcome.reclaimed_bytes += removed_bytes;
+        }
+    }
+
+    outcome.downgraded_snapshot_count += 1;
+    Ok(())
+}
+
+fn remove_blob(
+    storage_root: &Path,
+    store: &SnapshotStore,
+    batch: &mut fjall::OwnedWriteBatch,
+    blob_key: &str,
+) -> Result<u64, String> {
+    if let Some(fjall_key) = blob_key.strip_prefix("fjall:") {
+        let removed_bytes = store
+            .snapshot_blobs
+            .size_of(fjall_key)
+            .map_err(|error| {
+                errors::snapshot_store_failed(format!("读取 fjall blob 大小失败：{error}"))
+            })?
+            .unwrap_or_default() as u64;
+        batch.remove(&store.snapshot_blobs, fjall_key.as_bytes().to_vec());
+        return Ok(removed_bytes);
+    }
+
+    let Some(relative_key) = blob_key.strip_prefix("cas:") else {
+        return Err(errors::snapshot_store_failed("快照 blob key 格式无效。"));
+    };
+    remove_storage_file(
+        &join_storage_path(storage_root, relative_key),
+        "删除 CAS blob 失败",
+    )
+}
+
 fn build_cas_blob_key(content_hash: &str) -> String {
     let digest = content_hash
         .split_once(':')
@@ -563,6 +827,7 @@ impl SnapshotManifest {
 
     fn into_payload(self) -> AiSnapshotPayload {
         let storage_key = self.storage_key();
+        let content_available = self.has_live_blob();
         AiSnapshotPayload {
             id: self.id,
             scope: self.scope,
@@ -572,6 +837,8 @@ impl SnapshotManifest {
             file_refs: self.files.into_iter().map(|file| file.path).collect(),
             storage_key,
             size_bytes: self.size_bytes,
+            content_available,
+            pinned: false,
         }
     }
 
@@ -582,7 +849,13 @@ impl SnapshotManifest {
     ) -> Result<StoredSnapshot, String> {
         let mut files = Vec::with_capacity(self.files.len());
         for file in &self.files {
-            let content = read_blob(storage_root, &store.snapshot_blobs, &file.blob_key)?;
+            let Some(blob_key) = file.blob_key.as_deref() else {
+                return Err(errors::snapshot_store_failed(format!(
+                    "快照 {} 的全文内容已按保留策略清理，无法一键恢复。",
+                    self.id
+                )));
+            };
+            let content = read_blob(storage_root, &store.snapshot_blobs, blob_key)?;
             files.push(StoredSnapshotFile {
                 path: file.path.clone(),
                 content_hash: file.content_hash.clone(),
@@ -594,6 +867,10 @@ impl SnapshotManifest {
             snapshot: self.into_payload(),
             files,
         })
+    }
+
+    fn has_live_blob(&self) -> bool {
+        self.files.iter().all(|file| file.blob_key.is_some())
     }
 }
 

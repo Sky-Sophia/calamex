@@ -1192,6 +1192,13 @@ const aiEditCreateSnapshotIpc = definePayloadIpc(
   { audit: 'sensitive', timeoutMs: 20_000 },
 );
 
+const aiEditSetPinIpc = definePayloadIpc(
+  'ai_edit_set_pin',
+  '更新 AED Pin 状态',
+  tauriContracts.aiEditSetPin,
+  { audit: 'sensitive', timeoutMs: 15_000 },
+);
+
 const aiEditGetDiffIpc = definePayloadIpc(
   'ai_edit_get_diff',
   '读取 AED 文件 diff',
@@ -1566,6 +1573,8 @@ export const tauriService: ITauriService & {
   aiEditListTimeline: aiEditListTimelineIpc,
 
   aiEditCreateSnapshot: aiEditCreateSnapshotIpc,
+
+  aiEditSetPin: aiEditSetPinIpc,
 
   aiEditGetDiff: aiEditGetDiffIpc,
 

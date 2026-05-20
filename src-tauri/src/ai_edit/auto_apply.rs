@@ -3,6 +3,7 @@ use crate::ai_edit::file_transaction::{self, FileTransactionAction, FileTransact
 use crate::ai_edit::path_security;
 use crate::ai_edit::snapshot::{self, SnapshotSourceFile};
 use crate::ai_edit::{self, AiEditState};
+use crate::ai_edit::diff_render;
 use crate::ai_patch::{hash_text, read_text_file_baseline};
 use crate::commands::contracts::{
     AiApplyPatchMetadataRequest, AiEditOperationPayload, AiEditTimelineEntryPayload,
@@ -525,6 +526,7 @@ fn build_operation_payload(
             original_bytes,
         ),
     };
+    let diff_text = build_operation_diff_text(plan);
 
     AiEditOperationPayload {
         id: format!("ai-edit-op-{}-{index}", timestamp.timestamp_millis()),
@@ -541,7 +543,32 @@ fn build_operation_payload(
         applied_at: timestamp.to_rfc3339(),
         reason,
         tool_call_id: metadata.and_then(|value| value.tool_call_id.clone()),
+        diff_text,
+        pinned: false,
     }
+}
+
+fn build_operation_diff_text(plan: &AiAutoApplyOperationPlan) -> Option<String> {
+    let after_path = plan.new_path.as_deref().unwrap_or(&plan.path);
+    let (before, after) = match plan.kind {
+        AiAutoApplyOperationKind::Create => ("", plan.updated_content.as_deref()?),
+        AiAutoApplyOperationKind::Modify => (
+            plan.original_content.as_deref()?,
+            plan.updated_content.as_deref()?,
+        ),
+        AiAutoApplyOperationKind::Delete => (plan.original_content.as_deref()?, ""),
+        AiAutoApplyOperationKind::Rename => (
+            plan.original_content.as_deref()?,
+            plan.original_content.as_deref()?,
+        ),
+    };
+
+    Some(diff_render::render_unified_diff_text(
+        &plan.path,
+        after_path,
+        before,
+        after,
+    ))
 }
 
 fn validate_non_protected_path(

@@ -1334,6 +1334,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const isApplyingPatch = ref(false);
   const fileRollbackPrompt = ref<IAiFileRollbackPrompt | null>(null);
   const revertingChangedFilesSummaryId = ref<string | null>(null);
+  const pinningChangedFilesSummaryId = ref<string | null>(null);
   const runtimeTimelineEvents = shallowRef<TAgentRuntimeEvent[]>([]);
   const activeMode = computed<TAiAssistantMode>({
     get: () => agentStore.mode,
@@ -3843,6 +3844,58 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     }
   };
 
+  const setChangedFilesSummaryPin = async (
+    messageId: string,
+    summaryId: string,
+    pinned: boolean,
+  ): Promise<void> => {
+    if (pinningChangedFilesSummaryId.value) {
+      return;
+    }
+
+    const message = findMessageById(messageId);
+    const summary = message?.changedFilesSummary;
+
+    if (!message || !summary || summary.id !== summaryId) {
+      errorMessage.value = '未找到可钉住的文件变更。';
+      return;
+    }
+
+    const taskId = parseAiAedPatchRef(summary.patchRef);
+    if (!taskId) {
+      errorMessage.value = '当前变更没有可钉住的 AED 任务。';
+      return;
+    }
+
+    pinningChangedFilesSummaryId.value = summaryId;
+    errorMessage.value = '';
+
+    try {
+      await aiEditService.setPin({
+        targetType: 'task',
+        targetId: taskId,
+        pinned,
+      });
+
+      messages.value = messages.value.map((item) =>
+        item.id === messageId && item.changedFilesSummary?.id === summaryId
+          ? {
+              ...item,
+              changedFilesSummary: {
+                ...item.changedFilesSummary,
+                pinned,
+              },
+            }
+          : item,
+      );
+      commitDisplayMessagesToStore();
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error, '更新 AED Pin 状态失败');
+    } finally {
+      pinningChangedFilesSummaryId.value = null;
+    }
+  };
+
   const stopCurrentRequest = (): void => {
     const targetThreadId =
       activeSidecarAgentSession.value?.threadId ??
@@ -3917,6 +3970,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     conversationCheckpoints,
     restoringCheckpointId,
     revertingChangedFilesSummaryId,
+    pinningChangedFilesSummaryId,
     activeMode,
     agentSteps,
     providerProfiles,
@@ -3946,6 +4000,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     applyProposedPatch,
     rollbackLatestFileChange,
     rollbackChangedFilesSummary,
+    setChangedFilesSummaryPin,
     restoreConversationCheckpoint,
     clearConversation,
     deleteConversation,

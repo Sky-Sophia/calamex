@@ -28,6 +28,7 @@ declare module 'monaco-editor/esm/nls.messages.zh-cn.js';
 declare module 'monaco-editor/esm/vs/editor/contrib/clipboard/browser/clipboard';
 declare module 'monaco-editor/esm/vs/editor/contrib/comment/browser/comment';
 declare module 'monaco-editor/esm/vs/editor/contrib/find/browser/findController';
+declare module 'monaco-editor/esm/vs/editor/contrib/suggest/browser/suggestMemory.js';
 declare module 'monaco-editor/esm/vs/editor/standalone/browser/quickAccess/standaloneCommandsQuickAccess';
 declare module 'monaco-editor/esm/vs/editor/standalone/browser/quickAccess/standaloneGotoLineQuickAccess';
 
@@ -57,6 +58,9 @@ declare module 'monaco-editor/esm/vs/editor/common/core/selection.js';
 declare module 'monaco-editor/esm/vs/editor/common/standalone/standaloneEnums.js';
 declare module 'monaco-editor/esm/vs/editor/standalone/browser/standaloneEditor.js';
 declare module 'monaco-editor/esm/vs/editor/standalone/browser/standaloneLanguages.js';
+declare module 'monaco-editor/esm/vs/editor/editor.api.js' {
+    export * from 'monaco-editor';
+}
 
 // ── Vite ?worker 后缀:返回一个 Worker 构造器 ───────────────────────────────
 // 如果你的 tsconfig.json 已经在 compilerOptions.types 里 reference 了
