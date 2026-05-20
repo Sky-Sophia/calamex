@@ -94,17 +94,6 @@ pub fn estimate_chat_prompt_tokens_if_supported(
     estimate_chat_prompt_tokens(model, request).map(Some)
 }
 
-fn estimate_text_tokens(model: &str, text: &str) -> Result<u64, String> {
-    let family = resolve_tokenizer_family(model).ok_or_else(|| {
-        errors::error(
-            "AI_TOKENIZER_UNSUPPORTED",
-            format!("当前模型未配置本地 tokenizer，无法估算输出 token：{model}"),
-        )
-    })?;
-
-    count_text_tokens(family, text)
-}
-
 pub fn estimate_openai_tiled_image_tokens(width: u32, height: u32) -> Option<u64> {
     if width == 0 || height == 0 {
         return None;
@@ -768,7 +757,7 @@ fn parse_image_dimensions(content: &str) -> Option<(u32, u32)> {
 mod tests {
     use super::{
         estimate_chat_prompt_tokens, estimate_image_tokens_from_content,
-        estimate_openai_tiled_image_tokens, estimate_text_tokens, render_deepseek_v4_prompt,
+        estimate_openai_tiled_image_tokens, render_deepseek_v4_prompt,
         TokenizerFamily, DEEPSEEK_ASSISTANT_TOKEN, DEEPSEEK_BOS_TOKEN, DEEPSEEK_THINKING_END_TOKEN,
         DEEPSEEK_THINKING_START_TOKEN, DEEPSEEK_USER_TOKEN,
     };
@@ -857,20 +846,6 @@ mod tests {
         assert!(prompt.contains(r#""name":"read_file""#));
         assert!(prompt.contains(r#""description":"读取文件""#));
         assert!(!prompt.contains(r#""type":"function""#));
-    }
-
-    #[test]
-    fn counts_whitespace_text_tokens_when_provider_would_see_them() {
-        let tokens = estimate_text_tokens("deepseek/deepseek-v4-flash", " ").expect("tokens");
-
-        assert!(tokens > 0);
-    }
-
-    #[test]
-    fn estimates_completion_text_with_o200k() {
-        let tokens = estimate_text_tokens("openai/gpt-4o", "你好，world").expect("tokens");
-
-        assert!(tokens > 0);
     }
 
     #[test]

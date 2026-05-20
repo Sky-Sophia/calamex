@@ -873,7 +873,7 @@ pub struct AiEditOperationPayload {
     pub(crate) id: String,
     pub(crate) task_id: String,
     pub(crate) turn_id: String,
-    /// 已知值："create" | "modify" | "delete" | "rename"。
+    /// 已知值："modify"。
     pub(crate) kind: String,
     pub(crate) path: String,
     pub(crate) new_path: Option<String>,

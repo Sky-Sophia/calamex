@@ -2,8 +2,8 @@
 //!
 //! # 职责边界
 //! - `restore_snapshot`：基于已存快照整体恢复目标文件集合。
-//! - `undo_operation` / `revert_file`：按 operation 粒度撤销，依赖 source snapshot
-//!   与当前文件内容 hash 校验对齐。
+//! - `undo_operation` / `revert_file`：按 modify operation 粒度撤销，依赖 source
+//!   snapshot 与当前文件内容 hash 校验对齐。
 //! - `revert_hunk`：基于 `diff_render` 渲染的 hunk 序列做单 hunk 反向。
 //! - `revert_task`：在同一 task 内逐条撤销 operation。
 //!
@@ -52,8 +52,6 @@ struct UndoExecutionResult {
 }
 
 /// 单条 operation 的 diff 渲染上下文。
-///
-/// `path` 对 rename 走 `new_path`；其余 kind 等同于 `operation.path`。
 struct OperationDiffContext {
     operation: AiEditOperationPayload,
     path: String,
@@ -154,8 +152,8 @@ pub fn restore_snapshot(
 
 /// 撤销指定 operation。
 ///
-/// 严格校验：要求当前文件状态匹配 operation.after_hash（`modify` / `create` /
-/// `rename`），或目标已不存在（`delete`）。任何漂移都会立刻报错而不是写坏。
+/// 严格校验：要求当前文件状态匹配 modify operation.after_hash。
+/// 任何漂移都会立刻报错而不是写坏。
 pub fn undo_operation(
     payload: AiEditUndoOperationRequest,
     storage_root: &Path,
@@ -205,8 +203,8 @@ pub fn get_diff(
 
 /// 整文件回滚至 operation 的 source snapshot 状态。
 ///
-/// 选取 `list_task_operations` 中**首条**匹配 `operation_effective_path == path`
-/// 的 operation —— 由于列表按时间倒序，等价于「最近一次涉及该文件的 operation」。
+/// 选取 `list_task_operations` 中**首条**匹配路径的 operation —— 由于列表按
+/// 时间倒序，等价于「最近一次涉及该文件的 operation」。
 pub fn revert_file(
     payload: AiEditRevertFileRequest,
     storage_root: &Path,
@@ -220,7 +218,7 @@ pub fn revert_file(
     let operations = list_task_operations(storage_root, state, task_id)?;
     let operation = operations
         .into_iter()
-        .find(|operation| operation_effective_path(operation) == target_path)
+        .find(|operation| operation.path == target_path)
         .ok_or_else(|| {
             errors::restore_conflict(format!(
                 "任务 {task_id} 中未找到文件 {target_path} 的 AED 编辑记录。"
@@ -520,9 +518,6 @@ fn execute_undo_operation(
 
     match operation.kind.as_str() {
         "modify" => undo_modify_operation(storage_root, state, operation, source_snapshot.as_ref()),
-        "create" => undo_create_operation(storage_root, state, operation),
-        "delete" => undo_delete_operation(storage_root, state, operation, source_snapshot.as_ref()),
-        "rename" => undo_rename_operation(storage_root, state, operation, source_snapshot.as_ref()),
         other => Err(errors::restore_conflict(format!(
             "当前不支持撤销该操作类型:{other}"
         ))),
@@ -531,49 +526,18 @@ fn execute_undo_operation(
 
 /// 入口校验：撤销前确保磁盘上的状态与 operation 记录的「编辑后」状态一致。
 ///
-/// - `modify` / `create`：当前文件 hash == operation.after_hash
-/// - `delete`：原路径不存在
-/// - `rename`：原路径不存在 + new_path 内容 hash == operation.after_hash
+/// - `modify`：当前文件 hash == operation.after_hash
 fn ensure_operation_matches_expected_state(
     operation: &AiEditOperationPayload,
 ) -> Result<(), String> {
     match operation.kind.as_str() {
-        "modify" | "create" => {
+        "modify" => {
             let current_file = read_snapshot_file(&operation.path)?;
             if let Some(expected_hash) = operation.after_hash.as_deref() {
                 if current_file.content_hash != expected_hash {
                     return Err(errors::restore_conflict(format!(
                         "文件当前内容与 AED 记录不一致,拒绝回滚:{}",
                         operation.path
-                    )));
-                }
-            }
-            Ok(())
-        }
-        "delete" => {
-            if validate_revert_path(&operation.path)?.exists() {
-                return Err(errors::restore_conflict(format!(
-                    "文件当前已被重新创建,拒绝回滚 delete 操作:{}",
-                    operation.path
-                )));
-            }
-            Ok(())
-        }
-        "rename" => {
-            let current_path = operation.new_path.as_deref().ok_or_else(|| {
-                errors::restore_conflict("rename 操作缺少 newPath,无法校验当前状态。")
-            })?;
-            if validate_revert_path(&operation.path)?.exists() {
-                return Err(errors::restore_conflict(format!(
-                    "原路径已存在,说明当前文件状态已偏离 AED 记录:{}",
-                    operation.path
-                )));
-            }
-            let current_file = read_snapshot_file(current_path)?;
-            if let Some(expected_hash) = operation.after_hash.as_deref() {
-                if current_file.content_hash != expected_hash {
-                    return Err(errors::restore_conflict(format!(
-                        "文件当前内容与 AED 重命名记录不一致,拒绝回滚:{current_path}"
                     )));
                 }
             }
@@ -606,7 +570,7 @@ fn resolve_diff_preview(
     let mut last_preview = None;
 
     for operation in operations {
-        if operation_effective_path(&operation) != target_path {
+        if operation.path != target_path {
             continue;
         }
         matched_operation = true;
@@ -679,7 +643,7 @@ fn build_preview_from_stored_diff(
     let (additions, deletions, hunks) = parse_stored_unified_diff_hunks(diff_text)?;
     Ok(Some(ResolvedDiffPreview {
         operation: operation.clone(),
-        path: operation_effective_path(operation).to_string(),
+        path: operation.path.clone(),
         kind: operation.kind.clone(),
         additions,
         deletions,
@@ -797,44 +761,6 @@ fn build_operation_diff_context(
                 after_content: current_file.content,
             })
         }
-        "create" => {
-            let current_file = read_snapshot_file(&operation.path)?;
-            Ok(OperationDiffContext {
-                operation: operation.clone(),
-                path: operation.path.clone(),
-                kind: operation.kind.clone(),
-                before_content: String::new(),
-                after_content: current_file.content,
-            })
-        }
-        "delete" => {
-            let source_snapshot = source_snapshot
-                .ok_or_else(|| errors::restore_conflict("未找到 delete diff 所需的源快照。"))?;
-            let source_file = require_source_file(&source_snapshot, &operation.path)?;
-            Ok(OperationDiffContext {
-                operation: operation.clone(),
-                path: operation.path.clone(),
-                kind: operation.kind.clone(),
-                before_content: source_file.content,
-                after_content: String::new(),
-            })
-        }
-        "rename" => {
-            let current_path = operation.new_path.as_deref().ok_or_else(|| {
-                errors::restore_conflict("rename 操作缺少 newPath,无法生成 diff。")
-            })?;
-            let source_snapshot = source_snapshot
-                .ok_or_else(|| errors::restore_conflict("未找到 rename diff 所需的源快照。"))?;
-            let source_file = require_source_file(&source_snapshot, &operation.path)?;
-            let current_file = read_snapshot_file(current_path)?;
-            Ok(OperationDiffContext {
-                operation: operation.clone(),
-                path: current_path.to_string(),
-                kind: operation.kind.clone(),
-                before_content: source_file.content,
-                after_content: current_file.content,
-            })
-        }
         other => Err(errors::restore_conflict(format!(
             "当前不支持生成该操作类型的 AED diff:{other}"
         ))),
@@ -886,30 +812,6 @@ fn is_operation_already_reverted(
             let current_file = read_snapshot_file(&operation.path)?;
             Ok(current_file.content_hash == source_file.content_hash)
         }
-        "create" => Ok(!validate_revert_path(&operation.path)?.exists()),
-        "delete" => {
-            if !validate_revert_path(&operation.path)?.exists() {
-                return Ok(false);
-            }
-            let source_snapshot = load_required_source_snapshot(storage_root, operation, "delete")?;
-            let source_file = require_source_file(&source_snapshot, &operation.path)?;
-            let current_file = read_snapshot_file(&operation.path)?;
-            Ok(current_file.content_hash == source_file.content_hash)
-        }
-        "rename" => {
-            let current_path = operation.new_path.as_deref().ok_or_else(|| {
-                errors::restore_conflict("rename 操作缺少 newPath,无法判断回滚状态。")
-            })?;
-            if validate_revert_path(current_path)?.exists()
-                || !validate_revert_path(&operation.path)?.exists()
-            {
-                return Ok(false);
-            }
-            let source_snapshot = load_required_source_snapshot(storage_root, operation, "rename")?;
-            let source_file = require_source_file(&source_snapshot, &operation.path)?;
-            let current_file = read_snapshot_file(&operation.path)?;
-            Ok(current_file.content_hash == source_file.content_hash)
-        }
         other => Err(errors::restore_conflict(format!(
             "当前不支持检查该操作类型的回滚状态:{other}"
         ))),
@@ -928,13 +830,6 @@ fn load_required_source_snapshot(
         .map(|snapshot_id| snapshot::load_stored_snapshot(storage_root, snapshot_id))
         .transpose()?
         .ok_or_else(|| errors::restore_conflict(format!("未找到 {kind_label} 撤销所需的源快照。")))
-}
-
-fn operation_effective_path(operation: &AiEditOperationPayload) -> &str {
-    operation
-        .new_path
-        .as_deref()
-        .unwrap_or(operation.path.as_str())
 }
 
 fn undo_modify_operation(
@@ -976,155 +871,6 @@ fn undo_modify_operation(
 
     Ok(UndoExecutionResult {
         restored_files: vec![operation.path.clone()],
-        pre_revert_snapshot,
-        restored_snapshot,
-        source_snapshot_id: Some(source_snapshot_id),
-    })
-}
-
-fn undo_create_operation(
-    storage_root: &Path,
-    state: &AiEditState,
-    operation: &AiEditOperationPayload,
-) -> Result<UndoExecutionResult, String> {
-    let current_file = read_snapshot_file(&operation.path)?;
-    let pre_revert_snapshot = append_pre_revert_snapshot(
-        storage_root,
-        state,
-        &operation.task_id,
-        &format!("撤销前快照:{}", operation.path),
-        std::slice::from_ref(&current_file),
-    )?;
-
-    let target_path = validate_revert_path(&operation.path)?;
-    fs::remove_file(&target_path).map_err(|error| {
-        errors::restore_failed(format!("删除撤销文件失败({}):{error}", operation.path))
-    })?;
-
-    let restored_snapshot = append_revert_snapshot(
-        storage_root,
-        state,
-        &operation.task_id,
-        &format!("撤销创建:{}", operation.path),
-        &[],
-    )?;
-
-    Ok(UndoExecutionResult {
-        restored_files: vec![operation.path.clone()],
-        pre_revert_snapshot,
-        restored_snapshot,
-        source_snapshot_id: operation.source_snapshot_id.clone(),
-    })
-}
-
-fn undo_delete_operation(
-    storage_root: &Path,
-    state: &AiEditState,
-    operation: &AiEditOperationPayload,
-    source_snapshot: Option<&snapshot::StoredSnapshot>,
-) -> Result<UndoExecutionResult, String> {
-    if validate_revert_path(&operation.path)?.exists() {
-        return Err(errors::restore_conflict(format!(
-            "当前文件已存在,无法撤销 delete 操作:{}",
-            operation.path
-        )));
-    }
-
-    let source_snapshot_id = operation
-        .source_snapshot_id
-        .clone()
-        .ok_or_else(|| errors::restore_conflict("该删除操作没有可用的源快照引用。"))?;
-    let source_snapshot = source_snapshot
-        .ok_or_else(|| errors::restore_conflict("未找到 delete 撤销所需的源快照。"))?;
-    let source_file = require_source_file(source_snapshot, &operation.path)?;
-
-    let pre_revert_snapshot = append_pre_revert_snapshot(
-        storage_root,
-        state,
-        &operation.task_id,
-        &format!("撤销前快照:{}", operation.path),
-        &[],
-    )?;
-
-    let target_path = validate_revert_path(&operation.path)?;
-    ensure_parent_dir(&target_path, "撤销目录")?;
-    atomic_write::write_text(&target_path, &source_file.content).map_err(|error| {
-        errors::restore_failed(format!("写回删除文件失败({}):{error}", operation.path))
-    })?;
-
-    let restored_snapshot = append_revert_snapshot(
-        storage_root,
-        state,
-        &operation.task_id,
-        &format!("撤销删除:{}", operation.path),
-        std::slice::from_ref(&source_file),
-    )?;
-
-    Ok(UndoExecutionResult {
-        restored_files: vec![operation.path.clone()],
-        pre_revert_snapshot,
-        restored_snapshot,
-        source_snapshot_id: Some(source_snapshot_id),
-    })
-}
-
-fn undo_rename_operation(
-    storage_root: &Path,
-    state: &AiEditState,
-    operation: &AiEditOperationPayload,
-    source_snapshot: Option<&snapshot::StoredSnapshot>,
-) -> Result<UndoExecutionResult, String> {
-    let current_path = operation
-        .new_path
-        .as_deref()
-        .ok_or_else(|| errors::restore_conflict("rename 操作缺少 newPath,无法撤销。"))?;
-
-    let original_path = validate_revert_path(&operation.path)?;
-    let current_path_buf = validate_revert_path(current_path)?;
-
-    if original_path.exists() {
-        return Err(errors::restore_conflict(format!(
-            "原路径已存在,无法撤销 rename 操作:{}",
-            operation.path
-        )));
-    }
-
-    let current_file = read_snapshot_file(current_path)?;
-
-    let source_snapshot_id = operation
-        .source_snapshot_id
-        .clone()
-        .ok_or_else(|| errors::restore_conflict("该重命名操作没有可用的源快照引用。"))?;
-    let source_snapshot = source_snapshot
-        .ok_or_else(|| errors::restore_conflict("未找到 rename 撤销所需的源快照。"))?;
-    let source_file = require_source_file(source_snapshot, &operation.path)?;
-
-    let pre_revert_snapshot = append_pre_revert_snapshot(
-        storage_root,
-        state,
-        &operation.task_id,
-        &format!("撤销前快照:{current_path}"),
-        std::slice::from_ref(&current_file),
-    )?;
-
-    ensure_parent_dir(&original_path, "撤销目录")?;
-    fs::rename(&current_path_buf, &original_path).map_err(|error| {
-        errors::restore_failed(format!(
-            "撤销重命名失败({} -> {}):{error}",
-            current_path, operation.path
-        ))
-    })?;
-
-    let restored_snapshot = append_revert_snapshot(
-        storage_root,
-        state,
-        &operation.task_id,
-        &format!("撤销重命名:{}", operation.path),
-        std::slice::from_ref(&source_file),
-    )?;
-
-    Ok(UndoExecutionResult {
-        restored_files: vec![operation.path.clone(), current_path.to_string()],
         pre_revert_snapshot,
         restored_snapshot,
         source_snapshot_id: Some(source_snapshot_id),
@@ -1229,7 +975,7 @@ mod tests {
         errors, AiEditState,
     };
     use crate::ai::edit::apply::{
-        auto_apply::{apply_operation_plans, AiAutoApplyOperationKind, AiAutoApplyOperationPlan},
+        auto_apply::{apply_operation_plans, AiAutoApplyOperationPlan},
         diff_render,
     };
     use crate::ai::edit::history::{edit_journal, snapshot};
@@ -1746,276 +1492,6 @@ mod tests {
     }
 
     #[test]
-    fn undo_create_operation_removes_created_file() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "aed-undo-create-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time should move forward")
-                .as_nanos()
-        ));
-        let file_path = temp_dir.join("created.sh");
-        let snapshot_root = temp_dir.join("snapshot-store");
-        fs::create_dir_all(&temp_dir).expect("temp directory should be created");
-
-        let state = AiEditState::default();
-        ai_edit::set_auth_level(
-            AiEditSetAuthLevelRequest {
-                level: "session".to_string(),
-                task_id: None,
-            },
-            &state,
-        )
-        .expect("session auth should be set");
-
-        apply_operation_plans(
-            &[AiAutoApplyOperationPlan {
-                kind: AiAutoApplyOperationKind::Create,
-                path: file_path.to_string_lossy().to_string(),
-                new_path: None,
-                original_hash: None,
-                original_modified_at: None,
-                original_content: None,
-                updated_content: Some("echo created".to_string()),
-            }],
-            Some(&AiApplyPatchMetadataRequest {
-                task_id: Some("task-create".to_string()),
-                turn_id: Some("turn-create".to_string()),
-                reason: Some("创建文件".to_string()),
-                tool_call_id: None,
-                confirmed_by_user: None,
-                agent_run_id: None,
-                agent_step_id: None,
-                workspace_root_path: None,
-            }),
-            "创建文件",
-            &state,
-            &snapshot_root,
-        )
-        .expect("create operation should apply");
-
-        let operation_id = ai_edit::list_timeline_with_state(
-            AiEditListTimelineRequest {
-                task_id: None,
-                limit: None,
-            },
-            &state,
-            Vec::new(),
-            edit_journal::list_operations(&snapshot_root).expect("operations should be listed"),
-        )
-        .expect("timeline should be listed")
-        .entries
-        .into_iter()
-        .find_map(|entry| match entry {
-            AiEditTimelineEntryPayload::Operation(operation) if operation.kind == "create" => {
-                Some(operation.id)
-            }
-            _ => None,
-        })
-        .expect("create operation should exist");
-
-        let undo_payload = undo_operation(
-            AiEditUndoOperationRequest { operation_id },
-            &snapshot_root,
-            &state,
-        )
-        .expect("create operation should be reverted");
-
-        assert!(!file_path.exists());
-        assert_eq!(
-            undo_payload.restored_files,
-            vec![file_path.to_string_lossy().to_string()]
-        );
-
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn undo_delete_operation_restores_file_content() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "aed-undo-delete-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time should move forward")
-                .as_nanos()
-        ));
-        let file_path = temp_dir.join("deleted.sh");
-        let snapshot_root = temp_dir.join("snapshot-store");
-        fs::create_dir_all(&temp_dir).expect("temp directory should be created");
-        fs::write(&file_path, "echo deleted").expect("temp file should be written");
-
-        let state = AiEditState::default();
-        ai_edit::set_auth_level(
-            AiEditSetAuthLevelRequest {
-                level: "session".to_string(),
-                task_id: None,
-            },
-            &state,
-        )
-        .expect("session auth should be set");
-
-        apply_operation_plans(
-            &[AiAutoApplyOperationPlan {
-                kind: AiAutoApplyOperationKind::Delete,
-                path: file_path.to_string_lossy().to_string(),
-                new_path: None,
-                original_hash: Some(crate::ai::edit::patch::hash_text("echo deleted")),
-                original_modified_at: None,
-                original_content: Some("echo deleted".to_string()),
-                updated_content: None,
-            }],
-            Some(&AiApplyPatchMetadataRequest {
-                task_id: Some("task-delete".to_string()),
-                turn_id: Some("turn-delete".to_string()),
-                reason: Some("删除文件".to_string()),
-                tool_call_id: None,
-                confirmed_by_user: None,
-                agent_run_id: None,
-                agent_step_id: None,
-                workspace_root_path: None,
-            }),
-            "删除文件",
-            &state,
-            &snapshot_root,
-        )
-        .expect("delete operation should apply");
-
-        let operation_id = ai_edit::list_timeline_with_state(
-            AiEditListTimelineRequest {
-                task_id: None,
-                limit: None,
-            },
-            &state,
-            Vec::new(),
-            edit_journal::list_operations(&snapshot_root).expect("operations should be listed"),
-        )
-        .expect("timeline should be listed")
-        .entries
-        .into_iter()
-        .find_map(|entry| match entry {
-            AiEditTimelineEntryPayload::Operation(operation) if operation.kind == "delete" => {
-                Some(operation.id)
-            }
-            _ => None,
-        })
-        .expect("delete operation should exist");
-
-        let undo_payload = undo_operation(
-            AiEditUndoOperationRequest { operation_id },
-            &snapshot_root,
-            &state,
-        )
-        .expect("delete operation should be reverted");
-
-        assert_eq!(
-            fs::read_to_string(&file_path).expect("restored file should exist"),
-            "echo deleted"
-        );
-        assert_eq!(
-            undo_payload.restored_files,
-            vec![file_path.to_string_lossy().to_string()]
-        );
-
-        let _ = fs::remove_file(&file_path);
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn undo_rename_operation_restores_original_path() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "aed-undo-rename-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("time should move forward")
-                .as_nanos()
-        ));
-        let source_path = temp_dir.join("before.sh");
-        let target_path = temp_dir.join("after.sh");
-        let snapshot_root = temp_dir.join("snapshot-store");
-        fs::create_dir_all(&temp_dir).expect("temp directory should be created");
-        fs::write(&source_path, "echo rename").expect("temp file should be written");
-
-        let state = AiEditState::default();
-        ai_edit::set_auth_level(
-            AiEditSetAuthLevelRequest {
-                level: "session".to_string(),
-                task_id: None,
-            },
-            &state,
-        )
-        .expect("session auth should be set");
-
-        apply_operation_plans(
-            &[AiAutoApplyOperationPlan {
-                kind: AiAutoApplyOperationKind::Rename,
-                path: source_path.to_string_lossy().to_string(),
-                new_path: Some(target_path.to_string_lossy().to_string()),
-                original_hash: Some(crate::ai::edit::patch::hash_text("echo rename")),
-                original_modified_at: None,
-                original_content: Some("echo rename".to_string()),
-                updated_content: None,
-            }],
-            Some(&AiApplyPatchMetadataRequest {
-                task_id: Some("task-rename".to_string()),
-                turn_id: Some("turn-rename".to_string()),
-                reason: Some("重命名文件".to_string()),
-                tool_call_id: None,
-                confirmed_by_user: None,
-                agent_run_id: None,
-                agent_step_id: None,
-                workspace_root_path: None,
-            }),
-            "重命名文件",
-            &state,
-            &snapshot_root,
-        )
-        .expect("rename operation should apply");
-
-        let operation_id = ai_edit::list_timeline_with_state(
-            AiEditListTimelineRequest {
-                task_id: None,
-                limit: None,
-            },
-            &state,
-            Vec::new(),
-            edit_journal::list_operations(&snapshot_root).expect("operations should be listed"),
-        )
-        .expect("timeline should be listed")
-        .entries
-        .into_iter()
-        .find_map(|entry| match entry {
-            AiEditTimelineEntryPayload::Operation(operation) if operation.kind == "rename" => {
-                Some(operation.id)
-            }
-            _ => None,
-        })
-        .expect("rename operation should exist");
-
-        let undo_payload = undo_operation(
-            AiEditUndoOperationRequest { operation_id },
-            &snapshot_root,
-            &state,
-        )
-        .expect("rename operation should be reverted");
-
-        assert_eq!(
-            fs::read_to_string(&source_path).expect("source file should exist"),
-            "echo rename"
-        );
-        assert!(!target_path.exists());
-        assert_eq!(
-            undo_payload.restored_files,
-            vec![
-                source_path.to_string_lossy().to_string(),
-                target_path.to_string_lossy().to_string(),
-            ],
-        );
-
-        let _ = fs::remove_file(&source_path);
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
     fn revert_task_reverts_all_effective_operations_after_restart() {
         let temp_dir = std::env::temp_dir().join(format!(
             "aed-revert-task-{}",
@@ -2044,18 +1520,14 @@ mod tests {
         apply_operation_plans(
             &[
                 AiAutoApplyOperationPlan {
-                    kind: AiAutoApplyOperationKind::Modify,
                     path: first_path.to_string_lossy().to_string(),
-                    new_path: None,
                     original_hash: Some(crate::ai::edit::patch::hash_text("echo first-old")),
                     original_modified_at: None,
                     original_content: Some("echo first-old".to_string()),
                     updated_content: Some("echo first-new".to_string()),
                 },
                 AiAutoApplyOperationPlan {
-                    kind: AiAutoApplyOperationKind::Modify,
                     path: second_path.to_string_lossy().to_string(),
-                    new_path: None,
                     original_hash: Some(crate::ai::edit::patch::hash_text("echo second-old")),
                     original_modified_at: None,
                     original_content: Some("echo second-old".to_string()),
@@ -2141,9 +1613,7 @@ mod tests {
 
         apply_operation_plans(
             &[AiAutoApplyOperationPlan {
-                kind: AiAutoApplyOperationKind::Modify,
                 path: file_path.to_string_lossy().to_string(),
-                new_path: None,
                 original_hash: Some(crate::ai::edit::patch::hash_text("echo old")),
                 original_modified_at: None,
                 original_content: Some("echo old".to_string()),

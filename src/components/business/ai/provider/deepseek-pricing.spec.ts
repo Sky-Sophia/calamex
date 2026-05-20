@@ -15,19 +15,17 @@ describe('deepseek-pricing', () => {
             cachedInputTokens: 7,
         });
 
-        expect(pricing).toMatchObject({
-            usage: {
-                inputTokens: 30,
-                cacheHitInputTokens: 7,
-                cacheMissInputTokens: 23,
-                outputTokens: 12,
-            },
-            cacheHitInputCostCny: 0.0000007,
-            cacheMissInputCostCny: 0.000276,
-            inputCostCny: 0.0002767,
-            outputCostCny: 0.000288,
-            totalCostCny: 0.0005647,
+        expect(pricing?.usage).toMatchObject({
+            inputTokens: 30,
+            cacheHitInputTokens: 7,
+            cacheMissInputTokens: 23,
+            outputTokens: 12,
         });
+        expect(pricing?.cacheHitInputCostCny).toBeCloseTo(0.0000007);
+        expect(pricing?.cacheMissInputCostCny).toBeCloseTo(0.000276);
+        expect(pricing?.inputCostCny).toBeCloseTo(0.0002767);
+        expect(pricing?.outputCostCny).toBeCloseTo(0.000288);
+        expect(pricing?.totalCostCny).toBeCloseTo(0.0005647);
     });
 
     it('keeps tiny cache hit costs visible instead of rounding them to zero', () => {

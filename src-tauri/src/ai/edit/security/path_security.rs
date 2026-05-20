@@ -69,11 +69,6 @@ pub fn validate_ai_writable_path_with_root(
     })
 }
 
-/// 用于路径冲突比较的跨平台规范化文本。
-pub fn normalize_path_for_compare(raw_path: &str) -> String {
-    normalize_path_text(raw_path)
-}
-
 pub fn normalize_path_for_compare_path(path: &Path) -> String {
     normalize_path_text(&path.to_string_lossy())
 }

@@ -16,10 +16,7 @@ const MANIFEST_VERSION: u32 = 1;
 
 #[derive(Debug, Clone)]
 pub enum FileTransactionAction {
-    Create { path: PathBuf, content: String },
     Modify { path: PathBuf, content: String },
-    Delete { path: PathBuf },
-    Rename { from: PathBuf, to: PathBuf },
 }
 
 #[derive(Debug, Clone)]
@@ -166,10 +163,7 @@ struct FileTransactionEntry {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum FileTransactionEntryKind {
-    Create,
     Modify,
-    Delete,
-    Rename,
 }
 
 impl FileTransactionEntry {
@@ -179,16 +173,6 @@ impl FileTransactionEntry {
         action: FileTransactionAction,
     ) -> Result<Self, String> {
         let entry = match action {
-            FileTransactionAction::Create { path, content } => {
-                let path = path_to_string(&path)?;
-                Self {
-                    kind: FileTransactionEntryKind::Create,
-                    path,
-                    new_path: None,
-                    staging_key: Some(format!("{index}.txt")),
-                    content: Some(content),
-                }
-            }
             FileTransactionAction::Modify { path, content } => {
                 let path = path_to_string(&path)?;
                 Self {
@@ -199,27 +183,6 @@ impl FileTransactionEntry {
                     content: Some(content),
                 }
             }
-            FileTransactionAction::Delete { path } => {
-                let path = path_to_string(&path)?;
-                Self {
-                    kind: FileTransactionEntryKind::Delete,
-                    path,
-                    new_path: None,
-                    staging_key: None,
-                    content: None,
-                }
-            }
-            FileTransactionAction::Rename { from, to } => {
-                let path = path_to_string(&from)?;
-                let new_path = path_to_string(&to)?;
-                Self {
-                    kind: FileTransactionEntryKind::Rename,
-                    path,
-                    new_path: Some(new_path),
-                    staging_key: None,
-                    content: None,
-                }
-            }
         };
         Ok(entry)
     }
@@ -228,7 +191,7 @@ impl FileTransactionEntry {
 fn apply_manifest(storage_root: &Path, manifest: &FileTransactionManifest) -> Result<(), String> {
     for entry in &manifest.entries {
         match entry.kind {
-            FileTransactionEntryKind::Create | FileTransactionEntryKind::Modify => {
+            FileTransactionEntryKind::Modify => {
                 let target_path = path_security::validate_ai_writable_path(&entry.path)?;
                 path_security::reject_existing_symlink(&target_path)?;
                 ensure_parent_dir(&target_path)?;
@@ -242,43 +205,6 @@ fn apply_manifest(storage_root: &Path, manifest: &FileTransactionManifest) -> Re
                 atomic_write::write_text(&target_path, &content).map_err(|error| {
                     errors::transaction_failed(format!(
                         "提交事务写入失败（{}）：{error}",
-                        target_path.display()
-                    ))
-                })?;
-            }
-            FileTransactionEntryKind::Delete => {
-                let target_path = path_security::validate_ai_writable_path(&entry.path)?;
-                path_security::reject_existing_symlink(&target_path)?;
-                match fs::remove_file(&target_path) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => {
-                        return Err(errors::transaction_failed(format!(
-                            "提交事务删除失败（{}）：{error}",
-                            target_path.display()
-                        )));
-                    }
-                }
-            }
-            FileTransactionEntryKind::Rename => {
-                let source_path = path_security::validate_ai_writable_path(&entry.path)?;
-                path_security::reject_existing_symlink(&source_path)?;
-                let target_path = path_security::validate_ai_writable_path(
-                    entry.new_path.as_deref().ok_or_else(|| {
-                        errors::transaction_failed("rename 事务条目缺少 newPath。")
-                    })?,
-                )?;
-                path_security::reject_existing_symlink(&target_path)?;
-                ensure_parent_dir(&target_path)?;
-
-                if target_path.exists() {
-                    continue;
-                }
-
-                fs::rename(&source_path, &target_path).map_err(|error| {
-                    errors::transaction_failed(format!(
-                        "提交事务重命名失败（{} -> {}）：{error}",
-                        source_path.display(),
                         target_path.display()
                     ))
                 })?;
@@ -442,55 +368,27 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn commit_applies_all_actions_and_appends_operations() {
+    fn commit_applies_modify_actions_and_appends_operations() {
         let temp_dir = temp_dir("aed-file-transaction");
         fs::create_dir_all(&temp_dir).expect("temp directory should be created");
-        let source_path = temp_dir.join("source.txt");
         let modify_path = temp_dir.join("modify.txt");
-        let delete_path = temp_dir.join("delete.txt");
-        let rename_path = temp_dir.join("renamed.txt");
-        fs::write(&source_path, "rename").expect("source should be written");
         fs::write(&modify_path, "old").expect("modify target should be written");
-        fs::write(&delete_path, "delete").expect("delete target should be written");
 
         commit(
             &temp_dir,
             FileTransactionPlan {
-                actions: vec![
-                    FileTransactionAction::Create {
-                        path: temp_dir.join("created.txt"),
-                        content: "created".to_string(),
-                    },
-                    FileTransactionAction::Modify {
-                        path: modify_path.clone(),
-                        content: "new".to_string(),
-                    },
-                    FileTransactionAction::Delete {
-                        path: delete_path.clone(),
-                    },
-                    FileTransactionAction::Rename {
-                        from: source_path.clone(),
-                        to: rename_path.clone(),
-                    },
-                ],
+                actions: vec![FileTransactionAction::Modify {
+                    path: modify_path.clone(),
+                    content: "new".to_string(),
+                }],
                 operations: vec![operation("operation-1")],
             },
         )
         .expect("transaction should commit");
 
         assert_eq!(
-            fs::read_to_string(temp_dir.join("created.txt")).expect("created should exist"),
-            "created"
-        );
-        assert_eq!(
             fs::read_to_string(&modify_path).expect("modify target should exist"),
             "new"
-        );
-        assert!(!delete_path.exists());
-        assert!(!source_path.exists());
-        assert_eq!(
-            fs::read_to_string(&rename_path).expect("rename target should exist"),
-            "rename"
         );
         let operations = edit_journal::list_operations(&temp_dir).expect("operations should list");
         assert_eq!(operations.len(), 1);
@@ -504,9 +402,10 @@ mod tests {
         let temp_dir = temp_dir("aed-file-transaction-recover");
         fs::create_dir_all(&temp_dir).expect("temp directory should be created");
         let target_path = temp_dir.join("target.txt");
+        fs::write(&target_path, "before").expect("target should be written");
 
         let plan = FileTransactionPlan {
-            actions: vec![FileTransactionAction::Create {
+            actions: vec![FileTransactionAction::Modify {
                 path: target_path.clone(),
                 content: "recovered".to_string(),
             }],
