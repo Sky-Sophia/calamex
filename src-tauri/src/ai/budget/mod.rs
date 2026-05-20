@@ -10,9 +10,10 @@ use serde_json::{json, Value};
 use std::sync::{Mutex, OnceLock};
 use tokenizers::Tokenizer;
 
-const DEEPSEEK_TOKENIZER_JSON: &[u8] = include_bytes!("../../tokenizers/deepseek/tokenizer.json");
-const QWEN_TOKENIZER_JSON: &[u8] = include_bytes!("../../tokenizers/qwen/tokenizer.json");
-const O200K_TOKENIZER_JSON: &[u8] = include_bytes!("../../tokenizers/o200k/tokenizer.json");
+const DEEPSEEK_TOKENIZER_JSON: &[u8] =
+    include_bytes!("../../../tokenizers/deepseek/tokenizer.json");
+const QWEN_TOKENIZER_JSON: &[u8] = include_bytes!("../../../tokenizers/qwen/tokenizer.json");
+const O200K_TOKENIZER_JSON: &[u8] = include_bytes!("../../../tokenizers/o200k/tokenizer.json");
 
 const OPENAI_IMAGE_TILE_SIZE_PX: u32 = 512;
 const OPENAI_GPT4O_TOKENS_PER_IMAGE_TILE: u64 = 170;
@@ -93,7 +94,7 @@ pub fn estimate_chat_prompt_tokens_if_supported(
     estimate_chat_prompt_tokens(model, request).map(Some)
 }
 
-pub fn estimate_text_tokens(model: &str, text: &str) -> Result<u64, String> {
+fn estimate_text_tokens(model: &str, text: &str) -> Result<u64, String> {
     let family = resolve_tokenizer_family(model).ok_or_else(|| {
         errors::error(
             "AI_TOKENIZER_UNSUPPORTED",
@@ -776,21 +777,24 @@ mod tests {
 
     #[test]
     fn estimates_prompt_with_messages_and_tools() {
-        let request = AiProviderChatRequest::new(vec![
-            AiProviderMessage::system("你是小建C桌面应用中的 AI 编程助手。"),
-            AiProviderMessage::user("请解释这个脚本。"),
-        ])
-        .with_tools(vec![AiProviderToolSpec {
-            name: "read_file".to_string(),
-            description: "读取文件".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string" }
-                },
-                "required": ["path"]
-            }),
-        }]);
+        let request = AiProviderChatRequest {
+            messages: vec![
+                AiProviderMessage::system("你是小建C桌面应用中的 AI 编程助手。"),
+                AiProviderMessage::user("请解释这个脚本。"),
+            ],
+            tools: vec![AiProviderToolSpec {
+                name: "read_file".to_string(),
+                description: "读取文件".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" }
+                    },
+                    "required": ["path"]
+                }),
+            }],
+            force_tool_choice_none: false,
+        };
 
         let estimate =
             estimate_chat_prompt_tokens("deepseek/deepseek-chat", &request).expect("estimate");
@@ -827,21 +831,24 @@ mod tests {
 
     #[test]
     fn renders_deepseek_tools_as_official_schema_block() {
-        let request = AiProviderChatRequest::new(vec![
-            AiProviderMessage::system("系统提示"),
-            AiProviderMessage::user("读取文件"),
-        ])
-        .with_tools(vec![AiProviderToolSpec {
-            name: "read_file".to_string(),
-            description: "读取文件".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string" }
-                },
-                "required": ["path"]
-            }),
-        }]);
+        let request = AiProviderChatRequest {
+            messages: vec![
+                AiProviderMessage::system("系统提示"),
+                AiProviderMessage::user("读取文件"),
+            ],
+            tools: vec![AiProviderToolSpec {
+                name: "read_file".to_string(),
+                description: "读取文件".to_string(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" }
+                    },
+                    "required": ["path"]
+                }),
+            }],
+            force_tool_choice_none: false,
+        };
 
         let prompt =
             render_deepseek_v4_prompt("deepseek/deepseek-v4-flash", &request).expect("prompt");

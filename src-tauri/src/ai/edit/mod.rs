@@ -1,17 +1,13 @@
-pub mod atomic_write;
-pub mod auto_apply;
-pub mod diff_render;
-pub mod edit_journal;
+pub mod apply;
 pub mod errors;
-pub mod file_transaction;
-pub mod path_security;
+pub mod history;
+pub mod io;
 pub mod patch;
-pub mod pins;
-pub mod protected_paths;
-pub mod revert;
-pub mod snapshot;
-pub mod storage_lock;
-pub mod timeline;
+pub mod security;
+
+use self::history::{edit_journal, pins, revert, snapshot, timeline};
+use self::io::file_transaction;
+use self::security::path_security;
 
 use crate::ai::audit::{self, AiAuditEventKind};
 use crate::commands::contracts::{
@@ -85,8 +81,6 @@ pub struct AiEditState {
 
 #[derive(Debug, Default)]
 struct AiEditRetentionOutcome {
-    pruned_operation_ids: HashSet<String>,
-    pruned_snapshot_ids: HashSet<String>,
     pruned_operation_count: usize,
     pruned_snapshot_count: usize,
     pruned_blob_count: usize,
@@ -134,13 +128,6 @@ pub fn set_auth_level(
     );
     audit::emit(AiAuditEventKind::AiEditAuthChanged);
     Ok(current)
-}
-
-pub fn ensure_patch_authorized(
-    state: &AiEditState,
-    metadata: Option<&AiApplyPatchMetadataRequest>,
-) -> Result<(), String> {
-    ensure_auto_apply_authorized(state, metadata, "Patch 自动应用")
 }
 
 pub(crate) fn ensure_auto_apply_authorized(
@@ -346,8 +333,6 @@ fn apply_retention_policy_with_policy(
         pruned_snapshot_count: snapshot_outcome.removed_snapshot_ids.len(),
         pruned_blob_count: snapshot_outcome.removed_blob_count,
         reclaimed_bytes: journal_outcome.reclaimed_bytes + snapshot_outcome.reclaimed_bytes,
-        pruned_operation_ids: journal_outcome.removed_operation_ids,
-        pruned_snapshot_ids: snapshot_outcome.removed_snapshot_ids,
     }))
 }
 
@@ -601,115 +586,11 @@ fn parse_rfc3339_utc(value: &str) -> Option<chrono::DateTime<Utc>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        apply_retention_policy_with_policy, create_snapshot, ensure_patch_authorized, errors,
-        set_auth_level, AiEditState,
-    };
-    use crate::ai::edit::snapshot;
+    use super::{apply_retention_policy_with_policy, create_snapshot, AiEditState};
+    use crate::ai::edit::history::snapshot;
     use crate::commands::contracts::AiEditTimelineEntryPayload;
-    use crate::commands::contracts::{
-        AiApplyPatchMetadataRequest, AiEditCreateSnapshotRequest, AiEditSetAuthLevelRequest,
-    };
+    use crate::commands::contracts::AiEditCreateSnapshotRequest;
     use std::fs;
-
-    #[test]
-    fn ensure_patch_authorized_rejects_manual_mode() {
-        let state = AiEditState::default();
-        let error = ensure_patch_authorized(
-            &state,
-            Some(&AiApplyPatchMetadataRequest {
-                task_id: Some("task-1".to_string()),
-                turn_id: None,
-                reason: None,
-                tool_call_id: None,
-                confirmed_by_user: None,
-                agent_run_id: None,
-                agent_step_id: None,
-                workspace_root_path: None,
-            }),
-        )
-        .expect_err("manual mode should block patch apply");
-
-        assert!(error.contains(errors::AI_EDIT_AUTH_BLOCKED));
-    }
-
-    #[test]
-    fn ensure_patch_authorized_accepts_matching_per_task_mode() {
-        let state = AiEditState::default();
-        set_auth_level(
-            AiEditSetAuthLevelRequest {
-                level: "per_task".to_string(),
-                task_id: Some("task-1".to_string()),
-            },
-            &state,
-        )
-        .expect("per_task auth should be set");
-
-        ensure_patch_authorized(
-            &state,
-            Some(&AiApplyPatchMetadataRequest {
-                task_id: Some("task-1".to_string()),
-                turn_id: None,
-                reason: None,
-                tool_call_id: None,
-                confirmed_by_user: None,
-                agent_run_id: None,
-                agent_step_id: None,
-                workspace_root_path: None,
-            }),
-        )
-        .expect("matching task id should pass");
-    }
-
-    #[test]
-    fn ensure_patch_authorized_rejects_mismatched_per_task_mode() {
-        let state = AiEditState::default();
-        set_auth_level(
-            AiEditSetAuthLevelRequest {
-                level: "per_task".to_string(),
-                task_id: Some("task-1".to_string()),
-            },
-            &state,
-        )
-        .expect("per_task auth should be set");
-
-        let error = ensure_patch_authorized(
-            &state,
-            Some(&AiApplyPatchMetadataRequest {
-                task_id: Some("task-2".to_string()),
-                turn_id: None,
-                reason: None,
-                tool_call_id: None,
-                confirmed_by_user: None,
-                agent_run_id: None,
-                agent_step_id: None,
-                workspace_root_path: None,
-            }),
-        )
-        .expect_err("mismatched task id should be rejected");
-
-        assert!(error.contains(errors::AI_EDIT_AUTH_BLOCKED));
-    }
-
-    #[test]
-    fn ensure_patch_authorized_accepts_user_confirmed_manual_mode() {
-        let state = AiEditState::default();
-
-        ensure_patch_authorized(
-            &state,
-            Some(&AiApplyPatchMetadataRequest {
-                task_id: Some("task-1".to_string()),
-                turn_id: None,
-                reason: None,
-                tool_call_id: None,
-                confirmed_by_user: Some(true),
-                agent_run_id: None,
-                agent_step_id: None,
-                workspace_root_path: None,
-            }),
-        )
-        .expect("user confirmed patch should bypass auto-apply gate");
-    }
 
     #[test]
     fn create_snapshot_writes_manual_snapshot_for_current_files() {

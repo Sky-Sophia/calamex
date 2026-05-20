@@ -1,6 +1,6 @@
 use crate::ai::audit::{self, AiAuditEventKind};
-use crate::ai::network_permission::{self, validate_public_http_url};
-use crate::ai::redaction::redact_text;
+use crate::ai::security::network_permission::{self, validate_public_http_url};
+use crate::ai::security::redaction::redact_text;
 use crate::commands::contracts::{
     AiWebFetchInput, AiWebFetchPayload, AiWebSearchInput, AiWebSearchPayload,
 };

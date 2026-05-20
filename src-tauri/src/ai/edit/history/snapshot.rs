@@ -1,5 +1,6 @@
-use crate::ai::edit::{atomic_write, errors, storage_lock};
-use crate::ai::edit::pins::PinIndex;
+use crate::ai::edit::errors;
+use crate::ai::edit::history::pins::PinIndex;
+use crate::ai::edit::io::{atomic_write, storage_lock};
 use crate::commands::contracts::{AiApplyPatchMetadataRequest, AiSnapshotPayload};
 use chrono::{DateTime, Duration, Utc};
 use fjall::{Database, Keyspace, KeyspaceCreateOptions, PersistMode};
@@ -243,15 +244,6 @@ fn list_stored_snapshots_locked(storage_root: &Path) -> Result<Vec<AiSnapshotPay
     Ok(snapshots)
 }
 
-pub fn prune_stored_snapshots(
-    storage_root: &Path,
-    retained_snapshot_ids: &HashSet<String>,
-) -> Result<SnapshotPruneOutcome, String> {
-    storage_lock::with_storage_write_lock(storage_root, "裁剪 AED 快照", || {
-        prune_stored_snapshots_locked(storage_root, retained_snapshot_ids)
-    })
-}
-
 pub fn apply_snapshot_retention(
     storage_root: &Path,
     pin_index: &PinIndex,
@@ -260,91 +252,6 @@ pub fn apply_snapshot_retention(
     storage_lock::with_storage_write_lock(storage_root, "执行 AED 快照 GC", || {
         apply_snapshot_retention_locked(storage_root, pin_index, policy)
     })
-}
-
-fn prune_stored_snapshots_locked(
-    storage_root: &Path,
-    retained_snapshot_ids: &HashSet<String>,
-) -> Result<SnapshotPruneOutcome, String> {
-    let store = open_store(storage_root)?;
-    let manifests = list_manifests(&store.snapshots)?;
-    let retained_blob_keys = manifests
-        .iter()
-        .filter(|manifest| retained_snapshot_ids.contains(&manifest.id))
-        .flat_map(|manifest| {
-            manifest
-                .files
-                .iter()
-                .filter_map(|file| file.blob_key.clone())
-        })
-        .collect::<HashSet<_>>();
-
-    let mut blob_keys_to_remove = HashSet::new();
-    let mut outcome = SnapshotPruneOutcome::default();
-    let mut batch = store.db.batch();
-
-    for manifest in manifests {
-        if retained_snapshot_ids.contains(&manifest.id) {
-            continue;
-        }
-
-        outcome.removed_snapshot_ids.insert(manifest.id.clone());
-        outcome.reclaimed_bytes += serialized_manifest_len(&manifest)?;
-        batch.remove(&store.snapshots, manifest.id.as_bytes().to_vec());
-
-        for file in manifest.files {
-            let Some(blob_key) = file.blob_key else {
-                continue;
-            };
-            if !retained_blob_keys.contains(&blob_key) {
-                blob_keys_to_remove.insert(blob_key);
-            }
-        }
-    }
-
-    if outcome.removed_snapshot_ids.is_empty() {
-        return Ok(outcome);
-    }
-
-    for blob_key in blob_keys_to_remove {
-        if retained_blob_keys.contains(&blob_key) {
-            continue;
-        }
-
-        if let Some(fjall_key) = blob_key.strip_prefix("fjall:") {
-            let removed_bytes = store
-                .snapshot_blobs
-                .size_of(fjall_key)
-                .map_err(|error| {
-                    errors::snapshot_store_failed(format!("读取 fjall blob 大小失败：{error}"))
-                })?
-                .unwrap_or_default() as u64;
-            batch.remove(&store.snapshot_blobs, fjall_key.as_bytes().to_vec());
-            if removed_bytes > 0 {
-                outcome.removed_blob_count += 1;
-                outcome.reclaimed_bytes += removed_bytes;
-            }
-            continue;
-        }
-
-        if let Some(relative_key) = blob_key.strip_prefix("cas:") {
-            let removed_bytes = remove_storage_file(
-                &join_storage_path(storage_root, relative_key),
-                "删除 CAS blob 失败",
-            )?;
-            if removed_bytes > 0 {
-                outcome.removed_blob_count += 1;
-                outcome.reclaimed_bytes += removed_bytes;
-            }
-        }
-    }
-
-    batch
-        .commit()
-        .map_err(|error| errors::snapshot_store_failed(format!("裁剪 fjall 快照失败：{error}")))?;
-    persist(&store.db)?;
-
-    Ok(outcome)
 }
 
 fn apply_snapshot_retention_locked(
@@ -638,12 +545,6 @@ fn list_manifests(snapshots: &Keyspace) -> Result<Vec<SnapshotManifest>, String>
     Ok(manifests)
 }
 
-fn serialized_manifest_len(manifest: &SnapshotManifest) -> Result<u64, String> {
-    serde_json::to_vec(manifest)
-        .map(|value| value.len() as u64)
-        .map_err(|error| errors::snapshot_store_failed(format!("序列化快照清单失败：{error}")))
-}
-
 fn build_blob_ref_counts(manifests: &[SnapshotManifest]) -> HashMap<String, usize> {
     let mut counts = HashMap::new();
     for manifest in manifests {
@@ -901,11 +802,12 @@ fn read_blob(
 #[cfg(test)]
 mod tests {
     use super::{
-        list_stored_snapshots, load_stored_snapshot, prune_stored_snapshots, store_manual_snapshot,
-        store_pre_tool_snapshot, SnapshotSourceFile,
+        apply_snapshot_retention, list_stored_snapshots, load_stored_snapshot,
+        store_manual_snapshot, store_pre_tool_snapshot, SnapshotRetentionPolicy,
+        SnapshotSourceFile,
     };
+    use crate::ai::edit::history::pins::PinIndex;
     use crate::commands::contracts::AiApplyPatchMetadataRequest;
-    use std::collections::HashSet;
     use std::fs;
 
     #[test]
@@ -1018,8 +920,8 @@ mod tests {
     }
 
     #[test]
-    fn prune_stored_snapshots_removes_old_manifests_and_orphan_blobs() {
-        let temp_dir = temp_dir("aed-prune-snapshots");
+    fn apply_snapshot_retention_downgrades_unpinned_full_blobs() {
+        let temp_dir = temp_dir("aed-snapshot-retention");
         fs::create_dir_all(&temp_dir).expect("temp directory should be created");
 
         let first = store_manual_snapshot(
@@ -1046,31 +948,29 @@ mod tests {
             "second",
         )
         .expect("second snapshot should be written");
-        std::thread::sleep(std::time::Duration::from_millis(1));
 
-        let third = store_manual_snapshot(
+        let outcome = apply_snapshot_retention(
             &temp_dir,
-            &[SnapshotSourceFile {
-                path: "src/three.sh",
-                content_hash: "blake3:shared",
-                content: "echo shared",
-            }],
-            None,
-            "third",
+            &PinIndex::default(),
+            SnapshotRetentionPolicy {
+                now: chrono::Utc::now() + chrono::Duration::days(FULL_BLOB_TTL_DAYS + 1),
+                total_blob_quota_bytes: 0,
+                ..SnapshotRetentionPolicy::default()
+            },
         )
-        .expect("third snapshot should be written");
-
-        let retained_snapshot_ids = HashSet::from([third.id.clone()]);
-        let outcome = prune_stored_snapshots(&temp_dir, &retained_snapshot_ids)
-            .expect("snapshots should be pruned");
+        .expect("snapshots should be downgraded");
 
         let snapshots = list_stored_snapshots(&temp_dir).expect("snapshots should be listed");
 
-        assert_eq!(snapshots.len(), 1);
-        assert_eq!(snapshots[0].id, third.id);
-        assert!(outcome.removed_snapshot_ids.contains(&first.id));
-        assert!(outcome.removed_snapshot_ids.contains(&second.id));
-        assert_eq!(outcome.removed_blob_count, 1);
+        assert_eq!(snapshots.len(), 2);
+        assert!(snapshots.iter().any(|snapshot| snapshot.id == first.id));
+        assert!(snapshots.iter().any(|snapshot| snapshot.id == second.id));
+        assert!(snapshots
+            .iter()
+            .all(|snapshot| !snapshot.content_available));
+        assert!(outcome.removed_snapshot_ids.is_empty());
+        assert_eq!(outcome.downgraded_snapshot_count, 2);
+        assert_eq!(outcome.removed_blob_count, 2);
         assert!(outcome.reclaimed_bytes > 0);
 
         let _ = fs::remove_dir_all(&temp_dir);

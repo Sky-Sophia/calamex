@@ -3,53 +3,45 @@ import { cn } from '@/lib/utils';
 import type { HTMLAttributes } from 'vue';
 import { computed } from 'vue';
 import { useContextValue } from './context';
-import { computeDeepSeekCostBreakdown, formatCnyCost } from './deepseek-pricing';
 import TokensWithCost from './TokensWithCost.vue';
 
 const props = defineProps<{
   class?: HTMLAttributes['class'];
 }>();
 
-const { usage, usageSource, modelId } = useContextValue();
+const { usage, usageSource, cost } = useContextValue();
 
-const pricing = computed(() => computeDeepSeekCostBreakdown(modelId.value, usage.value));
-const inputTokens = computed(() => pricing.value?.usage.inputTokens ?? usage.value?.inputTokens ?? 0);
+const inputTokens = computed(() => usage.value?.inputTokens ?? 0);
 const inputLabel = computed(() => (usageSource.value === 'official' ? '输入' : '估算输入'));
-const cacheHitInputTokens = computed(() => pricing.value?.usage.cacheHitInputTokens ?? 0);
-const cacheMissInputTokens = computed(() => pricing.value?.usage.cacheMissInputTokens ?? 0);
-const shouldSplitOfficialDeepSeekInput = computed(() =>
+const cacheHitInputTokens = computed(() => cost.value?.cacheHitInputTokens ?? 0);
+const cacheMissInputTokens = computed(() => cost.value?.cacheMissInputTokens ?? 0);
+const shouldSplitOfficialInput = computed(() =>
   usageSource.value === 'official' &&
-  Boolean(pricing.value) &&
+  Boolean(cost.value) &&
   (cacheHitInputTokens.value > 0 || cacheMissInputTokens.value > 0),
 );
 
-const inputCostText = computed(() => {
-  if (!pricing.value) {
-    return undefined;
-  }
-
-  return formatCnyCost(pricing.value.inputCostCny);
-});
+const inputCostText = computed(() => cost.value?.inputCostText);
 const cacheHitInputCostText = computed(() => {
-  if (!pricing.value || cacheHitInputTokens.value <= 0) {
+  if (cacheHitInputTokens.value <= 0) {
     return undefined;
   }
 
-  return formatCnyCost(pricing.value.cacheHitInputCostCny);
+  return cost.value?.cacheHitInputCostText;
 });
 const cacheMissInputCostText = computed(() => {
-  if (!pricing.value || cacheMissInputTokens.value <= 0) {
+  if (cacheMissInputTokens.value <= 0) {
     return undefined;
   }
 
-  return formatCnyCost(pricing.value.cacheMissInputCostCny);
+  return cost.value?.cacheMissInputCostText;
 });
 </script>
 
 <template>
   <slot v-if="$slots.default" />
 
-  <div v-else-if="shouldSplitOfficialDeepSeekInput" :class="cn('space-y-1 text-xs', props.class)" v-bind="$attrs">
+  <div v-else-if="shouldSplitOfficialInput" :class="cn('space-y-1 text-xs', props.class)" v-bind="$attrs">
     <div v-if="cacheHitInputTokens > 0" class="flex items-center justify-between">
       <span class="text-[var(--text-secondary)]">输入（命中缓存）</span>
       <TokensWithCost :cost-text="cacheHitInputCostText" :tokens="cacheHitInputTokens" />

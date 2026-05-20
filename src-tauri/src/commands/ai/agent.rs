@@ -1,5 +1,5 @@
 use crate::ai::gateway;
-use crate::ai::network_permission;
+use crate::ai::security::network_permission;
 use crate::commands::contracts::{
     AiAgentClassifyTaskPayload, AiAgentClassifyTaskRequest, AiAgentNetworkPermissionPayload,
     AiAgentSetNetworkPermissionRequest,

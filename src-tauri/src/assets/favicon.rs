@@ -12,7 +12,7 @@ use tokio::fs;
 use tokio::net::lookup_host;
 use tokio::task::JoinSet;
 
-use crate::ai::network_permission::validate_public_http_url;
+use crate::ai::security::network_permission::validate_public_http_url;
 
 const CACHE_DIR_NAME: &str = "favicons";
 const CACHE_TTL_SUCCESS_SECS: i64 = 30 * 24 * 60 * 60;

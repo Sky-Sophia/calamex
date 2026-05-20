@@ -4,9 +4,9 @@ use super::errors;
 use super::provider::{
     AiProviderChatRequest, AiProviderMessage, AiProviderUsage,
 };
-use super::redaction::redact_text;
-use super::stream_manager;
-use super::token_budget;
+use super::budget as token_budget;
+use super::security::redaction::redact_text;
+use super::stream as stream_manager;
 use crate::ai::agent::planner::AgentPlanner;
 use crate::commands::contracts::{
     AiAgentClassifyTaskPayload, AiAgentClassifyTaskRequest, AiChatRequest, AiCodeActionPayload,
@@ -267,17 +267,6 @@ fn get_api_key_for_config(config: &AiRuntimeConfig) -> Result<String, String> {
     CredentialStore::get(&config.provider_type)
 }
 
-fn get_api_key_for_model_endpoint(
-    config: &AiModelEndpointRuntimeConfig,
-    role: AiResolvedModelRole,
-) -> Result<String, String> {
-    if let Some(profile_id) = config.active_profile_id.as_deref() {
-        return CredentialStore::get_profile_secret(profile_id);
-    }
-
-    CredentialStore::get_for_role(&config.provider_type, role.credential_role())
-}
-
 fn get_saved_api_key_for_candidate(
     role: AiResolvedModelRole,
     provider_type: &str,
@@ -441,22 +430,6 @@ fn default_base_url(provider_type: &str) -> Option<String> {
         "mastra" => None,
         _ => None,
     }
-}
-
-fn resolve_base_url(config: &AiRuntimeConfig) -> Result<&str, String> {
-    config
-        .base_url
-        .as_deref()
-        .ok_or_else(|| errors::error("AI_PROVIDER_NOT_CONFIGURED", "请先配置 Provider API 地址。"))
-}
-
-fn resolve_model_endpoint_base_url(config: &AiModelEndpointRuntimeConfig) -> Result<&str, String> {
-    config.base_url.as_deref().ok_or_else(|| {
-        errors::error(
-            "AI_PROVIDER_NOT_CONFIGURED",
-            "请先配置 Narrator Provider API 地址。",
-        )
-    })
 }
 
 fn next_runtime_id(prefix: &str) -> String {

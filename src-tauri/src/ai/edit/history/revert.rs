@@ -22,10 +22,13 @@
 
 use crate::ai::audit::{self, AiAuditEventKind};
 use crate::ai::edit as ai_edit;
-use crate::ai::edit::{
-    atomic_write, diff_render, edit_journal, errors, path_security, snapshot, AiEditState,
-};
+use crate::ai::edit::apply::diff_render;
+use crate::ai::edit::errors;
+use crate::ai::edit::history::{edit_journal, snapshot};
+use crate::ai::edit::io::atomic_write;
 use crate::ai::edit::patch;
+use crate::ai::edit::security::path_security;
+use crate::ai::edit::AiEditState;
 use crate::commands::contracts::{
     AiEditDiffHunkPayload, AiEditGetDiffPayload, AiEditGetDiffRequest, AiEditListTimelineRequest,
     AiEditOperationPayload, AiEditRestoreSnapshotPayload, AiEditRestoreSnapshotRequest,
@@ -1223,9 +1226,13 @@ mod tests {
     };
     use crate::ai::edit::{
         self,
-        auto_apply::{apply_operation_plans, AiAutoApplyOperationKind, AiAutoApplyOperationPlan},
-        diff_render, edit_journal, errors, snapshot, AiEditState,
+        errors, AiEditState,
     };
+    use crate::ai::edit::apply::{
+        auto_apply::{apply_operation_plans, AiAutoApplyOperationKind, AiAutoApplyOperationPlan},
+        diff_render,
+    };
+    use crate::ai::edit::history::{edit_journal, snapshot};
     use crate::commands::contracts::{
         AiApplyPatchMetadataRequest, AiApplyPatchRequest, AiEditGetDiffRequest,
         AiEditListTimelineRequest, AiEditRestoreSnapshotRequest, AiEditRevertFileRequest,

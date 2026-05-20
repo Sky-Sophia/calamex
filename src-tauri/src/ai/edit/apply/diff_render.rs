@@ -3,8 +3,7 @@
 //! 设计要点：
 //! - `render_patch_hunks` 基于 `diffy-imara` 生成标准 unified diff hunk。
 //! - `apply_reverse_hunk` 将单个 hunk 转为 `diffy-imara` patch 后反向作用到「应用后」文本上。
-//! - 多 hunk 反向请使用 `apply_reverse_hunks`（内部按 `new_start` 逆序作用），
-//!   避免前一个 hunk 的撤销改变后续 hunk 的行偏移。
+//! - 当前生产路径只支持单 hunk 回滚；批量回滚由 operation/snapshot 层处理。
 //! - 行号约定：1-based；`old_lines = 0` 表示纯插入，`new_lines = 0` 表示纯删除。
 
 use crate::commands::contracts::AiPatchHunkPayload;
@@ -85,21 +84,6 @@ pub fn apply_reverse_hunk(after: &str, hunk: &AiPatchHunkPayload) -> Result<Stri
     let patch = Patch::from_str(&patch_text).map_err(|error| format!("解析 hunk 失败：{error}"))?;
     diffy_imara::apply(after, &patch.reverse())
         .map_err(|error| format!("当前文件片段与目标 hunk 不一致：{error}"))
-}
-
-/// 将一组 hunk 一次性反向作用到「应用后」文本上。
-///
-/// 内部按 `new_start` 降序应用，保证前一次撤销不会污染后续 hunk 的行偏移。
-/// 任意 hunk 失败会立即返回，且不会保留半成品（在副本上构建）。
-pub fn apply_reverse_hunks(after: &str, hunks: &[AiPatchHunkPayload]) -> Result<String, String> {
-    let mut ordered: Vec<&AiPatchHunkPayload> = hunks.iter().collect();
-    ordered.sort_by(|a, b| b.new_start.cmp(&a.new_start));
-
-    let mut current = after.to_string();
-    for hunk in ordered {
-        current = apply_reverse_hunk(&current, hunk)?;
-    }
-    Ok(current)
 }
 
 fn ensure_hunk_matches_after_segment(after: &str, hunk: &AiPatchHunkPayload) -> Result<(), String> {
@@ -197,7 +181,7 @@ fn strip_diffy_line(value: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_reverse_hunk, apply_reverse_hunks, render_patch_hunks};
+    use super::{apply_reverse_hunk, render_patch_hunks};
 
     #[test]
     fn render_patch_hunks_splits_multiple_change_groups() {
@@ -227,8 +211,9 @@ mod tests {
         let rendered = render_patch_hunks(before, after);
         assert_eq!(rendered.additions, 2);
         assert_eq!(rendered.deletions, 0);
+        assert_eq!(rendered.hunks.len(), 1);
 
-        let reverted = apply_reverse_hunks(after, &rendered.hunks).expect("reverse ok");
+        let reverted = apply_reverse_hunk(after, &rendered.hunks[0]).expect("reverse ok");
         assert_eq!(reverted, before);
     }
 
@@ -239,8 +224,9 @@ mod tests {
         let rendered = render_patch_hunks(before, after);
         assert_eq!(rendered.additions, 0);
         assert_eq!(rendered.deletions, 2);
+        assert_eq!(rendered.hunks.len(), 1);
 
-        let reverted = apply_reverse_hunks(after, &rendered.hunks).expect("reverse ok");
+        let reverted = apply_reverse_hunk(after, &rendered.hunks[0]).expect("reverse ok");
         assert_eq!(reverted, before);
     }
 
@@ -249,19 +235,8 @@ mod tests {
         let before = "a\nb\n";
         let after = "a\nB\n";
         let rendered = render_patch_hunks(before, after);
-        let reverted = apply_reverse_hunks(after, &rendered.hunks).expect("reverse ok");
-        assert_eq!(reverted, before);
-    }
-
-    #[test]
-    fn reverse_hunks_applied_in_reverse_order() {
-        let before = "l1\nl2\nl3\nl4\nl5";
-        let after = "l1\nL2\nl3\nL4\nl5";
-        let rendered = render_patch_hunks(before, after);
-        assert_eq!(rendered.hunks.len(), 2);
-
-        // 调用方即便按正序传入，apply_reverse_hunks 内部也会逆序处理。
-        let reverted = apply_reverse_hunks(after, &rendered.hunks).expect("reverse ok");
+        assert_eq!(rendered.hunks.len(), 1);
+        let reverted = apply_reverse_hunk(after, &rendered.hunks[0]).expect("reverse ok");
         assert_eq!(reverted, before);
     }
 
@@ -284,7 +259,7 @@ mod tests {
         assert_eq!(rendered.hunks[0].old_lines, 0);
         assert_eq!(rendered.hunks[0].new_lines, 1);
 
-        let reverted = apply_reverse_hunks(after, &rendered.hunks).expect("reverse ok");
+        let reverted = apply_reverse_hunk(after, &rendered.hunks[0]).expect("reverse ok");
         assert_eq!(reverted, before);
     }
 
@@ -297,7 +272,7 @@ mod tests {
         assert_eq!(rendered.hunks[0].old_lines, 1);
         assert_eq!(rendered.hunks[0].new_lines, 0);
 
-        let reverted = apply_reverse_hunks(after, &rendered.hunks).expect("reverse ok");
+        let reverted = apply_reverse_hunk(after, &rendered.hunks[0]).expect("reverse ok");
         assert_eq!(reverted, before);
     }
 

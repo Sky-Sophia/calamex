@@ -11,6 +11,10 @@ import {
 } from '@/components/ai-elements/context';
 import { PromptInputAttachmentsDisplay } from '@/components/ai-elements/prompt-input';
 import AiProviderIcon from '@/components/business/ai/provider/AiProviderIcon.vue';
+import {
+  computeDeepSeekCostBreakdown,
+  formatCnyCost,
+} from '@/components/business/ai/provider/deepseek-pricing';
 import FieldError from '@/components/common/FieldError.vue';
 import DropdownMenu from '@/components/ui/dropdown-menu/DropdownMenu.vue';
 import DropdownMenuContent from '@/components/ui/dropdown-menu/DropdownMenuContent.vue';
@@ -142,6 +146,25 @@ const emptyTokenContext: IAiTokenContextProps = {
 };
 const resolvedTokenContext = computed(() => props.tokenContext ?? emptyTokenContext);
 const selectedModel = computed(() => props.config.selectedModel?.trim() ?? '');
+const tokenUsageCost = computed(() => {
+  const pricing = computeDeepSeekCostBreakdown(
+    selectedModel.value,
+    resolvedTokenContext.value.usage,
+  );
+  if (!pricing) {
+    return undefined;
+  }
+
+  return {
+    inputCostText: formatCnyCost(pricing.inputCostCny),
+    outputCostText: formatCnyCost(pricing.outputCostCny),
+    totalCostText: formatCnyCost(pricing.totalCostCny),
+    cacheHitInputCostText: formatCnyCost(pricing.cacheHitInputCostCny),
+    cacheMissInputCostText: formatCnyCost(pricing.cacheMissInputCostCny),
+    cacheHitInputTokens: pricing.usage.cacheHitInputTokens,
+    cacheMissInputTokens: pricing.usage.cacheMissInputTokens,
+  };
+});
 const selectedPlatform = computed(() => findAiServicePlatformByModel(selectedModel.value));
 const selectedModelLabel = computed(() => {
   const modelId = selectedModel.value;
@@ -428,7 +451,7 @@ const handleStop = (): void => {
             </SelectContent>
           </Select>
 
-          <Context v-bind="resolvedTokenContext">
+          <Context v-bind="resolvedTokenContext" :cost="tokenUsageCost">
             <ContextTrigger class="ai-token-trigger" aria-label="Token 消耗" />
 
             <ContextContent side="top" align="end" :side-offset="8" class="ai-token-content">

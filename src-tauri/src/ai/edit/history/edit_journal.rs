@@ -1,5 +1,6 @@
-use crate::ai::edit::{errors, storage_lock};
-use crate::ai::edit::pins::PinIndex;
+use crate::ai::edit::errors;
+use crate::ai::edit::history::pins::PinIndex;
+use crate::ai::edit::io::storage_lock;
 use crate::commands::contracts::AiEditOperationPayload;
 use fjall::{Database, Keyspace, KeyspaceCreateOptions, PersistMode};
 use std::collections::HashSet;

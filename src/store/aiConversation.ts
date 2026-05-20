@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { z } from 'zod';
 
 import type { IAiChatMessage } from '@/types/ai';
-import { aiChatMessageSchema } from '@/types/ai.schema';
+import {
+  aiConversationLegacyPersistSchema,
+  aiConversationPersistSchema,
+} from '@/types/ai-conversation.schema';
 
 // ---------------------------------------------------------------------------
 // Public constants & types
@@ -55,44 +57,6 @@ interface IAiConversationPersistShape {
   activeThreadId: string | null;
   threads: IAiConversationThread[];
 }
-
-// ---------------------------------------------------------------------------
-// Persistence schemas (validation only; types come from the interfaces above)
-// ---------------------------------------------------------------------------
-
-const aiConversationTitleStatusSchema = z.enum([
-  'temporary',
-  'generating',
-  'generated',
-  'failed',
-]);
-
-const aiConversationScrollStateSchema = z.object({
-  scrollTop: z.number().finite().nonnegative(),
-  scrollHeight: z.number().finite().nonnegative(),
-  clientHeight: z.number().finite().nonnegative(),
-  distanceFromBottom: z.number().finite().nonnegative(),
-  updatedAt: z.string().min(1),
-});
-
-const aiConversationThreadSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().min(1),
-  titleStatus: aiConversationTitleStatusSchema.catch('temporary'),
-  updatedAt: z.string().min(1),
-  createdAt: z.string().min(1),
-  messages: z.array(aiChatMessageSchema),
-  scrollState: aiConversationScrollStateSchema.optional(),
-});
-
-const aiConversationPersistSchema = z.object({
-  activeThreadId: z.string().min(1).nullable(),
-  threads: z.array(aiConversationThreadSchema),
-});
-
-const legacyPersistSchema = z.object({
-  activeMessages: z.array(aiChatMessageSchema),
-});
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -548,7 +512,7 @@ export const useAiConversationStore = defineStore('ai-conversation', () => {
       }
 
       // ── 旧版本快照 (单数组 activeMessages) ────────────────────────
-      const parsedLegacy = legacyPersistSchema.safeParse({
+      const parsedLegacy = aiConversationLegacyPersistSchema.safeParse({
         activeMessages: store.activeMessages ?? [],
       });
       const migrated = parsedLegacy.success

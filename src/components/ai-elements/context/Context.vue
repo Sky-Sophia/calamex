@@ -3,7 +3,7 @@ import type { LanguageModelUsage } from 'ai';
 import { HoverCard } from '@/components/ui/hover-card';
 import type { TAiTokenUsageSource } from '@/composables/ai/useAiTokenContext';
 import { computed, provide } from 'vue';
-import { ContextKey, type TContextModelId } from './context';
+import { ContextKey, type IContextUsageCost, type TContextModelId } from './context';
 
 defineOptions({
   inheritAttrs: false,
@@ -15,6 +15,7 @@ const props = defineProps<{
   usage?: LanguageModelUsage;
   usageSource?: TAiTokenUsageSource;
   modelId?: TContextModelId;
+  cost?: IContextUsageCost;
 }>();
 
 provide(ContextKey, {
@@ -23,6 +24,7 @@ provide(ContextKey, {
   usage: computed(() => props.usage),
   usageSource: computed(() => props.usageSource ?? 'estimated'),
   modelId: computed(() => props.modelId),
+  cost: computed(() => props.cost),
 });
 </script>
 

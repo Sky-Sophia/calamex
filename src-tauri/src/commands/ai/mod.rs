@@ -3,6 +3,7 @@ mod edit;
 mod gateway;
 mod storage;
 mod tools;
+pub mod tools_generated;
 
 pub use agent::{ai_agent_classify_task, ai_agent_set_network_permission};
 pub use edit::{

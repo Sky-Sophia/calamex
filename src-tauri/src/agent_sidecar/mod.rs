@@ -1063,24 +1063,6 @@ pub async fn model_chat(
     .await
 }
 
-pub async fn narrator_model_chat(
-    app: AppHandle,
-    mut payload: AgentSidecarChatRequest,
-) -> Result<AgentSidecarResponsePayload, String> {
-    let session_id = ensure_request_session_id(&mut payload.session_id, "sidecar-narrator-chat");
-    if payload.model_config.is_none() {
-        payload.model_config = Some(narrator_sidecar_model_config()?);
-    }
-    post_json_streaming_events(
-        &app,
-        "/model/chat",
-        "/model/chat/stream",
-        &payload,
-        &session_id,
-    )
-    .await
-}
-
 pub async fn model_chat_once(
     mut payload: AgentSidecarChatRequest,
 ) -> Result<AgentSidecarResponsePayload, String> {

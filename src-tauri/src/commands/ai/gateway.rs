@@ -1,6 +1,6 @@
 use crate::ai::audit::{self, AiAuditEventKind};
 use crate::ai::gateway;
-use crate::ai::stream_manager;
+use crate::ai::stream as stream_manager;
 use crate::commands::contracts::{
     AiCancelRequest, AiChatRequest, AiChatStreamPayload, AiCodeActionPayload,
     AiCodeActionRequest, AiConfigPayload, AiConversationTitlePayload,

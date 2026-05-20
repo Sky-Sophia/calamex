@@ -3,6 +3,7 @@
 mod agent_sidecar;
 mod approval_engine;
 mod ai;
+mod assets;
 mod commands;
 mod error;
 mod terminal;
@@ -209,7 +210,8 @@ fn main() {
         .register_asynchronous_uri_scheme_protocol("favicon", |context, request, responder| {
             let app_handle = context.app_handle().clone();
             tauri::async_runtime::spawn(async move {
-                let response = ai::favicon::handle_protocol_request(&app_handle, request).await;
+                let response =
+                    assets::favicon::handle_protocol_request(&app_handle, request).await;
                 responder.respond(response);
             });
         })

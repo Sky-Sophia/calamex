@@ -3,24 +3,15 @@ import { cn } from '@/lib/utils';
 import type { HTMLAttributes } from 'vue';
 import { computed } from 'vue';
 import { useContextValue } from './context';
-import { computeDeepSeekCostBreakdown, formatCnyCost } from './deepseek-pricing';
 
 const props = defineProps<{
   class?: HTMLAttributes['class'];
 }>();
 
-const { modelId, usage, usageSource } = useContextValue();
+const { cost, usageSource } = useContextValue();
 const costLabel = computed(() => (usageSource.value === 'official' ? 'usage 成本' : '预计成本'));
 
-const totalCost = computed(() => {
-  const pricing = computeDeepSeekCostBreakdown(modelId.value, usage.value);
-
-  if (!pricing) {
-    return '暂无价格';
-  }
-
-  return formatCnyCost(pricing.totalCostCny);
-});
+const totalCost = computed(() => cost.value?.totalCostText ?? '暂无价格');
 </script>
 
 <template>

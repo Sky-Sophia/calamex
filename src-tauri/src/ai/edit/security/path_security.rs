@@ -3,7 +3,8 @@
 //! 这里集中处理 AI 自动写盘相关的路径入口：UTF-8、NUL、`..`、protected path、
 //! 工作区边界和 capability 目录校验。业务模块不得再各自手写路径判断。
 
-use crate::ai::edit::{errors, protected_paths};
+use crate::ai::edit::errors;
+use crate::ai::edit::security::protected_paths;
 use camino::{Utf8Path, Utf8PathBuf};
 use cap_std::ambient_authority;
 use cap_std::fs::Dir;

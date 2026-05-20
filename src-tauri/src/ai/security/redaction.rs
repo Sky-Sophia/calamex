@@ -48,12 +48,6 @@ impl RedactionResult {
         }
     }
 
-    pub fn redacted(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            blocked: true,
-        }
-    }
 }
 
 pub fn redact_text(value: &str) -> RedactionResult {

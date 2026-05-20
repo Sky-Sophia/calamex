@@ -1,8 +1,8 @@
 use crate::ai::audit::{self, AiAuditEventKind};
 use crate::ai::errors;
-use crate::ai::edit::auto_apply::{self, AiAutoApplyOperationKind, AiAutoApplyOperationPlan};
-use crate::ai::edit::diff_render;
-use crate::ai::edit::path_security;
+use crate::ai::edit::apply::auto_apply::{self, AiAutoApplyOperationPlan};
+use crate::ai::edit::apply::diff_render;
+use crate::ai::edit::security::path_security;
 use crate::ai::edit::AiEditState;
 use crate::commands::contracts::{
     AiApplyPatchFilePayload, AiApplyPatchPayload, AiApplyPatchRequest, AiPatchFilePayload,
@@ -102,9 +102,7 @@ pub fn apply_patch(
     let operation_plans = pending_files
         .iter()
         .map(|file| AiAutoApplyOperationPlan {
-            kind: AiAutoApplyOperationKind::Modify,
             path: file.payload_path.clone(),
-            new_path: None,
             original_hash: Some(file.original_hash.clone()),
             original_modified_at: Some(file.original_modified_at),
             original_content: Some(file.original.clone()),
@@ -294,7 +292,9 @@ fn validate_patch_line(line: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{apply_patch, hash_text, propose_patch, validate_writable_path};
-    use crate::ai::edit::{self, diff_render, edit_journal, AiEditState};
+    use crate::ai::edit::apply::diff_render;
+    use crate::ai::edit::history::edit_journal;
+    use crate::ai::edit::{self, AiEditState};
     use crate::commands::contracts::{
         AiApplyPatchMetadataRequest, AiApplyPatchRequest, AiEditListTimelineRequest,
         AiEditSetAuthLevelRequest, AiEditTimelineEntryPayload, AiPatchFilePayload,

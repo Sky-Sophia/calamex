@@ -1,4 +1,7 @@
-use crate::ai::edit::{atomic_write, edit_journal, errors, path_security, storage_lock};
+use crate::ai::edit::errors;
+use crate::ai::edit::history::edit_journal;
+use crate::ai::edit::io::{atomic_write, storage_lock};
+use crate::ai::edit::security::path_security;
 use crate::commands::contracts::AiEditOperationPayload;
 use chrono::Utc;
 use fjall::{Database, Keyspace, KeyspaceCreateOptions, PersistMode};
@@ -434,7 +437,7 @@ mod tests {
         commit, recover_pending, update_status, FileTransactionAction, FileTransactionPlan,
         TransactionStatus,
     };
-    use crate::ai::edit::edit_journal;
+    use crate::ai::edit::history::edit_journal;
     use crate::commands::contracts::AiEditOperationPayload;
     use std::fs;
 

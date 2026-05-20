@@ -1,11 +1,13 @@
 use crate::ai::errors;
 use crate::ai::edit as ai_edit;
-use crate::ai::edit::file_transaction::{self, FileTransactionAction, FileTransactionPlan};
-use crate::ai::edit::path_security;
-use crate::ai::edit::snapshot::{self, SnapshotSourceFile};
-use crate::ai::edit::AiEditState;
-use crate::ai::edit::diff_render;
+use crate::ai::edit::apply::diff_render;
+use crate::ai::edit::history::snapshot::{self, SnapshotSourceFile};
+use crate::ai::edit::io::file_transaction::{
+    self, FileTransactionAction, FileTransactionPlan,
+};
 use crate::ai::edit::patch::{hash_text, read_text_file_baseline};
+use crate::ai::edit::security::path_security;
+use crate::ai::edit::AiEditState;
 use crate::commands::contracts::{
     AiApplyPatchMetadataRequest, AiEditOperationPayload, AiEditTimelineEntryPayload,
 };
@@ -20,34 +22,10 @@ mod error_codes {
     pub const WRITE_FAILED: &str = "AI_EDIT_WRITE_FAILED";
 }
 
-/// 自动写盘支持的四种操作类型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AiAutoApplyOperationKind {
-    Create,
-    Modify,
-    Delete,
-    Rename,
-}
-
-impl AiAutoApplyOperationKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Create => "create",
-            Self::Modify => "modify",
-            Self::Delete => "delete",
-            Self::Rename => "rename",
-        }
-    }
-}
-
-/// 单条自动写盘计划。
-///
-/// 字段按操作类型不同有不同必填要求，由 `validate_operation_plans` 统一前置校验。
+/// 单条 Patch 修改写盘计划。
 #[derive(Debug, Clone)]
 pub struct AiAutoApplyOperationPlan {
-    pub kind: AiAutoApplyOperationKind,
     pub path: String,
-    pub new_path: Option<String>,
     pub original_hash: Option<String>,
     pub original_modified_at: Option<SystemTime>,
     pub original_content: Option<String>,
@@ -125,60 +103,21 @@ fn validate_operation_plans(
 
         validate_non_protected_path(&plan.path, workspace_root)?;
 
-        match plan.kind {
-            AiAutoApplyOperationKind::Create => {
-                if plan.updated_content.is_none() {
-                    return Err(errors::error(
-                        error_codes::WRITE_INVALID,
-                        "create 操作缺少目标内容。",
-                    ));
-                }
-            }
-            AiAutoApplyOperationKind::Modify => {
-                validate_original_fields(plan, "modify 操作缺少前后内容。")?;
+        if plan.original_hash.is_none() || plan.original_content.is_none() {
+            return Err(errors::error(
+                error_codes::WRITE_INVALID,
+                "modify 操作缺少前后内容。",
+            ));
+        }
 
-                if plan.updated_content.is_none() {
-                    return Err(errors::error(
-                        error_codes::WRITE_INVALID,
-                        "modify 操作缺少目标内容。",
-                    ));
-                }
-            }
-            AiAutoApplyOperationKind::Delete => {
-                validate_original_fields(plan, "delete 操作缺少原始内容。")?;
-            }
-            AiAutoApplyOperationKind::Rename => {
-                validate_original_fields(plan, "rename 操作缺少源内容。")?;
-
-                let target = plan
-                    .new_path
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| {
-                        errors::error(error_codes::WRITE_INVALID, "rename 操作缺少目标路径。")
-                    })?;
-
-                validate_non_protected_path(target, workspace_root)?;
-
-                if normalize_path_for_compare(&plan.path) == normalize_path_for_compare(target) {
-                    return Err(errors::error(
-                        error_codes::WRITE_INVALID,
-                        "rename 源路径与目标路径不能相同。",
-                    ));
-                }
-            }
+        if plan.updated_content.is_none() {
+            return Err(errors::error(
+                error_codes::WRITE_INVALID,
+                "modify 操作缺少目标内容。",
+            ));
         }
 
         validate_declared_original_hash(plan)?;
-    }
-
-    Ok(())
-}
-
-fn validate_original_fields(plan: &AiAutoApplyOperationPlan, message: &str) -> Result<(), String> {
-    if plan.original_hash.is_none() || plan.original_content.is_none() {
-        return Err(errors::error(error_codes::WRITE_INVALID, message));
     }
 
     Ok(())
@@ -208,81 +147,20 @@ fn validate_declared_original_hash(plan: &AiAutoApplyOperationPlan) -> Result<()
 /// 写前统一做磁盘冲突检测。
 ///
 /// 这一步非常关键：
-/// - modify/delete/rename 必须确认磁盘当前内容仍等于计划生成时的 original_hash。
-/// - create 必须确认目标路径不存在。
-/// - rename 还必须确认目标路径不存在。
+/// - modify 必须确认磁盘当前内容仍等于计划生成时的 original_hash。
 fn validate_operation_conflicts(
     plans: &[AiAutoApplyOperationPlan],
     workspace_root: Option<&str>,
 ) -> Result<(), String> {
     for plan in plans {
-        match plan.kind {
-            AiAutoApplyOperationKind::Create => {
-                let path = validate_non_protected_path(&plan.path, workspace_root)?;
+        let path =
+            validate_existing_file_for_original_hash(plan, workspace_root, "modify 目标文件不存在。")?;
 
-                if path.exists() {
-                    return Err(errors::error(
-                        error_codes::WRITE_CONFLICT,
-                        "create 目标已存在。",
-                    ));
-                }
-            }
-            AiAutoApplyOperationKind::Modify => {
-                let path = validate_existing_file_for_original_hash(
-                    plan,
-                    workspace_root,
-                    "modify 目标文件不存在。",
-                )?;
-
-                if !path.is_file() {
-                    return Err(errors::error(
-                        error_codes::WRITE_CONFLICT,
-                        "modify 目标不是普通文件。",
-                    ));
-                }
-            }
-            AiAutoApplyOperationKind::Delete => {
-                let path = validate_existing_file_for_original_hash(
-                    plan,
-                    workspace_root,
-                    "delete 目标文件不存在。",
-                )?;
-
-                if !path.is_file() {
-                    return Err(errors::error(
-                        error_codes::WRITE_CONFLICT,
-                        "delete 目标不是普通文件。",
-                    ));
-                }
-            }
-            AiAutoApplyOperationKind::Rename => {
-                let source_path = validate_existing_file_for_original_hash(
-                    plan,
-                    workspace_root,
-                    "rename 源文件不存在。",
-                )?;
-
-                if !source_path.is_file() {
-                    return Err(errors::error(
-                        error_codes::WRITE_CONFLICT,
-                        "rename 源路径不是普通文件。",
-                    ));
-                }
-
-                let target_raw_path = plan
-                    .new_path
-                    .as_deref()
-                    .expect("validated rename operation should have target path");
-
-                let target_path = validate_non_protected_path(target_raw_path, workspace_root)?;
-
-                if target_path.exists() {
-                    return Err(errors::error(
-                        error_codes::WRITE_CONFLICT,
-                        "rename 目标文件已存在。",
-                    ));
-                }
-            }
+        if !path.is_file() {
+            return Err(errors::error(
+                error_codes::WRITE_CONFLICT,
+                "modify 目标不是普通文件。",
+            ));
         }
     }
 
@@ -377,21 +255,16 @@ fn capture_checkpoint_snapshots(
 fn build_snapshot_sources(plans: &[AiAutoApplyOperationPlan]) -> Vec<SnapshotSourceFile<'_>> {
     plans
         .iter()
-        .filter_map(|plan| match plan.kind {
-            AiAutoApplyOperationKind::Create => None,
-            AiAutoApplyOperationKind::Modify
-            | AiAutoApplyOperationKind::Delete
-            | AiAutoApplyOperationKind::Rename => Some(SnapshotSourceFile {
-                path: plan.path.as_str(),
-                content_hash: plan
-                    .original_hash
-                    .as_deref()
-                    .expect("validated operation should have original hash"),
-                content: plan
-                    .original_content
-                    .as_deref()
-                    .expect("validated operation should have original content"),
-            }),
+        .map(|plan| SnapshotSourceFile {
+            path: plan.path.as_str(),
+            content_hash: plan
+                .original_hash
+                .as_deref()
+                .expect("validated operation should have original hash"),
+            content: plan
+                .original_content
+                .as_deref()
+                .expect("validated operation should have original content"),
         })
         .collect()
 }
@@ -415,58 +288,24 @@ fn build_file_transaction_action(
     plan: &AiAutoApplyOperationPlan,
     workspace_root: Option<&str>,
 ) -> Result<FileTransactionAction, String> {
-    match plan.kind {
-        AiAutoApplyOperationKind::Create => Ok(FileTransactionAction::Create {
-            path: validate_non_protected_path(&plan.path, workspace_root)?,
-            content: plan
-                .updated_content
-                .clone()
-                .expect("validated create operation should have updated content"),
-        }),
-        AiAutoApplyOperationKind::Modify => Ok(FileTransactionAction::Modify {
-            path: validate_non_protected_path(&plan.path, workspace_root)?,
-            content: plan
-                .updated_content
-                .clone()
-                .expect("validated modify operation should have updated content"),
-        }),
-        AiAutoApplyOperationKind::Delete => Ok(FileTransactionAction::Delete {
-            path: validate_non_protected_path(&plan.path, workspace_root)?,
-        }),
-        AiAutoApplyOperationKind::Rename => Ok(FileTransactionAction::Rename {
-            from: validate_non_protected_path(&plan.path, workspace_root)?,
-            to: validate_non_protected_path(
-                plan.new_path
-                    .as_deref()
-                    .expect("validated rename operation should have target path"),
-                workspace_root,
-            )?,
-        }),
-    }
+    Ok(FileTransactionAction::Modify {
+        path: validate_non_protected_path(&plan.path, workspace_root)?,
+        content: plan
+            .updated_content
+            .clone()
+            .expect("validated modify operation should have updated content"),
+    })
 }
 
 fn build_file_result(plan: &AiAutoApplyOperationPlan) -> Result<AiAutoApplyFileResult, String> {
-    let (path, byte_size) = match plan.kind {
-        AiAutoApplyOperationKind::Create | AiAutoApplyOperationKind::Modify => (
-            plan.path.clone(),
-            plan.updated_content
-                .as_deref()
-                .expect("validated write operation should have updated content")
-                .len() as u64,
-        ),
-        AiAutoApplyOperationKind::Delete => (plan.path.clone(), 0),
-        AiAutoApplyOperationKind::Rename => (
-            plan.new_path
-                .clone()
-                .expect("validated rename operation should have target path"),
-            plan.original_content
-                .as_deref()
-                .map(|value| value.len() as u64)
-                .unwrap_or(0),
-        ),
-    };
-
-    Ok(AiAutoApplyFileResult { path, byte_size })
+    Ok(AiAutoApplyFileResult {
+        path: plan.path.clone(),
+        byte_size: plan
+            .updated_content
+            .as_deref()
+            .expect("validated write operation should have updated content")
+            .len() as u64,
+    })
 }
 
 fn record_committed_operations(
@@ -509,38 +348,20 @@ fn build_operation_payload(
         .as_deref()
         .map(|value| value.len() as u64);
 
-    let (before_hash, after_hash, bytes_before, bytes_after) = match plan.kind {
-        AiAutoApplyOperationKind::Create => (None, updated_hash, None, updated_bytes),
-        AiAutoApplyOperationKind::Modify => (
-            plan.original_hash.clone(),
-            updated_hash,
-            original_bytes,
-            updated_bytes,
-        ),
-        AiAutoApplyOperationKind::Delete => {
-            (plan.original_hash.clone(), None, original_bytes, None)
-        }
-        AiAutoApplyOperationKind::Rename => (
-            plan.original_hash.clone(),
-            plan.original_hash.clone(),
-            original_bytes,
-            original_bytes,
-        ),
-    };
     let diff_text = build_operation_diff_text(plan);
 
     AiEditOperationPayload {
         id: format!("ai-edit-op-{}-{index}", timestamp.timestamp_millis()),
         task_id,
         turn_id,
-        kind: plan.kind.as_str().to_string(),
+        kind: "modify".to_string(),
         path: plan.path.clone(),
-        new_path: plan.new_path.clone(),
+        new_path: None,
         source_snapshot_id: source_snapshot_id.map(str::to_string),
-        before_hash,
-        after_hash,
-        bytes_before,
-        bytes_after,
+        before_hash: plan.original_hash.clone(),
+        after_hash: updated_hash,
+        bytes_before: original_bytes,
+        bytes_after: updated_bytes,
         applied_at: timestamp.to_rfc3339(),
         reason,
         tool_call_id: metadata.and_then(|value| value.tool_call_id.clone()),
@@ -550,25 +371,11 @@ fn build_operation_payload(
 }
 
 fn build_operation_diff_text(plan: &AiAutoApplyOperationPlan) -> Option<String> {
-    let after_path = plan.new_path.as_deref().unwrap_or(&plan.path);
-    let (before, after) = match plan.kind {
-        AiAutoApplyOperationKind::Create => ("", plan.updated_content.as_deref()?),
-        AiAutoApplyOperationKind::Modify => (
-            plan.original_content.as_deref()?,
-            plan.updated_content.as_deref()?,
-        ),
-        AiAutoApplyOperationKind::Delete => (plan.original_content.as_deref()?, ""),
-        AiAutoApplyOperationKind::Rename => (
-            plan.original_content.as_deref()?,
-            plan.original_content.as_deref()?,
-        ),
-    };
-
     Some(diff_render::render_unified_diff_text(
         &plan.path,
-        after_path,
-        before,
-        after,
+        &plan.path,
+        plan.original_content.as_deref()?,
+        plan.updated_content.as_deref()?,
     ))
 }
 
@@ -580,10 +387,6 @@ fn validate_non_protected_path(
         .into_path_buf();
     path_security::reject_existing_symlink(&path)?;
     Ok(path)
-}
-
-fn normalize_path_for_compare(raw_path: &str) -> String {
-    path_security::normalize_path_for_compare(raw_path)
 }
 
 fn resolve_task_id(metadata: Option<&AiApplyPatchMetadataRequest>) -> String {
@@ -611,7 +414,7 @@ fn resolve_reason(metadata: Option<&AiApplyPatchMetadataRequest>, summary: &str)
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_operation_plans, AiAutoApplyOperationKind, AiAutoApplyOperationPlan};
+    use super::{apply_operation_plans, AiAutoApplyOperationPlan};
     use crate::ai::edit as ai_edit;
     use crate::ai::edit::AiEditState;
     use crate::commands::contracts::{
@@ -643,9 +446,7 @@ mod tests {
 
         apply_operation_plans(
             &[AiAutoApplyOperationPlan {
-                kind: AiAutoApplyOperationKind::Modify,
                 path: file_path.to_string_lossy().to_string(),
-                new_path: None,
                 original_hash: Some(crate::ai::edit::patch::hash_text("echo old")),
                 original_modified_at: None,
                 original_content: Some("echo old".to_string()),
@@ -710,114 +511,6 @@ mod tests {
     }
 
     #[test]
-    fn apply_operation_plans_support_create_delete_and_rename() {
-        let temp_dir = temp_dir("aed-auto-apply-ops");
-        let create_path = temp_dir.join("created.sh");
-        let rename_source_path = temp_dir.join("before-rename.sh");
-        let rename_target_path = temp_dir.join("after-rename.sh");
-        let delete_path = temp_dir.join("delete-me.sh");
-        let snapshot_root = temp_dir.join("snapshot-store");
-
-        fs::create_dir_all(&temp_dir).expect("temp directory should be created");
-        fs::write(&rename_source_path, "echo rename").expect("rename source should be written");
-        fs::write(&delete_path, "echo delete").expect("delete source should be written");
-
-        let state = AiEditState::default();
-
-        ai_edit::set_auth_level(
-            AiEditSetAuthLevelRequest {
-                level: "session".to_string(),
-                task_id: None,
-            },
-            &state,
-        )
-        .expect("session auth should be set");
-
-        apply_operation_plans(
-            &[
-                AiAutoApplyOperationPlan {
-                    kind: AiAutoApplyOperationKind::Create,
-                    path: create_path.to_string_lossy().to_string(),
-                    new_path: None,
-                    original_hash: None,
-                    original_modified_at: None,
-                    original_content: None,
-                    updated_content: Some("echo create".to_string()),
-                },
-                AiAutoApplyOperationPlan {
-                    kind: AiAutoApplyOperationKind::Rename,
-                    path: rename_source_path.to_string_lossy().to_string(),
-                    new_path: Some(rename_target_path.to_string_lossy().to_string()),
-                    original_hash: Some(crate::ai::edit::patch::hash_text("echo rename")),
-                    original_modified_at: None,
-                    original_content: Some("echo rename".to_string()),
-                    updated_content: None,
-                },
-                AiAutoApplyOperationPlan {
-                    kind: AiAutoApplyOperationKind::Delete,
-                    path: delete_path.to_string_lossy().to_string(),
-                    new_path: None,
-                    original_hash: Some(crate::ai::edit::patch::hash_text("echo delete")),
-                    original_modified_at: None,
-                    original_content: Some("echo delete".to_string()),
-                    updated_content: None,
-                },
-            ],
-            Some(&AiApplyPatchMetadataRequest {
-                task_id: Some("task-ops".to_string()),
-                turn_id: Some("turn-ops".to_string()),
-                reason: Some("批量写入".to_string()),
-                tool_call_id: None,
-                confirmed_by_user: None,
-                agent_run_id: None,
-                agent_step_id: None,
-                workspace_root_path: None,
-            }),
-            "批量写入",
-            &state,
-            &snapshot_root,
-        )
-        .expect("mixed operations should succeed");
-
-        let timeline = ai_edit::list_timeline_with_state(
-            AiEditListTimelineRequest {
-                task_id: None,
-                limit: None,
-            },
-            &state,
-            Vec::new(),
-            Vec::new(),
-        )
-        .expect("timeline should be listed");
-
-        let operation_kinds = timeline
-            .entries
-            .iter()
-            .filter_map(|entry| match entry {
-                AiEditTimelineEntryPayload::Operation(operation) => Some(operation.kind.as_str()),
-                AiEditTimelineEntryPayload::Snapshot(_) => None,
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            fs::read_to_string(&create_path).expect("created file should exist"),
-            "echo create"
-        );
-        assert!(!rename_source_path.exists());
-        assert_eq!(
-            fs::read_to_string(&rename_target_path).expect("renamed file should exist"),
-            "echo rename"
-        );
-        assert!(!delete_path.exists());
-
-        assert!(operation_kinds.contains(&"create"));
-        assert!(operation_kinds.contains(&"rename"));
-        assert!(operation_kinds.contains(&"delete"));
-
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
     fn modify_rejects_when_file_changed_after_plan_created() {
         let temp_dir = temp_dir("aed-auto-apply-conflict");
         let file_path = temp_dir.join("script.sh");
@@ -839,9 +532,7 @@ mod tests {
 
         let result = apply_operation_plans(
             &[AiAutoApplyOperationPlan {
-                kind: AiAutoApplyOperationKind::Modify,
                 path: file_path.to_string_lossy().to_string(),
-                new_path: None,
                 original_hash: Some(crate::ai::edit::patch::hash_text("echo old")),
                 original_modified_at: None,
                 original_content: Some("echo old".to_string()),
@@ -884,9 +575,7 @@ mod tests {
 
         let result = apply_operation_plans(
             &[AiAutoApplyOperationPlan {
-                kind: AiAutoApplyOperationKind::Modify,
                 path: file_path.to_string_lossy().to_string(),
-                new_path: None,
                 original_hash: Some(crate::ai::edit::patch::hash_text("echo old")),
                 original_modified_at: Some(std::time::UNIX_EPOCH),
                 original_content: Some("echo old".to_string()),
@@ -903,59 +592,6 @@ mod tests {
             fs::read_to_string(&file_path).expect("file should still exist"),
             "echo old"
         );
-
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn rolls_back_previous_create_when_later_operation_fails() {
-        let temp_dir = temp_dir("aed-auto-apply-rollback");
-        let create_path = temp_dir.join("created.sh");
-        let missing_path = temp_dir.join("missing.sh");
-        let snapshot_root = temp_dir.join("snapshot-store");
-
-        fs::create_dir_all(&temp_dir).expect("temp directory should be created");
-
-        let state = AiEditState::default();
-
-        ai_edit::set_auth_level(
-            AiEditSetAuthLevelRequest {
-                level: "session".to_string(),
-                task_id: None,
-            },
-            &state,
-        )
-        .expect("session auth should be set");
-
-        let result = apply_operation_plans(
-            &[
-                AiAutoApplyOperationPlan {
-                    kind: AiAutoApplyOperationKind::Create,
-                    path: create_path.to_string_lossy().to_string(),
-                    new_path: None,
-                    original_hash: None,
-                    original_modified_at: None,
-                    original_content: None,
-                    updated_content: Some("echo create".to_string()),
-                },
-                AiAutoApplyOperationPlan {
-                    kind: AiAutoApplyOperationKind::Delete,
-                    path: missing_path.to_string_lossy().to_string(),
-                    new_path: None,
-                    original_hash: Some(crate::ai::edit::patch::hash_text("echo missing")),
-                    original_modified_at: None,
-                    original_content: Some("echo missing".to_string()),
-                    updated_content: None,
-                },
-            ],
-            None,
-            "回滚测试",
-            &state,
-            &snapshot_root,
-        );
-
-        assert!(result.is_err());
-        assert!(!create_path.exists());
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -982,9 +618,7 @@ mod tests {
 
         let result = apply_operation_plans(
             &[AiAutoApplyOperationPlan {
-                kind: AiAutoApplyOperationKind::Modify,
                 path: file_path.to_string_lossy().to_string(),
-                new_path: None,
                 original_hash: Some("wrong-hash".to_string()),
                 original_modified_at: None,
                 original_content: Some("echo old".to_string()),

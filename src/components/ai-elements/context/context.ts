@@ -5,12 +5,23 @@ import type { TAiTokenUsageSource } from '@/composables/ai/useAiTokenContext';
 
 export type TContextModelId = string;
 
+export interface IContextUsageCost {
+  inputCostText?: string;
+  outputCostText?: string;
+  totalCostText?: string;
+  cacheHitInputCostText?: string;
+  cacheMissInputCostText?: string;
+  cacheHitInputTokens?: number;
+  cacheMissInputTokens?: number;
+}
+
 export interface IContextValue {
   usedTokens: ComputedRef<number>;
   maxTokens: ComputedRef<number>;
   usage: ComputedRef<LanguageModelUsage | undefined>;
   usageSource: ComputedRef<TAiTokenUsageSource>;
   modelId: ComputedRef<TContextModelId | undefined>;
+  cost: ComputedRef<IContextUsageCost | undefined>;
 }
 
 export const ContextKey: InjectionKey<IContextValue> = Symbol('ContextContext');
