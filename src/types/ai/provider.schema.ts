@@ -2,12 +2,11 @@ import { z } from 'zod';
 
 import {
   aiConfigPayloadSchema,
+  aiCredentialStatusPayloadSchema,
   aiModelEndpointConfigPayloadSchema,
   aiModelRoleSchema,
   aiProviderConnectionPayloadSchema,
   aiProviderConnectionRequestSchema,
-  aiProviderProfileDetailPayloadSchema,
-  aiProviderProfilePayloadSchema,
   aiProviderTestPayloadSchema,
   aiProviderTypeSchema,
   aiSaveCredentialsRequestSchema,
@@ -22,12 +21,11 @@ export const aiProviderCatalogEntrySchema = z.object({
 
 export {
   aiConfigPayloadSchema,
+  aiCredentialStatusPayloadSchema,
   aiModelEndpointConfigPayloadSchema,
   aiModelRoleSchema,
   aiProviderConnectionPayloadSchema,
   aiProviderConnectionRequestSchema,
-  aiProviderProfileDetailPayloadSchema,
-  aiProviderProfilePayloadSchema,
   aiProviderTestPayloadSchema,
   aiProviderTypeSchema,
   aiSaveCredentialsRequestSchema,

@@ -30,6 +30,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { createParser, type EventSourceMessage, type EventSourceParser } from 'eventsource-parser';
 
 // -----------------------------------------------------------------------------
 // Types
@@ -537,19 +538,17 @@ const extractStreamingDelta = (chunk: unknown): TJsonRecord | null => {
 };
 
 interface IStreamingCaptureState {
-  pending: string;
   reasoning: string;
   toolCallIds: Set<string>;
+  parser: EventSourceParser;
   finalized: boolean;
 }
 
-const captureStreamingLine = (
-  line: string,
-  state: IStreamingCaptureState,
+const captureStreamingEvent = (
+  event: EventSourceMessage,
+  state: Pick<IStreamingCaptureState, 'reasoning' | 'toolCallIds'>,
 ): void => {
-  const trimmedLine = line.trimEnd();
-  if (!trimmedLine.startsWith('data:')) return;
-  const data = trimmedLine.slice('data:'.length).trim();
+  const data = event.data.trim();
   if (!data || data === '[DONE]') return;
 
   let parsed: unknown;
@@ -570,16 +569,22 @@ const captureStreamingLine = (
   }
 };
 
-const processStreamingText = (
-  text: string,
-  state: IStreamingCaptureState,
-): void => {
-  state.pending += text;
-  const lines = state.pending.split('\n');
-  state.pending = lines.pop() ?? '';
-  for (const line of lines) {
-    captureStreamingLine(line, state);
-  }
+const createStreamingCaptureState = (): IStreamingCaptureState => {
+  let state: IStreamingCaptureState | undefined;
+  const parser = createParser({
+    onEvent: (event) => {
+      if (state) {
+        captureStreamingEvent(event, state);
+      }
+    },
+  });
+  state = {
+    reasoning: '',
+    toolCallIds: new Set<string>(),
+    parser,
+    finalized: false,
+  };
+  return state;
 };
 
 const finalizeStreamingCapture = (
@@ -590,11 +595,10 @@ const finalizeStreamingCapture = (
   if (state.finalized) return;
   state.finalized = true;
   const flushed = decoder.decode();
-  if (flushed) processStreamingText(flushed, state);
-  if (state.pending) {
-    captureStreamingLine(state.pending, state);
-    state.pending = '';
+  if (flushed) {
+    state.parser.feed(flushed);
   }
+  state.parser.reset();
   storeReasoning(context, [...state.toolCallIds], state.reasoning);
 };
 
@@ -726,12 +730,7 @@ const captureStreamingResponse = (
   if (!response.body) return response;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  const state: IStreamingCaptureState = {
-    pending: '',
-    reasoning: '',
-    toolCallIds: new Set<string>(),
-    finalized: false,
-  };
+  const state = createStreamingCaptureState();
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       const result = await reader.read();
@@ -754,7 +753,7 @@ const captureStreamingResponse = (
       }
       try {
         const text = decoder.decode(result.value, { stream: true });
-        processStreamingText(text, state);
+        state.parser.feed(text);
       } catch (error) {
         logReasoningWarning(
           'stream-chunk-capture-failed',

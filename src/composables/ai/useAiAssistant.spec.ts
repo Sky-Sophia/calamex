@@ -575,7 +575,7 @@ const aiEditServiceMock = vi.hoisted(() => {
   };
 });
 
-vi.mock('@/services/ipc/ai.service-edit', () => ({
+vi.mock('@/services/ipc/ai-edit.service', () => ({
   aiEditService: {
     listTimeline: aiEditServiceMock.listTimeline,
     getDiff: aiEditServiceMock.getDiff,
@@ -2195,6 +2195,20 @@ describe('useAiAssistant streaming integration', () => {
     const queuedFrames = new Map<number, FrameRequestCallback>();
     const expectedLiveText = '第一段实时回答，第二段实时回答';
     let nextFrameId = 0;
+    let frameTimestamp = 0;
+
+    const runNextQueuedFrame = (): void => {
+      const frame = Array.from(queuedFrames.entries())[0];
+      expect(frame).toBeDefined();
+
+      if (!frame) {
+        throw new Error('expected queued animation frame');
+      }
+
+      frameTimestamp += 16;
+      queuedFrames.delete(frame[0]);
+      frame[1](frameTimestamp);
+    };
 
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback): number => {
       nextFrameId += 1;
@@ -2275,16 +2289,20 @@ describe('useAiAssistant streaming integration', () => {
     }
 
     expect(queuedFrames.size).toBe(1);
-    const queuedFrame = Array.from(queuedFrames.entries())[0];
-    expect(queuedFrame).toBeDefined();
-
-    if (!queuedFrame) {
-      throw new Error('expected queued animation frame');
-    }
-
-    queuedFrames.delete(queuedFrame[0]);
-    queuedFrame[1](performance.now());
+    runNextQueuedFrame();
     await Promise.resolve();
+
+    expect(queuedFrames.size).toBe(1);
+    expect(assistant.messages.value[1]?.content).not.toBe(expectedLiveText);
+
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (assistant.messages.value[1]?.content === expectedLiveText || queuedFrames.size === 0) {
+        break;
+      }
+
+      runNextQueuedFrame();
+      await Promise.resolve();
+    }
 
     expect(queuedFrames.size).toBe(0);
     expect(assistant.messages.value[1]?.content).toBe(expectedLiveText);

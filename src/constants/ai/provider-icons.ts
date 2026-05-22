@@ -1,6 +1,6 @@
 import type { TAiServicePlatformId } from '@/constants/ai/providers';
 import anthropicIconUrl from '@/assets/icons/ai-providers/anthropic.svg';
-import deepseekIconUrl from '@/assets/icons/ai-providers/deepseek.ico';
+import deepseekIconUrl from '@/assets/icons/ai-providers/deepseek-color.svg';
 import geminiIconUrl from '@/assets/icons/ai-providers/google-gemini.svg';
 import moonshotIconUrl from '@/assets/icons/ai-providers/moonshotai.ico';
 import ollamaIconUrl from '@/assets/icons/ai-providers/ollama.svg';
@@ -28,7 +28,7 @@ export const AI_PROVIDER_ICON_DEFINITIONS = {
   deepseek: {
     label: 'DeepSeek',
     iconUrl: deepseekIconUrl,
-    background: '#4d6bfe',
+    background: 'transparent',
   },
   google: {
     label: 'Google Gemini',

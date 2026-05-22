@@ -9,12 +9,12 @@ use crate::ai::agent::planner::AgentPlanner;
 use crate::commands::contracts::{
     AiAgentClassifyTaskPayload, AiAgentClassifyTaskRequest, AiChatRequest, AiCodeActionPayload,
     AiCodeActionRequest, AiConfigPayload, AiContextReferencePayload, AiConversationTitlePayload,
-    AiConversationTitleRequest, AiInlineCompletionRangePayload, AiInlineCompletionRequest,
-    AiInlineCompletionResult, AiModelEndpointConfigPayload, AiProviderProfileDetailPayload,
-    AiProviderProfilePayload, AiProviderProfileSwitchRequest, AiSuggestionPoolPayload,
-    AiSuggestionPoolRequest,
+    AiConversationTitleRequest, AiCredentialStatusPayload, AiInlineCompletionRangePayload,
+    AiInlineCompletionRequest, AiInlineCompletionResult, AiModelEndpointConfigPayload,
+    AiSuggestionPoolPayload, AiSuggestionPoolRequest,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{
@@ -31,10 +31,7 @@ mod suggestions;
 #[cfg(test)]
 mod tests;
 
-pub use config::{
-    clear_credentials, get_config, get_provider_profile_detail, list_provider_profiles,
-    save_config, save_credentials, switch_provider_profile,
-};
+pub use config::{clear_credentials, get_config, save_config, save_credentials};
 pub use connection::{connect_provider, test_provider, test_provider_config};
 pub use conversation::{
     chat_stream, classify_task, code_action, generate_conversation_title, inline_complete,
@@ -62,14 +59,20 @@ struct AiRuntimeConfig {
     selected_model: Option<String>,
     base_url: Option<String>,
     #[serde(default)]
-    active_profile_id: Option<String>,
-    #[serde(default)]
-    profiles: Vec<AiProviderProfile>,
-    #[serde(default)]
     narrator: AiModelEndpointRuntimeConfig,
+    #[serde(default)]
+    credentials: HashMap<String, AiCredentialRuntimeMetadata>,
     inline_completion_enabled: bool,
     chat_enabled: bool,
     agent_enabled: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+struct AiCredentialRuntimeMetadata {
+    #[serde(default)]
+    alias: String,
+    #[serde(default)]
+    key_preview: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -77,8 +80,6 @@ struct AiModelEndpointRuntimeConfig {
     provider_type: String,
     selected_model: Option<String>,
     base_url: Option<String>,
-    #[serde(default)]
-    active_profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,50 +88,14 @@ enum AiResolvedModelRole {
     Narrator,
 }
 
-impl AiResolvedModelRole {
-    fn credential_role(self) -> &'static str {
-        match self {
-            Self::Main => "main",
-            Self::Narrator => "narrator",
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Main => "main",
-            Self::Narrator => "narrator",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AiProviderProfile {
-    id: String,
-    #[serde(default = "default_profile_role")]
-    role: String,
-    name: String,
-    provider_type: String,
-    selected_model: Option<String>,
-    base_url: Option<String>,
-    inline_completion_enabled: bool,
-    chat_enabled: bool,
-    agent_enabled: bool,
-    created_at: String,
-    updated_at: String,
-    #[serde(default)]
-    last_used_at: Option<String>,
-}
-
 impl Default for AiRuntimeConfig {
     fn default() -> Self {
         Self {
             provider_type: "mastra".to_string(),
             selected_model: Some(DEFAULT_MASTRA_MODEL.to_string()),
             base_url: None,
-            active_profile_id: None,
-            profiles: Vec::new(),
             narrator: AiModelEndpointRuntimeConfig::default(),
+            credentials: HashMap::new(),
             inline_completion_enabled: false,
             chat_enabled: true,
             agent_enabled: false,
@@ -144,7 +109,6 @@ impl Default for AiModelEndpointRuntimeConfig {
             provider_type: "mastra".to_string(),
             selected_model: Some(DEFAULT_NARRATOR_MODEL.to_string()),
             base_url: None,
-            active_profile_id: None,
         }
     }
 }
@@ -194,7 +158,8 @@ fn ensure_chat_enabled(config: &AiRuntimeConfig) -> Result<(), String> {
 }
 
 fn to_payload(config: AiRuntimeConfig) -> AiConfigPayload {
-    let has_credentials = has_credentials_for_config(&config);
+    let has_credentials = has_credentials_for_model(config.selected_model.as_deref());
+    let has_selected_model = has_model_selection(config.selected_model.as_deref());
     let narrator = model_endpoint_to_payload(&config.narrator, AiResolvedModelRole::Narrator);
 
     let is_base_url_configured = config
@@ -207,156 +172,172 @@ fn to_payload(config: AiRuntimeConfig) -> AiConfigPayload {
         provider_type: config.provider_type.clone(),
         selected_model: config.selected_model,
         base_url: config.base_url,
-        active_profile_id: config.active_profile_id,
         is_base_url_configured,
         has_credentials,
-        is_configured: has_credentials && is_base_url_configured,
+        is_configured: is_endpoint_ready(has_credentials, has_selected_model),
         inline_completion_enabled: config.inline_completion_enabled,
         chat_enabled: config.chat_enabled,
         agent_enabled: config.agent_enabled,
         narrator,
+        credentials: credential_status_payloads(&config.credentials),
     }
 }
 
 fn model_endpoint_to_payload(
     config: &AiModelEndpointRuntimeConfig,
-    role: AiResolvedModelRole,
+    _role: AiResolvedModelRole,
 ) -> AiModelEndpointConfigPayload {
+    let has_selected_model = has_model_selection(config.selected_model.as_deref());
     let is_base_url_configured = config
         .base_url
         .as_ref()
         .map(|value| !value.trim().is_empty())
         .unwrap_or(false);
-    let has_credentials = config
-        .active_profile_id
-        .as_deref()
-        .map(CredentialStore::has_profile_secret)
-        .unwrap_or_else(|| {
-            CredentialStore::has_provider_secret_for_role(
-                &config.provider_type,
-                role.credential_role(),
-            )
-        });
+    let has_credentials = has_credentials_for_model(config.selected_model.as_deref());
 
     AiModelEndpointConfigPayload {
         provider_type: config.provider_type.clone(),
         selected_model: config.selected_model.clone(),
         base_url: config.base_url.clone(),
-        active_profile_id: config.active_profile_id.clone(),
         is_base_url_configured,
         has_credentials,
-        is_configured: has_credentials && is_base_url_configured,
+        is_configured: is_endpoint_ready(has_credentials, has_selected_model),
     }
 }
 
-fn has_credentials_for_config(config: &AiRuntimeConfig) -> bool {
-    if let Some(profile_id) = config.active_profile_id.as_deref() {
-        return CredentialStore::has_profile_secret(profile_id);
-    }
+fn has_model_selection(selected_model: Option<&str>) -> bool {
+    selected_model
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+}
 
-    CredentialStore::has_provider_secret(&config.provider_type)
+fn is_endpoint_ready(has_credentials: bool, has_selected_model: bool) -> bool {
+    has_credentials && has_selected_model
+}
+
+fn has_credentials_for_model(selected_model: Option<&str>) -> bool {
+    model_service_platform(selected_model)
+        .map(CredentialStore::has)
+        .unwrap_or(false)
 }
 
 fn get_api_key_for_config(config: &AiRuntimeConfig) -> Result<String, String> {
-    if let Some(profile_id) = config.active_profile_id.as_deref() {
-        return CredentialStore::get_profile_secret(profile_id);
-    }
+    let provider_id = model_service_platform(config.selected_model.as_deref())
+        .ok_or_else(|| errors::error("AI_PROVIDER_NOT_CONFIGURED", "请先选择模型。"))?;
 
-    CredentialStore::get(&config.provider_type)
+    CredentialStore::get(provider_id)
 }
 
-fn get_saved_api_key_for_candidate(
-    role: AiResolvedModelRole,
-    provider_type: &str,
+fn get_saved_api_key_for_candidate(selected_model: Option<&str>) -> Result<String, String> {
+    let provider_id = model_service_platform(selected_model)
+        .ok_or_else(|| errors::error("AI_PROVIDER_NOT_CONFIGURED", "请先选择模型。"))?;
+
+    CredentialStore::get(provider_id)
+}
+
+fn credential_status_payloads(
+    metadata: &HashMap<String, AiCredentialRuntimeMetadata>,
+) -> Vec<AiCredentialStatusPayload> {
+    crate::ai::credential::supported_provider_ids()
+        .iter()
+        .map(|provider_id| {
+            let has_credentials = CredentialStore::has(provider_id);
+            let stored = metadata.get(*provider_id);
+            AiCredentialStatusPayload {
+                provider_id: (*provider_id).to_string(),
+                has_credentials,
+                alias: stored
+                    .map(|entry| entry.alias.trim())
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("厂商 API Key")
+                    .to_string(),
+                key_preview: stored
+                    .map(|entry| entry.key_preview.trim())
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| credential_key_preview(provider_id, has_credentials)),
+            }
+        })
+        .collect()
+}
+
+fn credential_key_preview(provider_id: &str, has_credentials: bool) -> String {
+    if !has_credentials {
+        return "未保存 Key".to_string();
+    }
+
+    CredentialStore::get(provider_id)
+        .map(|api_key| mask_api_key(&api_key))
+        .unwrap_or_else(|_| "已加密保存".to_string())
+}
+
+fn mask_api_key(api_key: &str) -> String {
+    let trimmed = api_key.trim();
+    let chars: Vec<char> = trimmed.chars().collect();
+    if chars.is_empty() {
+        return "已加密保存".to_string();
+    }
+    if chars.len() <= 8 {
+        let tail: String = chars
+            .iter()
+            .rev()
+            .take(2)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        return format!("…{tail}");
+    }
+    let head: String = chars.iter().take(4).collect();
+    let tail: String = chars
+        .iter()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("{head}…{tail}")
+}
+
+fn model_service_platform(model: Option<&str>) -> Option<&str> {
+    let model = model?.trim();
+    if model.is_empty() {
+        return None;
+    }
+
+    model
+        .split_once('/')
+        .map(|(platform, _)| platform.trim())
+        .filter(|platform| !platform.is_empty())
+}
+
+fn validate_model_provider(
     selected_model: Option<&str>,
-    base_url: Option<&str>,
+    provider_id: Option<&str>,
 ) -> Result<String, String> {
-    let config = current_config()?;
-
-    if let Some(index) = find_matching_profile_index(
-        &config.profiles,
-        role,
-        provider_type,
-        selected_model,
-        base_url,
-    ) {
-        return CredentialStore::get_profile_secret(&config.profiles[index].id);
-    }
-
-    CredentialStore::get_for_role(provider_type, role.credential_role())
-}
-
-fn profile_to_payload(
-    profile: AiProviderProfile,
-    config: &AiRuntimeConfig,
-) -> AiProviderProfilePayload {
-    let has_profile_credentials = CredentialStore::has_profile_secret(&profile.id);
-    let role = normalize_model_role(Some(&profile.role)).unwrap_or(AiResolvedModelRole::Main);
-    let active_profile_id = match role {
-        AiResolvedModelRole::Main => config.active_profile_id.as_deref(),
-        AiResolvedModelRole::Narrator => config.narrator.active_profile_id.as_deref(),
-    };
-    let is_base_url_configured = profile
-        .base_url
-        .as_ref()
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false);
-    let is_connected = has_profile_credentials
-        && is_base_url_configured
-        && active_profile_id == Some(profile.id.as_str());
-
-    AiProviderProfilePayload {
-        id: profile.id,
-        role: role.as_str().to_string(),
-        name: profile.name,
-        provider_type: profile.provider_type,
-        selected_model: profile.selected_model,
-        base_url: profile.base_url,
-        inline_completion_enabled: profile.inline_completion_enabled,
-        chat_enabled: profile.chat_enabled,
-        agent_enabled: profile.agent_enabled,
-        has_credentials: has_profile_credentials,
-        is_connected,
-        created_at: profile.created_at,
-        updated_at: profile.updated_at,
-        last_used_at: profile.last_used_at,
-    }
-}
-
-fn find_matching_profile_index(
-    profiles: &[AiProviderProfile],
-    role: AiResolvedModelRole,
-    provider_type: &str,
-    selected_model: Option<&str>,
-    base_url: Option<&str>,
-) -> Option<usize> {
-    profiles.iter().position(|profile| {
-        profile.role == role.as_str()
-            && profile.provider_type == provider_type
-            && profile.selected_model.as_deref() == selected_model
-            && profile.base_url.as_deref() == base_url
-    })
-}
-
-fn generate_profile_id() -> String {
-    format!(
-        "ai-profile-{}-{}",
-        chrono::Utc::now().timestamp_millis(),
-        STREAM_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    )
-}
-
-fn build_profile_name(selected_model: Option<&str>, base_url: Option<&str>) -> String {
-    let model = selected_model
+    let model_provider_id = model_service_platform(selected_model)
+        .ok_or_else(|| errors::error("AI_PROVIDER_NOT_CONFIGURED", "请先选择模型。"))?;
+    let normalized_provider_id = provider_id
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("未选择模型");
-    let base_url = base_url.map(str::trim).filter(|value| !value.is_empty());
+        .unwrap_or(model_provider_id);
 
-    match base_url {
-        Some(value) => format!("{model} · {value}"),
-        None => model.to_string(),
+    if normalized_provider_id != model_provider_id {
+        return Err(errors::error(
+            "AI_PROVIDER_NOT_CONFIGURED",
+            "模型必须挂在对应厂商下，不能跨厂商使用 API Key。",
+        ));
     }
+
+    if !crate::ai::credential::supported_provider_ids().contains(&normalized_provider_id) {
+        return Err(errors::error(
+            "AI_PROVIDER_NOT_CONFIGURED",
+            "当前模型厂商不支持保存凭证。",
+        ));
+    }
+
+    Ok(normalized_provider_id.to_string())
 }
 
 fn normalize_model_role(role: Option<&str>) -> Result<AiResolvedModelRole, String> {
@@ -368,10 +349,6 @@ fn normalize_model_role(role: Option<&str>) -> Result<AiResolvedModelRole, Strin
             "AI 模型用途无效。",
         )),
     }
-}
-
-fn default_profile_role() -> String {
-    AiResolvedModelRole::Main.as_str().to_string()
 }
 
 fn validate_provider(provider_type: &str) -> Result<(), String> {
@@ -480,36 +457,6 @@ fn normalize_runtime_config(mut config: AiRuntimeConfig) -> AiRuntimeConfig {
     config.base_url = base_url;
     config.narrator = normalize_model_endpoint_config(config.narrator)
         .unwrap_or_else(AiModelEndpointRuntimeConfig::default);
-    config.profiles = config
-        .profiles
-        .into_iter()
-        .filter_map(normalize_provider_profile)
-        .collect();
-
-    if config
-        .active_profile_id
-        .as_deref()
-        .is_some_and(|profile_id| {
-            !config.profiles.iter().any(|profile| {
-                profile.role == AiResolvedModelRole::Main.as_str() && profile.id == profile_id
-            })
-        })
-    {
-        config.active_profile_id = None;
-    }
-
-    if config
-        .narrator
-        .active_profile_id
-        .as_deref()
-        .is_some_and(|profile_id| {
-            !config.profiles.iter().any(|profile| {
-                profile.role == AiResolvedModelRole::Narrator.as_str() && profile.id == profile_id
-            })
-        })
-    {
-        config.narrator.active_profile_id = None;
-    }
 
     config
 }
@@ -531,42 +478,8 @@ fn normalize_model_endpoint_config(
         .map(|value| value.trim().trim_end_matches('/').to_string())
         .filter(|value| !value.is_empty())
         .or_else(|| default_base_url(&config.provider_type));
-    config.active_profile_id = config
-        .active_profile_id
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
 
     Some(config)
-}
-
-fn normalize_provider_profile(mut profile: AiProviderProfile) -> Option<AiProviderProfile> {
-    let role = normalize_model_role(Some(&profile.role)).ok()?;
-
-    if profile.id.trim().is_empty() || validate_provider(&profile.provider_type).is_err() {
-        return None;
-    }
-
-    profile.id = profile.id.trim().to_string();
-    profile.role = role.as_str().to_string();
-    profile.name = profile.name.trim().to_string();
-    profile.selected_model = profile
-        .selected_model
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    profile.base_url = profile
-        .base_url
-        .map(|value| value.trim().trim_end_matches('/').to_string())
-        .filter(|value| !value.is_empty())
-        .or_else(|| default_base_url(&profile.provider_type));
-
-    if profile.name.is_empty() {
-        profile.name = build_profile_name(
-            profile.selected_model.as_deref(),
-            profile.base_url.as_deref(),
-        );
-    }
-
-    Some(profile)
 }
 
 fn persist_config(config: &AiRuntimeConfig) -> Result<(), String> {

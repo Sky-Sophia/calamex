@@ -1045,8 +1045,8 @@ describe('DeepSeek reasoning fetch middleware', () => {
 
       if (callCount === 1) {
         const firstLine = 'data: {"choices":[{"delta":{"reasoning_content":"我需要';
-        const secondLine = '查时间","tool_calls":[{"id":"call-2"},{"id":"call-1"}]}}]}\n';
-        const doneLine = 'data: [DONE]\n';
+        const secondLine = '查时间","tool_calls":[{"id":"call-2"},{"id":"call-1"}]}}]}\n\n';
+        const doneLine = 'data: [DONE]\n\n';
         const body = new ReadableStream<Uint8Array>({
           start(controller) {
             controller.enqueue(encoder.encode(firstLine));

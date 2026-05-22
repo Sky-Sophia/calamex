@@ -15,8 +15,7 @@ pub use edit::{
 pub use gateway::{
     ai_cancel, ai_chat_stream, ai_clear_credentials, ai_code_action, ai_connect_provider,
     ai_generate_conversation_title, ai_generate_suggestion_pool, ai_get_config,
-    ai_get_provider_profile_detail, ai_get_suggestion_pool_cache, ai_inline_complete,
-    ai_list_provider_profiles, ai_save_config, ai_save_credentials, ai_switch_provider_profile,
+    ai_get_suggestion_pool_cache, ai_inline_complete, ai_save_config, ai_save_credentials,
     ai_test_provider, ai_test_provider_config,
 };
 pub use tools::{ai_web_fetch, ai_web_search};

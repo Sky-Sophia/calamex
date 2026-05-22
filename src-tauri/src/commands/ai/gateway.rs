@@ -5,8 +5,7 @@ use crate::commands::contracts::{
     AiCancelRequest, AiChatRequest, AiChatStreamPayload, AiCodeActionPayload, AiCodeActionRequest,
     AiConfigPayload, AiConversationTitlePayload, AiConversationTitleRequest,
     AiInlineCompletionRangePayload, AiInlineCompletionRequest, AiInlineCompletionResult,
-    AiProviderConnectionPayload, AiProviderConnectionRequest, AiProviderProfileDetailPayload,
-    AiProviderProfilePayload, AiProviderProfileSwitchRequest, AiProviderTestPayload,
+    AiProviderConnectionPayload, AiProviderConnectionRequest, AiProviderTestPayload,
     AiSaveConfigRequest, AiSaveCredentialsRequest, AiSuggestionPoolPayload,
     AiSuggestionPoolRequest,
 };
@@ -33,8 +32,8 @@ pub fn ai_save_config(payload: AiSaveConfigRequest) -> Result<AiConfigPayload, S
 #[tauri::command]
 pub fn ai_save_credentials(payload: AiSaveCredentialsRequest) -> Result<AiConfigPayload, String> {
     gateway::save_credentials(
-        payload.role.as_deref(),
-        &payload.provider_type,
+        &payload.provider_id,
+        payload.alias.as_deref(),
         &payload.api_key,
     )
 }
@@ -45,6 +44,7 @@ pub async fn ai_test_provider_config(
 ) -> Result<AiProviderTestPayload, String> {
     match gateway::test_provider_config(
         payload.role.as_deref(),
+        payload.provider_id.as_deref(),
         &payload.provider_type,
         payload.selected_model,
         payload.base_url,
@@ -74,6 +74,7 @@ pub async fn ai_connect_provider(
 ) -> Result<AiProviderConnectionPayload, String> {
     let config = gateway::connect_provider(
         payload.role.as_deref(),
+        payload.provider_id.as_deref(),
         &payload.provider_type,
         payload.selected_model,
         payload.base_url,
@@ -99,25 +100,6 @@ pub fn ai_clear_credentials() -> Result<(), String> {
     gateway::clear_credentials()?;
     audit::emit(AiAuditEventKind::CredentialCleared);
     Ok(())
-}
-
-#[tauri::command]
-pub fn ai_list_provider_profiles() -> Result<Vec<AiProviderProfilePayload>, String> {
-    gateway::list_provider_profiles()
-}
-
-#[tauri::command]
-pub fn ai_get_provider_profile_detail(
-    payload: AiProviderProfileSwitchRequest,
-) -> Result<AiProviderProfileDetailPayload, String> {
-    gateway::get_provider_profile_detail(payload)
-}
-
-#[tauri::command]
-pub fn ai_switch_provider_profile(
-    payload: AiProviderProfileSwitchRequest,
-) -> Result<AiConfigPayload, String> {
-    gateway::switch_provider_profile(payload)
 }
 
 #[tauri::command]

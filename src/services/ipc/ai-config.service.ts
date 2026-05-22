@@ -33,7 +33,6 @@ export const createDefaultAiModelEndpointConfig = (
   providerType: DEFAULT_PROVIDER_TYPE,
   selectedModel,
   baseUrl: resolveDefaultAiBaseUrl(selectedModel),
-  activeProfileId: null,
   isBaseUrlConfigured: true,
   hasCredentials: false,
   isConfigured: false,
@@ -43,7 +42,6 @@ export const createDefaultAiConfigPayload = (): IAiConfigPayload => ({
   providerType: DEFAULT_PROVIDER_TYPE,
   selectedModel: DEFAULT_MASTRA_MODEL_ID,
   baseUrl: resolveDefaultAiBaseUrl(DEFAULT_MASTRA_MODEL_ID),
-  activeProfileId: null,
   isBaseUrlConfigured: true,
   hasCredentials: false,
   isConfigured: false,
@@ -51,6 +49,7 @@ export const createDefaultAiConfigPayload = (): IAiConfigPayload => ({
   chatEnabled: true,
   agentEnabled: false,
   narrator: createDefaultAiModelEndpointConfig(DEFAULT_NARRATOR_MODEL_ID),
+  credentials: [],
 });
 
 export const cloneAiConfigPayload = (
@@ -70,7 +69,6 @@ const extractMainEndpointConfig = (
   providerType: config.providerType,
   selectedModel: config.selectedModel,
   baseUrl: config.baseUrl,
-  activeProfileId: config.activeProfileId,
   isBaseUrlConfigured: config.isBaseUrlConfigured,
   hasCredentials: config.hasCredentials,
   isConfigured: config.isConfigured,

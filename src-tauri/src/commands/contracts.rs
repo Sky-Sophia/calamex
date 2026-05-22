@@ -687,9 +687,9 @@ pub struct AiSaveConfigRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSaveCredentialsRequest {
+    pub(crate) provider_id: String,
     #[serde(default)]
-    pub(crate) role: Option<String>,
-    pub(crate) provider_type: String,
+    pub(crate) alias: Option<String>,
     pub(crate) api_key: SecretString,
 }
 
@@ -702,6 +702,8 @@ pub struct AiSaveCredentialsRequest {
 pub struct AiProviderConnectionRequest {
     #[serde(default)]
     pub(crate) role: Option<String>,
+    #[serde(default)]
+    pub(crate) provider_id: Option<String>,
     pub(crate) provider_type: String,
     pub(crate) selected_model: Option<String>,
     pub(crate) base_url: Option<String>,
@@ -711,19 +713,12 @@ pub struct AiProviderConnectionRequest {
     pub(crate) api_key: Option<SecretString>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiProviderProfileSwitchRequest {
-    pub(crate) profile_id: String,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiConfigPayload {
     pub(crate) provider_type: String,
     pub(crate) selected_model: Option<String>,
     pub(crate) base_url: Option<String>,
-    pub(crate) active_profile_id: Option<String>,
     pub(crate) is_base_url_configured: bool,
     pub(crate) has_credentials: bool,
     pub(crate) is_configured: bool,
@@ -731,6 +726,7 @@ pub struct AiConfigPayload {
     pub(crate) chat_enabled: bool,
     pub(crate) agent_enabled: bool,
     pub(crate) narrator: AiModelEndpointConfigPayload,
+    pub(crate) credentials: Vec<AiCredentialStatusPayload>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -739,7 +735,6 @@ pub struct AiModelEndpointConfigPayload {
     pub(crate) provider_type: String,
     pub(crate) selected_model: Option<String>,
     pub(crate) base_url: Option<String>,
-    pub(crate) active_profile_id: Option<String>,
     pub(crate) is_base_url_configured: bool,
     pub(crate) has_credentials: bool,
     pub(crate) is_configured: bool,
@@ -747,28 +742,11 @@ pub struct AiModelEndpointConfigPayload {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AiProviderProfilePayload {
-    pub(crate) id: String,
-    pub(crate) role: String,
-    pub(crate) name: String,
-    pub(crate) provider_type: String,
-    pub(crate) selected_model: Option<String>,
-    pub(crate) base_url: Option<String>,
-    pub(crate) inline_completion_enabled: bool,
-    pub(crate) chat_enabled: bool,
-    pub(crate) agent_enabled: bool,
+pub struct AiCredentialStatusPayload {
+    pub(crate) provider_id: String,
     pub(crate) has_credentials: bool,
-    pub(crate) is_connected: bool,
-    pub(crate) created_at: String,
-    pub(crate) updated_at: String,
-    pub(crate) last_used_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiProviderProfileDetailPayload {
-    pub(crate) profile: AiProviderProfilePayload,
-    pub(crate) api_key: Option<String>,
+    pub(crate) alias: String,
+    pub(crate) key_preview: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

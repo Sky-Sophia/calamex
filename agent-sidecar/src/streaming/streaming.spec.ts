@@ -203,7 +203,17 @@ describe('streaming event layer', () => {
       toJsonValue: (value): TJsonValue => JSON.parse(JSON.stringify(value)) as TJsonValue,
     });
 
-    assert.deepEqual(emittedEvents.filter((event) => event.type === 'message_delta'), [
+    assert.deepEqual(emittedEvents.filter((event) =>
+      event.type === 'message_delta' || event.type === 'message_clear',
+    ), [
+      {
+        type: 'message_delta',
+        text: '我先查看文件。',
+        phase: 'final',
+      },
+      {
+        type: 'message_clear',
+      },
       {
         type: 'message_delta',
         text: '最终回答第一段。',
@@ -265,5 +275,76 @@ describe('streaming event layer', () => {
       phase: 'final',
     }]);
     assert.equal(result.visibleText, '直接回答。');
+  });
+
+  it('emits cumulative message snapshots so UI frame coalescing preserves stream text', async () => {
+    const emittedEvents: TAgentRuntimeOutputEvent[] = [];
+    const runtimeEvents = new AgentStreamEventBus({
+      runId: 'run-cumulative',
+      sessionId: 'session-cumulative',
+      agentId: 'agent-cumulative',
+      now: () => '2026-05-02T00:00:00.000Z',
+    });
+    const agent = {
+      async *stream() {
+        yield {
+          type: 'modelStreamUpdateEvent',
+          event: {
+            type: 'modelContentBlockDeltaEvent',
+            delta: {
+              type: 'textDelta',
+              text: '第一段',
+            },
+          },
+        };
+        yield {
+          type: 'modelStreamUpdateEvent',
+          event: {
+            type: 'modelContentBlockDeltaEvent',
+            delta: {
+              type: 'textDelta',
+              text: '第二段',
+            },
+          },
+        };
+
+        return {
+          stopReason: 'endTurn',
+          lastMessage: {
+            content: [
+              {
+                type: 'textBlock',
+                text: '第一段第二段',
+              },
+            ],
+          },
+        };
+      },
+    };
+
+    const result = await runAgentStream({
+      agent,
+      prompt: '直接回答',
+      streamOptions: {},
+      eventBus: runtimeEvents,
+      emitOutputEvent: (event) => {
+        emittedEvents.push(event);
+      },
+      toJsonValue: (value): TJsonValue => JSON.parse(JSON.stringify(value)) as TJsonValue,
+    });
+
+    assert.deepEqual(emittedEvents.filter((event) => event.type === 'message_delta'), [
+      {
+        type: 'message_delta',
+        text: '第一段',
+        phase: 'final',
+      },
+      {
+        type: 'message_delta',
+        text: '第一段第二段',
+        phase: 'final',
+      },
+    ]);
+    assert.equal(result.visibleText, '第一段第二段');
   });
 });

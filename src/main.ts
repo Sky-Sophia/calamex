@@ -50,7 +50,7 @@ const bootstrap = async (): Promise<void> => {
 
     queueMicrotask(() => {
       markStartup('shell-catalog-prefetch-start')
-      void import('./services/shell-command-catalog')
+      void import('./services/shell/command-catalog')
         .then(({ listShellCommandLabels }) => listShellCommandLabels())
         .then(() => {
           markStartup('shell-catalog-prefetch-done')
@@ -64,7 +64,7 @@ const bootstrap = async (): Promise<void> => {
 
     queueMicrotask(() => {
       markStartup('monaco-shiki-prefetch-start')
-      void import('./services/monaco-shiki')
+      void import('./services/editor/monaco-shiki')
         .then(({ ensureMonacoShikiReady }) => ensureMonacoShikiReady())
         .then(() => {
           markStartup('monaco-shiki-prefetch-done')

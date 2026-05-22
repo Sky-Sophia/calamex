@@ -627,7 +627,6 @@ const openSettings = (): void => {
   settingsTavilyApiKey.value = '';
   isHistoryOpen.value = false;
   assistant.isSettingsOpen.value = true;
-  assistant.loadProviderProfiles().catch(() => undefined);
   assistant.loadTavilyApiKey().then((apiKey) => {
     if (assistant.isSettingsOpen.value) {
       settingsTavilyApiKey.value = apiKey;
@@ -1021,30 +1020,14 @@ const saveSettings = async (
   }
 };
 
-const switchProviderProfile = async (
-  profileId: string,
-  feedback: IAiProviderSettingsActionFeedback,
-): Promise<void> => {
-  try {
-    await assistant.switchProviderProfile(profileId);
-    settingsApiKey.value = '';
-    settingsDraft.value = cloneAiConfigPayload(assistant.config.value);
-    feedback.onSuccess('AI 配置已切换');
-  } catch (error) {
-    feedback.onError(toErrorMessage(error, 'AI 配置切换失败'));
-  }
-};
-
 const saveCredentials = async (
   apiKey: string,
-  role: TAiModelRole,
+  providerId: string,
+  alias: string,
   feedback: IAiProviderSettingsActionFeedback,
 ): Promise<void> => {
   try {
-    const providerType = role === 'narrator'
-      ? settingsDraft.value.narrator.providerType
-      : settingsDraft.value.providerType;
-    await assistant.saveCredentials(apiKey, providerType, role);
+    await assistant.saveCredentials(apiKey, providerId, alias);
     settingsApiKey.value = '';
     settingsDraft.value = cloneAiConfigPayload(assistant.config.value);
     feedback.onSuccess('API Key 已保存到系统凭证');
@@ -1096,7 +1079,6 @@ onMounted(() => {
   assistant.loadConfig().then(() => {
     settingsDraft.value = cloneAiConfigPayload(assistant.config.value);
   }).catch(() => undefined);
-  assistant.loadProviderProfiles().catch(() => undefined);
 });
 
 onBeforeUnmount(() => {
@@ -1270,10 +1252,9 @@ onBeforeUnmount(() => {
 
     <AiProviderSettings v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
       v-model:tavily-api-key="settingsTavilyApiKey" :open="assistant.isSettingsOpen.value"
-      :config="assistant.config.value" :profiles="assistant.providerProfiles.value"
-      :load-profile-detail="assistant.getProviderProfileDetail" @close="assistant.isSettingsOpen.value = false"
+      :config="assistant.config.value" @close="assistant.isSettingsOpen.value = false"
       @save="saveSettings" @save-credentials="saveCredentials" @test-provider="testProvider"
-      @save-tavily-key="saveTavilyKey" @switch-profile="switchProviderProfile" />
+      @save-tavily-key="saveTavilyKey" />
 
     <Teleport to="body">
       <div v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop" @click.self="cancelClearConversation">

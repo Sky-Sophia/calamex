@@ -12,10 +12,10 @@ import {
 import { useAiAgentPlan } from '@/composables/ai/useAiAgentPlan';
 import { useAiStream } from '@/composables/ai/useAiStream';
 import { useSidecarChangedDocumentRefresh } from '@/composables/useSidecarChangedDocumentRefresh';
-import { DEFAULT_LITELLM_MODEL_ID } from '@/constants/ai/providers';
+import { DEFAULT_LITELLM_MODEL_ID, findAiServicePlatformByModel } from '@/constants/ai/providers';
 import { aiService } from '@/services/ipc/ai.service';
 import { buildCurrentFileReference } from '@/services/ipc/ai-context.service';
-import { aiEditService } from '@/services/ipc/ai.service-edit';
+import { aiEditService } from '@/services/ipc/ai-edit.service';
 import { tauriService } from '@/services/tauri';
 import { useAiAgentStore, type IAiPersistedSidecarAgentSession } from '@/store/aiAgent';
 import { useAiConversationStore, type IAiConversationScrollState } from '@/store/aiConversation';
@@ -54,8 +54,6 @@ import type {
   IAiImageAttachmentPreview,
   IAiPatchSet,
   IAiProviderConnectionRequest,
-  IAiProviderProfileDetailPayload,
-  IAiProviderProfilePayload,
   IAiToolConfirmationRequest,
   TAiModelRole,
   TAiToolConfirmationDecision,
@@ -1343,7 +1341,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     },
   });
   const agentSteps = shallowRef<IAgentExecutionStep[]>([]);
-  const providerProfiles = shallowRef<IAiProviderProfilePayload[]>([]);
   const attachedFiles = shallowRef<IAiAttachedFile[]>([]);
   const restoringCheckpointId = ref<string | null>(null);
   const activeAbortController = ref<AbortController | null>(null);
@@ -1899,7 +1896,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       state.sourceText = sourceText;
       runWithSuppressedSidecarAnswerSync(() => {
         sidecarAnswerStream.append(delta);
-        sidecarAnswerStream.flushNow();
       });
 
       return sidecarAnswerStream.content.value;
@@ -1912,7 +1908,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     state.sourceText = sourceText;
     runWithSuppressedSidecarAnswerSync(() => {
       sidecarAnswerStream.append(sourceText);
-      sidecarAnswerStream.flushNow();
     });
 
     return sidecarAnswerStream.content.value;
@@ -2900,13 +2895,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     config.value = await aiService.getConfig();
   };
 
-  const loadProviderProfiles = async (): Promise<void> => {
-    providerProfiles.value = await aiService.listProviderProfiles();
-  };
-
-  const getProviderProfileDetail = (profileId: string): Promise<IAiProviderProfileDetailPayload> =>
-    aiService.getProviderProfileDetail({ profileId });
-
   const saveConfig = async (
     nextConfig: IAiConfigPayload,
     role: TAiModelRole = 'main',
@@ -2926,14 +2914,25 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
 
   const saveCredentials = async (
     apiKey: string,
-    providerType = config.value.providerType,
-    role: TAiModelRole = 'main',
+    providerId: string,
+    alias?: string,
   ): Promise<void> => {
     config.value = await aiService.saveCredentials({
-      role,
-      providerType,
+      providerId,
+      alias,
       apiKey,
     });
+  };
+
+  const getProviderIdForRoleConfig = (
+    nextConfig: IAiConfigPayload,
+    role: TAiModelRole,
+  ): string => {
+    const selectedModel = role === 'narrator'
+      ? nextConfig.narrator.selectedModel
+      : nextConfig.selectedModel;
+
+    return findAiServicePlatformByModel(selectedModel).id;
   };
 
   const createProviderConnectionRequest = (
@@ -2942,6 +2941,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     role: TAiModelRole = 'main',
   ): IAiProviderConnectionRequest => ({
     role,
+    providerId: getProviderIdForRoleConfig(nextConfig, role),
     providerType: role === 'narrator' ? nextConfig.narrator.providerType : nextConfig.providerType,
     selectedModel:
       role === 'narrator' ? nextConfig.narrator.selectedModel : nextConfig.selectedModel,
@@ -2979,7 +2979,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     );
 
     config.value = result.config;
-    await loadProviderProfiles();
 
     return result.test.message;
   };
@@ -3004,11 +3003,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     return apiKey.trim()
       ? `Tavily API Key 已保存，Agent sidecar 已重启（${health.status}）`
       : `Tavily API Key 已清除，Agent sidecar 已重启（${health.status}）`;
-  };
-
-  const switchProviderProfile = async (profileId: string): Promise<void> => {
-    config.value = await aiService.switchProviderProfile({ profileId });
-    await loadProviderProfiles();
   };
 
   const testProvider = async (): Promise<string> => {
@@ -3973,21 +3967,17 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     pinningChangedFilesSummaryId,
     activeMode,
     agentSteps,
-    providerProfiles,
     attachedFiles,
     providerLabel,
     sendButtonLabel,
     canPreviewPatch,
     loadConfig,
-    loadProviderProfiles,
-    getProviderProfileDetail,
     saveConfig,
     saveCredentials,
     loadTavilyApiKey,
     saveTavilyApiKey,
     testProviderConfig,
     connectProvider,
-    switchProviderProfile,
     testProvider,
     applyQuickAction,
     attachFile,

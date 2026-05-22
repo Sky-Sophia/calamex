@@ -273,6 +273,9 @@ importers:
       '@upstash/context7-mcp':
         specifier: 2.2.5
         version: 2.2.5
+      eventsource-parser:
+        specifier: 3.0.8
+        version: 3.0.8
       mcp-server-memory:
         specifier: 1.0.3
         version: 1.0.3

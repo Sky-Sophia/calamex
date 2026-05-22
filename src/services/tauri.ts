@@ -1048,27 +1048,6 @@ const aiClearCredentialsIpc = defineContractIpc(
   { audit: 'sensitive' },
 );
 
-const aiListProviderProfilesIpc = defineContractIpc(
-  'ai_list_provider_profiles',
-  '读取 AI 配置记录',
-  tauriContracts.aiListProviderProfiles,
-  { idempotent: true, audit: 'sensitive' },
-);
-
-const aiGetProviderProfileDetailIpc = definePayloadIpc(
-  'ai_get_provider_profile_detail',
-  '读取 AI 配置记录详情',
-  tauriContracts.aiGetProviderProfileDetail,
-  { idempotent: true, audit: 'none' },
-);
-
-const aiSwitchProviderProfileIpc = definePayloadIpc(
-  'ai_switch_provider_profile',
-  '切换 AI 配置记录',
-  tauriContracts.aiSwitchProviderProfile,
-  { audit: 'sensitive' },
-);
-
 const aiTestProviderIpc = defineContractIpc(
   'ai_test_provider',
   '测试 AI Provider',
@@ -1644,12 +1623,6 @@ export const tauriService: ITauriService & {
   aiSaveCredentials: aiSaveCredentialsIpc,
 
   aiClearCredentials: () => aiClearCredentialsIpc(undefined),
-
-  aiListProviderProfiles: () => aiListProviderProfilesIpc(undefined),
-
-  aiGetProviderProfileDetail: aiGetProviderProfileDetailIpc,
-
-  aiSwitchProviderProfile: aiSwitchProviderProfileIpc,
 
   aiTestProvider: () => aiTestProviderIpc(undefined),
 

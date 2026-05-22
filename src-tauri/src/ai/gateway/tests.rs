@@ -1,13 +1,12 @@
-use super::config::resolve_retained_profile_id;
 use super::conversation::{
     build_conversation_title_prompt, build_identity_system_prompt, normalize_conversation_title,
     with_identity_system_message,
 };
 use super::suggestions::{normalize_suggestion_text, parse_suggestion_pool_response};
 use super::{
-    default_base_url, default_model, validate_provider, AiModelEndpointRuntimeConfig,
-    AiProviderProfile, AiResolvedModelRole, AiRuntimeConfig, DEFAULT_MASTRA_MODEL,
-    DEFAULT_NARRATOR_MODEL, MAX_GENERATED_TITLE_CHARS,
+    default_base_url, default_model, is_endpoint_ready, model_service_platform,
+    validate_model_provider, validate_provider, AiModelEndpointRuntimeConfig, AiRuntimeConfig,
+    DEFAULT_MASTRA_MODEL, DEFAULT_NARRATOR_MODEL, MAX_GENERATED_TITLE_CHARS,
 };
 use crate::ai::provider::AiProviderMessage;
 
@@ -102,30 +101,28 @@ fn conversation_title_generation_prefers_narrator_model() {
 }
 
 #[test]
-fn model_switch_does_not_retain_profile_without_matching_profile_secret() {
-    let config = AiRuntimeConfig {
-        active_profile_id: Some("ai-profile-openai".to_string()),
-        profiles: vec![AiProviderProfile {
-            id: "ai-profile-openai".to_string(),
-            role: "main".to_string(),
-            name: "openai/gpt-5.5".to_string(),
-            provider_type: "mastra".to_string(),
-            selected_model: Some("openai/gpt-5.5".to_string()),
-            base_url: None,
-            inline_completion_enabled: false,
-            chat_enabled: true,
-            agent_enabled: false,
-            created_at: "2026-01-01T00:00:00Z".to_string(),
-            updated_at: "2026-01-01T00:00:00Z".to_string(),
-            last_used_at: None,
-        }],
-        ..AiRuntimeConfig::default()
-    };
+fn mastra_endpoint_readiness_does_not_require_manual_base_url() {
+    assert!(is_endpoint_ready(true, true));
+    assert!(!is_endpoint_ready(false, true));
+    assert!(!is_endpoint_ready(true, false));
+}
 
+#[test]
+fn model_provider_is_resolved_from_model_prefix() {
     assert_eq!(
-        resolve_retained_profile_id(&config, AiResolvedModelRole::Main, "mastra", None),
-        None,
+        model_service_platform(Some("deepseek/deepseek-v4-flash")),
+        Some("deepseek"),
     );
+    assert_eq!(model_service_platform(Some("gpt-5.5")), None);
+}
+
+#[test]
+fn credential_provider_must_match_model_provider() {
+    assert_eq!(
+        validate_model_provider(Some("deepseek/deepseek-v4-pro"), Some("deepseek")).unwrap(),
+        "deepseek",
+    );
+    assert!(validate_model_provider(Some("deepseek/deepseek-v4-pro"), Some("openai")).is_err());
 }
 
 #[test]

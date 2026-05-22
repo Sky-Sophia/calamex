@@ -163,14 +163,13 @@ const emitTextDelta = (
         params.emitOutputEvent({ type: 'message_clear' });
         capture.emittedTextLength = 0;
     }
-    const delta = full.slice(capture.emittedTextLength);
-    if (delta.length === 0) {
+    if (full.slice(capture.emittedTextLength).length === 0) {
         return;
     }
     capture.emittedTextLength = full.length;
     params.emitOutputEvent({
         type: 'message_delta',
-        text: delta,
+        text: full,
         phase,
     });
 };

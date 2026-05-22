@@ -1,6 +1,5 @@
 use super::config::{
-    build_provider_connection_candidate, save_connected_narrator, save_connected_profile,
-    AiProviderConnectionCandidate,
+    build_provider_connection_candidate, save_connected_model, AiProviderConnectionCandidate,
 };
 use super::*;
 use crate::agent_sidecar;
@@ -15,12 +14,10 @@ fn build_test_request(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| errors::error("AI_PROVIDER_NOT_CONFIGURED", "请先选择模型。"))?;
-    let api_key = candidate
-        .api_key_for_test
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| errors::error("AI_PROVIDER_AUTH_FAILED", "请填写 API Key。"))?;
+    let api_key = candidate.api_key_for_test.trim();
+    if api_key.is_empty() {
+        return Err(errors::error("AI_PROVIDER_AUTH_FAILED", "请填写 API Key。"));
+    }
 
     Ok(AgentSidecarChatRequest {
         session_id: None,
@@ -55,15 +52,17 @@ async fn test_provider_connection_candidate(
 
 pub async fn test_provider() -> Result<(), String> {
     let config = current_config()?;
+    let selected_model = config
+        .selected_model
+        .clone()
+        .or_else(|| default_model(&config.provider_type));
+    let provider_id = validate_model_provider(selected_model.as_deref(), None)?;
     let candidate = AiProviderConnectionCandidate {
+        provider_id,
         provider_type: config.provider_type.clone(),
-        selected_model: config
-            .selected_model
-            .clone()
-            .or_else(|| default_model(&config.provider_type)),
+        selected_model,
         base_url: config.base_url.clone(),
-        api_key_for_test: Some(get_api_key_for_config(&config)?),
-        api_key_for_save: None,
+        api_key_for_test: get_api_key_for_config(&config)?,
         inline_completion_enabled: config.inline_completion_enabled,
         chat_enabled: config.chat_enabled,
         agent_enabled: config.agent_enabled,
@@ -73,7 +72,8 @@ pub async fn test_provider() -> Result<(), String> {
 }
 
 pub async fn test_provider_config(
-    role: Option<&str>,
+    _role: Option<&str>,
+    provider_id: Option<&str>,
     provider_type: &str,
     selected_model: Option<String>,
     base_url: Option<String>,
@@ -82,9 +82,8 @@ pub async fn test_provider_config(
     agent_enabled: bool,
     api_key: Option<&str>,
 ) -> Result<(), String> {
-    let role = normalize_model_role(role)?;
     let candidate = build_provider_connection_candidate(
-        role,
+        provider_id,
         provider_type,
         selected_model,
         base_url,
@@ -99,6 +98,7 @@ pub async fn test_provider_config(
 
 pub async fn connect_provider(
     role: Option<&str>,
+    provider_id: Option<&str>,
     provider_type: &str,
     selected_model: Option<String>,
     base_url: Option<String>,
@@ -109,7 +109,7 @@ pub async fn connect_provider(
 ) -> Result<AiConfigPayload, String> {
     let role = normalize_model_role(role)?;
     let candidate = build_provider_connection_candidate(
-        role,
+        provider_id,
         provider_type,
         selected_model,
         base_url,
@@ -121,31 +121,5 @@ pub async fn connect_provider(
 
     test_provider_connection_candidate(&candidate).await?;
 
-    if let Some(api_key_to_save) = candidate.api_key_for_save.as_deref() {
-        CredentialStore::save_for_role(
-            &candidate.provider_type,
-            role.credential_role(),
-            api_key_to_save,
-        )?;
-    }
-
-    if role == AiResolvedModelRole::Narrator {
-        return save_connected_narrator(
-            candidate.provider_type,
-            candidate.selected_model,
-            candidate.base_url,
-            candidate.api_key_for_test.as_deref(),
-        );
-    }
-
-    save_connected_profile(
-        AiResolvedModelRole::Main,
-        candidate.provider_type,
-        candidate.selected_model,
-        candidate.base_url,
-        candidate.inline_completion_enabled,
-        candidate.chat_enabled,
-        candidate.agent_enabled,
-        candidate.api_key_for_test.as_deref(),
-    )
+    save_connected_model(role, candidate)
 }

@@ -33,10 +33,9 @@ describe('AI service and store', () => {
   });
   it('store 只保存非敏感配置', async () => {
     tauriServiceMock.aiGetConfig.mockResolvedValueOnce({
-      providerType: 'litellm',
+      providerType: 'mastra',
       selectedModel: 'openai/gpt-5.5',
       baseUrl: 'http://127.0.0.1:4000/v1',
-      activeProfileId: null,
       isBaseUrlConfigured: true,
       hasCredentials: false,
       isConfigured: true,
@@ -44,22 +43,22 @@ describe('AI service and store', () => {
       chatEnabled: true,
       agentEnabled: false,
       narrator: createDefaultAiModelEndpointConfig('zhipuai/glm-4.7-flash'),
+      credentials: [],
     });
 
     const store = useAiStore();
     await store.loadConfig();
 
-    expect(store.config.providerType).toBe('litellm');
+    expect(store.config.providerType).toBe('mastra');
     expect('apiKey' in store.config).toBe(false);
   });
 
   it('connectProvider 成功后只落非敏感 config，不把 apiKey 放进 store', async () => {
     tauriServiceMock.aiConnectProvider.mockResolvedValueOnce({
       config: {
-        providerType: 'litellm',
+        providerType: 'mastra',
         selectedModel: 'openai/gpt-5.5',
         baseUrl: 'http://127.0.0.1:4000/v1',
-        activeProfileId: null,
         isBaseUrlConfigured: true,
         hasCredentials: true,
         isConfigured: true,
@@ -67,6 +66,7 @@ describe('AI service and store', () => {
         chatEnabled: true,
         agentEnabled: false,
         narrator: createDefaultAiModelEndpointConfig('zhipuai/glm-4.7-flash'),
+        credentials: [{ providerId: 'openai', hasCredentials: true }],
       },
       test: {
         ok: true,
@@ -77,7 +77,8 @@ describe('AI service and store', () => {
 
     const store = useAiStore();
     await store.connectProvider({
-      providerType: 'litellm',
+      providerId: 'openai',
+      providerType: 'mastra',
       selectedModel: 'openai/gpt-5.5',
       baseUrl: 'http://127.0.0.1:4000/v1',
       inlineCompletionEnabled: true,
@@ -86,7 +87,7 @@ describe('AI service and store', () => {
       apiKey: 'sk-test-secret-value',
     });
 
-    expect(store.config.providerType).toBe('litellm');
+    expect(store.config.providerType).toBe('mastra');
     expect(store.config.hasCredentials).toBe(true);
     expect('apiKey' in store.config).toBe(false);
   });

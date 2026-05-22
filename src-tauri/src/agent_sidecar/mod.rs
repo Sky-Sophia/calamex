@@ -747,52 +747,14 @@ fn inject_sidecar_dotenv_key_if_present(command: &mut Command, sidecar_root: &Pa
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SidecarCredentialLookup<'a> {
-    Profile(&'a str),
-    Provider(&'a str),
-    ProviderRole {
-        provider_type: &'a str,
-        role: &'a str,
-    },
-}
+fn model_provider_id(model_id: &str) -> Result<&str, String> {
+    let provider_id = model_id
+        .split_once('/')
+        .map(|(provider_id, _)| provider_id.trim())
+        .filter(|provider_id| !provider_id.is_empty())
+        .ok_or_else(|| "AI 模型 ID 缺少厂商前缀，请使用“厂商/模型”格式。".to_string())?;
 
-fn resolve_sidecar_credential_lookup<'a>(
-    active_profile_id: Option<&'a str>,
-    provider_type: &'a str,
-    role: Option<&'a str>,
-) -> SidecarCredentialLookup<'a> {
-    if let Some(profile_id) = active_profile_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return SidecarCredentialLookup::Profile(profile_id);
-    }
-
-    match role.map(str::trim).filter(|value| !value.is_empty()) {
-        Some("narrator") => SidecarCredentialLookup::ProviderRole {
-            provider_type,
-            role: "narrator",
-        },
-        _ => SidecarCredentialLookup::Provider(provider_type),
-    }
-}
-
-fn load_sidecar_api_key(
-    active_profile_id: Option<&str>,
-    provider_type: &str,
-    role: Option<&str>,
-) -> Result<String, String> {
-    match resolve_sidecar_credential_lookup(active_profile_id, provider_type, role) {
-        SidecarCredentialLookup::Profile(profile_id) => {
-            CredentialStore::get_profile_secret(profile_id)
-        }
-        SidecarCredentialLookup::Provider(provider_type) => CredentialStore::get(provider_type),
-        SidecarCredentialLookup::ProviderRole {
-            provider_type,
-            role,
-        } => CredentialStore::get_for_role(provider_type, role),
-    }
+    Ok(provider_id)
 }
 
 fn current_sidecar_model_config() -> Result<AgentSidecarModelConfigPayload, String> {
@@ -803,11 +765,7 @@ fn current_sidecar_model_config() -> Result<AgentSidecarModelConfigPayload, Stri
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "AI 模型未配置：请先在 AI 设置中选择模型并保存。".to_string())?;
-    let api_key = load_sidecar_api_key(
-        config.active_profile_id.as_deref(),
-        &config.provider_type,
-        None,
-    )?;
+    let api_key = CredentialStore::get(model_provider_id(model_id)?)?;
     let base_url = config
         .base_url
         .as_deref()
@@ -833,11 +791,7 @@ fn narrator_sidecar_model_config() -> Result<AgentSidecarModelConfigPayload, Str
         .ok_or_else(|| {
             "Narrator 模型未配置：请先在 AI 设置中选择 Narrator 模型并保存。".to_string()
         })?;
-    let api_key = load_sidecar_api_key(
-        config.narrator.active_profile_id.as_deref(),
-        &config.narrator.provider_type,
-        Some("narrator"),
-    )?;
+    let api_key = CredentialStore::get(model_provider_id(model_id)?)?;
     let base_url = config
         .narrator
         .base_url
@@ -1093,9 +1047,9 @@ mod tests {
     use super::{
         build_sidecar_url, classify_sidecar_health, drain_complete_sidecar_stream_lines,
         has_non_whitespace_bytes, inject_sidecar_dotenv_key_if_present,
-        is_default_local_sidecar_url, normalize_base_url, parse_netstat_listening_pids,
-        resolve_sidecar_credential_lookup, SidecarCredentialLookup, SidecarHealthProbePayload,
-        SidecarHealthStatus, DEFAULT_SIDECAR_URL,
+        is_default_local_sidecar_url, model_provider_id, normalize_base_url,
+        parse_netstat_listening_pids, SidecarHealthProbePayload, SidecarHealthStatus,
+        DEFAULT_SIDECAR_URL,
     };
     use std::fs;
     use std::process::Command;
@@ -1239,29 +1193,12 @@ mod tests {
     }
 
     #[test]
-    fn sidecar_credential_lookup_prefers_active_profile_secret() {
+    fn model_provider_id_uses_model_prefix() {
         assert_eq!(
-            resolve_sidecar_credential_lookup(Some(" ai-profile-123 "), "mastra", Some("narrator")),
-            SidecarCredentialLookup::Profile("ai-profile-123")
+            model_provider_id("deepseek/deepseek-v4-pro").unwrap(),
+            "deepseek"
         );
-    }
-
-    #[test]
-    fn sidecar_credential_lookup_uses_provider_secret_for_main_model() {
-        assert_eq!(
-            resolve_sidecar_credential_lookup(None, "mastra", None),
-            SidecarCredentialLookup::Provider("mastra")
-        );
-    }
-
-    #[test]
-    fn sidecar_credential_lookup_uses_role_secret_for_narrator_without_profile() {
-        assert_eq!(
-            resolve_sidecar_credential_lookup(None, "mastra", Some("narrator")),
-            SidecarCredentialLookup::ProviderRole {
-                provider_type: "mastra",
-                role: "narrator",
-            }
-        );
+        assert_eq!(model_provider_id(" openai/gpt-5.5 ").unwrap(), "openai");
+        assert!(model_provider_id("gpt-5.5").is_err());
     }
 }

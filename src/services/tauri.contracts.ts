@@ -52,8 +52,6 @@ import {
   aiPatchSetSchema,
   aiProviderConnectionPayloadSchema,
   aiProviderConnectionRequestSchema,
-  aiProviderProfileDetailPayloadSchema,
-  aiProviderProfilePayloadSchema,
   aiProviderTestPayloadSchema,
   aiProviderTypeSchema,
   aiSuggestionPoolPayloadSchema,
@@ -624,8 +622,7 @@ export const tauriContracts = {
   },
   aiSaveCredentials: {
     inSchema: z.object({
-      role: aiModelRoleSchema.optional(),
-      providerType: aiProviderTypeSchema,
+      providerId: z.string().min(1),
       apiKey: z.string().min(1),
     }),
     outSchema: aiConfigPayloadSchema,
@@ -641,22 +638,6 @@ export const tauriContracts = {
   aiClearCredentials: {
     inSchema: z.void(),
     outSchema: zTauriVoid,
-  },
-  aiListProviderProfiles: {
-    inSchema: z.void(),
-    outSchema: z.array(aiProviderProfilePayloadSchema),
-  },
-  aiGetProviderProfileDetail: {
-    inSchema: z.object({
-      profileId: z.string().min(1),
-    }),
-    outSchema: aiProviderProfileDetailPayloadSchema,
-  },
-  aiSwitchProviderProfile: {
-    inSchema: z.object({
-      profileId: z.string().min(1),
-    }),
-    outSchema: aiConfigPayloadSchema,
   },
   aiTestProvider: {
     inSchema: z.void(),

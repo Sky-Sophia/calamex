@@ -1,7 +1,7 @@
 import {
   aiChatRequestSchema,
   aiConfigPayloadSchema,
-  aiProviderProfilePayloadSchema,
+  aiCredentialStatusPayloadSchema,
   aiProviderTypeSchema,
 } from '@/types/ai/schema';
 import { describe, expect, it } from 'vitest';
@@ -30,7 +30,6 @@ describe('AI schema', () => {
       providerType: 'mastra',
       selectedModel: 'openai/gpt-5.5',
       baseUrl: 'http://127.0.0.1:4000/v1',
-      activeProfileId: null,
       isBaseUrlConfigured: true,
       hasCredentials: false,
       isConfigured: true,
@@ -41,14 +40,15 @@ describe('AI schema', () => {
         providerType: 'mastra',
         selectedModel: 'zhipuai/glm-4.7-flash',
         baseUrl: 'http://127.0.0.1:4000/v1',
-        activeProfileId: null,
         isBaseUrlConfigured: true,
         hasCredentials: false,
         isConfigured: false,
       },
+      credentials: [{ providerId: 'openai', hasCredentials: true }],
     });
 
     expect(parsed.providerType).toBe('mastra');
+    expect(parsed.credentials[0]?.providerId).toBe('openai');
     expect('apiKey' in parsed).toBe(false);
   });
 
@@ -94,7 +94,6 @@ describe('AI schema', () => {
         providerType: 'unknown',
         selectedModel: null,
         baseUrl: null,
-        activeProfileId: null,
         isBaseUrlConfigured: false,
         hasCredentials: false,
         isConfigured: false,
@@ -105,7 +104,6 @@ describe('AI schema', () => {
           providerType: 'mastra',
           selectedModel: 'zhipuai/glm-4.7-flash',
           baseUrl: 'http://127.0.0.1:4000/v1',
-          activeProfileId: null,
           isBaseUrlConfigured: true,
           hasCredentials: false,
           isConfigured: false,
@@ -119,25 +117,13 @@ describe('AI schema', () => {
     expect(() => aiProviderTypeSchema.parse('litellm')).toThrow();
   });
 
-  it('配置记录包含模型用途和真实连接状态字段', () => {
-    const parsed = aiProviderProfilePayloadSchema.parse({
-      id: 'profile-narrator',
-      role: 'narrator',
-      name: '旁白 GLM',
-      providerType: 'mastra',
-      selectedModel: 'zhipuai/glm-4.7-flash',
-      baseUrl: 'http://127.0.0.1:4000/v1',
-      inlineCompletionEnabled: false,
-      chatEnabled: false,
-      agentEnabled: false,
+  it('凭证状态按厂商保存', () => {
+    const parsed = aiCredentialStatusPayloadSchema.parse({
+      providerId: 'deepseek',
       hasCredentials: true,
-      isConnected: true,
-      createdAt: '2026-05-03T00:00:00.000Z',
-      updatedAt: '2026-05-03T00:00:00.000Z',
-      lastUsedAt: null,
     });
 
-    expect(parsed.role).toBe('narrator');
-    expect(parsed.isConnected).toBe(true);
+    expect(parsed.providerId).toBe('deepseek');
+    expect(parsed.hasCredentials).toBe(true);
   });
 });

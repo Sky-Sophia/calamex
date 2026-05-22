@@ -159,8 +159,8 @@ const createAssistantMock = (
         inlineCompletionEnabled: false,
         chatEnabled: true,
         agentEnabled: false,
-        activeProfileId: null,
         narrator: createDefaultAiModelEndpointConfig('zhipuai/glm-4.7-flash'),
+        credentials: [],
     });
 
     const messages = ref<IAiChatMessage[]>(messagesList);
@@ -173,7 +173,6 @@ const createAssistantMock = (
     const isSending = ref(false);
     const draft = ref('');
     const errorMessage = ref('');
-    const providerProfiles = ref([]);
     const currentReferences = ref<IAiContextReference[]>([]);
     const agentSteps = ref<IAiTaskPlanStep[]>([]);
     const attachedFiles = ref([] as Array<{ id: string; name: string; sizeLabel: string; kind: 'text' | 'image' }>);
@@ -241,7 +240,6 @@ const createAssistantMock = (
         isSending,
         draft,
         errorMessage,
-        providerProfiles,
         currentReferences,
         agentSteps,
         attachedFiles,
@@ -267,10 +265,8 @@ const createAssistantMock = (
         canPreviewPatch: computed(() => false),
         sendButtonLabel: computed(() => '发送'),
         loadConfig: vi.fn().mockResolvedValue(undefined),
-        loadProviderProfiles: vi.fn().mockResolvedValue(undefined),
         saveConfig: vi.fn().mockResolvedValue(undefined),
         saveCredentials: vi.fn().mockResolvedValue(undefined),
-        getProviderProfileDetail: vi.fn().mockResolvedValue(null),
         testProviderConfig: vi.fn().mockResolvedValue('ok'),
         connectProvider: vi.fn().mockResolvedValue('ok'),
         testProvider: vi.fn().mockResolvedValue('ok'),

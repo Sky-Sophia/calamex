@@ -1,19 +1,12 @@
 import AiProviderSettings from '@/components/business/ai/provider/AiProviderSettings.vue';
-import type {
-  IAiConfigPayload,
-  IAiProviderProfileDetailPayload,
-  IAiProviderProfilePayload,
-  IAiProviderSettingsActionFeedback,
-} from '@/types/ai';
+import type { IAiConfigPayload, IAiProviderSettingsActionFeedback } from '@/types/ai';
 import { createDefaultAiModelEndpointConfig } from '@/services/ipc/ai-config.service';
 import { mount, type DOMWrapper } from '@vue/test-utils';
-import { createPinia } from 'pinia';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { nextTick } from 'vue';
 
 const createGlobalMountOptions = () => ({
   global: {
-    plugins: [createPinia()],
     stubs: {
       teleport: true,
     },
@@ -21,60 +14,60 @@ const createGlobalMountOptions = () => ({
 });
 
 const createConfig = (overrides: Partial<IAiConfigPayload> = {}): IAiConfigPayload => ({
-  providerType: 'litellm',
+  providerType: 'mastra',
   selectedModel: 'openai/gpt-5.5',
-  baseUrl: 'http://127.0.0.1:4000/v1',
-  isBaseUrlConfigured: true,
+  baseUrl: null,
+  isBaseUrlConfigured: false,
   hasCredentials: true,
   isConfigured: true,
-  inlineCompletionEnabled: true,
-  chatEnabled: true,
-  agentEnabled: false,
-  activeProfileId: null,
-  narrator: createDefaultAiModelEndpointConfig('zhipuai/glm-4.7-flash'),
-  ...overrides,
-});
-
-const createProfile = (
-  overrides: Partial<IAiProviderProfilePayload> = {},
-): IAiProviderProfilePayload => ({
-  id: 'profile-main',
-  role: 'main',
-  name: 'GPT5.5',
-  providerType: 'litellm',
-  selectedModel: 'openai/gpt-5.5',
-  baseUrl: 'http://127.0.0.1:4000/v1',
   inlineCompletionEnabled: false,
   chatEnabled: true,
   agentEnabled: false,
-  hasCredentials: true,
-  isConnected: false,
-  createdAt: '2026-05-03T00:00:00.000Z',
-  updatedAt: '2026-05-03T00:00:00.000Z',
-  lastUsedAt: null,
+  narrator: createDefaultAiModelEndpointConfig('zhipuai/glm-4.7-flash'),
+  credentials: [
+    {
+      providerId: 'openai',
+      hasCredentials: true,
+      alias: '个人',
+      keyPreview: 'sk-ab…7Qd2',
+    },
+    {
+      providerId: 'deepseek',
+      hasCredentials: false,
+      alias: '默认',
+      keyPreview: '',
+    },
+    {
+      providerId: 'zhipuai',
+      hasCredentials: true,
+      alias: '默认',
+      keyPreview: 'sk-gl…9Wz1',
+    },
+  ],
   ...overrides,
 });
 
-interface IAiProviderSettingsTestProps {
+const mountSettings = (props: Partial<{
   open: boolean;
   config: IAiConfigPayload;
   draft: IAiConfigPayload;
   apiKey: string;
-  profiles: IAiProviderProfilePayload[];
-  loadProfileDetail: (profileId: string) => Promise<IAiProviderProfileDetailPayload>;
-}
+  tavilyApiKey: string;
+}> = {}) => {
+  const config = props.config ?? createConfig();
 
-const createSettingsProps = (
-  overrides: Partial<IAiProviderSettingsTestProps> = {},
-): IAiProviderSettingsTestProps => ({
-  open: true,
-  config: createConfig(),
-  draft: createConfig(),
-  apiKey: '',
-  profiles: [],
-  loadProfileDetail: vi.fn(),
-  ...overrides,
-});
+  return mount(AiProviderSettings, {
+    props: {
+      open: true,
+      config,
+      draft: props.draft ?? config,
+      apiKey: props.apiKey ?? '',
+      tavilyApiKey: props.tavilyApiKey ?? '',
+      ...props,
+    },
+    ...createGlobalMountOptions(),
+  });
+};
 
 const findButtonByText = (buttons: DOMWrapper<Element>[], label: string): DOMWrapper<Element> => {
   const button = buttons.find((item) => item.text().includes(label));
@@ -86,449 +79,191 @@ const findButtonByText = (buttons: DOMWrapper<Element>[], label: string): DOMWra
   return button;
 };
 
-const getEmittedEvent = (events: unknown[][] | undefined, index = 0): unknown[] => {
-  const event = events?.[index];
+const openProviderForm = async (
+  wrapper: ReturnType<typeof mountSettings>,
+  providerLabel: string,
+): Promise<void> => {
+  const trigger = wrapper.find(`[aria-label*="${providerLabel} 凭证"]`);
+  if (!trigger.exists()) {
+    throw new Error(`未找到厂商入口：${providerLabel}`);
+  }
+  await trigger.trigger('click');
+};
 
+const openAddForm = async (wrapper: ReturnType<typeof mountSettings>): Promise<void> => {
+  await findButtonByText(wrapper.findAll('button'), '添加').trigger('click');
+};
+
+const selectProviderInForm = async (
+  wrapper: ReturnType<typeof mountSettings>,
+  providerLabel: string,
+): Promise<void> => {
+  await wrapper.get('#ai-provider-select').trigger('click');
+  await findButtonByText(wrapper.findAll('button'), providerLabel).trigger('click');
+};
+
+const getFeedback = (event: unknown[] | undefined): IAiProviderSettingsActionFeedback => {
   if (!event) {
-    throw new Error(`未找到第 ${index + 1} 个事件`);
+    throw new Error('未找到事件');
   }
 
-  return event;
-};
-
-const openRoleEditor = async (
-  wrapper: ReturnType<typeof mount>,
-  role: 'main' | 'narrator' = 'main',
-): Promise<void> => {
-  await wrapper.get(`[data-open-edit="${role}"]`).trigger('click');
-  await nextTick();
-};
-
-const selectPlatform = async (
-  wrapper: ReturnType<typeof mount>,
-  platformId: string,
-): Promise<void> => {
-  await wrapper.get('[data-field="platform"]').setValue(platformId);
-  await nextTick();
-};
-
-const selectModel = async (
-  wrapper: ReturnType<typeof mount>,
-  modelId: string,
-): Promise<void> => {
-  await wrapper.get('[data-field="model"]').setValue(modelId);
-  await nextTick();
+  return event.at(-1) as IAiProviderSettingsActionFeedback;
 };
 
 describe('AiProviderSettings', () => {
-  afterEach(() => {
-    vi.useRealTimers();
+  it('按厂商展示凭证状态，不再渲染配置记录入口', () => {
+    const wrapper = mountSettings();
+
+    expect(wrapper.text()).toContain('AI 凭证');
+    expect(wrapper.text()).toContain('OpenAI');
+    expect(wrapper.text()).toContain('个人');
+    expect(wrapper.text()).toContain('openai / sk-ab…7Qd2');
+    expect(wrapper.text()).not.toContain('DeepSeek');
+    expect(wrapper.text()).not.toContain('等待配置');
+    expect(wrapper.text()).not.toContain('默认模型');
+    expect(wrapper.text()).not.toContain('该厂商已有本地凭证');
+    expect(wrapper.text()).not.toContain('个模型');
+    expect(wrapper.text()).not.toContain('AI 配置记录');
+    expect(wrapper.findAll('[aria-label="默认小模型厂商"]')).toHaveLength(1);
+    expect(wrapper.find('[aria-label="进入配置记录"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label*="删除"]').exists()).toBe(false);
   });
 
-  it('renders vendor platforms while keeping the LiteLLM provider underneath', async () => {
-    const draft = createConfig();
+  it('保存厂商 API Key 时只提交厂商 ID 和 Key', async () => {
+    const wrapper = mountSettings();
 
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps({
-        draft,
-      }),
-      ...createGlobalMountOptions(),
+    await openAddForm(wrapper);
+    await selectProviderInForm(wrapper, 'DeepSeek');
+    await wrapper.get('#ai-credential-alias').setValue('工作');
+    await wrapper.get('#ai-provider-key').setValue('sk-deepseek-test');
+    await wrapper.setProps({ apiKey: 'sk-deepseek-test' });
+    await findButtonByText(wrapper.get('.ai-credential-foot').findAll('button'), '保存').trigger('click');
+
+    const event = wrapper.emitted('saveCredentials')?.[0];
+    expect(event?.[0]).toBe('sk-deepseek-test');
+    expect(event?.[1]).toBe('deepseek');
+    expect(event?.[2]).toBe('工作');
+
+    getFeedback(event).onSuccess('DeepSeek API Key 已保存');
+    await nextTick();
+    expect(wrapper.text()).toContain('DeepSeek API Key 已保存');
+  });
+
+  it('测试主模型时按主模型厂商走真实连接事件', async () => {
+    const wrapper = mountSettings();
+
+    await openProviderForm(wrapper, 'OpenAI');
+    await findButtonByText(wrapper.findAll('button'), '测试').trigger('click');
+
+    const event = wrapper.emitted('testProvider')?.[0];
+    expect(event?.[2]).toBe('main');
+    expect(event?.[0]).toMatchObject({
+      providerType: 'mastra',
+      selectedModel: 'openai/gpt-5.5',
     });
-
-    await openRoleEditor(wrapper);
-    await selectPlatform(wrapper, 'deepseek');
-
-    expect(draft.providerType).toBe('litellm');
-    expect(draft.baseUrl).toBe('http://127.0.0.1:4000/v1');
-    expect(draft.selectedModel).toBe('deepseek/deepseek-v4-pro');
-    expect(wrapper.find('[data-field="platform"] option[value="litellm"]').exists()).toBe(false);
   });
 
-  it('switches model options by platform without rendering a custom model input', async () => {
-    const draft = createConfig();
-
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps({
-        draft,
-      }),
-      ...createGlobalMountOptions(),
-    });
-
-    await openRoleEditor(wrapper);
-    await selectPlatform(wrapper, 'anthropic');
-
-    expect(draft.providerType).toBe('litellm');
-    expect(draft.baseUrl).toBe('http://127.0.0.1:4000/v1');
-    expect(draft.selectedModel).toBe('anthropic/claude-opus-4-6');
-    expect(wrapper.find('.model-alias-input').exists()).toBe(false);
-
-    const modelOptions = wrapper
-      .get('[data-field="model"]')
-      .findAll('option')
-      .map((option) => option.text());
-
-    expect(modelOptions).toContain('Claude Opus 4.7');
-    expect(modelOptions).toContain('Claude Sonnet 4.6');
-    expect(wrapper.find('.lr-option-meta').exists()).toBe(false);
-
-    await selectModel(wrapper, 'anthropic/claude-opus-4-7');
-
-    expect(draft.selectedModel).toBe('anthropic/claude-opus-4-7');
-  });
-
-  it('renders latest DeepSeek V4 model options and excludes deprecated aliases', async () => {
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps(),
-      ...createGlobalMountOptions(),
-    });
-
-    await openRoleEditor(wrapper);
-    await selectPlatform(wrapper, 'deepseek');
-
-    const modelOptions = wrapper
-      .get('[data-field="model"]')
-      .findAll('option')
-      .map((option) => option.text());
-
-    expect(modelOptions).toContain('DeepSeek-v4-pro');
-    expect(modelOptions).toContain('DeepSeek-v4-flash');
-    expect(modelOptions).not.toContain('deepseek-chat');
-    expect(modelOptions).not.toContain('deepseek-reasoner');
-  });
-
-  it('renders latest Zhipu model options and fills the new platform default base url', async () => {
+  it('测试小模型不改动主模型配置', async () => {
     const draft = createConfig({
-      narrator: createDefaultAiModelEndpointConfig('zhipuai/glm-4.7-flash'),
-    });
-
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps({
-        draft,
-      }),
-      ...createGlobalMountOptions(),
-    });
-
-    await openRoleEditor(wrapper, 'narrator');
-    await selectPlatform(wrapper, 'zhipuai');
-
-    expect(draft.narrator.baseUrl).toBe('https://open.bigmodel.cn/api/paas/v4');
-    expect(draft.narrator.selectedModel).toBe('zhipuai/glm-4.7-flash');
-
-    const modelOptions = wrapper
-      .get('[data-field="model"]')
-      .findAll('option')
-      .map((option) => option.text());
-
-    expect(modelOptions).toContain('GLM-4-Flash');
-    expect(modelOptions).toContain('GLM-4.7-Flash');
-    expect(modelOptions).toContain('GLM-4.5-Flash');
-  });
-
-  it('keeps narrator model config independent from the main model config', async () => {
-    const draft = createConfig();
-
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps({
-        draft,
-      }),
-      ...createGlobalMountOptions(),
-    });
-
-    await openRoleEditor(wrapper, 'narrator');
-    await wrapper.get('input[type="password"]').setValue('sk-narrator-test');
-    await selectPlatform(wrapper, 'deepseek');
-
-    expect(draft.selectedModel).toBe('openai/gpt-5.5');
-    expect(draft.narrator.selectedModel).toBe('deepseek/deepseek-v4-pro');
-
-    const saveButton = findButtonByText(wrapper.findAll('button'), '开始连接');
-
-    await saveButton.trigger('click');
-    const emitted = wrapper.emitted('save');
-
-    expect(getEmittedEvent(emitted)[2]).toBe('narrator');
-  });
-
-  it('opens AI configuration records with main profiles selected by default and allows switching to narrator profiles', async () => {
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps(),
-      ...createGlobalMountOptions(),
-    });
-
-    await wrapper.get('[aria-label="进入配置记录"]').trigger('click');
-
-    expect(wrapper.text()).toContain('AI 配置记录');
-    const mainProfileFilter = findButtonByText(wrapper.findAll('button'), '主力模型');
-    const narratorProfileFilter = findButtonByText(wrapper.findAll('button'), '小模型');
-
-    expect(mainProfileFilter.classes()).toContain('is-selected');
-    expect(narratorProfileFilter.classes()).not.toContain('is-selected');
-
-    await narratorProfileFilter.trigger('click');
-    await nextTick();
-
-    expect(findButtonByText(wrapper.findAll('button'), '小模型').classes()).toContain(
-      'is-selected',
-    );
-  });
-
-  it('filters configuration records by role while preserving connection states', async () => {
-    const profiles = [
-      createProfile({
-        id: 'profile-main-connected',
-        role: 'main',
-        name: '主力 GPT',
-        isConnected: true,
-        lastUsedAt: '2026-05-03T01:00:00.000Z',
-      }),
-      createProfile({
-        id: 'profile-narrator-ready',
-        role: 'narrator',
-        name: '旁白 GLM',
-        selectedModel: 'zhipuai/glm-4.7-flash',
-        hasCredentials: true,
-        isConnected: false,
-      }),
-      createProfile({
-        id: 'profile-narrator-missing',
-        role: 'narrator',
-        name: '缺少 Key 的旁白',
-        selectedModel: 'zhipuai/glm-4.7-flash',
+      selectedModel: 'openai/gpt-5.5',
+      narrator: {
+        ...createDefaultAiModelEndpointConfig('deepseek/deepseek-v4-pro'),
         hasCredentials: false,
-        isConnected: false,
-        updatedAt: '2026-05-02T00:00:00.000Z',
-      }),
-    ];
-
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps({
-        config: createConfig({ activeProfileId: 'profile-main-connected' }),
-        profiles,
-      }),
-      ...createGlobalMountOptions(),
-    });
-
-    await wrapper.get('[aria-label="进入配置记录"]').trigger('click');
-
-    expect(wrapper.text()).toContain('主力 GPT');
-    expect(wrapper.text()).toContain('已连接');
-    expect(wrapper.text()).not.toContain('旁白 GLM');
-    expect(wrapper.text()).not.toContain('缺少 Key 的旁白');
-
-    const narratorProfileFilter = findButtonByText(wrapper.findAll('button'), '小模型');
-    await narratorProfileFilter.trigger('click');
-    await nextTick();
-
-    const text = wrapper.text();
-    expect(text).not.toContain('主力 GPT');
-    expect(text).toContain('旁白 GLM');
-    expect(text).toContain('缺少 Key 的旁白');
-    expect(text).toContain('未连接');
-    expect(text).toContain('缺少 API Key');
-  });
-
-  it('uses isConnected from profile payload when disabling quick switch', async () => {
-    const profiles = [
-      createProfile({
-        id: 'profile-main-connected',
-        name: '当前主力',
-        isConnected: true,
-        lastUsedAt: '2026-05-03T01:00:00.000Z',
-      }),
-      createProfile({
-        id: 'profile-narrator-ready',
-        role: 'narrator',
-        name: '可切换旁白',
-        selectedModel: 'zhipuai/glm-4.7-flash',
+        isConfigured: false,
+      },
+      credentials: [{
+        providerId: 'deepseek',
         hasCredentials: true,
-        isConnected: false,
-      }),
-    ];
-
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps({
-        config: createConfig({ activeProfileId: 'profile-main-connected' }),
-        profiles,
-      }),
-      ...createGlobalMountOptions(),
+        alias: '默认',
+        keyPreview: 'sk-ds…1234',
+      }],
     });
+    const wrapper = mountSettings({ config: draft, draft });
 
-    await wrapper.get('[aria-label="进入配置记录"]').trigger('click');
+    await openProviderForm(wrapper, 'DeepSeek');
+    await findButtonByText(wrapper.findAll('button'), '测试').trigger('click');
 
-    const narratorProfileFilter = findButtonByText(wrapper.findAll('button'), '小模型');
-    await narratorProfileFilter.trigger('click');
-    await nextTick();
-
-    const cards = wrapper.findAll('.profile-card');
-    const narratorCard = cards[0];
-
-    if (!narratorCard) {
-      throw new Error('配置记录列表渲染不完整');
-    }
-
-    const narratorSwitchButton = narratorCard.findAll('.profile-action-button')[1];
-
-    if (!narratorSwitchButton) {
-      throw new Error('配置记录切换按钮渲染不完整');
-    }
-
-    expect(narratorSwitchButton.attributes('disabled')).toBeUndefined();
-
-    await narratorSwitchButton.trigger('click');
-
-    expect(wrapper.emitted('switchProfile')![0][0]).toBe('profile-narrator-ready');
+    const event = wrapper.emitted('testProvider')?.[0];
+    expect(event?.[2]).toBe('narrator');
+    const emittedConfig = event?.[0] as IAiConfigPayload;
+    expect(emittedConfig.selectedModel).toBe('openai/gpt-5.5');
+    expect(emittedConfig.narrator.selectedModel).toBe('deepseek/deepseek-v4-pro');
   });
 
-  it('renders inline feedback after the parent resolves the emitted callback', async () => {
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps(),
-      ...createGlobalMountOptions(),
-    });
+  it('在凭证列表设置主模型默认时只保存主模型配置', async () => {
+    const wrapper = mountSettings();
 
-    await openRoleEditor(wrapper);
-    const testButton = findButtonByText(wrapper.findAll('button'), '测试连接');
+    await wrapper.get('[aria-label="设为主模型：智谱 GLM"]').trigger('click');
 
-    await testButton.trigger('click');
-
-    const emitted = wrapper.emitted('testProvider');
-    expect(emitted).toHaveLength(1);
-    const testEvent = getEmittedEvent(emitted);
-
-    expect(testEvent[0]).toMatchObject({ providerType: 'litellm' });
-    expect(testEvent[1]).toBe('');
-    expect(testEvent[2]).toBe('main');
-    const feedback = testEvent[3] as IAiProviderSettingsActionFeedback;
-    feedback.onSuccess('连接成功，Provider 已响应');
-    await nextTick();
-
-    expect(wrapper.text()).toContain('连接成功，Provider 已响应');
-    expect(wrapper.emitted('close')).toBeUndefined();
+    const event = wrapper.emitted('save')?.[0];
+    expect(event?.[1]).toBe('');
+    expect(event?.[2]).toBe('main');
+    const emittedConfig = event?.[0] as IAiConfigPayload;
+    expect(emittedConfig.selectedModel).toBe('zhipuai/glm-4.7-flash');
+    expect(emittedConfig.narrator.selectedModel).toBe('zhipuai/glm-4.7-flash');
   });
 
-  it('renders copy button without exposing the API Key visibility toggle', async () => {
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps({
-        apiKey: 'sk-test-secret-value',
-      }),
-      ...createGlobalMountOptions(),
-    });
+  it('在凭证列表设置小模型默认时不改动主模型配置', async () => {
+    const wrapper = mountSettings();
 
-    await openRoleEditor(wrapper);
+    await wrapper.get('[aria-label="设为小模型：OpenAI"]').trigger('click');
 
-    expect(wrapper.find('[aria-label="复制"]').exists()).toBe(true);
-    expect(wrapper.find('[aria-label="显示 / 隐藏"]').exists()).toBe(false);
-    expect(wrapper.find('input[type="password"]').exists()).toBe(true);
+    const event = wrapper.emitted('save')?.[0];
+    expect(event?.[1]).toBe('');
+    expect(event?.[2]).toBe('narrator');
+    const emittedConfig = event?.[0] as IAiConfigPayload;
+    expect(emittedConfig.selectedModel).toBe('openai/gpt-5.5');
+    expect(emittedConfig.narrator.selectedModel).toBe('openai/gpt-5.5');
   });
 
-  it('emits tavily key save action from the summary list', async () => {
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps(),
-      ...createGlobalMountOptions(),
+  it('表单里的小模型默认模型随厂商切换，并按所选模型保存小模型', async () => {
+    const config = createConfig({
+      credentials: [
+        {
+          providerId: 'deepseek',
+          hasCredentials: true,
+          alias: '默认',
+          keyPreview: 'sk-ds…1234',
+        },
+      ],
     });
+    const wrapper = mountSettings({ config, draft: config });
 
+    await openProviderForm(wrapper, 'DeepSeek');
+    expect(wrapper.get('[data-small-model-select]').text()).toContain('DeepSeek-v4-pro');
+
+    await wrapper.get('[data-small-model-select]').trigger('click');
+    await findButtonByText(wrapper.findAll('.ai-credential-combobox-option'), 'DeepSeek-v4-flash')
+      .trigger('click');
+    expect(wrapper.find('[aria-label="设为小模型"]').exists()).toBe(false);
+    await findButtonByText(wrapper.get('.ai-credential-foot').findAll('button'), '保存').trigger('click');
+
+    const event = wrapper.emitted('save')?.[0];
+    expect(event?.[1]).toBe('');
+    expect(event?.[2]).toBe('narrator');
+    const emittedConfig = event?.[0] as IAiConfigPayload;
+    expect(emittedConfig.selectedModel).toBe('openai/gpt-5.5');
+    expect(emittedConfig.narrator.selectedModel).toBe('deepseek/deepseek-v4-flash');
+  });
+
+  it('保存 Tavily Key 走独立事件', async () => {
+    const wrapper = mountSettings();
+
+    await openProviderForm(wrapper, 'OpenAI');
     await wrapper.get('[data-tavily-input]').setValue('tvly-test-key');
+    await wrapper.setProps({ tavilyApiKey: 'tvly-test-key' });
     await wrapper.get('[data-save-tavily]').trigger('click');
 
-    const emitted = wrapper.emitted('saveTavilyKey');
-
-    expect(getEmittedEvent(emitted)[0]).toBe('tvly-test-key');
+    expect(wrapper.emitted('saveTavilyKey')?.[0]?.[0]).toBe('tvly-test-key');
   });
 
-  it('renders field-level validation instead of emitting when API Key is required', async () => {
-    const draft = createConfig({
-      hasCredentials: false,
-    });
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps({
-        config: createConfig({
-          hasCredentials: false,
-        }),
-        draft,
-        apiKey: '',
-      }),
-      ...createGlobalMountOptions(),
-    });
+  it('点击遮罩关闭，点击弹窗本身不关闭', async () => {
+    const wrapper = mountSettings();
 
-    await openRoleEditor(wrapper);
-    const saveButton = findButtonByText(wrapper.findAll('button'), '开始连接');
-
-    await saveButton.trigger('click');
-    await nextTick();
-
-    expect(wrapper.emitted('save')).toBeUndefined();
-    expect(wrapper.text()).toContain('请输入 API Key。');
-  });
-
-  it('keeps the dialog open after testing connection even after the success toast timeout', async () => {
-    vi.useFakeTimers();
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps(),
-      ...createGlobalMountOptions(),
-    });
-
-    await openRoleEditor(wrapper);
-    const testButton = findButtonByText(wrapper.findAll('button'), '测试连接');
-
-    await testButton.trigger('click');
-
-    const feedback = getEmittedEvent(
-      wrapper.emitted('testProvider'),
-    )[3] as IAiProviderSettingsActionFeedback;
-    feedback.onSuccess('连接测试通过');
-    await nextTick();
-    vi.advanceTimersByTime(2400);
-    await nextTick();
-
-    expect(wrapper.emitted('close')).toBeUndefined();
-  });
-
-  it('only closes after start connection succeeds', async () => {
-    vi.useFakeTimers();
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps(),
-      ...createGlobalMountOptions(),
-    });
-
-    await openRoleEditor(wrapper);
-    const saveButton = findButtonByText(wrapper.findAll('button'), '开始连接');
-
-    await saveButton.trigger('click');
-    const feedback = getEmittedEvent(
-      wrapper.emitted('save'),
-    )[3] as IAiProviderSettingsActionFeedback;
-
-    feedback.onError('连接失败');
-    await nextTick();
-    vi.advanceTimersByTime(2000);
-    await nextTick();
+    await wrapper.get('.ai-credential-dialog').trigger('click');
     expect(wrapper.emitted('close')).toBeUndefined();
 
-    await saveButton.trigger('click');
-    const successFeedback = getEmittedEvent(
-      wrapper.emitted('save'),
-      1,
-    )[3] as IAiProviderSettingsActionFeedback;
-    successFeedback.onSuccess('连接成功');
-    await nextTick();
-    expect(wrapper.emitted('close')).toBeUndefined();
-
-    vi.advanceTimersByTime(1200);
-    await nextTick();
-    expect(wrapper.emitted('close')).toHaveLength(1);
-  });
-
-  it('clicks the backdrop to close without rendering an explicit close button', async () => {
-    const wrapper = mount(AiProviderSettings, {
-      props: createSettingsProps(),
-      ...createGlobalMountOptions(),
-    });
-
-    expect(wrapper.find('.close-btn').exists()).toBe(false);
-
-    await wrapper.get('.modal').trigger('click');
-    expect(wrapper.emitted('close')).toBeUndefined();
-
-    await wrapper.get('.modal-shell').trigger('click');
+    await wrapper.get('.ai-credential-shell').trigger('click');
     expect(wrapper.emitted('close')).toHaveLength(1);
   });
 });

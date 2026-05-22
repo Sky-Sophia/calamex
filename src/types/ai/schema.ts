@@ -213,24 +213,29 @@ export const aiChatMessageSchema = z.object({
 });
 
 /* ============================================================================
- * Provider config / credentials / profile
+ * Provider config / credentials
  * ========================================================================== */
 
 export const aiModelEndpointConfigPayloadSchema = z.object({
   providerType: aiProviderTypeSchema,
   selectedModel: z.string().nullable(),
   baseUrl: z.string().nullable(),
-  activeProfileId: z.string().nullable().default(null),
   isBaseUrlConfigured: z.boolean(),
   hasCredentials: z.boolean(),
   isConfigured: z.boolean(),
+});
+
+export const aiCredentialStatusPayloadSchema = z.object({
+  providerId: z.string().min(1),
+  hasCredentials: z.boolean(),
+  alias: z.string().default('厂商 API Key'),
+  keyPreview: z.string().default(''),
 });
 
 export const aiConfigPayloadSchema = z.object({
   providerType: aiProviderTypeSchema,
   selectedModel: z.string().nullable(),
   baseUrl: z.string().nullable(),
-  activeProfileId: z.string().nullable().default(null),
   isBaseUrlConfigured: z.boolean(),
   hasCredentials: z.boolean(),
   isConfigured: z.boolean(),
@@ -238,38 +243,18 @@ export const aiConfigPayloadSchema = z.object({
   chatEnabled: z.boolean(),
   agentEnabled: z.boolean(),
   narrator: aiModelEndpointConfigPayloadSchema,
-});
-
-export const aiProviderProfilePayloadSchema = z.object({
-  id: z.string().min(1),
-  role: aiModelRoleSchema.default('main'),
-  name: z.string().min(1),
-  providerType: aiProviderTypeSchema,
-  selectedModel: z.string().nullable(),
-  baseUrl: z.string().nullable(),
-  inlineCompletionEnabled: z.boolean(),
-  chatEnabled: z.boolean(),
-  agentEnabled: z.boolean(),
-  hasCredentials: z.boolean(),
-  isConnected: z.boolean().default(false),
-  createdAt: z.string().min(1),
-  updatedAt: z.string().min(1),
-  lastUsedAt: z.string().min(1).nullable(),
-});
-
-export const aiProviderProfileDetailPayloadSchema = z.object({
-  profile: aiProviderProfilePayloadSchema,
-  apiKey: z.string().nullable(),
+  credentials: z.array(aiCredentialStatusPayloadSchema).default([]),
 });
 
 export const aiSaveCredentialsRequestSchema = z.object({
-  role: aiModelRoleSchema.optional(),
-  providerType: aiProviderTypeSchema,
+  providerId: z.string().min(1),
+  alias: z.string().min(1).optional(),
   apiKey: z.string().min(1),
 });
 
 export const aiProviderConnectionRequestSchema = z.object({
   role: aiModelRoleSchema.optional(),
+  providerId: z.string().min(1).nullable().optional(),
   providerType: aiProviderTypeSchema,
   selectedModel: z.string().nullable(),
   baseUrl: z.string().nullable(),

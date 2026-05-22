@@ -1,4 +1,4 @@
-import { aiEditService } from '@/services/ipc/ai.service-edit';
+import { aiEditService } from '@/services/ipc/ai-edit.service';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

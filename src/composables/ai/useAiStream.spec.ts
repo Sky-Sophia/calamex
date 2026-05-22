@@ -43,6 +43,12 @@ describe('useAiStream', () => {
     callback(timestamp);
   };
 
+  const runFramesUntilIdle = (maxFrames = 120): void => {
+    for (let index = 0; index < maxFrames && queuedFrames.size > 0; index += 1) {
+      runNextFrame((index + 1) * 16);
+    }
+  };
+
   beforeEach(() => {
     frameId = 0;
     queuedFrames = new Map<number, FrameRequestCallback>();
@@ -60,24 +66,30 @@ describe('useAiStream', () => {
     vi.unstubAllGlobals();
   });
 
-  it('按帧合并 burst delta，不拆分真实到达的内容', () => {
+  it('按稳定帧节奏输出 burst delta，不一帧喷完整段内容', () => {
     const { stream, scope } = createStreamHarness();
 
     stream.start();
-    stream.append('abcdef');
+    stream.append('abcdef'.repeat(8));
 
     expect(stream.content.value).toBe('');
-    expect(stream.bufferedGraphemeCount.value).toBe(6);
-    expect(stream.maxBufferedGraphemeCount.value).toBe(6);
+    expect(stream.bufferedGraphemeCount.value).toBe(48);
+    expect(stream.maxBufferedGraphemeCount.value).toBe(48);
     expect(queuedFrames.size).toBe(1);
 
     runNextFrame(16);
-    expect(stream.content.value).toBe('abcdef');
+    expect(stream.content.value.length).toBeGreaterThan(0);
+    expect(stream.content.value.length).toBeLessThan(48);
+    expect(stream.bufferedGraphemeCount.value).toBeGreaterThan(0);
+    expect(stream.maxBufferedGraphemeCount.value).toBe(48);
+    expect(queuedFrames.size).toBe(1);
+
+    runFramesUntilIdle();
+    expect(stream.content.value).toBe('abcdef'.repeat(8));
     expect(stream.bufferedGraphemeCount.value).toBe(0);
-    expect(stream.maxBufferedGraphemeCount.value).toBe(6);
 
     stream.complete();
-    expect(stream.content.value).toBe('abcdef');
+    expect(stream.content.value).toBe('abcdef'.repeat(8));
     expect(stream.bufferedGraphemeCount.value).toBe(0);
     expect(stream.status.value).toBe('completed');
 
@@ -138,6 +150,10 @@ describe('useAiStream', () => {
     stream.append('‍👩‍👧‍👦完成');
 
     runNextFrame(16);
+    expect(stream.content.value).toBe(family);
+    expect(stream.content.value).not.toContain('�');
+
+    runFramesUntilIdle();
 
     expect(stream.content.value).toBe(`${family}完成`);
     expect(stream.content.value).not.toContain('�');

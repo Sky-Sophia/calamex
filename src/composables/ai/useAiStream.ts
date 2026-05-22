@@ -1,3 +1,4 @@
+import { splitTextGraphemes } from '@/utils/text-preview';
 import { computed, getCurrentScope, onScopeDispose, ref } from 'vue';
 
 type TAiStreamStatus = 'idle' | 'streaming' | 'completed' | 'cancelled';
@@ -15,6 +16,11 @@ export interface IAiStreamStartOptions {
 }
 
 const DEFAULT_FRAME_MS = 16.7;
+const MAX_FRAME_DELTA_MS = 50;
+const BASE_GRAPHEMES_PER_SECOND = 42;
+const MAX_GRAPHEMES_PER_SECOND = 180;
+const BACKLOG_ACCELERATION_PER_GRAPHEME = 2.5;
+const BACKLOG_ACCELERATION_START = 12;
 
 export const useAiStream = (options: IUseAiStreamOptions = {}) => {
   void options;
@@ -27,8 +33,10 @@ export const useAiStream = (options: IUseAiStreamOptions = {}) => {
   let pendingText = '';
   let frameHandle: TFrameHandle | null = null;
   let isFrameScheduled = false;
+  let lastFrameTimestamp: number | null = null;
+  let pacingBudgetRemainder = 0;
 
-  const countBufferedText = (text: string): number => Array.from(text).length;
+  const countBufferedText = (text: string): number => splitTextGraphemes(text).length;
 
   const updateBufferMetrics = (): void => {
     bufferedGraphemeCount.value = countBufferedText(pendingText);
@@ -58,16 +66,66 @@ export const useAiStream = (options: IUseAiStreamOptions = {}) => {
 
     content.value += pendingText;
     pendingText = '';
+    pacingBudgetRemainder = 0;
+    updateBufferMetrics();
+  };
+
+  const getFrameElapsedMs = (timestamp: number): number => {
+    const elapsed = lastFrameTimestamp === null
+      ? DEFAULT_FRAME_MS
+      : timestamp - lastFrameTimestamp;
+    lastFrameTimestamp = timestamp;
+
+    if (!Number.isFinite(elapsed) || elapsed <= 0) {
+      return DEFAULT_FRAME_MS;
+    }
+
+    return Math.min(elapsed, MAX_FRAME_DELTA_MS);
+  };
+
+  const getPacingRate = (bufferedCount: number): number => {
+    const backlog = Math.max(0, bufferedCount - BACKLOG_ACCELERATION_START);
+    return Math.min(
+      MAX_GRAPHEMES_PER_SECOND,
+      BASE_GRAPHEMES_PER_SECOND + backlog * BACKLOG_ACCELERATION_PER_GRAPHEME,
+    );
+  };
+
+  const drainPendingTextByFrame = (timestamp: number): void => {
+    if (!pendingText) {
+      pacingBudgetRemainder = 0;
+      return;
+    }
+
+    const graphemes = splitTextGraphemes(pendingText);
+    if (graphemes.length === 0) {
+      pendingText = '';
+      updateBufferMetrics();
+      return;
+    }
+
+    const elapsedMs = getFrameElapsedMs(timestamp);
+    const nextBudget =
+      pacingBudgetRemainder + getPacingRate(graphemes.length) * (elapsedMs / 1_000);
+    const drainCount = Math.min(
+      graphemes.length,
+      Math.max(1, Math.floor(nextBudget)),
+    );
+    pacingBudgetRemainder = Math.max(0, nextBudget - drainCount);
+    content.value += graphemes.slice(0, drainCount).join('');
+    pendingText = graphemes.slice(drainCount).join('');
     updateBufferMetrics();
   };
 
   const resetPacingState = (): void => {
     cancelFrame();
     pendingText = '';
+    lastFrameTimestamp = null;
+    pacingBudgetRemainder = 0;
     bufferedGraphemeCount.value = 0;
   };
 
-  const releaseFrame = (): void => {
+  const releaseFrame = (timestamp: number): void => {
     frameHandle = null;
     isFrameScheduled = false;
 
@@ -75,8 +133,14 @@ export const useAiStream = (options: IUseAiStreamOptions = {}) => {
       return;
     }
 
-    flushPendingText();
+    drainPendingTextByFrame(timestamp);
 
+    if (pendingText) {
+      scheduleFrame();
+    } else {
+      lastFrameTimestamp = null;
+      pacingBudgetRemainder = 0;
+    }
   };
 
   function scheduleFrame(): void {
@@ -88,9 +152,9 @@ export const useAiStream = (options: IUseAiStreamOptions = {}) => {
     let didRunSynchronously = false;
 
     if (typeof globalThis.requestAnimationFrame === 'function') {
-      const frameId = globalThis.requestAnimationFrame(() => {
+      const frameId = globalThis.requestAnimationFrame((timestamp) => {
         didRunSynchronously = true;
-        releaseFrame();
+        releaseFrame(timestamp);
       });
 
       if (!didRunSynchronously) {
@@ -106,7 +170,7 @@ export const useAiStream = (options: IUseAiStreamOptions = {}) => {
     frameHandle = {
       kind: 'timeout',
       id: setTimeout(() => {
-        releaseFrame();
+        releaseFrame(Date.now());
       }, DEFAULT_FRAME_MS),
     };
   }

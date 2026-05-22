@@ -17,13 +17,12 @@ import type {
   aiConfigPayloadSchema,
   aiConversationTitlePayloadSchema,
   aiConversationTitleRequestSchema,
+  aiCredentialStatusPayloadSchema,
   aiLanguageModelUsageSchema,
   aiModelEndpointConfigPayloadSchema,
   aiPatchSetSchema,
   aiProviderConnectionPayloadSchema,
   aiProviderConnectionRequestSchema,
-  aiProviderProfileDetailPayloadSchema,
-  aiProviderProfilePayloadSchema,
   aiProviderTestPayloadSchema,
   aiSaveCredentialsRequestSchema,
   aiSuggestionPoolPayloadSchema,
@@ -158,9 +157,8 @@ export type IAiAgentConfirmationState = z.infer<typeof aiAgentConfirmationStateS
 export type IAiChatMessageWire = z.infer<typeof aiChatMessageSchema>;
 
 export type IAiModelEndpointConfigPayload = z.infer<typeof aiModelEndpointConfigPayloadSchema>;
+export type IAiCredentialStatusPayload = z.infer<typeof aiCredentialStatusPayloadSchema>;
 export type IAiConfigPayload = z.infer<typeof aiConfigPayloadSchema>;
-export type IAiProviderProfilePayload = z.infer<typeof aiProviderProfilePayloadSchema>;
-export type IAiProviderProfileDetailPayload = z.infer<typeof aiProviderProfileDetailPayloadSchema>;
 
 export type IAiChatRequest = z.infer<typeof aiChatRequestSchema>;
 export type IAiConversationTitleRequest = z.infer<typeof aiConversationTitleRequestSchema>;
@@ -239,10 +237,6 @@ export interface IAiSaveConfigRequest {
 
 export interface IAiCancelRequest {
   streamId: string;
-}
-
-export interface IAiProviderProfileSwitchRequest {
-  profileId: string;
 }
 
 export interface IAiInlineCompletionRequest {

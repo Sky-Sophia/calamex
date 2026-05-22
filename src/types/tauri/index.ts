@@ -35,9 +35,6 @@ import type {
   IAiProposePatchRequest,
   IAiProviderConnectionPayload,
   IAiProviderConnectionRequest,
-  IAiProviderProfileDetailPayload,
-  IAiProviderProfilePayload,
-  IAiProviderProfileSwitchRequest,
   IAiProviderTestPayload,
   IAiSaveConfigRequest,
   IAiSaveCredentialsRequest,
@@ -388,13 +385,6 @@ export interface ITauriService {
   aiSaveConfig(payload: IAiSaveConfigRequest): Promise<IAiConfigPayload>;
   aiSaveCredentials(payload: IAiSaveCredentialsRequest): Promise<IAiConfigPayload>;
   aiClearCredentials(): Promise<void>;
-  aiListProviderProfiles(): Promise<IAiProviderProfilePayload[]>;
-  aiGetProviderProfileDetail(
-    payload: IAiProviderProfileSwitchRequest,
-  ): Promise<IAiProviderProfileDetailPayload>;
-  aiSwitchProviderProfile(
-    payload: IAiProviderProfileSwitchRequest,
-  ): Promise<IAiConfigPayload>;
   aiTestProvider(): Promise<IAiProviderTestPayload>;
   aiTestProviderConfig(payload: IAiProviderConnectionRequest): Promise<IAiProviderTestPayload>;
   aiConnectProvider(payload: IAiProviderConnectionRequest): Promise<IAiProviderConnectionPayload>;

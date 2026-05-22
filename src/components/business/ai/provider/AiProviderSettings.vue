@@ -1,82 +1,53 @@
 <script setup lang="ts">
 import AiProviderIcon from '@/components/business/ai/provider/AiProviderIcon.vue';
-import FieldError from '@/components/common/FieldError.vue';
-import type { TAiServicePlatformId } from '@/constants/ai/providers';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import {
   AI_SERVICE_PLATFORM_PRESETS,
-  DEFAULT_MASTRA_BASE_URL,
-  findAiProviderPreset,
   findAiServicePlatformByModel,
   findAiServicePlatformPreset,
-  isAiServicePlatformModel,
+  type IAiServicePlatformPreset,
+  type TAiServicePlatformId,
 } from '@/constants/ai/providers';
+import { cloneAiConfigPayload } from '@/services/ipc/ai-config.service';
 import type {
   IAiConfigPayload,
-  IAiModelEndpointConfigPayload,
-  IAiProviderProfileDetailPayload,
-  IAiProviderProfilePayload,
   IAiProviderSettingsActionFeedback,
   TAiModelRole,
 } from '@/types/ai';
-import {
-  cloneAiConfigPayload,
-  getAiModelEndpointConfig,
-  patchAiModelEndpointConfig,
-} from '@/services/ipc/ai-config.service';
-import { tryWriteClipboardText } from '@/utils/clipboard';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-
-interface IAiAdvancedDraft {
-  timeoutSeconds: number;
-  proxyUrl: string;
-  temperature: number;
-  topP: number;
-  maxTokens: number;
-}
-
-interface IPlatformSelectOption {
-  value: TAiServicePlatformId;
-  label: string;
-}
-
-interface IModelSelectOption {
-  value: string;
-  label: string;
-}
-
-interface IAiRoleSummaryRow {
-  role: TAiModelRole;
-  label: string;
-  description: string;
-  platformId: TAiServicePlatformId;
-  platformLabel: string;
-  modelLabel: string;
-  statusLabel: string;
-  statusTone: 'ok' | 'warn' | 'over';
-  credentialLabel: string;
-  entryStatusLabel: string;
-}
-
-type TProviderSettingsField = 'apiKey' | 'baseUrl' | 'model';
-type TSettingsView = 'list' | 'edit' | 'profiles' | 'detail';
-
-const createDefaultAdvancedDraft = (): IAiAdvancedDraft => ({
-  timeoutSeconds: 30,
-  proxyUrl: '',
-  temperature: 0.7,
-  topP: 1,
-  maxTokens: 1024,
-});
+import AlertTriangle from '~icons/lucide/triangle-alert';
+import ArrowLeft from '~icons/lucide/arrow-left';
+import Check from '~icons/lucide/check';
+import Crown from '~icons/lucide/crown';
+import Eye from '~icons/lucide/eye';
+import EyeOff from '~icons/lucide/eye-off';
+import Gauge from '~icons/lucide/gauge';
+import Pencil from '~icons/lucide/pencil';
+import Plus from '~icons/lucide/plus';
+import Search from '~icons/lucide/search';
+import X from '~icons/lucide/x';
+import Zap from '~icons/lucide/zap';
+import { computed, ref, watch } from 'vue';
 
 const props = defineProps<{
   open: boolean;
   config: IAiConfigPayload;
-  profiles: IAiProviderProfilePayload[];
-  loadProfileDetail: (profileId: string) => Promise<IAiProviderProfileDetailPayload>;
+  draft: IAiConfigPayload;
+  apiKey: string;
+  tavilyApiKey: string;
 }>();
 
 const emit = defineEmits<{
   close: [];
+  'update:draft': [value: IAiConfigPayload];
+  'update:apiKey': [value: string];
+  'update:tavilyApiKey': [value: string];
   save: [
     config: IAiConfigPayload,
     apiKey: string,
@@ -85,7 +56,8 @@ const emit = defineEmits<{
   ];
   saveCredentials: [
     apiKey: string,
-    role: TAiModelRole,
+    providerId: TAiServicePlatformId,
+    alias: string,
     feedback: IAiProviderSettingsActionFeedback,
   ];
   testProvider: [
@@ -95,2910 +67,1288 @@ const emit = defineEmits<{
     feedback: IAiProviderSettingsActionFeedback,
   ];
   saveTavilyKey: [apiKey: string, feedback: IAiProviderSettingsActionFeedback];
-  switchProfile: [profileId: string, feedback: IAiProviderSettingsActionFeedback];
 }>();
 
-const nextConfig = defineModel<IAiConfigPayload>('draft', { required: true });
-const apiKey = defineModel<string>('apiKey', { required: true });
-const tavilyApiKey = defineModel<string>('tavilyApiKey', { default: '' });
+type TPane = 'list' | 'form';
+type TFeedbackTone = 'info' | 'success' | 'error';
+type TActionState = 'idle' | 'saving' | 'testing';
 
-const statusMessage = ref('');
-const statusTone = ref<'success' | 'error' | 'info'>('info');
-const fieldErrors = ref<Record<TProviderSettingsField, string>>({
-  apiKey: '',
-  baseUrl: '',
-  model: '',
-});
-const isTesting = ref(false);
-const isSaving = ref(false);
-const isSavingTavily = ref(false);
-const isPlatformOpen = ref(false);
-const isModelOpen = ref(false);
-const settingsView = ref<TSettingsView>('list');
-const activeModelRole = ref<TAiModelRole>('main');
-const apiKeyDrafts = ref<Record<TAiModelRole, string>>({
-  main: '',
-  narrator: '',
-});
-const streamEnabled = ref(true);
-const advancedDraft = ref<IAiAdvancedDraft>(createDefaultAdvancedDraft());
-const profileDetail = ref<IAiProviderProfileDetailPayload | null>(null);
-const isProfileDetailLoading = ref(false);
-const isApiKeyVisible = ref(false);
-const activeProfileRole = ref<TAiModelRole>('main');
-const activeServicePlatformId = ref<TAiServicePlatformId>(
-  findAiServicePlatformByModel(nextConfig.value.selectedModel).id,
+interface IProviderViewModel {
+  preset: IAiServicePlatformPreset;
+  hasCredentials: boolean;
+  alias: string;
+  keyPreview: string;
+  isNarratorProvider: boolean;
+}
+
+const pane = ref<TPane>('list');
+const searchText = ref('');
+const selectedProviderId = ref<TAiServicePlatformId>(
+  findAiServicePlatformByModel(props.config.selectedModel).id,
 );
+const selectedSmallModelId = ref('');
+const credentialAlias = ref('默认');
+const aliasError = ref('');
+const providerKeyError = ref('');
+const tavilyKeyError = ref('');
+const feedbackText = ref('');
+const feedbackTone = ref<TFeedbackTone>('info');
+const actionState = ref<TActionState>('idle');
+const isKeyVisible = ref(false);
+const isProviderMenuOpen = ref(false);
+const isSmallModelMenuOpen = ref(false);
 
-let statusTimer: number | null = null;
+const credentialsByProvider = computed(() => {
+  const entries = props.config.credentials ?? [];
+  return new Map(entries.map((entry) => [entry.providerId, entry]));
+});
 
-const platformOptions = computed<IPlatformSelectOption[]>(() =>
-  AI_SERVICE_PLATFORM_PRESETS.map((preset) => ({
-    value: preset.id,
-    label: preset.label,
-  })),
+const mainProviderId = computed(() => findAiServicePlatformByModel(props.config.selectedModel).id);
+const narratorProviderId = computed(() =>
+  findAiServicePlatformByModel(props.config.narrator.selectedModel).id,
 );
+const selectedProvider = computed(() => findAiServicePlatformPreset(selectedProviderId.value));
+const selectedProviderHasCredentials = computed(
+  () => credentialsByProvider.value.get(selectedProviderId.value)?.hasCredentials === true,
+);
+const selectedProviderModels = computed(() => selectedProvider.value.models);
+const selectedSmallModel = computed(() => {
+  const matched = selectedProviderModels.value.find((model) => model.id === selectedSmallModelId.value);
+  return matched ?? selectedProviderModels.value[0] ?? {
+    id: selectedProvider.value.defaultModel,
+    label: selectedProvider.value.defaultModel,
+  };
+});
 
-const modelRoleOptions: Array<{
-  value: TAiModelRole;
-  label: string;
-  description: string;
-}> = [
-    {
-      value: 'main',
-      label: '主力模型',
-      description: '负责对话、Agent 执行、代码修改和验证。',
-    },
-    {
-      value: 'narrator',
-      label: '小模型',
-      description: '只负责活动区旁白，不调用工具、不影响主力模型。',
-    },
-  ];
-const profileRoleOptions = modelRoleOptions.map(({ value, label }) => ({ value, label }));
+const providerKey = computed({
+  get: () => props.apiKey,
+  set: (value: string) => {
+    providerKeyError.value = '';
+    emit('update:apiKey', value);
+  },
+});
 
-const getRoleOption = (role: TAiModelRole) =>
-  modelRoleOptions.find((option) => option.value === role) ?? modelRoleOptions[0];
+const tavilyKey = computed({
+  get: () => props.tavilyApiKey,
+  set: (value: string) => {
+    tavilyKeyError.value = '';
+    emit('update:tavilyApiKey', value);
+  },
+});
 
-const getDraftConfigForRole = (role: TAiModelRole): IAiModelEndpointConfigPayload =>
-  getAiModelEndpointConfig(nextConfig.value, role);
-
-const getSavedConfigForRole = (role: TAiModelRole): IAiModelEndpointConfigPayload =>
-  getAiModelEndpointConfig(props.config, role);
-
-const getRoleApiKeyDraft = (role: TAiModelRole): string =>
-  role === activeModelRole.value ? apiKey.value : apiKeyDrafts.value[role];
-
-const maskApiKey = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return '尚未填写';
-  }
-
-  const characters = Array.from(trimmed);
-  if (characters.length <= 8) {
-    return '••••••••';
-  }
-
-  return `${characters.slice(0, 3).join('')}••••••••${characters.slice(-4).join('')}`;
-};
-
-const isRoleDirty = (role: TAiModelRole): boolean => {
-  const draft = getDraftConfigForRole(role);
-  const saved = getSavedConfigForRole(role);
-  return (
-    draft.providerType !== saved.providerType ||
-    (draft.selectedModel ?? '') !== (saved.selectedModel ?? '') ||
-    (draft.baseUrl ?? '') !== (saved.baseUrl ?? '') ||
-    Boolean(getRoleApiKeyDraft(role).trim())
-  );
-};
-
-const roleSummaryRows = computed<IAiRoleSummaryRow[]>(() =>
-  modelRoleOptions.map((option) => {
-    const draftConfig = getDraftConfigForRole(option.value);
-    const savedConfig = getSavedConfigForRole(option.value);
-    const platform = findAiServicePlatformByModel(draftConfig.selectedModel);
-    const modelLabel =
-      platform.models.find((model) => model.id === draftConfig.selectedModel)?.label ??
-      draftConfig.selectedModel?.trim() ??
-      '未选择模型';
-    const hasDraftKey = Boolean(getRoleApiKeyDraft(option.value).trim());
-
-    let statusLabel = '未配置';
-    let statusTone: IAiRoleSummaryRow['statusTone'] = 'warn';
-    if (isRoleDirty(option.value) && (savedConfig.isConfigured || savedConfig.hasCredentials)) {
-      statusLabel = '已覆盖';
-      statusTone = 'over';
-    } else if (savedConfig.isConfigured) {
-      statusLabel = '已连接';
-      statusTone = 'ok';
-    } else if (savedConfig.hasCredentials || draftConfig.hasCredentials || hasDraftKey) {
-      statusLabel = '已保存';
-      statusTone = 'over';
-    }
-
+const providerRows = computed<IProviderViewModel[]>(() =>
+  AI_SERVICE_PLATFORM_PRESETS.filter((preset) =>
+    credentialsByProvider.value.get(preset.id)?.hasCredentials === true,
+  ).map((preset) => {
+    const credential = credentialsByProvider.value.get(preset.id);
     return {
-      role: option.value,
-      label: option.label,
-      description: option.description,
-      platformId: platform.id,
-      platformLabel: platform.label,
-      modelLabel,
-      statusLabel,
-      statusTone,
-      credentialLabel: hasDraftKey
-        ? maskApiKey(getRoleApiKeyDraft(option.value))
-        : savedConfig.hasCredentials
-          ? '凭证已保存到本地'
-          : '尚未填写',
-      entryStatusLabel: hasDraftKey || savedConfig.hasCredentials ? '已填写' : '未填写',
+      preset,
+      hasCredentials: true,
+      alias: credential?.alias?.trim() || '厂商 API Key',
+      keyPreview: credential?.keyPreview?.trim() || '已加密保存',
+      isNarratorProvider: preset.id === narratorProviderId.value,
     };
   }),
 );
 
-const activeRoleOption = computed(() => getRoleOption(activeModelRole.value));
-
-const activeRoleConfig = computed<IAiModelEndpointConfigPayload>(() =>
-  getAiModelEndpointConfig(nextConfig.value, activeModelRole.value),
-);
-const savedActiveRoleConfig = computed<IAiModelEndpointConfigPayload>(() =>
-  getAiModelEndpointConfig(props.config, activeModelRole.value),
-);
-const activePreset = computed(() => findAiProviderPreset(activeRoleConfig.value.providerType));
-const activeServicePlatform = computed(() =>
-  findAiServicePlatformPreset(activeServicePlatformId.value),
-);
-
-const modelOptions = computed<IModelSelectOption[]>(() =>
-  activeServicePlatform.value.models.map((model) => ({
-    value: model.id,
-    label: model.label,
-  })),
-);
-
-const selectedPlatformLabel = computed(() => {
-  const matched = platformOptions.value.find(
-    (item) => item.value === activeServicePlatformId.value,
-  );
-  return matched?.label ?? '请选择';
+const filteredProviderRows = computed(() => {
+  const keyword = searchText.value.trim().toLocaleLowerCase();
+  if (!keyword) {
+    return providerRows.value;
+  }
+  return providerRows.value.filter((row) => {
+    const haystack = [
+      row.preset.id,
+      row.preset.label,
+      ...row.preset.models.map((model) => model.label),
+    ].join(' ').toLocaleLowerCase();
+    return haystack.includes(keyword);
+  });
 });
 
-const selectedModelLabel = computed(() => {
-  const currentModel = activeRoleConfig.value.selectedModel?.trim();
-  const matched = modelOptions.value.find((item) => item.value === currentModel);
-  if (matched) {
-    return matched.label;
-  }
-  return modelOptions.value[0]?.label ?? '选择模型';
+const isSaving = computed(() => actionState.value === 'saving');
+const isTesting = computed(() => actionState.value === 'testing');
+const canSaveProviderKey = computed(() => {
+  const hasKey = selectedProviderHasCredentials.value || providerKey.value.trim().length > 0;
+  return credentialAlias.value.trim().length > 0 && hasKey && !isSaving.value;
+});
+const canTestSelectedProvider = computed(() => {
+  const hasKey = selectedProviderHasCredentials.value || providerKey.value.trim().length > 0;
+  return hasKey && !isTesting.value;
 });
 
-const hasSavedCredentialsForProvider = computed(
-  () =>
-    savedActiveRoleConfig.value.providerType === activeRoleConfig.value.providerType &&
-    savedActiveRoleConfig.value.hasCredentials,
-);
-
-const requiresApiKey = computed(() => !hasSavedCredentialsForProvider.value);
-
-const canTestProvider = computed(() => !isTesting.value);
-const canSaveProvider = computed(() => !isSaving.value);
-const hasTavilyApiKey = computed(() => Boolean(tavilyApiKey.value.trim()));
-const filteredProfiles = computed(() =>
-  props.profiles
-    .filter((profile) => profile.role === activeProfileRole.value)
-    .sort((left, right) => {
-      const leftTime = Date.parse(left.lastUsedAt ?? left.updatedAt);
-      const rightTime = Date.parse(right.lastUsedAt ?? right.updatedAt);
-      return rightTime - leftTime;
-    }),
-);
-const hasFilteredProfiles = computed(() => filteredProfiles.value.length > 0);
-const activeProfileRoleLabel = computed(
-  () =>
-    profileRoleOptions.find((option) => option.value === activeProfileRole.value)?.label ??
-    '主力模型',
-);
-const profileEmptyTitle = computed(() => `还没有${activeProfileRoleLabel.value}配置`);
-const profileEmptyDescription = computed(
-  () => `完成一次“开始连接”后，成功的${activeProfileRoleLabel.value}配置会自动出现在这里。`,
-);
-const settingsTitle = computed(() => {
-  switch (settingsView.value) {
-    case 'edit':
-      return '编辑配置';
-    case 'profiles':
-      return 'AI 配置记录';
-    case 'detail':
-      return '配置详情';
-    default:
-      return 'API 连接配置';
+const resolveSmallModelForProvider = (providerId: TAiServicePlatformId): string => {
+  const provider = findAiServicePlatformPreset(providerId);
+  const narratorModelId = props.config.narrator.selectedModel;
+  if (
+    providerId === narratorProviderId.value
+    && provider.models.some((model) => model.id === narratorModelId)
+  ) {
+    return narratorModelId ?? provider.defaultModel;
   }
-});
-const settingsSubtitle = computed(() => {
-  switch (settingsView.value) {
-    case 'edit':
-      return activeRoleOption.value.description;
-    case 'profiles':
-      return '快速切换已验证连接';
-    case 'detail':
-      return '只读查看，API Key 仅本地显示';
-    default:
-      return '为主力模型与小模型分别维护连接配置，凭证只在本地保存。';
-  }
-});
-
-const ensureMastraConnectionDefaults = (): void => {
-  const platform = findAiServicePlatformPreset(activeServicePlatformId.value);
-  patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
-    providerType: 'mastra',
-  });
-  if (activeRoleConfig.value.baseUrl?.trim()) {
-    return;
-  }
-  patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
-    baseUrl: platform.baseUrl || DEFAULT_MASTRA_BASE_URL || null,
-  });
+  return provider.defaultModel;
 };
 
-const syncDraftWithServicePlatform = (platformId: TAiServicePlatformId): void => {
-  const platform = findAiServicePlatformPreset(platformId);
-  activeServicePlatformId.value = platform.id;
-  ensureMastraConnectionDefaults();
-  if (!isAiServicePlatformModel(platform.id, activeRoleConfig.value.selectedModel)) {
-    patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
-      selectedModel: platform.defaultModel,
-    });
-  }
+const showStatus = (message: string, tone: TFeedbackTone): void => {
+  feedbackText.value = message;
+  feedbackTone.value = tone;
 };
 
-const hideStatus = (): void => {
-  if (statusTimer !== null) {
-    window.clearTimeout(statusTimer);
-    statusTimer = null;
-  }
-  statusMessage.value = '';
-};
-
-const clearFieldError = (field: TProviderSettingsField): void => {
-  fieldErrors.value[field] = '';
-};
-
-const clearFieldErrors = (): void => {
-  fieldErrors.value = {
-    apiKey: '',
-    baseUrl: '',
-    model: '',
-  };
-};
-
-const showStatus = (
-  message: string,
-  tone: 'success' | 'error' | 'info' = 'info',
-  autoHide = true,
-): void => {
-  if (statusTimer !== null) {
-    window.clearTimeout(statusTimer);
-    statusTimer = null;
-  }
-  statusMessage.value = message;
-  statusTone.value = tone;
-  if (!autoHide) {
-    return;
-  }
-  statusTimer = window.setTimeout(
-    () => {
-      statusMessage.value = '';
-      statusTimer = null;
-    },
-    tone === 'success' ? 1800 : 2400,
-  );
-};
-
-const closeDropdowns = (): void => {
-  isPlatformOpen.value = false;
-  isModelOpen.value = false;
-};
-
-const showProfileSwitcher = (options?: { resetRole?: boolean }): void => {
-  closeDropdowns();
-  if (options?.resetRole) {
-    activeProfileRole.value = 'main';
-  }
-  settingsView.value = 'profiles';
-  profileDetail.value = null;
-  isApiKeyVisible.value = false;
-};
-
-const showConnectionList = (): void => {
-  closeDropdowns();
-  settingsView.value = 'list';
-  profileDetail.value = null;
-  isApiKeyVisible.value = false;
-};
-
-const openRoleEditor = (role: TAiModelRole): void => {
-  updateModelRole(role);
-  settingsView.value = 'edit';
-};
-
-const resetDraftFromSaved = (): void => {
-  nextConfig.value = cloneAiConfigPayload(props.config);
-  activeModelRole.value = 'main';
-  apiKeyDrafts.value = {
-    main: '',
-    narrator: '',
-  };
-  apiKey.value = '';
-  clearFieldErrors();
-  hideStatus();
-  settingsView.value = 'list';
-  syncDraftWithServicePlatform(findAiServicePlatformByModel(nextConfig.value.selectedModel).id);
-};
-
-const updatePlatformFromSelect = (event: Event): void => {
-  updatePlatform((event.target as HTMLSelectElement).value as TAiServicePlatformId);
-};
-
-const updateModelFromSelect = (event: Event): void => {
-  updateModel((event.target as HTMLSelectElement).value);
-};
-
-const handleHeaderNavigation = (): void => {
-  if (settingsView.value === 'list') {
-    showProfileSwitcher({ resetRole: true });
-    return;
-  }
-
-  if (settingsView.value === 'edit') {
-    showConnectionList();
-    return;
-  }
-
-  if (settingsView.value === 'detail') {
-    showProfileSwitcher();
-    return;
-  }
-
-  showConnectionList();
-};
-
-const showProfileDetail = async (profile: IAiProviderProfilePayload): Promise<void> => {
-  closeDropdowns();
-  settingsView.value = 'detail';
-  profileDetail.value = null;
-  isApiKeyVisible.value = false;
-  isProfileDetailLoading.value = true;
-
-  try {
-    profileDetail.value = await props.loadProfileDetail(profile.id);
-  } catch (error) {
-    showStatus(
-      error instanceof Error && error.message.trim() ? error.message : '配置详情读取失败',
-      'error',
-    );
-    settingsView.value = 'profiles';
-  } finally {
-    isProfileDetailLoading.value = false;
-  }
-};
-
-const resetEphemeralState = (): void => {
-  hideStatus();
-  clearFieldErrors();
-  closeDropdowns();
-  isTesting.value = false;
-  isSaving.value = false;
-  isSavingTavily.value = false;
-  streamEnabled.value = true;
-  apiKeyDrafts.value = {
-    main: activeModelRole.value === 'main' ? apiKey.value : '',
-    narrator: activeModelRole.value === 'narrator' ? apiKey.value : '',
-  };
-  advancedDraft.value = createDefaultAdvancedDraft();
-};
-
-const onDocumentClick = (): void => {
-  closeDropdowns();
-};
-
-const onDocumentKeydown = (event: KeyboardEvent): void => {
-  if (event.key === 'Escape') {
-    closeDropdowns();
-  }
-};
-
-const copyKey = async (): Promise<void> => {
-  const value = apiKey.value.trim();
-  if (!value) {
-    showStatus('暂无可复制内容', 'error');
-    return;
-  }
-  const copied = await tryWriteClipboardText(value);
-  showStatus(copied ? '已复制到剪贴板' : '当前环境不支持剪贴板写入', copied ? 'success' : 'error');
-};
-
-const toggleStream = (): void => {
-  streamEnabled.value = !streamEnabled.value;
-};
-
-const updatePlatform = (platformId: TAiServicePlatformId): void => {
-  if (activeServicePlatformId.value === platformId) {
-    closeDropdowns();
-    return;
-  }
-  syncDraftWithServicePlatform(platformId);
-  closeDropdowns();
-};
-
-const updateModelRole = (role: TAiModelRole): void => {
-  if (activeModelRole.value === role) {
-    return;
-  }
-
-  closeDropdowns();
-  apiKeyDrafts.value[activeModelRole.value] = apiKey.value;
-  activeModelRole.value = role;
-  apiKey.value = apiKeyDrafts.value[role];
-  const platform = findAiServicePlatformByModel(activeRoleConfig.value.selectedModel);
-  syncDraftWithServicePlatform(platform.id);
-  hideStatus();
-  clearFieldErrors();
-};
-
-const updateModel = (model: string): void => {
-  patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
-    selectedModel: model,
-  });
-  clearFieldError('model');
-  closeDropdowns();
-};
-
-const updateBaseUrl = (event: Event): void => {
-  const target = event.target as HTMLInputElement;
-  clearFieldError('baseUrl');
-  patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
-    baseUrl: target.value,
-  });
-};
-
-const createSwitchFeedback = (
-  profile: IAiProviderProfilePayload,
+const createFeedback = (
+  done: () => void,
+  fallbackSuccess: string,
 ): IAiProviderSettingsActionFeedback => ({
-  onSuccess(message) {
-    isSaving.value = false;
-    showStatus(message ?? `已切换到 ${profile.name}`, 'success');
+  onSuccess(message?: string) {
+    done();
+    showStatus(message ?? fallbackSuccess, 'success');
   },
-  onError(message) {
-    isSaving.value = false;
+  onError(message: string) {
+    done();
     showStatus(message, 'error');
   },
 });
 
-const switchProfile = (profile: IAiProviderProfilePayload): void => {
-  if (profile.isConnected || isSaving.value) {
-    return;
-  }
-
-  if (!profile.hasCredentials) {
-    showStatus('该配置缺少 API Key，请重新连接保存', 'error');
-    return;
-  }
-
-  isSaving.value = true;
-  showStatus(`正在切换到 ${profile.name}…`, 'info', false);
-  emit('switchProfile', profile.id, createSwitchFeedback(profile));
+const openList = (): void => {
+  pane.value = 'list';
+  aliasError.value = '';
+  providerKeyError.value = '';
+  tavilyKeyError.value = '';
+  isProviderMenuOpen.value = false;
+  isSmallModelMenuOpen.value = false;
 };
 
-const createActionFeedback = (
-  action: 'test' | 'save',
-  successMessage: string,
-): IAiProviderSettingsActionFeedback => ({
-  onSuccess(message) {
-    if (action === 'test') {
-      isTesting.value = false;
-    } else {
-      isSaving.value = false;
-    }
-    showStatus(message ?? successMessage, 'success');
-    if (action === 'save') {
-      apiKeyDrafts.value[activeModelRole.value] = '';
-      apiKey.value = '';
-      window.setTimeout(() => {
-        emit('close');
-      }, 1200);
-    }
-  },
-  onError(message) {
-    if (action === 'test') {
-      isTesting.value = false;
-    } else {
-      isSaving.value = false;
-    }
-    showStatus(message, 'error');
-  },
-});
+const openForm = (providerId?: TAiServicePlatformId): void => {
+  selectedProviderId.value = providerId ?? mainProviderId.value;
+  const credential = credentialsByProvider.value.get(selectedProviderId.value);
+  credentialAlias.value = credential?.alias?.trim() || '默认';
+  selectedSmallModelId.value = resolveSmallModelForProvider(selectedProviderId.value);
+  providerKey.value = '';
+  aliasError.value = '';
+  providerKeyError.value = '';
+  tavilyKeyError.value = '';
+  feedbackText.value = '';
+  isKeyVisible.value = false;
+  isProviderMenuOpen.value = false;
+  isSmallModelMenuOpen.value = false;
+  pane.value = 'form';
+};
 
-const createTavilyActionFeedback = (): IAiProviderSettingsActionFeedback => ({
-  onSuccess(message) {
-    isSavingTavily.value = false;
-    showStatus(
-      message ?? (hasTavilyApiKey.value ? 'Tavily API Key 已保存' : 'Tavily API Key 已清除'),
-      'success',
+const handleProviderChange = (providerId: string): void => {
+  selectedProviderId.value = providerId as TAiServicePlatformId;
+  const credential = credentialsByProvider.value.get(selectedProviderId.value);
+  credentialAlias.value = credential?.alias?.trim() || '默认';
+  selectedSmallModelId.value = findAiServicePlatformPreset(selectedProviderId.value).defaultModel;
+  aliasError.value = '';
+  providerKeyError.value = '';
+  feedbackText.value = '';
+  isProviderMenuOpen.value = false;
+  isSmallModelMenuOpen.value = false;
+};
+
+const toggleProviderMenu = (): void => {
+  isProviderMenuOpen.value = !isProviderMenuOpen.value;
+  if (isProviderMenuOpen.value) {
+    isSmallModelMenuOpen.value = false;
+  }
+};
+
+const toggleSmallModelMenu = (): void => {
+  isSmallModelMenuOpen.value = !isSmallModelMenuOpen.value;
+  if (isSmallModelMenuOpen.value) {
+    isProviderMenuOpen.value = false;
+  }
+};
+
+const handleSmallModelChange = (modelId: string): void => {
+  const matched = selectedProviderModels.value.find((model) => model.id === modelId);
+  selectedSmallModelId.value = matched?.id ?? selectedProvider.value.defaultModel;
+  isSmallModelMenuOpen.value = false;
+};
+
+const saveProviderSettings = (): void => {
+  const normalizedApiKey = providerKey.value.trim();
+  const normalizedAlias = credentialAlias.value.trim();
+  if (!normalizedAlias) {
+    aliasError.value = '请填写名称。';
+    return;
+  }
+  if (!selectedProviderHasCredentials.value && !normalizedApiKey) {
+    providerKeyError.value = '请填写 API Key。';
+    return;
+  }
+
+  actionState.value = 'saving';
+  showStatus(`正在保存 ${selectedProvider.value.label} 设置...`, 'info');
+  if (normalizedApiKey) {
+    emit(
+      'saveCredentials',
+      normalizedApiKey,
+      selectedProviderId.value,
+      normalizedAlias,
+      createFeedback(() => {
+        providerKey.value = '';
+      }, `${selectedProvider.value.label} API Key 已保存`),
     );
-  },
-  onError(message) {
-    isSavingTavily.value = false;
-    showStatus(message, 'error');
-  },
-});
-
-const saveTavilyKey = (): void => {
-  if (isSavingTavily.value) {
-    return;
   }
-
-  isSavingTavily.value = true;
-  showStatus('正在写入 Tavily 配置…', 'info', false);
-  emit('saveTavilyKey', tavilyApiKey.value.trim(), createTavilyActionFeedback());
-};
-
-const validateForm = (): boolean => {
-  clearFieldErrors();
-  let isValid = true;
-
-  if (requiresApiKey.value && !apiKey.value.trim()) {
-    fieldErrors.value.apiKey = '请输入 API Key。';
-    isValid = false;
-  }
-  if (!activeRoleConfig.value.baseUrl?.trim()) {
-    fieldErrors.value.baseUrl = '请填写 Base URL。';
-    isValid = false;
-  }
-  if (!activeRoleConfig.value.selectedModel?.trim()) {
-    fieldErrors.value.model = '请选择模型。';
-    isValid = false;
-  }
-  return isValid;
-};
-
-const testConnection = (): void => {
-  hideStatus();
-  if (!validateForm()) {
-    return;
-  }
-  isTesting.value = true;
-  showStatus('正在测试连接…', 'info', false);
-  emit(
-    'testProvider',
-    nextConfig.value,
-    apiKey.value.trim(),
-    activeModelRole.value,
-    createActionFeedback('test', `连接成功 · 模型：${selectedModelLabel.value}`),
-  );
-};
-
-const saveConfig = (): void => {
-  hideStatus();
-  if (!validateForm()) {
-    return;
-  }
-  isSaving.value = true;
-  showStatus('正在连接…', 'info', false);
   emit(
     'save',
-    nextConfig.value,
-    apiKey.value.trim(),
-    activeModelRole.value,
-    createActionFeedback('save', '连接成功'),
+    createRoleConfig(
+      selectedProvider.value,
+      'narrator',
+      selectedSmallModel.value.id,
+    ),
+    normalizedApiKey,
+    'narrator',
+    createFeedback(() => {
+      actionState.value = 'idle';
+    }, `${selectedProvider.value.label} 小模型已保存`),
   );
 };
 
-const getProfilePlatformLabel = (profile: IAiProviderProfilePayload): string =>
-  findAiServicePlatformByModel(profile.selectedModel).label;
-
-const getProfilePlatformId = (profile: IAiProviderProfilePayload): TAiServicePlatformId =>
-  findAiServicePlatformByModel(profile.selectedModel).id;
-
-const getProfileModelLabel = (profile: IAiProviderProfilePayload): string => {
-  const model = profile.selectedModel?.trim();
-
-  if (!model) {
-    return '未选择模型';
+const testSelectedProvider = (): void => {
+  if (!selectedProviderHasCredentials.value && !providerKey.value.trim()) {
+    providerKeyError.value = '请先保存或填写当前厂商的 API Key。';
+    return;
   }
 
-  const platform = findAiServicePlatformByModel(model);
-  return platform.models.find((item) => item.id === model)?.label ?? model;
+  actionState.value = 'testing';
+  const draft = cloneAiConfigPayload(props.draft);
+  const role: TAiModelRole = selectedProviderId.value === narratorProviderId.value
+    && selectedProviderId.value !== mainProviderId.value
+    ? 'narrator'
+    : 'main';
+  if (role === 'narrator') {
+    draft.narrator.selectedModel = selectedSmallModel.value.id;
+    draft.narrator.baseUrl = selectedProvider.value.baseUrl || null;
+  } else {
+    draft.selectedModel = selectedProvider.value.defaultModel;
+    draft.baseUrl = selectedProvider.value.baseUrl || null;
+  }
+  showStatus(`正在测试 ${selectedProvider.value.label}...`, 'info');
+  emit(
+    'testProvider',
+    draft,
+    providerKey.value.trim(),
+    role,
+    createFeedback(() => {
+      actionState.value = 'idle';
+    }, `${selectedProvider.value.label} 连接可用`),
+  );
 };
 
-const getProfileEndpointLabel = (profile: IAiProviderProfilePayload): string =>
-  profile.baseUrl?.trim() || '使用 Provider 默认地址';
-
-const getProfileRoleLabel = (profile: IAiProviderProfilePayload): string =>
-  profile.role === 'narrator' ? '小模型' : '主力模型';
-
-const getProfileRoleToneClass = (profile: IAiProviderProfilePayload): string =>
-  profile.role === 'narrator' ? 'is-narrator' : 'is-main';
-
-const getProfileConnectionLabel = (profile: IAiProviderProfilePayload): string => {
-  if (profile.isConnected) {
-    return '已连接';
+const createRoleConfig = (
+  provider: IAiServicePlatformPreset,
+  role: TAiModelRole,
+  modelId = provider.defaultModel,
+): IAiConfigPayload => {
+  const draft = cloneAiConfigPayload(props.draft);
+  if (role === 'narrator') {
+    draft.narrator.providerType = draft.providerType;
+    draft.narrator.selectedModel = modelId;
+    draft.narrator.baseUrl = provider.baseUrl || null;
+    return draft;
   }
-  if (!profile.hasCredentials) {
-    return '缺少 API Key';
-  }
-  return '未连接';
+
+  draft.selectedModel = modelId;
+  draft.baseUrl = provider.baseUrl || null;
+  return draft;
 };
 
-const getProfileConnectionToneClass = (profile: IAiProviderProfilePayload): string => {
-  if (profile.isConnected) {
-    return 'is-connected';
-  }
-  if (!profile.hasCredentials) {
-    return 'is-missing';
-  }
-  return 'is-disconnected';
+const setProviderAsRoleDefault = (
+  provider: IAiServicePlatformPreset,
+  role: TAiModelRole,
+): void => {
+  actionState.value = 'saving';
+  const roleLabel = role === 'narrator' ? '小模型' : '主模型';
+  showStatus(`正在设置 ${provider.label} 为${roleLabel}...`, 'info');
+  emit(
+    'save',
+    createRoleConfig(provider, role),
+    '',
+    role,
+    createFeedback(() => {
+      actionState.value = 'idle';
+    }, `${provider.label} 已设为${roleLabel}`),
+  );
 };
 
-const getProfileTimeLabel = (profile: IAiProviderProfilePayload): string => {
-  const timestamp = Date.parse(profile.lastUsedAt ?? profile.updatedAt);
-
-  if (!Number.isFinite(timestamp)) {
-    return '时间未知';
+const saveTavily = (): void => {
+  const normalizedApiKey = tavilyKey.value.trim();
+  if (!normalizedApiKey) {
+    tavilyKeyError.value = '请输入 Tavily API Key。';
+    return;
   }
 
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date(timestamp));
+  actionState.value = 'saving';
+  showStatus('正在保存 Tavily API Key...', 'info');
+  emit(
+    'saveTavilyKey',
+    normalizedApiKey,
+    createFeedback(() => {
+      actionState.value = 'idle';
+    }, 'Tavily API Key 已保存'),
+  );
 };
 
-const getProfileFeatureLabel = (profile: IAiProviderProfilePayload): string => {
-  const features = [
-    profile.chatEnabled ? 'Chat' : null,
-    profile.agentEnabled ? 'Agent' : null,
-    profile.inlineCompletionEnabled ? 'Inline' : null,
-  ].filter((item): item is string => Boolean(item));
-
-  return features.length ? features.join(' / ') : '未启用';
+const handleClose = (): void => {
+  emit('close');
 };
-
-const detailProfile = computed(() => profileDetail.value?.profile ?? null);
-const detailApiKey = computed(() => profileDetail.value?.apiKey ?? '');
-const maskedDetailApiKey = computed(() => {
-  const value = detailApiKey.value;
-
-  if (!value) {
-    return '未保存';
-  }
-
-  if (isApiKeyVisible.value) {
-    return value;
-  }
-
-  const characters = Array.from(value);
-  if (characters.length <= 8) {
-    return '••••••••';
-  }
-
-  return `${characters.slice(0, 4).join('')}••••••••${characters.slice(-4).join('')}`;
-});
-
-watch(
-  () => activeRoleConfig.value.providerType,
-  () => {
-    ensureMastraConnectionDefaults();
-  },
-  { immediate: true },
-);
-
-watch(
-  () => activeRoleConfig.value.selectedModel,
-  (selectedModel) => {
-    const platform = findAiServicePlatformByModel(selectedModel);
-    activeServicePlatformId.value = platform.id;
-    if (!isAiServicePlatformModel(platform.id, selectedModel)) {
-      patchAiModelEndpointConfig(nextConfig.value, activeModelRole.value, {
-        selectedModel: platform.defaultModel,
-      });
-    }
-  },
-  { immediate: true },
-);
-
-watch(
-  () => activeModelRole.value,
-  () => {
-    const platform = findAiServicePlatformByModel(activeRoleConfig.value.selectedModel);
-    activeServicePlatformId.value = platform.id;
-  },
-);
-
-watch(
-  () => apiKey.value,
-  (value) => {
-    apiKeyDrafts.value[activeModelRole.value] = value;
-  },
-);
 
 watch(
   () => props.open,
-  (isOpen) => {
-    if (!isOpen) {
-      hideStatus();
-      closeDropdowns();
+  (open) => {
+    if (!open) {
       return;
     }
-    activeModelRole.value = 'main';
-    resetEphemeralState();
-    activeProfileRole.value = 'main';
-    settingsView.value = 'list';
-    profileDetail.value = null;
-    isApiKeyVisible.value = false;
-    syncDraftWithServicePlatform(
-      findAiServicePlatformByModel(activeRoleConfig.value.selectedModel).id,
-    );
+
+    pane.value = 'list';
+    searchText.value = '';
+    selectedProviderId.value = mainProviderId.value;
+    selectedSmallModelId.value = resolveSmallModelForProvider(selectedProviderId.value);
+    credentialAlias.value = '默认';
+    aliasError.value = '';
+    providerKeyError.value = '';
+    tavilyKeyError.value = '';
+    feedbackText.value = '';
+    actionState.value = 'idle';
+    isKeyVisible.value = false;
+    isProviderMenuOpen.value = false;
+    isSmallModelMenuOpen.value = false;
   },
-  { immediate: true },
 );
-
-onMounted(() => {
-  document.addEventListener('click', onDocumentClick);
-  document.addEventListener('keydown', onDocumentKeydown);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener('click', onDocumentClick);
-  document.removeEventListener('keydown', onDocumentKeydown);
-  hideStatus();
-});
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="props.open" class="modal-shell" @click.self="emit('close')">
-      <div class="modal">
-        <template v-if="settingsView === 'edit'">
-          <div class="edit-view-header">
-            <button type="button" class="profile-icon-action" title="返回" aria-label="返回" @click="showConnectionList">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                stroke-linejoin="round" aria-hidden="true">
-                <path d="M15 18 9 12l6-6" />
-              </svg>
-            </button>
-            <div class="edit-view-title-group">
-              <h2>编辑配置 <span>· {{ activeRoleOption.label }}</span></h2>
-              <p>{{ activeRoleOption.description }}</p>
-            </div>
+    <div v-if="open" class="ai-credential-shell" @click.self="handleClose">
+      <section class="ai-credential-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-credential-title">
+        <header class="ai-credential-head" :data-pane="pane">
+          <Button
+            v-if="pane === 'form'"
+            class="ai-credential-icon-button"
+            variant="ghost"
+            size="icon-sm"
+            type="button"
+            aria-label="返回"
+            @click="openList"
+          >
+            <ArrowLeft aria-hidden="true" />
+          </Button>
+          <h2 id="ai-credential-title" class="ai-credential-title">
+            {{ pane === 'form' ? '编辑凭证' : 'AI 凭证' }}
+          </h2>
+          <Button
+            v-if="pane === 'list'"
+            class="ai-credential-head-action"
+            variant="outline"
+            size="sm"
+            type="button"
+            @click="openForm()"
+          >
+            <Plus aria-hidden="true" />
+            添加
+          </Button>
+        </header>
+
+        <section v-if="pane === 'list'" class="ai-credential-pane" aria-label="AI 凭证列表">
+          <div class="ai-credential-search">
+            <Search class="ai-credential-search__icon" aria-hidden="true" />
+            <Input
+              v-model="searchText"
+              class="ai-credential-search__input"
+              placeholder="搜索厂商或模型"
+              aria-label="搜索厂商或模型"
+            />
           </div>
 
-          <div class="modal-body edit-view-body">
-            <div class="cfg-row">
-              <span class="cfg-name">PROVIDER</span>
-              <span class="cfg-tag">必填</span>
-              <span class="cfg-spacer"></span>
-              <select class="cfg-select" data-field="platform" :value="activeServicePlatformId"
-                @change="updatePlatformFromSelect">
-                <option v-for="option in platformOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </option>
-              </select>
+          <div class="ai-credential-body">
+            <div v-if="filteredProviderRows.length" class="ai-credential-groups">
+              <section
+                v-for="row in filteredProviderRows"
+                :key="row.preset.id"
+                class="ai-credential-group"
+              >
+                <header class="ai-credential-group__head">
+                  <AiProviderIcon class="ai-credential-provider-icon" :platform-id="row.preset.id" decorative />
+                  <span class="ai-credential-group__name">{{ row.preset.label }}</span>
+                </header>
+                <div class="ai-credential-row">
+                  <div class="ai-credential-row__main">
+                    <div class="ai-credential-row__name">
+                      <span>{{ row.alias }}</span>
+                      <span
+                        v-if="row.isNarratorProvider"
+                        class="ai-credential-default-mark"
+                        aria-label="默认小模型厂商"
+                      >
+                        <AiProviderIcon class="ai-credential-default-mark__icon" :platform-id="row.preset.id" decorative />
+                      </span>
+                    </div>
+                    <div class="ai-credential-row__key">
+                      {{ row.preset.id }} / {{ row.keyPreview }}
+                    </div>
+                  </div>
+                  <div class="ai-credential-row__acts">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <Button
+                            class="ai-credential-icon-button"
+                            variant="ghost"
+                            size="icon-sm"
+                            type="button"
+                            :disabled="isSaving"
+                            :aria-label="`设为主模型：${row.preset.label}`"
+                            @click="setProviderAsRoleDefault(row.preset, 'main')"
+                          >
+                            <Crown aria-hidden="true" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>设为主模型</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <Button
+                            class="ai-credential-icon-button"
+                            variant="ghost"
+                            size="icon-sm"
+                            type="button"
+                            :disabled="isSaving"
+                            :aria-label="`设为小模型：${row.preset.label}`"
+                            @click="setProviderAsRoleDefault(row.preset, 'narrator')"
+                          >
+                            <Gauge aria-hidden="true" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>设为小模型</TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <Button
+                            class="ai-credential-icon-button"
+                            variant="ghost"
+                            size="icon-sm"
+                            type="button"
+                            :aria-label="row.hasCredentials ? `编辑 ${row.preset.label} 凭证` : `添加 ${row.preset.label} 凭证`"
+                            @click="openForm(row.preset.id)"
+                          >
+                            <Pencil v-if="row.hasCredentials" aria-hidden="true" />
+                            <Plus v-else aria-hidden="true" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{{ row.hasCredentials ? '编辑' : '添加' }}</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                </div>
+              </section>
             </div>
-
-            <div class="cfg-row cfg-row--stacked">
-              <div class="cfg-row-main">
-                <span class="cfg-name">模型 ID</span>
-                <span class="cfg-tag">必填</span>
-                <span class="cfg-spacer"></span>
-                <select class="cfg-select" data-field="model" :value="activeRoleConfig.selectedModel ?? ''"
-                  :aria-invalid="Boolean(fieldErrors.model)" @change="updateModelFromSelect">
-                  <option v-for="option in modelOptions" :key="option.value" :value="option.value">
-                    {{ option.label }}
-                  </option>
-                </select>
+            <div v-else class="ai-credential-empty">
+              <div class="ai-credential-empty__title">
+                {{ providerRows.length ? '没有匹配的凭证' : '还没有 AI 凭证' }}
               </div>
-              <FieldError v-if="fieldErrors.model" :message="fieldErrors.model" />
+              <div class="ai-credential-empty__desc">
+                {{ providerRows.length ? '换个关键词再试试' : '点击右上角添加厂商 Key' }}
+              </div>
             </div>
+          </div>
+          <div v-if="feedbackText" class="ai-credential-list-status" :class="`is-${feedbackTone}`">
+            <Check v-if="feedbackTone === 'success'" aria-hidden="true" />
+            <X v-else-if="feedbackTone === 'error'" aria-hidden="true" />
+            <AlertTriangle v-else aria-hidden="true" />
+            <span>{{ feedbackText }}</span>
+          </div>
+        </section>
 
-            <div class="cfg-row cfg-row--stacked">
-              <div class="cfg-row-main">
-                <span class="cfg-name">API 密钥</span>
-                <span class="cfg-tag">必填</span>
-                <span class="cfg-spacer"></span>
-                <div class="cfg-secret-field">
-                  <input v-model="apiKey" type="password" class="cfg-input" :aria-invalid="Boolean(fieldErrors.apiKey)"
-                    :placeholder="activePreset.apiKeyHint || 'sk-xxxx'" @input="clearFieldError('apiKey')" />
-                  <button type="button" class="key-btn" aria-label="复制" @click="copyKey">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                      stroke-linejoin="round">
-                      <rect x="9" y="9" width="13" height="13" rx="2" />
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
+        <section v-else class="ai-credential-pane" aria-label="编辑 AI 凭证">
+          <form class="ai-credential-body ai-credential-form" autocomplete="off" novalidate @submit.prevent="saveProviderSettings">
+            <div class="ai-credential-field">
+              <label class="ai-credential-label" for="ai-provider-select">厂商</label>
+              <div class="ai-credential-combobox" :class="{ 'is-open': isProviderMenuOpen }">
+                <Button
+                  id="ai-provider-select"
+                  class="ai-credential-combobox-trigger"
+                  variant="outline"
+                  type="button"
+                  data-field="provider"
+                  aria-haspopup="listbox"
+                  :aria-expanded="isProviderMenuOpen"
+                  @click="toggleProviderMenu"
+                >
+                  <span class="ai-credential-combobox-value">
+                    <AiProviderIcon
+                      class="ai-credential-select-icon"
+                      :platform-id="selectedProviderId"
+                      decorative
+                    />
+                    <span>{{ selectedProvider.label }}</span>
+                  </span>
+                  <span class="ai-credential-combobox-chev" aria-hidden="true"></span>
+                </Button>
+                <div v-if="isProviderMenuOpen" class="ai-credential-combobox-menu" role="listbox">
+                  <button
+                    v-for="provider in AI_SERVICE_PLATFORM_PRESETS"
+                    :key="provider.id"
+                    type="button"
+                    class="ai-credential-combobox-option"
+                    :class="{ 'is-selected': provider.id === selectedProviderId }"
+                    role="option"
+                    :aria-selected="provider.id === selectedProviderId"
+                    @click="handleProviderChange(provider.id)"
+                  >
+                    <AiProviderIcon class="ai-credential-select-icon" :platform-id="provider.id" decorative />
+                    <span>{{ provider.label }}</span>
+                    <Check aria-hidden="true" />
                   </button>
                 </div>
               </div>
-              <FieldError v-if="fieldErrors.apiKey" :message="fieldErrors.apiKey" />
             </div>
 
-            <div class="cfg-row cfg-row--stacked">
-              <div class="cfg-row-main">
-                <span class="cfg-name">接口地址</span>
-                <span class="cfg-spacer"></span>
-                <input :value="activeRoleConfig.baseUrl ?? ''" class="cfg-input"
-                  :readonly="!activePreset.isEndpointEditable" :aria-invalid="Boolean(fieldErrors.baseUrl)"
-                  :placeholder="activePreset.baseUrl ?? ''" @input="updateBaseUrl" />
+            <div class="ai-credential-field">
+              <label class="ai-credential-label" for="ai-credential-alias">
+                名称
+                <span>同厂商唯一</span>
+              </label>
+              <Input
+                id="ai-credential-alias"
+                v-model="credentialAlias"
+                class="ai-credential-input"
+                placeholder="默认"
+                :aria-invalid="aliasError ? 'true' : 'false'"
+              />
+              <p v-if="aliasError" class="ai-credential-field-msg is-error">{{ aliasError }}</p>
+            </div>
+
+            <div class="ai-credential-field">
+              <label class="ai-credential-label" for="ai-provider-key">
+                API Key
+                <span>{{ selectedProviderHasCredentials ? '留空则不修改已保存 Key' : '按厂商保存' }}</span>
+              </label>
+              <div class="ai-credential-key-wrap">
+                <Input
+                  id="ai-provider-key"
+                  v-model="providerKey"
+                  class="ai-credential-input ai-credential-key-input"
+                  :type="isKeyVisible ? 'text' : 'password'"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :placeholder="selectedProviderHasCredentials ? '输入新 Key 后覆盖保存' : '粘贴厂商 API Key'"
+                  :aria-invalid="providerKeyError ? 'true' : 'false'"
+                />
+                <Button
+                  class="ai-credential-key-toggle"
+                  variant="ghost"
+                  size="icon-sm"
+                  type="button"
+                  :aria-label="isKeyVisible ? '隐藏 API Key' : '显示 API Key'"
+                  @click="isKeyVisible = !isKeyVisible"
+                >
+                  <EyeOff v-if="isKeyVisible" aria-hidden="true" />
+                  <Eye v-else aria-hidden="true" />
+                </Button>
               </div>
-              <FieldError v-if="fieldErrors.baseUrl" :message="fieldErrors.baseUrl" />
+              <p class="ai-credential-field-msg" :class="{ 'is-error': providerKeyError }">
+                {{ providerKeyError || '本地加密保存，不会上传。' }}
+              </p>
             </div>
 
-            <div class="cfg-row">
-              <span class="cfg-name">超时时间（秒）</span>
-              <span class="cfg-spacer"></span>
-              <input v-model.number="advancedDraft.timeoutSeconds" type="number" class="cfg-input cfg-input--short"
-                min="5" max="120" />
-            </div>
-
-            <div class="cfg-row">
-              <span class="cfg-name">代理地址</span>
-              <span class="cfg-spacer"></span>
-              <input v-model="advancedDraft.proxyUrl" class="cfg-input" placeholder="http://127.0.0.1:7890" />
-            </div>
-
-            <div class="cfg-row">
-              <span class="cfg-name">温度值</span>
-              <span class="cfg-spacer"></span>
-              <input v-model.number="advancedDraft.temperature" type="number" class="cfg-input cfg-input--short" min="0"
-                max="2" step="0.1" />
-            </div>
-
-            <div class="cfg-row">
-              <span class="cfg-name">核采样阈值</span>
-              <span class="cfg-spacer"></span>
-              <input v-model.number="advancedDraft.topP" type="number" class="cfg-input cfg-input--short" min="0"
-                max="1" step="0.1" />
-            </div>
-
-            <div class="cfg-row">
-              <span class="cfg-name">最大生成 Token 数</span>
-              <span class="cfg-spacer"></span>
-              <input v-model.number="advancedDraft.maxTokens" type="number" class="cfg-input cfg-input--short" min="256"
-                max="128000" />
-            </div>
-
-            <div class="cfg-row">
-              <span class="cfg-name">流式响应</span>
-              <span class="cfg-spacer"></span>
-              <button type="button" class="cfg-switch" :class="{ 'is-active': streamEnabled }"
-                :aria-pressed="streamEnabled" @click="toggleStream">
-                <span class="cfg-switch__thumb"></span>
-              </button>
-              <span class="cfg-switch-label">{{ streamEnabled ? '已开启' : '已关闭' }}</span>
-            </div>
-          </div>
-
-          <div class="edit-view-footer">
-            <button type="button" class="btn btn-ghost" @click="showConnectionList">取消</button>
-            <button type="button" class="btn btn-test" :disabled="!canTestProvider" @click="testConnection">
-              {{ isTesting ? '正在测试' : '测试连接' }}
-            </button>
-            <button type="button" class="btn btn-save" :disabled="!canSaveProvider" @click="saveConfig">
-              {{ isSaving ? '正在连接' : '开始连接' }}
-            </button>
-          </div>
-        </template>
-
-        <template v-else>
-          <div class="modal-header" :class="{ 'is-summary': settingsView === 'list' }">
-            <div class="modal-title-group">
-              <h2>{{ settingsTitle }}</h2>
-              <span>{{ settingsSubtitle }}</span>
-            </div>
-            <div class="modal-header-actions">
-              <button v-if="settingsView === 'list'" type="button" class="profile-icon-action" title="恢复当前配置"
-                aria-label="恢复当前配置" @click="resetDraftFromSaved">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                  stroke-linejoin="round" aria-hidden="true">
-                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-                  <path d="M3 3v5h5" />
-                </svg>
-              </button>
-              <button type="button" class="profile-icon-action" :title="settingsView === 'list' ? '进入配置记录' : '返回'"
-                :aria-label="settingsView === 'list' ? '进入配置记录' : '返回'" @click="handleHeaderNavigation">
-                <svg v-if="settingsView === 'list'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <rect x="4" y="5" width="16" height="4" rx="1.5" />
-                  <rect x="4" y="11" width="16" height="4" rx="1.5" />
-                  <rect x="4" y="17" width="16" height="2" rx="1" />
-                </svg>
-                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="m15 18-6-6 6-6" />
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <div v-if="settingsView === 'list'" class="modal-body settings-list-body">
-            <section class="summary-list" aria-label="AI 配置摘要列表">
-              <article v-for="row in roleSummaryRows" :key="row.role" class="summary-row"
-                :class="{ 'is-selected': row.role === activeModelRole }" :data-role-row="row.role"
-                @click="updateModelRole(row.role)">
-                <div class="summary-row-main">
-                  <div class="summary-row-top">
-                    <span class="summary-row-title">{{ row.label }}</span>
-                    <span class="summary-badge" :class="`is-${row.statusTone}`">
-                      <span class="summary-badge__dot"></span>
-                      {{ row.statusLabel }}
-                    </span>
-                  </div>
-                  <p class="summary-row-desc">{{ row.description }}</p>
-                  <div class="summary-row-meta">
-                    <AiProviderIcon class="summary-provider-icon" :platform-id="row.platformId"
-                      :title="row.platformLabel" decorative />
-                    <span>{{ row.platformLabel }}</span>
-                    <span class="summary-sep">·</span>
-                    <span class="summary-mono">{{ row.modelLabel }}</span>
-                  </div>
-                  <div class="summary-row-keyline">
-                    <span class="summary-token-label">API Key</span>
-                    <span class="summary-token-value" :class="{ 'is-empty': row.credentialLabel === '尚未填写' }">
-                      {{ row.credentialLabel }}
-                    </span>
-                    <span class="summary-spacer"></span>
-                    <button type="button" class="summary-edit-button" :data-open-edit="row.role"
-                      @click.stop="openRoleEditor(row.role)">
-                      <svg class="summary-edit-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M12 20h9" />
-                        <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5Z" />
-                      </svg>
-                      编辑配置
-                      <span class="summary-edit-button__status">{{ row.entryStatusLabel }}</span>
-                      <svg class="summary-edit-button__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="m9 18 6-6-6-6" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              </article>
-
-              <article class="summary-row summary-row--static" data-role-row="tavily">
-                <div class="summary-row-main">
-                  <div class="summary-row-top">
-                    <span class="summary-row-title">Tavily 搜索</span>
-                    <span class="summary-badge" :class="hasTavilyApiKey ? 'is-ok' : 'is-warn'">
-                      <span class="summary-badge__dot"></span>
-                      {{ hasTavilyApiKey ? '已配置' : '未配置' }}
-                    </span>
-                  </div>
-                  <p class="summary-row-desc">联网检索增强（可选）。保存后写入 agent-sidecar/.env，并自动重启 Agent sidecar。</p>
-                  <div class="summary-row-meta">
-                    <span class="summary-provider-icon summary-provider-icon--generic" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M11 19a8 8 0 1 1 5.3-14" />
-                        <path d="m20 4-4 4" />
-                        <path d="M15 4h5v5" />
-                      </svg>
-                    </span>
-                    <span>Tavily MCP</span>
-                    <span class="summary-sep">·</span>
-                    <span class="summary-mono">TAVILY_API_KEY</span>
-                  </div>
-                  <div class="summary-row-keyline summary-row-keyline--tavily">
-                    <span class="summary-token-label">TAVILY_API_KEY</span>
-                    <input v-model="tavilyApiKey" data-tavily-input type="password" class="summary-key-input"
-                      placeholder="输入 Tavily API Key" autocomplete="off" />
-                    <button type="button" class="btn btn-test summary-save-button" data-save-tavily
-                      :disabled="isSavingTavily" @click.stop="saveTavilyKey">
-                      {{ isSavingTavily ? '保存中' : '保存' }}
-                    </button>
-                  </div>
-                </div>
-              </article>
-            </section>
-          </div>
-
-          <div v-else-if="settingsView === 'profiles'" class="modal-body profile-switcher">
-            <div class="profile-role-switch" aria-label="配置记录模型类型切换">
-              <button v-for="option in profileRoleOptions" :key="option.value" type="button"
-                class="profile-role-switch__button" :class="{ 'is-selected': option.value === activeProfileRole }"
-                :aria-pressed="option.value === activeProfileRole" @click="activeProfileRole = option.value">
-                {{ option.label }}
-              </button>
-            </div>
-
-            <div v-if="hasFilteredProfiles" class="profile-list" aria-label="AI 配置记录列表">
-              <article v-for="profile in filteredProfiles" :key="profile.id" class="profile-card"
-                :class="{ 'is-active': profile.isConnected }">
-                <span class="profile-drag" aria-hidden="true">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </span>
-                <AiProviderIcon class="profile-provider-icon" :platform-id="getProfilePlatformId(profile)"
-                  :title="getProfilePlatformLabel(profile)" decorative />
-                <div class="profile-main">
-                  <div class="profile-title-row">
-                    <strong>{{ profile.name }}</strong>
-                    <span class="profile-role-badge" :class="getProfileRoleToneClass(profile)">
-                      {{ getProfileRoleLabel(profile) }}
-                    </span>
-                    <span class="profile-connection-badge" :class="getProfileConnectionToneClass(profile)">
-                      {{ getProfileConnectionLabel(profile) }}
-                    </span>
-                  </div>
-                  <span class="profile-url">{{ getProfileEndpointLabel(profile) }}</span>
-                  <dl class="profile-details">
-                    <div>
-                      <dt>平台</dt>
-                      <dd>{{ getProfilePlatformLabel(profile) }}</dd>
-                    </div>
-                    <div>
-                      <dt>模型</dt>
-                      <dd>{{ getProfileModelLabel(profile) }}</dd>
-                    </div>
-                    <div>
-                      <dt>凭证</dt>
-                      <dd>{{ profile.hasCredentials ? '已保存' : '缺失' }}</dd>
-                    </div>
-                    <div>
-                      <dt>最近使用</dt>
-                      <dd>{{ getProfileTimeLabel(profile) }}</dd>
-                    </div>
-                  </dl>
-                </div>
-                <div class="profile-actions">
-                  <button type="button" class="profile-action-button" title="查看配置" aria-label="查看配置"
-                    @click="showProfileDetail(profile)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                      stroke-linejoin="round" aria-hidden="true">
-                      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </svg>
-                  </button>
-                  <button type="button" class="profile-action-button" :disabled="profile.isConnected || isSaving"
-                    :title="profile.isConnected ? '已连接' : '快速切换'" :aria-label="profile.isConnected ? '已连接' : '快速切换'"
-                    @click="switchProfile(profile)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                      stroke-linejoin="round" aria-hidden="true">
-                      <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" />
-                    </svg>
+            <div class="ai-credential-field">
+              <label class="ai-credential-label" for="ai-small-model-select">
+                小模型默认模型
+                <span>随厂商切换</span>
+              </label>
+              <div class="ai-credential-combobox" :class="{ 'is-open': isSmallModelMenuOpen }">
+                <Button
+                  id="ai-small-model-select"
+                  class="ai-credential-combobox-trigger"
+                  variant="outline"
+                  type="button"
+                  data-small-model-select
+                  aria-haspopup="listbox"
+                  :aria-expanded="isSmallModelMenuOpen"
+                  @click="toggleSmallModelMenu"
+                >
+                  <span class="ai-credential-combobox-value">
+                    <AiProviderIcon
+                      class="ai-credential-select-icon"
+                      :platform-id="selectedProviderId"
+                      decorative
+                    />
+                    <span>{{ selectedSmallModel.label }}</span>
+                  </span>
+                  <span class="ai-credential-combobox-chev" aria-hidden="true"></span>
+                </Button>
+                <div v-if="isSmallModelMenuOpen" class="ai-credential-combobox-menu" role="listbox">
+                  <button
+                    v-for="model in selectedProviderModels"
+                    :key="model.id"
+                    type="button"
+                    class="ai-credential-combobox-option"
+                    :class="{ 'is-selected': model.id === selectedSmallModel.id }"
+                    role="option"
+                    :aria-selected="model.id === selectedSmallModel.id"
+                    @click="handleSmallModelChange(model.id)"
+                  >
+                    <AiProviderIcon class="ai-credential-select-icon" :platform-id="selectedProviderId" decorative />
+                    <span>{{ model.label }}</span>
+                    <Check aria-hidden="true" />
                   </button>
                 </div>
-              </article>
-            </div>
-            <div v-else class="profile-empty">
-              <strong>{{ profileEmptyTitle }}</strong>
-              <span>{{ profileEmptyDescription }}</span>
-              <button type="button" class="btn btn-test" @click="showConnectionList">去连接</button>
-            </div>
-          </div>
-
-          <div v-else class="modal-body profile-detail">
-            <div v-if="isProfileDetailLoading" class="profile-empty">
-              <strong>正在读取配置详情</strong>
-              <span>API Key 只会在本地只读展示。</span>
-            </div>
-            <section v-else-if="detailProfile" class="profile-detail-card">
-              <div class="profile-detail-head">
-                <AiProviderIcon class="profile-detail-icon" :platform-id="getProfilePlatformId(detailProfile)"
-                  :title="getProfilePlatformLabel(detailProfile)" decorative />
-                <div>
-                  <strong>{{ detailProfile.name }}</strong>
-                  <span>{{ getProfilePlatformLabel(detailProfile) }} ·
-                    {{ getProfileModelLabel(detailProfile) }}</span>
-                </div>
               </div>
-
-              <dl class="profile-readonly-list">
-                <div>
-                  <dt>用途</dt>
-                  <dd>
-                    <span class="profile-role-badge" :class="getProfileRoleToneClass(detailProfile)">
-                      {{ getProfileRoleLabel(detailProfile) }}
-                    </span>
-                  </dd>
-                </div>
-                <div>
-                  <dt>连接状态</dt>
-                  <dd>
-                    <span class="profile-connection-badge" :class="getProfileConnectionToneClass(detailProfile)">
-                      {{ getProfileConnectionLabel(detailProfile) }}
-                    </span>
-                  </dd>
-                </div>
-                <div>
-                  <dt>API Base URL</dt>
-                  <dd>{{ getProfileEndpointLabel(detailProfile) }}</dd>
-                </div>
-                <div>
-                  <dt>模型</dt>
-                  <dd>{{ getProfileModelLabel(detailProfile) }}</dd>
-                </div>
-                <div>
-                  <dt>能力</dt>
-                  <dd>{{ getProfileFeatureLabel(detailProfile) }}</dd>
-                </div>
-                <div>
-                  <dt>最近使用</dt>
-                  <dd>{{ getProfileTimeLabel(detailProfile) }}</dd>
-                </div>
-                <div class="is-secret">
-                  <dt>API Key</dt>
-                  <dd>
-                    <code :class="{ 'is-visible': isApiKeyVisible }">{{ maskedDetailApiKey }}</code>
-                    <button type="button" class="profile-action-button" :disabled="!detailApiKey"
-                      :title="isApiKeyVisible ? '隐藏 API Key' : '查看 API Key'"
-                      :aria-label="isApiKeyVisible ? '隐藏 API Key' : '查看 API Key'"
-                      @click="isApiKeyVisible = !isApiKeyVisible">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                        stroke-linejoin="round" aria-hidden="true">
-                        <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    </button>
-                  </dd>
-                </div>
-              </dl>
-            </section>
-          </div>
-
-          <div v-if="settingsView === 'list'" class="summary-footer">
-            <div class="summary-footer__hint">
-              当前仅保存本地凭证与模型连接配置，已验证配置可在记录中快速切换。
             </div>
-            <button type="button" class="btn btn-test" @click="showProfileSwitcher({ resetRole: true })">
-              查看记录
-            </button>
-            <button type="button" class="btn btn-save" @click="openRoleEditor(activeModelRole)">
-              编辑当前
-            </button>
-          </div>
-        </template>
-      </div>
 
-      <div v-if="statusMessage" class="status" :class="[`status-${statusTone}`, 'show']">
-        <span class="status-icon">
-          <svg v-if="statusTone === 'success'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
-          <svg v-else-if="statusTone === 'error'" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <span v-else class="status-pulse" aria-hidden="true" />
-        </span>
-        <span class="status-text">{{ statusMessage }}</span>
-      </div>
+            <details class="ai-credential-advanced">
+              <summary>
+                <span class="ai-credential-advanced__chev" aria-hidden="true"></span>
+                高级
+              </summary>
+              <div class="ai-credential-field">
+                <label class="ai-credential-label" for="ai-base-url">
+                  Base URL
+                  <span>由模型路由管理</span>
+                </label>
+                <Input
+                  id="ai-base-url"
+                  class="ai-credential-input"
+                  :model-value="selectedProvider.baseUrl"
+                  placeholder="使用系统默认路由"
+                  disabled
+                />
+              </div>
+              <div class="ai-credential-field">
+                <label class="ai-credential-label" for="tavily-key">
+                  信息源 API Key
+                  <span>可选</span>
+                </label>
+                <div class="ai-credential-key-wrap">
+                  <Input
+                    id="tavily-key"
+                    v-model="tavilyKey"
+                    class="ai-credential-input ai-credential-key-input"
+                    data-tavily-input
+                    type="password"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Tavily API Key"
+                    :aria-invalid="tavilyKeyError ? 'true' : 'false'"
+                  />
+                  <Button
+                    class="ai-credential-inline-save"
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    data-save-tavily
+                    :disabled="isSaving"
+                    @click="saveTavily"
+                  >
+                    保存
+                  </Button>
+                </div>
+                <p v-if="tavilyKeyError" class="ai-credential-field-msg is-error">{{ tavilyKeyError }}</p>
+              </div>
+            </details>
+          </form>
+
+          <footer class="ai-credential-foot">
+            <Button
+              class="ai-credential-test"
+              variant="outline"
+              size="sm"
+              type="button"
+              :disabled="!canTestSelectedProvider"
+              @click="testSelectedProvider"
+            >
+              <Zap aria-hidden="true" />
+              测试
+            </Button>
+            <div v-if="feedbackText" class="ai-credential-status" :class="`is-${feedbackTone}`">
+              <Check v-if="feedbackTone === 'success'" aria-hidden="true" />
+              <X v-else-if="feedbackTone === 'error'" aria-hidden="true" />
+              <AlertTriangle v-else aria-hidden="true" />
+              <span>{{ feedbackText }}</span>
+            </div>
+            <div class="ai-credential-spacer"></div>
+            <Button variant="outline" size="sm" type="button" @click="openList">
+              取消
+            </Button>
+            <Button size="sm" type="button" :disabled="!canSaveProviderKey" @click="saveProviderSettings">
+              {{ isSaving ? '保存中' : '保存' }}
+            </Button>
+          </footer>
+        </section>
+      </section>
     </div>
   </Teleport>
 </template>
 
-<style scoped>
-.modal-shell {
-  --bg-app: #fafafa;
-  --bg-elevated: #ffffff;
-  --bg-overlay: #ffffff;
-  --bg-input: #ffffff;
-  --bg-input-hover: #fafafa;
-  --bg-hover: #f5f5f5;
-  --bg-active: #f0f0f0;
-  --bg-mono: #f5f5f5;
-
-  --border-subtle: #ededed;
-  --border: #e7e7e7;
-  --border-strong: #d4d4d4;
-
-  --fg-primary: #0a0a0a;
-  --fg-secondary: #525252;
-  --fg-tertiary: #737373;
-  --fg-muted: #a3a3a3;
-
-  --accent: #0a0a0a;
-  --accent-hover: #262626;
-  --accent-soft: rgba(10, 10, 10, 0.06);
-  --accent-ring: rgba(10, 10, 10, 0.08);
-  --selection-soft: #f0f0f0;
-  --selection-soft-hover: #f5f5f5;
-  --selection-border: #d4d4d4;
-  --selection-ring: rgba(10, 10, 10, 0.06);
-  --selection-chip-bg: #f5f5f5;
-  --selection-chip-border: #e5e5e5;
-
-  --success: #16a34a;
-  --danger: #dc2626;
-  --warn: #d97706;
-  --info: #2563eb;
-
-  --r-sm: 5px;
-  --r-md: 6px;
-  --r-lg: 12px;
-
-  --shadow-modal: 0 0 0 1px rgba(10, 10, 10, 0.04), 0 18px 48px rgba(10, 10, 10, 0.08);
-
-  --ease: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-.modal-shell {
+<style>
+.ai-credential-shell {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.28);
+  z-index: var(--z-modal, 50);
+  display: grid;
+  place-items: center;
+  padding: var(--spacing-6, 24px);
+  background: rgb(15 23 42 / 38%);
+}
+
+.ai-credential-dialog {
+  --ai-credential-bg: #fafafa;
+  --ai-credential-surface: #fff;
+  --ai-credential-surface-2: #f6f6f7;
+  --ai-credential-line: #ececec;
+  --ai-credential-line-strong: #d8d8da;
+  --ai-credential-text: #18181b;
+  --ai-credential-muted: #71717a;
+  --ai-credential-subtle: #a1a1aa;
+  --ai-credential-accent: #18181b;
+  --ai-credential-accent-fg: #fff;
+  --ai-credential-danger: #dc2626;
+  --ai-credential-success: #15803d;
+
+  width: min(420px, calc(100vw - 32px));
+  height: min(560px, calc(100vh - 32px));
   display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 24px;
-  z-index: 9999;
-  pointer-events: auto;
-  animation: fadeIn 0.14s var(--ease);
-  font-family:
-    'Inter',
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
-  font-feature-settings: 'cv11', 'ss01', 'ss03';
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-.modal {
-  background: var(--bg-elevated);
-  width: clamp(560px, 62vw, 720px);
-  max-width: calc(100vw - 48px);
-  min-height: min(620px, calc(100vh - 48px));
-  max-height: calc(100vh - 48px);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-modal);
   overflow: hidden;
-  pointer-events: auto;
-  animation: pop 0.16s var(--ease);
-  color: var(--fg-primary);
+  flex-direction: column;
+  border: 1px solid var(--ai-credential-line);
+  border-radius: var(--radius-xl, 12px);
+  background: var(--ai-credential-surface);
+  box-shadow: var(--shadow-lg);
+  color: var(--ai-credential-text);
+}
+
+.ai-credential-dialog button:active {
+  transform: none;
+}
+
+.ai-credential-head {
   display: flex;
+  align-items: center;
+  gap: var(--spacing-1-5, 6px);
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--ai-credential-line);
+}
+
+.ai-credential-title {
+  flex: 1;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ai-credential-head-action {
+  height: 26px;
+  gap: 4px;
+  padding: 0 10px 0 8px;
+  border-color: var(--ai-credential-line-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ai-credential-text);
+  font-size: 12px;
+}
+
+.ai-credential-head-action svg,
+.ai-credential-icon-button svg,
+.ai-credential-test svg,
+.ai-credential-status svg,
+.ai-credential-list-status svg {
+  width: 12px;
+  height: 12px;
+}
+
+.ai-credential-pane {
+  display: flex;
+  min-height: 0;
+  flex: 1;
   flex-direction: column;
 }
 
-@keyframes pop {
-  from {
-    opacity: 0;
-    transform: translateY(4px) scale(0.985);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+.ai-credential-search {
+  position: relative;
+  padding: 12px 16px;
 }
 
-.modal-header {
-  height: 48px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border-subtle);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+.ai-credential-search__icon {
+  position: absolute;
+  top: 50%;
+  left: 26px;
+  width: 13px;
+  height: 13px;
+  color: var(--ai-credential-subtle);
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 
-.modal-title-group {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.modal-header h2 {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--fg-primary);
-  letter-spacing: -0.01em;
-}
-
-.modal-title-group span {
-  color: var(--fg-muted);
-  font-size: 11px;
-  line-height: 14px;
-}
-
-.profile-icon-action {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  place-items: center;
-  flex: 0 0 auto;
-  border: 1px solid transparent;
-  border-radius: var(--r-md);
-  background: transparent;
-  background-color: transparent;
-  box-shadow: none;
-  outline: none;
-  color: var(--fg-tertiary);
-  transition:
-    color 0.12s var(--ease),
-    transform 0.12s var(--ease),
-    opacity 0.12s var(--ease);
-}
-
-.profile-icon-action:hover,
-.profile-icon-action:focus-visible,
-.profile-icon-action:active {
-  background: var(--bg-hover);
-  background-color: var(--bg-hover);
-  box-shadow: none;
-  border-color: var(--border-subtle);
-  color: var(--fg-primary);
-}
-
-.profile-icon-action:disabled {
-  cursor: not-allowed;
-  opacity: 0.48;
-}
-
-.profile-icon-action:active {
-  transform: scale(0.97);
-}
-
-.profile-icon-action svg {
-  width: 15px;
-  height: 15px;
-}
-
-.modal-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: 16px;
-  overflow-y: auto;
-}
-
-.modal-body::-webkit-scrollbar {
-  width: 8px;
-}
-
-.modal-body::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
-}
-
-.modal-body::-webkit-scrollbar-thumb:hover {
-  background: var(--border-strong);
-}
-
-.form-item {
-  margin-bottom: 14px;
-}
-
-.form-label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--fg-secondary);
-  letter-spacing: -0.005em;
-}
-
-.form-input,
-.form-select {
-  width: 100%;
+.ai-credential-search__input {
   height: 32px;
-  padding: 0 10px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-md);
+  padding-left: 30px;
+  border-color: var(--ai-credential-line);
+  border-radius: var(--radius-md);
+  background: var(--ai-credential-surface-2);
   font-size: 13px;
-  color: var(--fg-primary);
-  font-family: inherit;
-  transition:
-    border-color 0.12s var(--ease),
-    background 0.12s var(--ease),
-    box-shadow 0.12s var(--ease);
 }
 
-.form-input:hover,
-.form-select:hover {
-  background: var(--bg-input-hover);
-  border-color: var(--border);
-}
-
-.form-input:focus,
-.form-select:focus {
-  outline: none;
-  border-color: var(--accent);
-  background: var(--bg-input-hover);
-  box-shadow: 0 0 0 3px var(--accent-ring);
-}
-
-.form-input[aria-invalid='true'],
-.lr-select-trigger[aria-invalid='true'] {
-  border-color: var(--danger);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent);
-}
-
-.form-input::placeholder {
-  color: var(--fg-muted);
-}
-
-input[type='number']::-webkit-outer-spin-button,
-input[type='number']::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  appearance: none;
-  margin: 0;
-}
-
-input[type='number'] {
-  -moz-appearance: textfield;
-  appearance: textfield;
-}
-
-.form-row {
-  display: flex;
-  gap: 10px;
-}
-
-.form-row .form-item {
+.ai-credential-body {
+  min-height: 0;
   flex: 1;
-  margin-bottom: 14px;
+  overflow-y: auto;
+  scrollbar-width: none;
 }
 
-.model-role-section {
+.ai-credential-body::-webkit-scrollbar,
+.ai-credential-combobox-menu::-webkit-scrollbar {
+  display: none;
+}
+
+.ai-credential-groups {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 4px 16px 16px;
+}
+
+.ai-credential-group {
+  overflow: hidden;
+  border: 1px solid var(--ai-credential-line);
+  border-radius: 10px;
+  background: var(--ai-credential-surface);
+}
+
+.ai-credential-group__head {
+  display: flex;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 14px;
-}
-
-.model-role-card {
-  min-height: 66px;
   padding: 10px 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-md);
-  background: var(--bg-input);
-  color: var(--fg-secondary);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 0.12s var(--ease),
-    background 0.12s var(--ease),
-    color 0.12s var(--ease),
-    transform 0.12s var(--ease);
+  border-bottom: 1px solid var(--ai-credential-line);
+  background: var(--ai-credential-surface-2);
 }
 
-.model-role-card:hover {
-  border-color: var(--border);
-  background: var(--bg-input-hover);
-  color: var(--fg-primary);
+.ai-credential-provider-icon {
+  width: 18px;
+  height: 18px;
+  padding: 1px;
 }
 
-.model-role-card:active {
-  transform: scale(0.985);
-}
-
-.model-role-card.is-selected {
-  border-color: var(--selection-border);
-  background: var(--selection-soft);
-  color: var(--fg-primary);
-  box-shadow: 0 0 0 1px var(--selection-ring);
-}
-
-.model-role-card__label,
-.model-role-card__description {
-  display: block;
-}
-
-.model-role-card__label {
+.ai-credential-group__name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
   font-size: 12.5px;
   font-weight: 600;
-  letter-spacing: -0.005em;
-}
-
-.model-role-card__description {
-  margin-top: 4px;
-  color: var(--fg-muted);
-  font-size: 11px;
-  line-height: 15px;
-}
-
-.lr-select {
-  position: relative;
-  width: 100%;
-}
-
-.lr-select-trigger {
-  width: 100%;
-  height: 32px;
-  padding: 0 8px 0 10px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-md);
-  font-size: 13px;
-  font-family: inherit;
-  color: var(--fg-primary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  text-align: left;
-  letter-spacing: -0.005em;
-  transition:
-    border-color 0.12s var(--ease),
-    background 0.12s var(--ease),
-    box-shadow 0.12s var(--ease);
-}
-
-.lr-select-trigger:hover {
-  background: var(--bg-input-hover);
-  border-color: var(--border);
-}
-
-.lr-select.open .lr-select-trigger {
-  border-color: var(--accent);
-  background: var(--bg-input-hover);
-  box-shadow: 0 0 0 3px var(--accent-ring);
-}
-
-.lr-select-value {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.lr-select-icon {
+.ai-credential-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 10px;
+  margin: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  transition: background-color 150ms ease-out;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ai-credential-row:hover {
+    background: var(--ai-credential-surface-2);
+  }
+
+  .ai-credential-row:hover .ai-credential-row__acts,
+  .ai-credential-row:focus-within .ai-credential-row__acts {
+    opacity: 1;
+  }
+}
+
+.ai-credential-row__main {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.ai-credential-row__name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.ai-credential-default-mark {
+  display: inline-flex;
   width: 16px;
   height: 16px;
-  flex: 0 0 auto;
-}
-
-.lr-select-chevron {
-  width: 12px;
-  height: 12px;
-  color: var(--fg-tertiary);
-  transition:
-    transform 0.15s var(--ease),
-    color 0.15s var(--ease);
-  flex-shrink: 0;
-}
-
-.lr-select.open .lr-select-chevron {
-  transform: rotate(180deg);
-  color: var(--fg-secondary);
-}
-
-.lr-select-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  background: var(--bg-overlay);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 4px;
-  box-shadow:
-    0 0 0 1px rgba(10, 10, 10, 0.03),
-    0 16px 36px rgba(10, 10, 10, 0.08),
-    0 4px 10px rgba(10, 10, 10, 0.04);
-  z-index: 100;
-  max-height: 248px;
-  overflow-y: auto;
-  display: none;
-  transform-origin: top center;
-}
-
-.lr-select.open .lr-select-menu {
-  display: block;
-  animation: menuPop 0.14s var(--ease);
-}
-
-@keyframes menuPop {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.lr-option {
-  min-height: 28px;
-  padding: 0 28px 0 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  color: var(--fg-secondary);
-  border-radius: var(--r-sm);
-  cursor: pointer;
-  position: relative;
-  transition:
-    background 0.1s var(--ease),
-    color 0.1s var(--ease);
-  letter-spacing: -0.005em;
-  user-select: none;
-}
-
-.lr-option-icon {
-  width: 15px;
-  height: 15px;
-  flex: 0 0 auto;
-}
-
-.lr-option-main {
-  flex: 1;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.lr-option-main {
-  color: inherit;
-}
-
-.lr-option:hover {
-  background: var(--bg-hover);
-  color: var(--fg-primary);
-}
-
-.lr-option.selected {
-  color: var(--fg-primary);
-  background: var(--selection-soft-hover);
-}
-
-.lr-option.selected::before {
-  content: '';
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  width: 11px;
-  height: 11px;
-  transform: translateY(-50%);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230a0a0a' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>");
-  background-size: contain;
-  background-repeat: no-repeat;
-}
-
-.lr-select-menu::-webkit-scrollbar {
-  width: 8px;
-}
-
-.lr-select-menu::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
-}
-
-.lr-select-menu::-webkit-scrollbar-thumb:hover {
-  background: var(--border-strong);
-}
-
-.tip {
-  font-size: 11.5px;
-  color: var(--fg-muted);
-  margin-top: 6px;
-  letter-spacing: -0.005em;
-}
-
-.key-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.key-wrapper input {
-  padding-right: 36px;
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12.5px;
-}
-
-.key-actions {
-  position: absolute;
-  right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  gap: 1px;
-}
-
-.key-btn {
-  width: 24px;
-  height: 24px;
-  background: transparent;
-  border: none;
-  border-radius: var(--r-sm);
-  color: var(--fg-tertiary);
-  cursor: pointer;
-  display: flex;
   align-items: center;
   justify-content: center;
-  transition:
-    background 0.12s var(--ease),
-    color 0.12s var(--ease);
+  color: var(--ai-credential-success);
 }
 
-.key-btn:hover {
-  background: var(--bg-active);
-  color: var(--fg-primary);
-}
-
-.key-btn svg {
+.ai-credential-default-mark__icon {
   width: 14px;
   height: 14px;
 }
 
-.switch-inline {
-  height: 32px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.switch-text {
-  font-size: 12.5px;
-  color: var(--fg-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-.switch {
-  position: relative;
-  width: 28px;
-  height: 16px;
-  background: var(--bg-active);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.15s var(--ease);
-  box-shadow: inset 0 0 0 1px var(--border);
-}
-
-.switch::after {
-  content: '';
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  left: 2px;
-  top: 2px;
-  background: #fff;
-  border-radius: 50%;
-  transition: left 0.15s var(--ease);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-}
-
-.switch.active {
-  background: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-.switch.active::after {
-  left: 14px;
-}
-
-.slider-row {
-  display: flex;
-  gap: 14px;
-  margin-bottom: 14px;
-}
-
-.narrator-note {
-  display: grid;
-  gap: 6px;
-  margin-top: 4px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  background: var(--bg-input);
-  padding: 14px;
-}
-
-.narrator-note strong {
-  color: var(--fg-primary);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.narrator-note span {
-  color: var(--fg-secondary);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.profile-switcher {
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  min-height: 320px;
-}
-
-.profile-role-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.profile-role-switch__button {
-  height: 34px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  background: var(--bg-input);
-  color: var(--fg-secondary);
-  font-size: 12.5px;
-  font-weight: 600;
-  transition:
-    border-color 0.12s var(--ease),
-    background 0.12s var(--ease),
-    color 0.12s var(--ease),
-    transform 0.12s var(--ease);
-}
-
-.profile-role-switch__button:hover {
-  border-color: var(--border);
-  background: var(--bg-input-hover);
-  color: var(--fg-primary);
-}
-
-.profile-role-switch__button:active {
-  transform: scale(0.985);
-}
-
-.profile-role-switch__button.is-selected {
-  border-color: var(--selection-border);
-  background: var(--selection-soft);
-  color: var(--fg-primary);
-  box-shadow: 0 0 0 1px var(--selection-ring);
-}
-
-.profile-list {
-  display: grid;
-  gap: 8px;
-}
-
-.profile-card {
-  display: grid;
-  grid-template-columns: 12px 30px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  min-height: 68px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--bg-input) 84%, transparent);
-  padding: 8px 10px;
-  transition:
-    background 0.14s var(--ease),
-    border-color 0.14s var(--ease),
-    transform 0.14s var(--ease);
-}
-
-.profile-card:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-input-hover);
-}
-
-.profile-card.is-active {
-  border-color: var(--selection-border);
-  background: var(--selection-soft);
-}
-
-.profile-drag {
-  display: grid;
-  grid-template-columns: repeat(2, 3px);
-  gap: 2px;
-  color: var(--fg-muted);
-}
-
-.profile-drag span {
-  width: 3px;
-
-  height: 3px;
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.profile-provider-icon {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-elevated);
-  padding: 6px;
-  font-size: 17px;
-}
-
-.profile-main {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.profile-title-row {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-}
-
-.profile-title-row strong {
+.ai-credential-row__key {
   overflow: hidden;
-  color: var(--fg-primary);
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  color: var(--ai-credential-subtle);
+  font: 11.5px/1.3 ui-monospace, Menlo, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.profile-role-badge,
-.profile-connection-badge {
-  flex: 0 0 auto;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-active);
-  color: var(--fg-secondary);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 16px;
-  padding: 0 7px;
+.ai-credential-default-mark__icon svg {
+  width: 11px;
+  height: 11px;
 }
 
-.profile-role-badge.is-main {
-  border-color: var(--selection-chip-border);
-  background: var(--selection-chip-bg);
-  color: var(--fg-primary);
-}
-
-.profile-role-badge.is-narrator {
-  border-color: color-mix(in srgb, var(--success) 44%, transparent);
-  background: color-mix(in srgb, var(--success) 14%, transparent);
-  color: var(--fg-primary);
-}
-
-.profile-connection-badge.is-connected {
-  border-color: color-mix(in srgb, var(--success) 44%, transparent);
-  background: color-mix(in srgb, var(--success) 12%, transparent);
-  color: var(--fg-primary);
-}
-
-.profile-connection-badge.is-disconnected {
-  color: var(--fg-tertiary);
-}
-
-.profile-connection-badge.is-missing {
-  border-color: color-mix(in srgb, var(--danger) 42%, transparent);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-  color: var(--fg-primary);
-}
-
-.profile-url {
-  overflow: hidden;
-  color: var(--accent-hover);
-  font-size: 11.5px;
-  line-height: 16px;
-  text-decoration: none;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.profile-details {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 5px;
-}
-
-.profile-details div {
-  min-width: 0;
-}
-
-.profile-details dt {
-  color: var(--fg-muted);
-  font-size: 10px;
-  line-height: 12px;
-}
-
-.profile-details dd {
-  overflow: hidden;
-  color: var(--fg-secondary);
-  font-size: 10.5px;
-  line-height: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.profile-actions {
+.ai-credential-row__acts {
   display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.profile-action-button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--bg-elevated);
-  color: var(--fg-primary);
-  transition:
-    background 0.12s var(--ease),
-    border-color 0.12s var(--ease),
-    transform 0.12s var(--ease),
-    opacity 0.12s var(--ease);
-}
-
-.profile-action-button:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  background: var(--bg-hover);
-}
-
-.profile-action-button:active:not(:disabled) {
-  transform: scale(0.97);
-}
-
-.profile-action-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.profile-action-button svg {
-  width: 14px;
-  height: 14px;
-}
-
-.profile-detail {
-  min-height: 320px;
-}
-
-.profile-detail-card {
-  display: grid;
-  gap: 14px;
-}
-
-.profile-detail-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--bg-input);
-  padding: 12px;
-}
-
-.profile-detail-icon {
-  width: 38px;
-  height: 38px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-elevated);
-  padding: 9px;
-}
-
-.profile-detail-head strong {
-  display: block;
-  color: var(--fg-primary);
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.profile-detail-head span {
-  color: var(--fg-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.profile-readonly-list {
-  display: grid;
   gap: 8px;
 }
 
-.profile-readonly-list>div {
-  display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
-  align-items: center;
+.ai-credential-icon-button {
+  width: 22px;
+  height: 22px;
+  color: var(--ai-credential-muted);
+}
+
+.ai-credential-icon-button:hover {
+  color: var(--ai-credential-text);
+}
+
+.ai-credential-list-status {
+  display: inline-flex;
   min-height: 34px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-input) 72%, transparent);
-  padding: 8px 10px;
-}
-
-.profile-readonly-list dt {
-  color: var(--fg-muted);
-  font-size: 11px;
-}
-
-.profile-readonly-list dd {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fg-secondary);
-  font-size: 12px;
-  line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.profile-readonly-list .is-secret dd {
-  display: flex;
   align-items: center;
-  gap: 8px;
-  overflow: visible;
-  white-space: normal;
+  gap: 6px;
+  padding: 0 16px 10px;
+  color: var(--ai-credential-muted);
+  font-size: 12px;
 }
 
-.profile-readonly-list code {
-  flex: 1;
-  min-width: 0;
+.ai-credential-list-status.is-success {
+  color: var(--ai-credential-success);
+}
+
+.ai-credential-list-status.is-error {
+  color: var(--ai-credential-danger);
+}
+
+.ai-credential-list-status span {
   overflow: hidden;
-  color: var(--fg-primary);
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.profile-readonly-list code.is-visible {
-  overflow-wrap: anywhere;
-  text-overflow: clip;
-  white-space: normal;
-}
-
-.profile-empty {
+.ai-credential-empty {
   display: grid;
-  min-height: 320px;
+  height: 100%;
   place-items: center;
   align-content: center;
-  gap: 10px;
-  border: 1px dashed var(--border);
-  border-radius: 16px;
-  color: var(--fg-tertiary);
+  gap: 4px;
+  padding: 24px;
+  color: var(--ai-credential-subtle);
   text-align: center;
 }
 
-.profile-empty strong {
-  color: var(--fg-primary);
-  font-size: 14px;
-  font-weight: 600;
+.ai-credential-empty__title {
+  font-size: 13px;
 }
 
-.profile-empty span {
-  max-width: 320px;
+.ai-credential-empty__desc {
+  color: var(--ai-credential-muted);
   font-size: 12px;
-  line-height: 1.6;
 }
 
-.aed-auth-grid {
+.ai-credential-form {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 14px;
+  padding: 16px;
 }
 
-.aed-auth-card {
+.ai-credential-field {
   display: grid;
   gap: 6px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  background: var(--bg-input);
-  padding: 12px;
-  text-align: left;
-  transition:
-    border-color 0.12s var(--ease),
-    background 0.12s var(--ease),
-    transform 0.12s var(--ease);
 }
 
-.aed-auth-card:hover {
-  background: var(--bg-input-hover);
-  border-color: var(--border);
-}
-
-.aed-auth-card:active {
-  transform: scale(0.985);
-}
-
-.aed-auth-card.is-selected {
-  box-shadow: 0 0 0 1px var(--accent-ring);
-}
-
-.aed-auth-card.is-task.is-selected {
-  border-color: rgba(86, 168, 255, 0.42);
-  background: rgba(86, 168, 255, 0.12);
-}
-
-.aed-auth-card.is-session.is-selected {
-  border-color: rgba(245, 158, 11, 0.42);
-  background: rgba(245, 158, 11, 0.14);
-}
-
-.aed-auth-card__title {
-  color: var(--fg-primary);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.aed-auth-card__description {
-  color: var(--fg-tertiary);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
-
-.slider-item {
-  flex: 1;
-}
-
-.slider-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--fg-secondary);
-  margin-bottom: 8px;
+.ai-credential-label {
   display: flex;
   justify-content: space-between;
+  color: var(--ai-credential-muted);
+  font-size: 12px;
 }
 
-.slider-val {
-  color: var(--fg-primary);
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
+.ai-credential-label span {
+  color: var(--ai-credential-subtle);
 }
 
-input[type='range'] {
+.ai-credential-combobox {
+  position: relative;
+}
+
+.ai-credential-combobox-trigger,
+.ai-credential-input {
   width: 100%;
-  height: 4px;
-  background: var(--bg-active);
-  border-radius: 2px;
-  outline: none;
-  -webkit-appearance: none;
-  appearance: none;
-  cursor: pointer;
+  height: 34px;
+  border: 1px solid var(--ai-credential-line-strong);
+  border-color: var(--ai-credential-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--ai-credential-surface);
+  color: var(--ai-credential-text);
+  font-size: 13px;
 }
 
-input[type='range']::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  background: var(--fg-primary);
-  border: 2px solid var(--bg-elevated);
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow:
-    0 0 0 1px var(--border-strong),
-    0 1px 2px rgba(0, 0, 0, 0.4);
-  transition: transform 0.12s var(--ease);
-}
-
-input[type='range']::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
-}
-
-input[type='range']::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  background: var(--fg-primary);
-  border: 2px solid var(--bg-elevated);
-  border-radius: 50%;
-  cursor: pointer;
-}
-
-.modal-footer {
-  height: 52px;
-  padding: 0 16px;
-  border-top: 1px solid var(--border-subtle);
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 8px;
-  background: var(--bg-elevated);
-}
-
-@media (max-width: 720px) {
-  .profile-card {
-    grid-template-columns: 12px 30px minmax(0, 1fr);
-  }
-
-  .profile-actions {
-    grid-column: 3;
-    justify-self: start;
-  }
-
-  .profile-details {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .profile-readonly-list>div {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
-}
-
-.btn {
-  height: 28px;
-  padding: 0 11px;
-  border: 1px solid transparent;
-  border-radius: var(--r-md);
-  font-size: 12.5px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition:
-    background 0.12s var(--ease),
-    border-color 0.12s var(--ease),
-    color 0.12s var(--ease);
-  letter-spacing: -0.005em;
-}
-
-.btn-test {
-  background: transparent;
-  color: var(--fg-primary);
-  border-color: var(--border);
-}
-
-.btn-test:hover {
-  background: var(--bg-hover);
-  border-color: var(--border-strong);
-}
-
-.btn-save {
-  background: var(--accent);
-  color: #fff;
+.ai-credential-combobox-trigger {
+  justify-content: space-between;
+  padding: 0 10px;
   box-shadow: none;
 }
 
-.btn-save:hover {
-  background: var(--accent-hover);
-}
-
-.btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.status {
-  position: fixed;
-  top: 20px;
-  left: 50%;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: var(--r-md);
-  font-size: 12.5px;
+.ai-credential-combobox-value {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--fg-secondary);
-  letter-spacing: -0.005em;
-  box-shadow: 0 12px 28px rgba(10, 10, 10, 0.08);
-  z-index: 10000;
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, -6px);
-  transition:
-    opacity 0.14s var(--ease),
-    transform 0.14s var(--ease);
+}
+
+.ai-credential-combobox-value span {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: calc(100vw - 40px);
 }
 
-.status.show {
-  opacity: 1;
-  transform: translate(-50%, 0);
+.ai-credential-combobox-chev {
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  color: var(--ai-credential-muted);
+  transform: translateY(-2px) rotate(45deg);
 }
 
-.status-icon {
-  width: 12px;
-  height: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+.ai-credential-select-icon {
+  width: 16px;
+  height: 16px;
 }
 
-.status-icon svg {
-  width: 12px;
-  height: 12px;
-  stroke-width: 2.4;
+.ai-credential-combobox-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  z-index: calc(var(--z-modal, 50) + 2);
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--ai-credential-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--ai-credential-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 10%);
+  color: var(--ai-credential-text);
+  scrollbar-width: none;
 }
 
-.status-success .status-icon {
-  color: var(--success);
-}
-
-.status-error .status-icon {
-  color: var(--danger);
-}
-
-.status-info .status-icon {
-  color: var(--accent);
-}
-
-.status-pulse {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: currentColor;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-@media (max-width: 640px) {
-  .modal {
-    width: calc(100vw - 16px);
-    max-width: 100%;
-  }
-
-  .modal-body {
-    padding: 14px;
-  }
-
-  .form-row,
-  .slider-row {
-    flex-direction: column;
-    gap: 0;
-  }
-
-  .form-item[style],
-  .form-item {
-    flex: 1 1 auto !important;
-  }
-}
-
-.modal-header.is-summary {
-  height: auto;
-  min-height: 76px;
-  padding: 16px 20px;
-  align-items: flex-start;
-}
-
-.modal-header-actions {
-  display: inline-flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.settings-list-body {
-  padding: 0;
-}
-
-.summary-list {
-  display: grid;
-}
-
-.summary-row {
-  border-top: 1px solid var(--border-subtle);
-  cursor: pointer;
-}
-
-.summary-row:first-child {
-  border-top: none;
-}
-
-.summary-row--static {
-  cursor: default;
-}
-
-.summary-row-main {
-  display: grid;
-  gap: 8px;
-  padding: 16px 20px;
-}
-
-.summary-row-top {
+.ai-credential-combobox-option {
   display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.summary-row-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg-primary);
-}
-
-.summary-row-desc {
-  color: var(--fg-tertiary);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.summary-row-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--fg-secondary);
-  font-size: 12.5px;
-}
-
-.summary-provider-icon {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.summary-provider-icon--generic {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--fg-secondary);
-}
-
-.summary-provider-icon--generic svg {
-  width: 12px;
-  height: 12px;
-}
-
-.summary-sep {
-  color: var(--fg-muted);
-}
-
-.summary-mono,
-.cfg-name,
-.cfg-input,
-.cfg-select,
-.summary-key-input,
-.summary-token-label,
-.summary-token-value {
-  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.summary-row-keyline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
-}
-
-.summary-row-keyline--tavily {
-  gap: 10px;
-}
-
-.summary-token-label {
-  color: var(--fg-secondary);
-  font-size: 11.5px;
-  padding: 2px 7px;
-  border-radius: 6px;
-  background: var(--bg-mono);
-}
-
-.summary-token-value {
-  color: var(--fg-secondary);
-  font-size: 12px;
-}
-
-.summary-token-value.is-empty {
-  color: var(--warn);
-}
-
-.summary-key-input {
-  flex: 1 1 240px;
-  min-width: 220px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  background: var(--bg-input);
-  color: var(--fg-primary);
-  font-size: 12px;
-}
-
-.summary-key-input::placeholder {
-  color: var(--fg-muted);
-}
-
-.summary-key-input:focus {
-  outline: none;
-  border-color: var(--fg-secondary);
-  box-shadow: 0 0 0 3px var(--accent-ring);
-}
-
-.summary-key-input:disabled {
-  background: var(--bg-hover);
-}
-
-.summary-spacer,
-.cfg-spacer {
-  flex: 1;
-}
-
-.summary-edit-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  width: 100%;
   height: 30px;
-  padding: 0 10px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 7px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--info);
-  font-size: 12.5px;
-  font-weight: 500;
+  color: var(--ai-credential-text);
   cursor: pointer;
-  transition:
-    background 0.12s var(--ease),
-    border-color 0.12s var(--ease);
+  font-size: 13px;
+  text-align: left;
 }
 
-.summary-edit-button:hover {
-  background: color-mix(in srgb, var(--info) 10%, transparent);
-  border-color: color-mix(in srgb, var(--info) 22%, var(--border-strong));
+.ai-credential-combobox-option:hover,
+.ai-credential-combobox-option.is-selected {
+  background: var(--ai-credential-surface-2);
 }
 
-.summary-edit-button__icon,
-.summary-edit-button__chevron {
+.ai-credential-combobox-option span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-credential-combobox-option svg:last-child {
   width: 13px;
   height: 13px;
-  flex-shrink: 0;
+  opacity: 0;
 }
 
-.summary-edit-button__status {
-  margin-left: 6px;
-  color: var(--fg-muted);
-  font-size: 11px;
-  font-weight: 400;
+.ai-credential-combobox-option.is-selected svg:last-child {
+  opacity: 1;
 }
 
-.summary-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-mono);
-  color: var(--fg-secondary);
-  font-size: 11px;
-}
-
-.summary-badge__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.summary-badge.is-ok {
-  color: var(--success);
-}
-
-.summary-badge.is-warn {
-  color: var(--warn);
-}
-
-.summary-badge.is-over {
-  color: var(--info);
-}
-
-.summary-footer,
-.edit-view-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 18px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.summary-footer {
-  justify-content: flex-end;
-}
-
-.summary-footer__hint {
-  flex: 1;
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.edit-view-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.edit-view-title-group {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.edit-view-title-group h2 {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg-primary);
-}
-
-.edit-view-title-group h2 span {
-  color: var(--fg-secondary);
-  font-weight: 500;
-}
-
-.edit-view-title-group p {
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.edit-view-body {
-  padding: 0;
-}
-
-.cfg-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 48px;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.cfg-row--stacked {
-  display: grid;
-  gap: 8px;
-}
-
-.cfg-row-main {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.cfg-tag {
-  border-radius: 999px;
-  background: var(--bg-mono);
-  color: var(--fg-secondary);
-  font-size: 10.5px;
-  font-weight: 600;
-  padding: 1px 7px;
-}
-
-.cfg-input,
-.cfg-select {
-  width: 260px;
-  height: 30px;
-  padding: 0 10px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  color: var(--fg-primary);
-  font-size: 12.5px;
-  text-align: right;
-}
-
-.cfg-select {
-  text-align: left;
-  font-family: inherit;
-}
-
-.cfg-input--short {
-  width: 132px;
-}
-
-.cfg-input:focus,
-.cfg-select:focus {
-  outline: none;
-  border-color: var(--fg-secondary);
-  box-shadow: 0 0 0 3px var(--accent-ring);
-}
-
-.cfg-help {
-  color: var(--fg-muted);
-  font-size: 11.5px;
-}
-
-.cfg-secret-field {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.cfg-secret-field .cfg-input {
-  width: 224px;
-}
-
-.cfg-switch {
+.ai-credential-key-wrap {
   position: relative;
-  width: 30px;
-  height: 18px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: var(--border-strong);
-  cursor: pointer;
-  transition: background 0.12s var(--ease);
+  display: flex;
+  align-items: center;
 }
 
-.cfg-switch.is-active {
-  background: var(--accent);
+.ai-credential-key-input {
+  padding-right: 78px;
+  font: 13px/1.4 ui-monospace, Menlo, monospace;
 }
 
-.cfg-switch__thumb {
+.ai-credential-key-toggle {
   position: absolute;
-  top: 2px;
-  left: 2px;
+  top: 50%;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  color: var(--ai-credential-muted);
+  transform: translateY(-50%);
+}
+
+.ai-credential-key-toggle svg {
   width: 14px;
   height: 14px;
-  border-radius: 999px;
-  background: #fff;
-  transition: transform 0.12s var(--ease);
 }
 
-.cfg-switch.is-active .cfg-switch__thumb {
-  transform: translateX(12px);
+.ai-credential-inline-save {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  height: 24px;
+  padding: 0 8px;
+  color: var(--ai-credential-muted);
+  font-size: 12px;
+  transform: translateY(-50%);
 }
 
-.cfg-switch-label {
-  color: var(--fg-secondary);
+.ai-credential-field-msg {
+  min-height: 16px;
+  margin: 0;
+  color: var(--ai-credential-subtle);
   font-size: 12px;
 }
 
-.btn-ghost {
-  background: transparent;
-  color: var(--fg-secondary);
+.ai-credential-field-msg.is-error {
+  color: var(--ai-credential-danger);
+}
+
+.ai-credential-advanced {
+  padding-top: 10px;
+  border-top: 1px dashed var(--ai-credential-line);
+}
+
+.ai-credential-advanced summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ai-credential-muted);
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+  user-select: none;
+}
+
+.ai-credential-advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-credential-advanced__chev {
+  width: 6px;
+  height: 6px;
+  border-top: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.ai-credential-advanced[open] .ai-credential-advanced__chev {
+  transform: rotate(135deg);
+}
+
+.ai-credential-advanced .ai-credential-field {
+  margin-top: 10px;
+}
+
+.ai-credential-usage {
+  margin: 0;
+  color: var(--ai-credential-muted);
+  font-size: 12px;
+}
+
+.ai-credential-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--ai-credential-line);
+}
+
+.ai-credential-test {
+  height: 32px;
+  gap: 6px;
   border-color: transparent;
+  border-radius: 6px;
+  background: var(--ai-credential-surface-2);
+  color: var(--ai-credential-muted);
+  padding: 0 10px;
+  font-size: 13px;
 }
 
-.btn-ghost:hover {
-  background: var(--bg-hover);
-  color: var(--fg-primary);
+.ai-credential-test:hover:not(:disabled) {
+  background: #eeeeef;
+  color: var(--ai-credential-text);
 }
 
-.summary-save-button {
-  flex: 0 0 auto;
+.ai-credential-foot > button:not(.ai-credential-test) {
+  height: 32px;
+  border-color: transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ai-credential-text);
+  font-size: 13px;
+  padding: 0 10px;
 }
 
-@media (max-width: 720px) {
+.ai-credential-foot > button:not(.ai-credential-test):hover:not(:disabled) {
+  background: var(--ai-credential-surface-2);
+}
 
-  .summary-row-keyline,
-  .cfg-row,
-  .cfg-row-main,
-  .summary-footer,
-  .edit-view-footer {
-    flex-wrap: wrap;
-  }
+.ai-credential-foot > button:not(.ai-credential-test):last-child {
+  color: var(--ai-credential-muted);
+}
 
-  .cfg-input,
-  .cfg-select,
-  .summary-key-input,
-  .cfg-secret-field .cfg-input {
-    width: 100%;
-  }
+.ai-credential-foot > button:not(.ai-credential-test):last-child:not(:disabled) {
+  color: var(--ai-credential-text);
+}
 
-  .summary-edit-button {
-    width: 100%;
-    justify-content: center;
-  }
+.ai-credential-status {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  color: var(--ai-credential-muted);
+  font-size: 12px;
+}
 
-  .summary-footer__hint {
-    flex-basis: 100%;
-  }
+.ai-credential-status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-credential-status.is-success {
+  color: var(--ai-credential-success);
+}
+
+.ai-credential-status.is-error {
+  color: var(--ai-credential-danger);
+}
+
+.ai-credential-spacer {
+  flex: 1;
 }
 </style>

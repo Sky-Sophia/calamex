@@ -1,6 +1,6 @@
 import {
   aiProviderCatalogEntrySchema,
-  aiProviderProfilePayloadSchema,
+  aiCredentialStatusPayloadSchema,
   aiProviderTypeSchema,
 } from '@/types/ai/provider.schema';
 import { describe, expect, it } from 'vitest';
@@ -20,23 +20,12 @@ describe('AI provider schema', () => {
     expect(() => aiProviderTypeSchema.parse('deepseek')).toThrow();
   });
 
-  it('校验 provider profile wire payload', () => {
-    const profile = aiProviderProfilePayloadSchema.parse({
-      id: 'profile-1',
-      role: 'main',
-      name: '默认模型',
-      providerType: 'mastra',
-      selectedModel: 'deepseek-chat',
-      baseUrl: null,
-      inlineCompletionEnabled: true,
-      chatEnabled: true,
-      agentEnabled: true,
+  it('校验 provider credential wire payload', () => {
+    const credential = aiCredentialStatusPayloadSchema.parse({
+      providerId: 'deepseek',
       hasCredentials: true,
-      createdAt: '2026-05-20T10:00:00.000Z',
-      updatedAt: '2026-05-20T10:00:00.000Z',
-      lastUsedAt: null,
     });
 
-    expect(profile.isConnected).toBe(false);
+    expect(credential.providerId).toBe('deepseek');
   });
 });
