@@ -9,7 +9,6 @@ pub fn list_git_branches(
     let iterator = repository
         .branches(None)
         .map_err(|error| format!("读取 Git 分支列表失败：{error}"))?;
-
     for branch_result in iterator {
         let (branch, branch_type) =
             branch_result.map_err(|error| format!("读取 Git 分支失败：{error}"))?;
@@ -17,16 +16,13 @@ pub fn list_git_branches(
         if branch_type == BranchType::Remote && shorthand.ends_with("/HEAD") {
             continue;
         }
-
         branches.push(build_git_branch_payload(&repository, &branch, branch_type)?);
     }
-
     branches.sort_by(|left, right| {
         resolve_branch_sort_key(left)
             .cmp(&resolve_branch_sort_key(right))
             .then_with(|| left.shorthand.cmp(&right.shorthand))
     });
-
     Ok(GitBranchListPayload { branches })
 }
 
@@ -71,21 +67,17 @@ pub fn create_git_branch(
 ) -> Result<GitRepositoryStatusPayload, String> {
     let repository = open_repository_from_root(&payload.repository_root_path)?;
     let branch_name = payload.branch_name.trim();
-
     if branch_name.is_empty() {
         return Err("Git 分支名称不能为空。".into());
     }
-
     let is_valid_branch_name = Branch::name_is_valid(branch_name)
         .map_err(|error| format!("校验 Git 分支名称失败：{error}"))?;
     if !is_valid_branch_name {
         return Err(format!("Git 分支名称不合法：{branch_name}"));
     }
-
     if payload.checkout {
         assert_repository_is_clean_for_switch(&repository, "创建并切换分支")?;
     }
-
     let head_commit = resolve_head_commit(&repository)?
         .ok_or_else(|| "当前仓库还没有提交记录，无法创建分支。".to_string())?;
     let branch = repository
@@ -97,11 +89,9 @@ pub fn create_git_branch(
                 format!("创建 Git 分支失败：{error}")
             }
         })?;
-
     if payload.checkout {
         checkout_branch_reference(&repository, &branch)?;
     }
-
     super::status::build_git_repository_status_payload(&repository)
 }
 
@@ -124,16 +114,27 @@ fn build_git_branch_payload(
         .name()
         .map(str::to_string)
         .unwrap_or_else(|| shorthand.clone());
-    let upstream_name = if branch_type == BranchType::Local {
-        resolve_branch_upstream_name(branch)?
+
+    let upstream_branch = if branch_type == BranchType::Local {
+        match branch.upstream() {
+            Ok(upstream) => Some(upstream),
+            Err(error) if error.code() == ErrorCode::NotFound => None,
+            Err(error) => return Err(format!("读取 Git 分支上游失败：{error}")),
+        }
     } else {
         None
     };
-    let (ahead, behind) = if branch_type == BranchType::Local {
-        resolve_branch_ahead_behind(repository, branch)?
-    } else {
-        (0, 0)
+
+    let upstream_name = match upstream_branch.as_ref() {
+        Some(upstream) => Some(resolve_branch_shorthand(upstream)?),
+        None => None,
     };
+
+    let (ahead, behind) = match upstream_branch.as_ref() {
+        Some(upstream) => resolve_ahead_behind_with_upstream(repository, branch, upstream)?,
+        None => (0, 0),
+    };
+
     let last_commit = branch
         .get()
         .target()
@@ -164,39 +165,23 @@ fn resolve_branch_shorthand(branch: &Branch<'_>) -> Result<String, String> {
     if let Ok(Some(name)) = branch.name() {
         return Ok(name.to_string());
     }
-
     if let Some(shorthand) = branch.get().shorthand() {
         return Ok(shorthand.to_string());
     }
-
     Err("读取 Git 分支名称失败：分支名不是有效的 UTF-8。".into())
 }
 
-fn resolve_branch_upstream_name(branch: &Branch<'_>) -> Result<Option<String>, String> {
-    match branch.upstream() {
-        Ok(upstream_branch) => resolve_branch_shorthand(&upstream_branch).map(Some),
-        Err(error) if error.code() == ErrorCode::NotFound => Ok(None),
-        Err(error) => Err(format!("读取 Git 分支上游失败：{error}")),
-    }
-}
-
-fn resolve_branch_ahead_behind(
+fn resolve_ahead_behind_with_upstream(
     repository: &Repository,
     branch: &Branch<'_>,
+    upstream_branch: &Branch<'_>,
 ) -> Result<(usize, usize), String> {
-    let upstream_branch = match branch.upstream() {
-        Ok(upstream_branch) => upstream_branch,
-        Err(error) if error.code() == ErrorCode::NotFound => return Ok((0, 0)),
-        Err(error) => return Err(format!("读取 Git 分支上游失败：{error}")),
-    };
-
     let Some(local_oid) = branch.get().target() else {
         return Ok((0, 0));
     };
     let Some(upstream_oid) = upstream_branch.get().target() else {
         return Ok((0, 0));
     };
-
     repository
         .graph_ahead_behind(local_oid, upstream_oid)
         .map_err(|error| format!("读取 Git 分支 ahead/behind 失败：{error}"))
@@ -211,7 +196,6 @@ fn resolve_branch_commit<'repo>(
             .find_commit(oid)
             .map_err(|error| format!("读取 Git 分支提交失败：{error}"));
     }
-
     branch
         .get()
         .peel_to_commit()
@@ -245,14 +229,12 @@ fn find_branch_by_candidates<'repo>(
             Err(error) => return Err(format!("读取 Git 分支失败：{error}")),
         }
     }
-
     Ok(None)
 }
 
 fn build_branch_name_candidates(branch_name: &str, prefix: &str) -> Vec<String> {
     let trimmed = branch_name.trim();
     let mut candidates = Vec::new();
-
     for candidate in [Some(trimmed), trimmed.strip_prefix(prefix)]
         .into_iter()
         .flatten()
@@ -262,7 +244,6 @@ fn build_branch_name_candidates(branch_name: &str, prefix: &str) -> Vec<String> 
         }
         candidates.push(candidate.to_string());
     }
-
     candidates
 }
 
@@ -274,7 +255,6 @@ fn checkout_branch_reference(repository: &Repository, branch: &Branch<'_>) -> Re
     repository
         .set_head(reference_name)
         .map_err(|error| format!("切换 Git HEAD 失败：{error}"))?;
-
     let mut checkout_builder = CheckoutBuilder::new();
     checkout_builder.safe();
     repository
@@ -287,17 +267,14 @@ pub(super) fn assert_repository_is_clean_for_switch(
     action: &str,
 ) -> Result<(), String> {
     let status = super::status::build_git_repository_status_payload(repository)?;
-
     if status.conflicted_count > 0 {
         return Err(format!("当前工作区存在冲突，{action} 前请先解决冲突。"));
     }
-
     if !status.is_clean {
         return Err(format!(
             "当前工作区存在未提交改动，{action} 前请先提交、贮藏或放弃当前改动。"
         ));
     }
-
     Ok(())
 }
 

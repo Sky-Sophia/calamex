@@ -1,5 +1,8 @@
 use super::*;
 
+const AUTHORITY_PATH_REMOTE_SCHEMES: &[&str] =
+    &["ssh://", "https://", "http://", "git://"];
+
 struct ParsedGitRemoteRepositoryUrl {
     host: String,
     repository_url: String,
@@ -20,7 +23,6 @@ pub fn get_git_pull_request_support(
             create_pull_request_url: None,
         });
     };
-
     let Some(parsed_remote) = parse_git_remote_repository_url(&remote_url) else {
         return Ok(GitPullRequestSupportPayload {
             available: false,
@@ -57,7 +59,6 @@ fn find_preferred_git_remote(repository: &Repository) -> Result<Option<(String, 
         .map(str::to_string)
         .collect::<Vec<_>>();
     remote_names.sort_by_key(|name| if name == "origin" { 0 } else { 1 });
-
     for remote_name in remote_names {
         let remote = repository
             .find_remote(&remote_name)
@@ -68,10 +69,8 @@ fn find_preferred_git_remote(repository: &Repository) -> Result<Option<(String, 
         if remote_url.trim().is_empty() {
             continue;
         }
-
         return Ok(Some((remote_name, remote_url.to_string())));
     }
-
     Ok(None)
 }
 
@@ -84,13 +83,10 @@ fn parse_git_remote_repository_url(url: &str) -> Option<ParsedGitRemoteRepositor
     let (host, raw_path) = if let Some(rest) = trimmed.strip_prefix("git@") {
         let (host, path) = rest.split_once(':')?;
         (host.to_string(), path.to_string())
-    } else if let Some(rest) = trimmed.strip_prefix("ssh://") {
-        parse_authority_path_remote(rest)?
-    } else if let Some(rest) = trimmed.strip_prefix("https://") {
-        parse_authority_path_remote(rest)?
-    } else if let Some(rest) = trimmed.strip_prefix("http://") {
-        parse_authority_path_remote(rest)?
-    } else if let Some(rest) = trimmed.strip_prefix("git://") {
+    } else if let Some(rest) = AUTHORITY_PATH_REMOTE_SCHEMES
+        .iter()
+        .find_map(|scheme| trimmed.strip_prefix(scheme))
+    {
         parse_authority_path_remote(rest)?
     } else {
         return None;
@@ -105,18 +101,20 @@ fn parse_git_remote_repository_url(url: &str) -> Option<ParsedGitRemoteRepositor
         .unwrap_or(host.as_str())
         .trim_matches('/')
         .to_string();
+
     let repository_path = raw_path.trim_matches('/');
     if repository_path.is_empty() {
         return None;
     }
-
     let repository_path = repository_path
         .strip_suffix(".git")
         .unwrap_or(repository_path)
         .to_string();
+
+    let repository_url = format!("https://{host}/{repository_path}");
     Some(ParsedGitRemoteRepositoryUrl {
-        host: host.clone(),
-        repository_url: format!("https://{host}/{repository_path}"),
+        host,
+        repository_url,
     })
 }
 
@@ -139,7 +137,6 @@ fn resolve_pull_request_provider(host: &str) -> &'static str {
     if normalized_host.contains("gitea") {
         return "gitea";
     }
-
     "unknown"
 }
 

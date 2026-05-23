@@ -42,105 +42,35 @@ struct SshConnectionParams {
     password: Option<String>,
 }
 
-impl SshConnectionParams {
-    fn from_test_request(payload: &SshConnectionTestRequest) -> Self {
-        Self {
-            host: payload.host.trim().into(),
-            port: payload.port,
-            username: payload.username.trim().into(),
-            auth_mode: payload.auth_mode.clone(),
-            identity_path: payload.identity_path.clone(),
-            password: payload.password.clone(),
+macro_rules! impl_ssh_connection_params_from_request {
+    ($($method:ident => $request:ty),* $(,)?) => {
+        impl SshConnectionParams {
+            $(
+                fn $method(payload: &$request) -> Self {
+                    Self {
+                        host: payload.host.trim().into(),
+                        port: payload.port,
+                        username: payload.username.trim().into(),
+                        auth_mode: payload.auth_mode.clone(),
+                        identity_path: payload.identity_path.clone(),
+                        password: payload.password.clone(),
+                    }
+                }
+            )*
         }
-    }
+    };
+}
 
-    fn from_directory_request(payload: &SshDirectoryListRequest) -> Self {
-        Self {
-            host: payload.host.trim().into(),
-            port: payload.port,
-            username: payload.username.trim().into(),
-            auth_mode: payload.auth_mode.clone(),
-            identity_path: payload.identity_path.clone(),
-            password: payload.password.clone(),
-        }
-    }
-
-    fn from_download_request(payload: &SshFileDownloadRequest) -> Self {
-        Self {
-            host: payload.host.trim().into(),
-            port: payload.port,
-            username: payload.username.trim().into(),
-            auth_mode: payload.auth_mode.clone(),
-            identity_path: payload.identity_path.clone(),
-            password: payload.password.clone(),
-        }
-    }
-
-    fn from_upload_request(payload: &SshFileUploadRequest) -> Self {
-        Self {
-            host: payload.host.trim().into(),
-            port: payload.port,
-            username: payload.username.trim().into(),
-            auth_mode: payload.auth_mode.clone(),
-            identity_path: payload.identity_path.clone(),
-            password: payload.password.clone(),
-        }
-    }
-
-    fn from_delete_request(payload: &SshPathDeleteRequest) -> Self {
-        Self {
-            host: payload.host.trim().into(),
-            port: payload.port,
-            username: payload.username.trim().into(),
-            auth_mode: payload.auth_mode.clone(),
-            identity_path: payload.identity_path.clone(),
-            password: payload.password.clone(),
-        }
-    }
-
-    fn from_rename_request(payload: &SshPathRenameRequest) -> Self {
-        Self {
-            host: payload.host.trim().into(),
-            port: payload.port,
-            username: payload.username.trim().into(),
-            auth_mode: payload.auth_mode.clone(),
-            identity_path: payload.identity_path.clone(),
-            password: payload.password.clone(),
-        }
-    }
-
-    fn from_create_directory_request(payload: &SshDirectoryCreateRequest) -> Self {
-        Self {
-            host: payload.host.trim().into(),
-            port: payload.port,
-            username: payload.username.trim().into(),
-            auth_mode: payload.auth_mode.clone(),
-            identity_path: payload.identity_path.clone(),
-            password: payload.password.clone(),
-        }
-    }
-
-    fn from_read_request(payload: &SshFileReadRequest) -> Self {
-        Self {
-            host: payload.host.trim().into(),
-            port: payload.port,
-            username: payload.username.trim().into(),
-            auth_mode: payload.auth_mode.clone(),
-            identity_path: payload.identity_path.clone(),
-            password: payload.password.clone(),
-        }
-    }
-
-    fn from_write_request(payload: &SshFileWriteRequest) -> Self {
-        Self {
-            host: payload.host.trim().into(),
-            port: payload.port,
-            username: payload.username.trim().into(),
-            auth_mode: payload.auth_mode.clone(),
-            identity_path: payload.identity_path.clone(),
-            password: payload.password.clone(),
-        }
-    }
+impl_ssh_connection_params_from_request! {
+    from_test_request => SshConnectionTestRequest,
+    from_directory_request => SshDirectoryListRequest,
+    from_download_request => SshFileDownloadRequest,
+    from_upload_request => SshFileUploadRequest,
+    from_delete_request => SshPathDeleteRequest,
+    from_rename_request => SshPathRenameRequest,
+    from_create_directory_request => SshDirectoryCreateRequest,
+    from_read_request => SshFileReadRequest,
+    from_write_request => SshFileWriteRequest,
 }
 
 #[tauri::command]
@@ -198,13 +128,11 @@ pub async fn list_ssh_config_hosts() -> Result<Vec<SshConfigHostPayload>, String
     let Some(config_path) = default_ssh_config_path() else {
         return Ok(Vec::new());
     };
-
     let content = match tokio_fs::read_to_string(&config_path).await {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(format!("读取 SSH 配置失败：{error}")),
     };
-
     Ok(parse_ssh_config_hosts(&content))
 }
 
@@ -217,12 +145,10 @@ pub fn save_ssh_password(
     if password.is_empty() {
         return Err("SSH 密码不能为空。".into());
     }
-
     keyring::Entry::new(SSH_KEYRING_SERVICE, &account)
         .map_err(|error| format!("打开系统凭据库失败：{error}"))?
         .set_password(password)
         .map_err(|error| format!("保存 SSH 密码失败：{error}"))?;
-
     Ok(SshPasswordStatusPayload { has_password: true })
 }
 
@@ -233,11 +159,9 @@ pub fn get_ssh_password(payload: SshPasswordGetRequest) -> Result<SshPasswordPay
         .map_err(|error| format!("打开系统凭据库失败：{error}"))?
         .get_password()
         .map_err(|_| "未找到该 SSH 连接的已保存密码，请重新输入并连接一次。".to_string())?;
-
     if password.is_empty() {
         return Err("该 SSH 连接的已保存密码为空，请重新输入并连接一次。".into());
     }
-
     Ok(SshPasswordPayload { password })
 }
 
@@ -247,13 +171,7 @@ pub async fn list_ssh_directory(
 ) -> Result<SshDirectoryListPayload, String> {
     let params = SshConnectionParams::from_directory_request(&payload);
     let remote_path = normalize_remote_path(&payload.path);
-    if params.host.is_empty() {
-        return Err("请填写主机地址。".into());
-    }
-    if params.username.is_empty() {
-        return Err("请填写用户名。".into());
-    }
-    validate_ssh_endpoint(&params.host, &params.username)?;
+    validate_ssh_connection_params(&params)?;
     validate_remote_path(&remote_path)?;
 
     match timeout(
@@ -275,13 +193,7 @@ pub async fn download_ssh_file(
     let params = SshConnectionParams::from_download_request(&payload);
     let remote_path = normalize_remote_path(&payload.remote_path);
     let local_path = payload.local_path.trim();
-    if params.host.is_empty() {
-        return Err("请填写主机地址。".into());
-    }
-    if params.username.is_empty() {
-        return Err("请填写用户名。".into());
-    }
-    validate_ssh_endpoint(&params.host, &params.username)?;
+    validate_ssh_connection_params(&params)?;
     if local_path.is_empty() {
         return Err("请选择本地保存路径。".into());
     }
@@ -316,18 +228,11 @@ pub async fn upload_ssh_file(
     let params = SshConnectionParams::from_upload_request(&payload);
     let local_path = payload.local_path.trim();
     let remote_directory = normalize_remote_path(&payload.remote_directory);
-    if params.host.is_empty() {
-        return Err("请填写主机地址。".into());
-    }
-    if params.username.is_empty() {
-        return Err("请填写用户名。".into());
-    }
-    validate_ssh_endpoint(&params.host, &params.username)?;
+    validate_ssh_connection_params(&params)?;
     if local_path.is_empty() {
         return Err("请选择要上传的本地文件。".into());
     }
     validate_remote_path(&remote_directory)?;
-
     let local_file_path = validate_local_file_path(local_path, "请选择要上传的本地文件。")?;
     let file_name = local_file_path
         .file_name()
@@ -336,9 +241,8 @@ pub async fn upload_ssh_file(
     let metadata = std_fs::metadata(&local_file_path)
         .map_err(|error| format!("读取本地文件信息失败：{error}"))?;
     if !metadata.is_file() {
-        return Err("请选择一个本地文件，暂不支持上传目录。".into());
+        return Err("请选择一个本地文件,暂不支持上传目录。".into());
     }
-
     let remote_path = join_remote_path(&remote_directory, file_name);
     validate_remote_path(&remote_path)?;
 
@@ -367,13 +271,7 @@ pub async fn upload_ssh_file(
 pub async fn read_ssh_file(payload: SshFileReadRequest) -> Result<SshFileReadPayload, String> {
     let params = SshConnectionParams::from_read_request(&payload);
     let remote_path = normalize_remote_path(&payload.remote_path);
-    if params.host.is_empty() {
-        return Err("请填写主机地址。".into());
-    }
-    if params.username.is_empty() {
-        return Err("请填写用户名。".into());
-    }
-    validate_ssh_endpoint(&params.host, &params.username)?;
+    validate_ssh_connection_params(&params)?;
     validate_remote_path(&remote_path)?;
 
     match timeout(
@@ -397,13 +295,7 @@ pub async fn write_ssh_file(payload: SshFileWriteRequest) -> Result<SshFileWrite
     let remote_path = normalize_remote_path(&payload.remote_path);
     let encoding = normalize_ssh_preview_encoding(&payload.encoding)?;
     let line_ending = normalize_ssh_preview_line_ending(&payload.line_ending)?;
-    if params.host.is_empty() {
-        return Err("请填写主机地址。".into());
-    }
-    if params.username.is_empty() {
-        return Err("请填写用户名。".into());
-    }
-    validate_ssh_endpoint(&params.host, &params.username)?;
+    validate_ssh_connection_params(&params)?;
     validate_remote_path(&remote_path)?;
 
     let content = payload.content;
@@ -433,18 +325,11 @@ pub async fn delete_ssh_path(
 ) -> Result<SshPathDeletePayload, String> {
     let params = SshConnectionParams::from_delete_request(&payload);
     let remote_path = normalize_remote_path(&payload.remote_path);
-    if params.host.is_empty() {
-        return Err("请填写主机地址。".into());
-    }
-    if params.username.is_empty() {
-        return Err("请填写用户名。".into());
-    }
-    validate_ssh_endpoint(&params.host, &params.username)?;
+    validate_ssh_connection_params(&params)?;
     if remote_path == "." || remote_path == "/" || remote_path == "~" {
         return Err("拒绝删除远端根目录或当前目录。".into());
     }
     validate_remote_path(&remote_path)?;
-
     run_sftp_mutation(
         params,
         {
@@ -454,7 +339,6 @@ pub async fn delete_ssh_path(
         "删除远端路径",
     )
     .await?;
-
     Ok(SshPathDeletePayload { remote_path })
 }
 
@@ -465,18 +349,11 @@ pub async fn rename_ssh_path(
     let params = SshConnectionParams::from_rename_request(&payload);
     let remote_path = normalize_remote_path(&payload.remote_path);
     let new_name = payload.new_name.trim();
-    if params.host.is_empty() {
-        return Err("请填写主机地址。".into());
-    }
-    if params.username.is_empty() {
-        return Err("请填写用户名。".into());
-    }
-    validate_ssh_endpoint(&params.host, &params.username)?;
+    validate_ssh_connection_params(&params)?;
     if !is_safe_file_name(new_name) {
         return Err("新名称不能为空，且不能包含路径分隔符。".into());
     }
     validate_remote_path(&remote_path)?;
-
     let new_path = join_remote_path(&parent_remote_path(&remote_path), new_name);
     validate_remote_path(&new_path)?;
     run_sftp_mutation(
@@ -489,7 +366,6 @@ pub async fn rename_ssh_path(
         "重命名远端路径",
     )
     .await?;
-
     Ok(SshPathRenamePayload {
         old_path: remote_path,
         new_path,
@@ -503,18 +379,11 @@ pub async fn create_ssh_directory(
     let params = SshConnectionParams::from_create_directory_request(&payload);
     let remote_directory = normalize_remote_path(&payload.remote_directory);
     let name = payload.name.trim();
-    if params.host.is_empty() {
-        return Err("请填写主机地址。".into());
-    }
-    if params.username.is_empty() {
-        return Err("请填写用户名。".into());
-    }
-    validate_ssh_endpoint(&params.host, &params.username)?;
+    validate_ssh_connection_params(&params)?;
     if !is_safe_file_name(name) {
         return Err("目录名称不能为空，且不能包含路径分隔符。".into());
     }
     validate_remote_path(&remote_directory)?;
-
     let remote_path = join_remote_path(&remote_directory, name);
     validate_remote_path(&remote_path)?;
     run_sftp_mutation(
@@ -526,8 +395,17 @@ pub async fn create_ssh_directory(
         "创建远端目录",
     )
     .await?;
-
     Ok(SshDirectoryCreatePayload { remote_path })
+}
+
+fn validate_ssh_connection_params(params: &SshConnectionParams) -> Result<(), String> {
+    if params.host.is_empty() {
+        return Err("请填写主机地址。".into());
+    }
+    if params.username.is_empty() {
+        return Err("请填写用户名。".into());
+    }
+    validate_ssh_endpoint(&params.host, &params.username)
 }
 
 async fn run_sftp_mutation<F>(
@@ -567,18 +445,15 @@ fn open_authenticated_session(params: &SshConnectionParams) -> Result<Session, S
         .map_err(|error| format!("设置 SSH 读取超时失败：{error}"))?;
     tcp.set_write_timeout(Some(SSH_FILE_TRANSFER_TIMEOUT))
         .map_err(|error| format!("设置 SSH 写入超时失败：{error}"))?;
-
     let mut session = Session::new().map_err(|error| format!("创建 SSH 会话失败：{error}"))?;
     session.set_tcp_stream(tcp);
     session
         .handshake()
         .map_err(|error| format!("SSH 握手失败：{error}"))?;
-
     authenticate_session(&session, params)?;
     if !session.authenticated() {
         return Err("SSH 认证失败。".into());
     }
-
     Ok(session)
 }
 
@@ -595,7 +470,6 @@ fn validate_ssh_auth_payload(params: &SshConnectionParams) -> Result<(), String>
     {
         return Err("请填写 SSH 登录密码。".into());
     }
-
     Ok(())
 }
 
@@ -646,7 +520,6 @@ fn authenticate_session(session: &Session, params: &SshConnectionParams) -> Resu
             return Ok(());
         }
     }
-
     Err("SSH agent 中没有可用身份，请选择私钥或输入密码。".into())
 }
 
@@ -661,7 +534,7 @@ fn list_sftp_directory(
     let resolved_remote_path = resolve_sftp_realpath(&sftp, remote_path)?;
     let entries = sftp
         .readdir(Path::new(&resolved_remote_path))
-        .map_err(|error| format_ssh_directory_error(&error.to_string()))?;
+        .map_err(|error| format_remote_error("读取远端目录", &error.to_string()))?;
     let mut payload_entries = entries
         .into_iter()
         .filter_map(|(path, stat)| sftp_entry_to_payload(&resolved_remote_path, &path, &stat))
@@ -672,7 +545,6 @@ fn list_sftp_directory(
             right.name.to_lowercase(),
         ))
     });
-
     Ok(SshDirectoryListPayload {
         path: resolved_remote_path,
         entries: payload_entries,
@@ -683,7 +555,6 @@ fn resolve_sftp_realpath(sftp: &Sftp, remote_path: &str) -> Result<String, Strin
     let realpath = sftp
         .realpath(Path::new(remote_path))
         .map_err(|error| format!("解析远端真实路径失败：{error}"))?;
-
     Ok(path_to_remote_string(&realpath))
 }
 
@@ -692,7 +563,6 @@ fn path_to_remote_string(path: &Path) -> String {
     if normalized.is_empty() {
         return "/".into();
     }
-
     if normalized.starts_with('/') {
         normalized
     } else {
@@ -714,7 +584,6 @@ fn sftp_entry_to_payload(
     } else {
         "file"
     };
-
     Some(SshDirectoryEntryPayload {
         name: name.clone(),
         path: join_remote_path(directory_path, &name),
@@ -734,12 +603,11 @@ fn download_sftp_file(
         .map_err(|error| format!("打开 SFTP 会话失败：{error}"))?;
     let stat = sftp
         .stat(Path::new(remote_path))
-        .map_err(|error| format_ssh_download_error(&error.to_string()))?;
+        .map_err(|error| format_remote_error("下载远端文件", &error.to_string()))?;
     if is_directory_stat(&stat) {
         return Err("暂不支持下载目录，请选择一个文件。".into());
     }
     let byte_size = stat.size.unwrap_or(0);
-
     if let Ok(local_metadata) = std_fs::metadata(local_path) {
         if local_metadata.is_dir() {
             return Err("本地保存路径已存在为目录，无法写入文件。".into());
@@ -749,7 +617,6 @@ fn download_sftp_file(
             return Ok(byte_size);
         }
     }
-
     let partial_path = local_partial_path(local_path);
     let mut resume_offset = match std_fs::metadata(&partial_path) {
         Ok(metadata) if metadata.is_file() => metadata.len(),
@@ -757,13 +624,11 @@ fn download_sftp_file(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
         Err(error) => return Err(format!("读取本地临时下载文件失败：{error}")),
     };
-
     if resume_offset > byte_size {
         std_fs::remove_file(&partial_path)
             .map_err(|error| format!("清理过期本地临时下载文件失败：{error}"))?;
         resume_offset = 0;
     }
-
     if resume_offset == byte_size {
         if partial_path.exists() {
             finalize_local_download(&partial_path, local_path)?;
@@ -775,10 +640,11 @@ fn download_sftp_file(
 
     let mut remote_file = sftp
         .open(Path::new(remote_path))
-        .map_err(|error| format_ssh_download_error(&error.to_string()))?;
+        .map_err(|error| format_remote_error("下载远端文件", &error.to_string()))?;
     remote_file
         .seek(SeekFrom::Start(resume_offset))
         .map_err(|error| format!("定位远端下载断点失败：{error}"))?;
+
     let result = (|| {
         let expected_remaining = byte_size.saturating_sub(resume_offset);
         let mut local_file = std_fs::OpenOptions::new()
@@ -802,7 +668,6 @@ fn download_sftp_file(
         finalize_local_download(&partial_path, local_path)?;
         Ok::<u64, String>(byte_size)
     })();
-
     result
 }
 
@@ -818,8 +683,8 @@ fn upload_sftp_file(
     let local_size = std_fs::metadata(local_path)
         .map_err(|error| format!("读取本地文件信息失败：{error}"))?
         .len();
-    let partial_remote_path = remote_partial_path(remote_path);
 
+    let partial_remote_path = remote_partial_path(remote_path);
     if let Ok(remote_stat) = sftp.stat(Path::new(remote_path)) {
         if is_directory_stat(&remote_stat) {
             return Err("远端已存在同名目录，已取消上传。".into());
@@ -828,7 +693,6 @@ fn upload_sftp_file(
             let _ = sftp.unlink(Path::new(&partial_remote_path));
             return Ok(());
         }
-
         return Err("远端已存在同名文件且大小不一致，已取消上传以避免覆盖。".into());
     }
 
@@ -839,11 +703,9 @@ fn upload_sftp_file(
         Ok(stat) => stat.size.unwrap_or(0),
         Err(_) => 0,
     };
-
     if resume_offset > local_size {
         return Err("远端临时上传文件大于本地文件，已取消上传以避免写坏目标。".into());
     }
-
     if resume_offset == local_size && local_size > 0 {
         finalize_remote_upload(&sftp, &partial_remote_path, remote_path)?;
         return Ok(());
@@ -861,10 +723,11 @@ fn upload_sftp_file(
             0o644,
             OpenType::File,
         )
-        .map_err(|error| format_ssh_upload_error(&error.to_string()))?;
+        .map_err(|error| format_remote_error("上传本地文件", &error.to_string()))?;
     remote_file
         .seek(SeekFrom::Start(resume_offset))
         .map_err(|error| format!("定位远端上传断点失败：{error}"))?;
+
     let expected_remaining = local_size.saturating_sub(resume_offset);
     let mut limited_local_file = (&mut local_file).take(expected_remaining);
     let copied = copy_stream_with_buffer(
@@ -881,7 +744,6 @@ fn upload_sftp_file(
         .map_err(|error| format!("同步远端临时文件失败：{error}"))?;
     drop(remote_file);
     finalize_remote_upload(&sftp, &partial_remote_path, remote_path)?;
-
     Ok(())
 }
 
@@ -906,7 +768,6 @@ fn read_sftp_text_file(
             SSH_FILE_PREVIEW_MAX_BYTES / 1024 / 1024
         ));
     }
-
     let mut remote_file = sftp
         .open(Path::new(remote_path))
         .map_err(|error| format!("打开远端文件失败：{error}"))?;
@@ -919,7 +780,6 @@ fn read_sftp_text_file(
     let modified_at = format_remote_modified_at(&stat);
     let (content, encoding, line_ending) = decode_remote_preview_text(buffer)?;
     let line_count = count_text_lines(&content);
-
     Ok(SshFileReadPayload {
         remote_path: remote_path.into(),
         content,
@@ -950,7 +810,6 @@ fn write_sftp_text_file(
     if is_directory_stat(&stat) {
         return Err("请选择一个文件编辑。".into());
     }
-
     let encoded_content = encode_remote_preview_text(content, encoding, line_ending)?;
     let mut remote_file = sftp
         .open_mode(
@@ -969,7 +828,6 @@ fn write_sftp_text_file(
     remote_file
         .fsync()
         .map_err(|error| format!("同步远端文件失败：{error}"))?;
-
     Ok(encoded_content.len() as u64)
 }
 
@@ -979,14 +837,12 @@ fn decode_remote_preview_text(
     if buffer.contains(&0) {
         return Err("暂不支持预览二进制文件，请下载到本地查看。".into());
     }
-
     let line_ending = detect_remote_line_ending(&buffer);
     if buffer.starts_with(&[0xef, 0xbb, 0xbf]) {
         let content = String::from_utf8(buffer[3..].to_vec())
             .map_err(|_| "远端文件不是有效 UTF-8 文本。".to_string())?;
         return Ok((content, "utf-8-bom", line_ending));
     }
-
     let content =
         String::from_utf8(buffer).map_err(|_| "远端文件不是有效 UTF-8 文本。".to_string())?;
     Ok((content, "utf-8", line_ending))
@@ -1022,7 +878,6 @@ fn delete_sftp_path(sftp: &Sftp, remote_path: &str) -> Result<(), String> {
         delete_sftp_directory_recursive(sftp, remote_path)?;
         return Ok(());
     }
-
     sftp.unlink(Path::new(remote_path))
         .map_err(|error| format!("删除远端文件失败：{error}"))
 }
@@ -1046,7 +901,6 @@ fn delete_sftp_directory_recursive(sftp: &Sftp, remote_path: &str) -> Result<(),
                 .map_err(|error| format!("删除远端文件失败：{error}"))?;
         }
     }
-
     sftp.rmdir(Path::new(remote_path))
         .map_err(|error| format!("删除远端目录失败：{error}"))
 }
@@ -1089,7 +943,6 @@ fn detect_remote_line_ending(buffer: &[u8]) -> &'static str {
     let mut has_crlf = false;
     let mut has_cr = false;
     let mut index = 0;
-
     while index < buffer.len() {
         match buffer[index] {
             b'\r' if buffer.get(index + 1) == Some(&b'\n') => {
@@ -1107,7 +960,6 @@ fn detect_remote_line_ending(buffer: &[u8]) -> &'static str {
         }
         index += 1;
     }
-
     match (has_crlf, has_lf, has_cr) {
         (false, false, false) => "none",
         (true, false, false) => "crlf",
@@ -1121,7 +973,6 @@ fn count_text_lines(content: &str) -> u64 {
     if content.is_empty() {
         return 1;
     }
-
     content
         .replace("\r\n", "\n")
         .replace('\r', "\n")
@@ -1137,14 +988,12 @@ fn format_remote_permission(stat: &FileStat, is_directory: bool) -> String {
             "----------".into()
         };
     };
-
     let file_type = if mode & S_IFMT == S_IFDIR || is_directory {
         'd'
     } else {
         '-'
     };
     let bit_to_char = |bit: u32, value: char| if mode & bit != 0 { value } else { '-' };
-
     format!(
         "{file_type}{}{}{}{}{}{}{}{}{}",
         bit_to_char(0o400, 'r'),
@@ -1173,7 +1022,6 @@ fn resolve_remote_owner_label(session: &Session, remote_path: &str, stat: &FileS
     if let Some(owner_label) = lookup_remote_owner_label(session, remote_path) {
         return owner_label;
     }
-
     match (stat.uid, stat.gid) {
         (Some(uid), Some(gid)) => format!("{uid}:{gid}"),
         (Some(uid), None) => uid.to_string(),
@@ -1192,7 +1040,6 @@ fn lookup_remote_owner_label(session: &Session, remote_path: &str) -> Option<Str
     if owner.is_empty() {
         return None;
     }
-
     Some(owner.into())
 }
 
@@ -1203,7 +1050,6 @@ fn run_remote_exec(session: &Session, command: &str) -> Result<String, String> {
     channel
         .exec(command)
         .map_err(|error| format!("执行远端命令失败：{error}"))?;
-
     let mut stdout = String::new();
     channel
         .read_to_string(&mut stdout)
@@ -1224,7 +1070,6 @@ fn run_remote_exec(session: &Session, command: &str) -> Result<String, String> {
             format!("远端命令执行失败：{detail}")
         });
     }
-
     Ok(stdout)
 }
 
@@ -1241,7 +1086,6 @@ fn validate_ssh_endpoint(host: &str, username: &str) -> Result<(), String> {
     if contains_ssh_target_separator(username) || username.contains('@') {
         return Err("用户名不能包含空白、换行符、NUL 字符或 @。".into());
     }
-
     Ok(())
 }
 
@@ -1293,8 +1137,15 @@ fn format_ssh_error_message(stderr: &str) -> String {
     if stderr.trim().is_empty() {
         return "SSH 连接验证失败。".into();
     }
-
     format!("SSH 连接验证失败：{}", stderr.trim())
+}
+
+fn format_remote_error(action: &str, stderr: &str) -> String {
+    let trimmed = stderr.trim();
+    if trimmed.is_empty() {
+        return format!("{action}失败。");
+    }
+    format!("{action}失败：{trimmed}")
 }
 
 fn normalize_remote_path(path: &str) -> String {
@@ -1302,7 +1153,6 @@ fn normalize_remote_path(path: &str) -> String {
     if trimmed.is_empty() {
         return ".".into();
     }
-
     trimmed.into()
 }
 
@@ -1310,7 +1160,6 @@ fn validate_remote_path(path: &str) -> Result<(), String> {
     if path.contains('\0') || path.contains('\n') || path.contains('\r') {
         return Err("远端路径不能包含换行符或 NUL 字符。".into());
     }
-
     Ok(())
 }
 
@@ -1324,7 +1173,6 @@ fn ssh_password_account(host: &str, port: u16, username: &str) -> Result<String,
         return Err("请填写用户名。".into());
     }
     validate_ssh_endpoint(normalized_host, normalized_username)?;
-
     Ok(format!(
         "password:{normalized_username}@{normalized_host}:{port}"
     ))
@@ -1338,7 +1186,6 @@ fn validate_local_file_path(path: &str, empty_message: &str) -> Result<PathBuf, 
     if trimmed.contains('\0') {
         return Err("本地路径不能包含 NUL 字符。".into());
     }
-
     Ok(PathBuf::from(trimmed))
 }
 
@@ -1349,7 +1196,6 @@ fn copy_stream_with_buffer<R: Read, W: Write>(
 ) -> Result<u64, String> {
     let mut buffer = vec![0_u8; SFTP_TRANSFER_CHUNK_BYTES];
     let mut copied = 0_u64;
-
     loop {
         let bytes_read = reader
             .read(&mut buffer)
@@ -1357,13 +1203,11 @@ fn copy_stream_with_buffer<R: Read, W: Write>(
         if bytes_read == 0 {
             break;
         }
-
         writer
             .write_all(&buffer[..bytes_read])
             .map_err(|error| format!("{error_message}：{error}"))?;
         copied += bytes_read as u64;
     }
-
     Ok(copied)
 }
 
@@ -1371,7 +1215,6 @@ fn ensure_expected_transfer_size(copied: u64, expected: u64, action: &str) -> Re
     if copied == expected {
         return Ok(());
     }
-
     Err(format!(
         "{action}未完整完成，预期剩余 {expected} 字节，实际写入 {copied} 字节。"
     ))
@@ -1388,7 +1231,6 @@ fn local_partial_path(local_path: &Path) -> PathBuf {
         .filter(|value| !value.is_empty())
         .unwrap_or("download");
     let partial_file_name = format!("{file_name}{SFTP_PARTIAL_SUFFIX}");
-
     match local_path.parent() {
         Some(parent) => parent.join(partial_file_name),
         None => PathBuf::from(partial_file_name),
@@ -1402,7 +1244,6 @@ fn finalize_local_download(partial_path: &Path, local_path: &Path) -> Result<(),
         }
         std_fs::remove_file(local_path).map_err(|error| format!("覆盖本地文件失败：{error}"))?;
     }
-
     std_fs::rename(partial_path, local_path).map_err(|error| format!("保存本地文件失败：{error}"))
 }
 
@@ -1413,7 +1254,6 @@ fn create_empty_local_download(local_path: &Path) -> Result<(), String> {
         }
         std_fs::remove_file(local_path).map_err(|error| format!("覆盖本地文件失败：{error}"))?;
     }
-
     let local_file =
         std_fs::File::create(local_path).map_err(|error| format!("创建本地文件失败：{error}"))?;
     local_file
@@ -1429,7 +1269,6 @@ fn finalize_remote_upload(
     if sftp.stat(Path::new(remote_path)).is_ok() {
         return Err("远端目标文件已存在，已取消提交临时上传文件。".into());
     }
-
     sftp.rename(
         Path::new(partial_remote_path),
         Path::new(remote_path),
@@ -1456,7 +1295,6 @@ fn parse_remote_directory_entries(
             if chunk.len() != 3 {
                 return None;
             }
-
             let kind = String::from_utf8_lossy(chunk[0]).to_string();
             let size = String::from_utf8_lossy(chunk[1])
                 .parse::<u64>()
@@ -1471,7 +1309,6 @@ fn parse_remote_directory_entries(
             })
         })
         .collect::<Vec<_>>();
-
     entries.sort_by(|left, right| {
         (left.kind.as_str() != "directory", left.name.to_lowercase()).cmp(&(
             right.kind.as_str() != "directory",
@@ -1489,7 +1326,6 @@ fn join_remote_path(base: &str, name: &str) -> String {
     if normalized_base == "/" {
         return format!("/{name}");
     }
-
     format!("{}/{}", normalized_base.trim_end_matches('/'), name)
 }
 
@@ -1499,7 +1335,6 @@ fn parent_remote_path(path: &str) -> String {
     if trimmed == "." || trimmed == "/" {
         return ".".into();
     }
-
     match trimmed.rsplit_once('/') {
         Some(("", _)) => "/".into(),
         Some((parent, _)) if !parent.is_empty() => parent.into(),
@@ -1518,36 +1353,11 @@ fn is_safe_file_name(name: &str) -> bool {
         && !name.contains('\r')
 }
 
-fn format_ssh_directory_error(stderr: &str) -> String {
-    if stderr.trim().is_empty() {
-        return "读取远端目录失败。".into();
-    }
-
-    format!("读取远端目录失败：{}", stderr.trim())
-}
-
-fn format_ssh_download_error(stderr: &str) -> String {
-    if stderr.trim().is_empty() {
-        return "下载远端文件失败。".into();
-    }
-
-    format!("下载远端文件失败：{}", stderr.trim())
-}
-
-fn format_ssh_upload_error(stderr: &str) -> String {
-    if stderr.trim().is_empty() {
-        return "上传本地文件失败。".into();
-    }
-
-    format!("上传本地文件失败：{}", stderr.trim())
-}
-
 fn expand_local_path(path: &str) -> PathBuf {
     let trimmed = path.trim();
     if trimmed == "~" {
         return home_dir().unwrap_or_else(|| PathBuf::from(trimmed));
     }
-
     if let Some(stripped) = trimmed
         .strip_prefix("~/")
         .or_else(|| trimmed.strip_prefix("~\\"))
@@ -1556,7 +1366,6 @@ fn expand_local_path(path: &str) -> PathBuf {
             return home.join(stripped);
         }
     }
-
     PathBuf::from(trimmed)
 }
 
@@ -1620,7 +1429,6 @@ fn parse_ssh_config_hosts(content: &str) -> Vec<SshConfigHostPayload> {
             if let Some(draft) = current.take() {
                 hosts.extend(draft.into_payloads());
             }
-
             let aliases = value
                 .split_whitespace()
                 .map(str::to_string)
@@ -1652,7 +1460,6 @@ fn parse_ssh_config_hosts(content: &str) -> Vec<SshConfigHostPayload> {
     if let Some(draft) = current {
         hosts.extend(draft.into_payloads());
     }
-
     hosts
 }
 
@@ -1661,18 +1468,15 @@ fn parse_ssh_config_line(line: &str) -> Option<(&str, &str)> {
     if trimmed.is_empty() || trimmed.starts_with('#') {
         return None;
     }
-
     let without_comment = strip_ssh_config_comment(trimmed).trim();
     if without_comment.is_empty() {
         return None;
     }
-
     let (keyword, value) = split_ssh_config_keyword(without_comment)?;
     let normalized_value = unquote_ssh_config_value(value.trim());
     if keyword.trim().is_empty() || normalized_value.is_empty() {
         return None;
     }
-
     Some((keyword.trim(), normalized_value))
 }
 
@@ -1680,7 +1484,6 @@ fn split_ssh_config_keyword(line: &str) -> Option<(&str, &str)> {
     if let Some((keyword, value)) = line.split_once('=') {
         return Some((keyword, value));
     }
-
     let split_index = line.find(char::is_whitespace)?;
     Some(line.split_at(split_index))
 }
@@ -1705,7 +1508,6 @@ fn strip_ssh_config_comment(line: &str) -> &str {
             return &line[..index];
         }
     }
-
     line
 }
 
@@ -1742,16 +1544,12 @@ mod tests {
 
     #[test]
     fn parse_ssh_config_hosts_keeps_direct_host_when_no_advanced_resolution() {
-        let content = r#"
-Host dev-box
+        let content = r#"Host dev-box
   HostName 192.168.56.10
   User ubuntu
   Port 2202
-  IdentityFile "~/.ssh/dev key"
-"#;
-
+  IdentityFile "~/.ssh/dev key""#;
         let hosts = parse_ssh_config_hosts(content);
-
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0].name, "dev-box");
         assert_eq!(hosts[0].host, "192.168.56.10");
@@ -1762,16 +1560,12 @@ Host dev-box
 
     #[test]
     fn parse_ssh_config_hosts_uses_alias_when_proxy_jump_is_required() {
-        let content = r#"
-Host prod-app
+        let content = r#"Host prod-app
   HostName 10.0.12.31
   User deploy
   ProxyJump bastion
-  IdentityFile "~/.ssh/prod # key" # 本地注释不能截断引号内内容
-"#;
-
+  IdentityFile "~/.ssh/prod # key" # 本地注释不能截断引号内内容"#;
         let hosts = parse_ssh_config_hosts(content);
-
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0].name, "prod-app");
         assert_eq!(hosts[0].host, "prod-app");
@@ -1781,13 +1575,9 @@ Host prod-app
 
     #[test]
     fn parse_ssh_config_hosts_filters_wildcard_aliases() {
-        let content = r#"
-Host * !blocked concrete-host
-  User root
-"#;
-
+        let content = r#"Host * !blocked concrete-host
+  User root"#;
         let hosts = parse_ssh_config_hosts(content);
-
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0].name, "concrete-host");
     }
@@ -1795,9 +1585,7 @@ Host * !blocked concrete-host
     #[test]
     fn parse_remote_directory_entries_keeps_unicode_names_and_directory_first() {
         let stdout = b"file\012\0z.log\0directory\00\0src\0file\03\0\xe4\xbd\xa0\xe5\xa5\xbd.txt\0";
-
         let entries = parse_remote_directory_entries(stdout, "/home/app");
-
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[0].kind, "directory");
         assert_eq!(entries[0].path, "/home/app/src");
@@ -1890,7 +1678,6 @@ Host * !blocked concrete-host
             atime: None,
             mtime: None,
         };
-
         assert_eq!(format_remote_permission(&stat, false), "-rwxr-xr-x");
     }
 }
