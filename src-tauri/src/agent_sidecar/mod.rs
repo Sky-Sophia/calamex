@@ -200,30 +200,26 @@ where
     TRequest: Serialize,
     TResponse: DeserializeOwned,
 {
-    let mut last_error: Option<String> = None;
+    let total_attempts = NARRATOR_CHAT_RETRY_DELAYS_MS.len() + 1;
+    let mut last_retryable_error: Option<String> = None;
 
-    for (attempt_index, retry_delay_ms) in NARRATOR_CHAT_RETRY_DELAYS_MS.iter().enumerate() {
+    for attempt_index in 0..total_attempts {
         match post_json(endpoint, payload).await {
             Ok(response) => return Ok(response),
             Err(error) if is_retryable_narrator_sidecar_error(&error) => {
-                last_error = Some(error);
-                tokio::time::sleep(Duration::from_millis(*retry_delay_ms)).await;
+                last_retryable_error = Some(error);
             }
             Err(error) => return Err(error),
         }
 
-        if attempt_index + 1 == NARRATOR_CHAT_RETRY_DELAYS_MS.len() {
-            break;
+        if let Some(&retry_delay_ms) = NARRATOR_CHAT_RETRY_DELAYS_MS.get(attempt_index) {
+            tokio::time::sleep(Duration::from_millis(retry_delay_ms)).await;
         }
     }
 
-    match post_json(endpoint, payload).await {
-        Ok(response) => Ok(response),
-        Err(error) if is_retryable_narrator_sidecar_error(&error) => {
-            Err(last_error.unwrap_or(error))
-        }
-        Err(error) => Err(error),
-    }
+    Err(last_retryable_error.unwrap_or_else(|| {
+        format!("AGENT_SIDECAR_UNAVAILABLE: Narrator sidecar 重试 {total_attempts} 次后仍未成功。")
+    }))
 }
 
 fn create_sidecar_session_id(prefix: &str) -> String {

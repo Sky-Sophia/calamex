@@ -1139,7 +1139,7 @@ const confirmReplacementPreview = async (): Promise<void> => {
       })),
     });
     const refreshResult = await refreshSidecarChangedDocuments({
-      changedFilePaths: payload.files.map((changedFile) => changedFile.path),
+      changedFilePaths: payload.files.map((changedFile: { path: string }) => changedFile.path),
       hasFileMutations: true,
       workspaceRootPath: payload.rootPath,
     });
@@ -1202,7 +1202,7 @@ const replaceReplacementLine = async (
       ],
     });
     const refreshResult = await refreshSidecarChangedDocuments({
-      changedFilePaths: payload.files.map((changedFile) => changedFile.path),
+      changedFilePaths: payload.files.map((changedFile: { path: string }) => changedFile.path),
       hasFileMutations: true,
       workspaceRootPath: payload.rootPath,
     });

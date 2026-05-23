@@ -4,8 +4,7 @@ import { javascript } from '@codemirror/lang-javascript';
 import { json } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { vue } from '@codemirror/lang-vue';
-import { LanguageDescription, StreamLanguage, type LanguageSupport } from '@codemirror/language';
-import type { Extension } from '@codemirror/state';
+import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { c, cpp, csharp, dart, java, kotlin, scala } from '@codemirror/legacy-modes/mode/clike';
 import { diff } from '@codemirror/legacy-modes/mode/diff';
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
@@ -25,9 +24,11 @@ import { swift } from '@codemirror/legacy-modes/mode/swift';
 import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { xml } from '@codemirror/legacy-modes/mode/xml';
 import { yaml } from '@codemirror/legacy-modes/mode/yaml';
+import type { Extension } from '@codemirror/state';
 
-const streamLanguage = (parser: Parameters<typeof StreamLanguage.define>[0]): Extension =>
-  StreamLanguage.define(parser);
+const streamLanguage = (
+  parser: Parameters<typeof StreamLanguage.define>[0],
+): LanguageSupport => new LanguageSupport(StreamLanguage.define(parser));
 
 const languageDescriptions: readonly LanguageDescription[] = [
   LanguageDescription.of({
@@ -223,4 +224,4 @@ export const resolveCodeMirrorLanguageExtension = (language: string): Extension 
 
 export const isCodeMirrorLanguageSupport = (
   value: Extension,
-): value is LanguageSupport => Boolean(value);
+): value is LanguageSupport => value instanceof LanguageSupport;

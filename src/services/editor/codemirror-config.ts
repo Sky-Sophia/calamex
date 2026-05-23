@@ -1,3 +1,4 @@
+import type { IEditorSettings } from '@/types/settings';
 import { closeBrackets } from '@codemirror/autocomplete';
 import { foldGutter, indentUnit } from '@codemirror/language';
 import { EditorState, type Extension } from '@codemirror/state';
@@ -9,10 +10,10 @@ import {
   lineNumbers,
 } from '@codemirror/view';
 
-import type { IEditorSettings } from '@/types/settings';
-
-export const resolveCodeMirrorIndentUnit = (editorSettings: IEditorSettings): string =>
-  editorSettings.indentation === 'tabs' ? '\t' : ' '.repeat(Math.max(1, editorSettings.tabSize));
+export const resolveCodeMirrorIndentUnit = (editorSettings: IEditorSettings): string => {
+  const tabSize = Math.max(1, editorSettings.tabSize);
+  return editorSettings.indentation === 'tabs' ? '\t' : ' '.repeat(tabSize);
+};
 
 export interface ICodeMirrorSettingsOptions {
   activeLine?: boolean;
@@ -27,21 +28,26 @@ export const buildCodeMirrorSettingsExtensions = (
   editorSettings: IEditorSettings,
   options: ICodeMirrorSettingsOptions = {},
 ): Extension[] => {
+  const tabSize = Math.max(1, editorSettings.tabSize);
   const readOnly = options.readOnly ?? false;
   const editable = options.editable ?? !readOnly;
   const showLineNumbers = options.lineNumbers ?? editorSettings.lineNumbers;
+  const showActiveLine = options.activeLine ?? true;
+  const showFoldGutter = options.foldGutter ?? true;
+  const enableAutoClosingPairs = options.autoClosingPairs ?? editorSettings.autoClosingPairs;
+  const wrapLines = editorSettings.wordWrap === 'viewport';
 
   return [
-    EditorState.tabSize.of(Math.max(1, editorSettings.tabSize)),
+    EditorState.tabSize.of(tabSize),
     indentUnit.of(resolveCodeMirrorIndentUnit(editorSettings)),
-    editorSettings.wordWrap === 'viewport' ? EditorView.lineWrapping : [],
+    wrapLines ? EditorView.lineWrapping : [],
     EditorState.readOnly.of(readOnly),
     EditorView.editable.of(editable),
     drawSelection(),
     showLineNumbers ? lineNumbers() : [],
-    options.activeLine ?? true ? highlightActiveLine() : [],
+    showActiveLine ? highlightActiveLine() : [],
     editorSettings.indentGuides ? highlightActiveLineGutter() : [],
-    options.foldGutter ?? true ? foldGutter() : [],
-    options.autoClosingPairs ?? editorSettings.autoClosingPairs ? closeBrackets() : [],
+    showFoldGutter ? foldGutter() : [],
+    enableAutoClosingPairs ? closeBrackets() : [],
   ];
 };

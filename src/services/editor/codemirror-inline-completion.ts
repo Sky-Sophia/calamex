@@ -1,7 +1,14 @@
 import { aiService } from '@/services/ipc/ai.service';
 import type { IAiInlineCompletionResult } from '@/types/ai';
 import { EditorSelection, StateEffect, StateField } from '@codemirror/state';
-import { Decoration, EditorView, keymap, type DecorationSet, type ViewUpdate } from '@codemirror/view';
+import {
+  Decoration,
+  EditorView,
+  keymap,
+  WidgetType,
+  type DecorationSet,
+  type ViewUpdate,
+} from '@codemirror/view';
 
 const INLINE_COMPLETION_CONTEXT_LIMIT = 8_000;
 const INLINE_COMPLETION_DELAY_MS = 450;
@@ -16,6 +23,27 @@ export interface ICodeMirrorInlineCompletionOptions {
   getLanguage: () => string;
 }
 
+class InlineCompletionGhostWidget extends WidgetType {
+  constructor(readonly text: string) {
+    super();
+  }
+
+  eq(other: InlineCompletionGhostWidget): boolean {
+    return other.text === this.text;
+  }
+
+  toDOM(): HTMLSpanElement {
+    const span = document.createElement('span');
+    span.className = 'cm-ghostText';
+    span.textContent = this.text;
+    return span;
+  }
+
+  ignoreEvent(): boolean {
+    return true;
+  }
+}
+
 const setInlineCompletionGhost = StateEffect.define<IInlineCompletionState | null>();
 
 const inlineCompletionGhostField = StateField.define<DecorationSet>({
@@ -27,29 +55,16 @@ const inlineCompletionGhostField = StateField.define<DecorationSet>({
       if (!effect.is(setInlineCompletionGhost)) {
         continue;
       }
-
-      if (!effect.value || !effect.value.text) {
+      const next = effect.value;
+      if (!next || !next.text) {
         return Decoration.none;
       }
-
       const widget = Decoration.widget({
         side: 1,
-        widget: {
-          toDOM() {
-            const span = document.createElement('span');
-            span.className = 'cm-ghostText';
-            span.textContent = effect.value.text;
-            return span;
-          },
-          ignoreEvent() {
-            return true;
-          },
-        },
+        widget: new InlineCompletionGhostWidget(next.text),
       });
-
-      return Decoration.set([widget.range(effect.value.from)]);
+      return Decoration.set([widget.range(next.from)]);
     }
-
     return value.map(transaction.changes);
   },
   provide: (field) => EditorView.decorations.from(field),
@@ -65,15 +80,12 @@ const inlineCompletionState = StateField.define<IInlineCompletionState | null>({
         return effect.value;
       }
     }
-
     if (transaction.docChanged) {
       return null;
     }
-
     if (!value) {
       return null;
     }
-
     const mappedFrom = transaction.changes.mapPos(value.from);
     return { ...value, from: mappedFrom };
   },
@@ -99,7 +111,6 @@ const acceptInlineCompletion = (view: EditorView): boolean => {
   if (!ghost || !ghost.text.trim() || view.state.selection.main.head !== ghost.from) {
     return false;
   }
-
   view.dispatch({
     changes: { from: ghost.from, insert: ghost.text },
     selection: EditorSelection.cursor(ghost.from + ghost.text.length),
@@ -134,12 +145,10 @@ export const createCodeMirrorInlineCompletionController = (
     if (!view || options.getLanguage() !== 'shell') {
       return;
     }
-
     const config = await aiService.getConfig();
     if (nextRequestId !== requestId || !config.inlineCompletionEnabled) {
       return;
     }
-
     const fullText = view.state.doc.toString();
     const result = await aiService.inlineComplete({
       filePath: options.getFilePath() ?? 'untitled.sh',
@@ -148,12 +157,10 @@ export const createCodeMirrorInlineCompletionController = (
       prefix: clipInlineContext(fullText.slice(0, cursorOffset), INLINE_COMPLETION_CONTEXT_LIMIT),
       suffix: fullText.slice(cursorOffset, cursorOffset + INLINE_COMPLETION_CONTEXT_LIMIT),
     });
-
     const insertText = resolveInlineCompletionInsertText(cursorOffset, result);
     if (nextRequestId !== requestId || !insertText.trim()) {
       return;
     }
-
     viewRef?.dispatch({
       effects: setInlineCompletionGhost.of({ from: cursorOffset, text: insertText }),
     });
@@ -164,11 +171,9 @@ export const createCodeMirrorInlineCompletionController = (
     clearTimer();
     requestId += 1;
     clearGhost();
-
     if (options.getLanguage() !== 'shell') {
       return;
     }
-
     const cursorOffset = view.state.selection.main.head;
     const nextRequestId = requestId;
     timerId = window.setTimeout(() => {

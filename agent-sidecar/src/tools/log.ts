@@ -1,8 +1,9 @@
+import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
+import { dirname } from 'node:path';
+
 import { createTool } from '@mastra/core/tools';
 import { PinoLogger } from '@mastra/loggers';
 import { FileTransport } from '@mastra/loggers/file';
-import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { z } from 'zod';
 
 const LOG_LEVEL_VALUES = ['debug', 'info', 'warn', 'error'] as const;
@@ -55,7 +56,7 @@ const listLogsInputSchema = z
             && Date.parse(value.from_date) > Date.parse(value.to_date)
         ) {
             ctx.addIssue({
-                code: z.ZodIssueCode.custom,
+                code: 'custom',
                 message: 'from_date must be earlier than or equal to to_date.',
                 path: ['from_date'],
             });
@@ -64,14 +65,14 @@ const listLogsInputSchema = z
 
 type TListLogsInput = z.infer<typeof listLogsInputSchema>;
 
-const logEntrySchema = z.object({
+const logEntrySchema = z.looseObject({
     level: z.string(),
     msg: z.string(),
     time: z.string().optional(),
     runId: z.string().optional(),
     destinationPath: z.string().optional(),
     type: z.string().optional(),
-}).passthrough();
+});
 
 const listLogsOutputSchema = z.object({
     logs: z.array(logEntrySchema),
@@ -94,16 +95,18 @@ const toLogEntry = (raw: unknown): TLogEntry => {
             ? source.time.toISOString()
             : source.time,
     };
+
     const parsed = logEntrySchema.safeParse(normalized);
     if (parsed.success) {
         return parsed.data;
     }
+
     // Fallback：保证 level 和 msg 至少存在为 string，passthrough 字段一并带回
-    return {
+    return logEntrySchema.parse({
         ...normalized,
         level: typeof source.level === 'string' ? source.level : String(source.level ?? 'info'),
         msg: typeof source.msg === 'string' ? source.msg : String(source.msg ?? ''),
-    } as TLogEntry;
+    });
 };
 
 export interface IMastraLogToolsRef {
@@ -170,13 +173,17 @@ export const createMastraLogTools = (
         inputSchema: listLogsInputSchema,
         outputSchema: listLogsOutputSchema,
         execute: async (inputData) => {
-            const { run_id, log_level, from_date, to_date, page, per_page } = listLogsInputSchema.parse(inputData) as TListLogsInput;
+            const { run_id, log_level, from_date, to_date, page, per_page }: TListLogsInput =
+                listLogsInputSchema.parse(inputData);
+
             const logger = loggerRef.current;
             if (!logger) {
                 return buildEmptyResult(page, per_page);
             }
+
             const resolvedPage = page ?? DEFAULT_PAGE;
             const resolvedPerPage = per_page ?? DEFAULT_PER_PAGE;
+
             const baseFilters = {
                 ...(log_level ? { logLevel: log_level } : {}),
                 ...(from_date ? { fromDate: new Date(from_date) } : {}),
@@ -184,6 +191,7 @@ export const createMastraLogTools = (
                 page: resolvedPage,
                 perPage: resolvedPerPage,
             };
+
             const result = run_id
                 ? await logger.listLogsByRunId({
                     transportId: LOG_TRANSPORT_ID,
@@ -191,6 +199,7 @@ export const createMastraLogTools = (
                     ...baseFilters,
                 })
                 : await logger.listLogs(LOG_TRANSPORT_ID, baseFilters);
+
             return {
                 logs: result.logs.map(toLogEntry),
                 total: result.total,
