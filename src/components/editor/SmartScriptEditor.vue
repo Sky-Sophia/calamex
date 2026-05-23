@@ -1,5 +1,5 @@
 <template>
-  <ScriptEditor
+  <CodeMirrorScriptEditor
 ref="innerEditorRef" :document-path="documentPath" :document-name="documentName"
     :model-value="modelValue" :theme="theme" :can-run="canRun" :analysis="analysisState" :editor-settings="editorSettings"
     @update:model-value="handleModelValueChange" @cursor-position-change="handleCursorPositionChange"
@@ -9,7 +9,7 @@ ref="innerEditorRef" :document-path="documentPath" :document-name="documentName"
 </template>
 
 <script setup lang="ts">
-import ScriptEditor from '@/components/editor/ScriptEditor.vue';
+import CodeMirrorScriptEditor from '@/components/editor/CodeMirrorScriptEditor.vue';
 import { tauriService } from '@/services/tauri';
 import type { IAiCodeActionRequest } from '@/types/ai';
 import type { TThemeMode } from '@/types/app';

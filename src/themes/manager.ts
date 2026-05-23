@@ -263,7 +263,7 @@ export class ThemeManager {
             writeStoredVariantId(id);
         }
 
-        // 分发事件（Monaco / xterm / 其他消费者订阅）
+        // 分发事件（CodeMirror / xterm / 其他消费者订阅）
         this.#dispatchThemeChanged(id, variant.mode, tokens);
     }
 
@@ -338,12 +338,12 @@ export function createThemeManager(): ThemeManager {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 便捷辅助：从事件中重建 Monaco 主题
+// 便捷辅助：订阅主题变化事件
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 订阅 theme-changed 事件并自动重建 Monaco 主题的辅助函数。
- * 在 monaco.ts 中调用，消除重复事件绑定。
+ * 订阅 theme-changed 事件并自动回调编辑器适配层的辅助函数。
+ * 在编辑器适配层中调用，消除重复事件绑定。
  */
 export function onThemeChanged(
     handler: (detail: IThemeChangedDetail) => void,

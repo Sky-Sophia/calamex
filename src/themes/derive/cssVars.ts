@@ -102,7 +102,7 @@ export function emitCssVars(roles: IRoles, tokens: IComponentTokens): void {
     set('--overlay-border', tokens.overlay.border);
     set('--overlay-separator', tokens.overlay.separator);
 
-    // ── 语法高亮（供非 Monaco 场景引用）────────────────────────────────────
+    // ── 语法高亮（供非编辑器场景引用）────────────────────────────────────
     set('--syntax-comment', tokens.syntax.comment);
     set('--syntax-keyword', tokens.syntax.keyword);
     set('--syntax-string', tokens.syntax.string);

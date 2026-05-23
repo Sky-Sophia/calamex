@@ -1,7 +1,7 @@
 /**
  * T-2.2 特征化测试：workbench façade 快照
  * 目的：拆分前锁定 useWorkbench 对外可观察行为，作为 T-2.6 的安全网。
- * 约束：MUST NOT 依赖真实 Tauri / Monaco / xterm。
+ * 约束：MUST NOT 依赖真实 Tauri / CodeMirror / xterm。
  */
 import { useAppStore } from '@/store/app';
 import { useEditorStore } from '@/store/editor';

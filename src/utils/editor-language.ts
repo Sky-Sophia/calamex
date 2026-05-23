@@ -1,5 +1,5 @@
 /**
- * 根据文件路径或文件名推断 Monaco/Shiki 共用的语言 ID。
+ * 根据文件路径或文件名推断编辑器/Shiki 共用的语言 ID。
  * 仅在确认为 shell 脚本时返回 shell,未知类型统一回退为 plaintext。
  */
 const LANGUAGE_BY_EXTENSION: Readonly<Record<string, string>> = {

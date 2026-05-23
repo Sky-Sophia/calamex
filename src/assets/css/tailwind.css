@@ -14,10 +14,8 @@
   html.is-resizing [class*='shadow-'],
   html.is-resizing .diagnostics-overlay-panel,
   html.is-resizing .dropdown-menu-panel,
-  html.is-resizing .monaco-editor .suggest-widget,
-  html.is-resizing .monaco-editor .suggest-details,
-  html.is-resizing .monaco-editor .find-widget,
-  html.is-resizing .monaco-editor .parameter-hints-widget {
+  html.is-resizing .cm-tooltip,
+  html.is-resizing .cm-panels {
     backdrop-filter: none !important;
     box-shadow: none !important;
   }

@@ -10,7 +10,6 @@
  *  - 断言数量 ≥ 24
  */
 import { buildComponentTokens } from '@/themes/components';
-import { buildMonacoTheme } from '@/themes/derive/monaco';
 import { buildTerminalTheme } from '@/themes/derive/terminal';
 import { dark } from '@/themes/variants/dark';
 import { light } from '@/themes/variants/light';
@@ -85,7 +84,6 @@ const darkTokens = buildComponentTokens(dark);
 const lightTokens = buildComponentTokens(light);
 const darkTerminalTheme = buildTerminalTheme(dark);
 const lightTerminalTheme = buildTerminalTheme(light);
-const lightMonacoTheme = buildMonacoTheme(light, lightTokens, { mode: 'light' });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Group 1: 深色变体 L2 → L3 组件令牌映射
@@ -193,11 +191,6 @@ describe('buildComponentTokens / light', () => {
     it('Git Diff 新增与删除背景使用浅色令牌', () => {
         expect(lightTokens.diff.addedSubtle).toBe('#e7f4e7');
         expect(lightTokens.diff.deletedSubtle).toBe('#fbe6e2');
-        expect(lightMonacoTheme.colors['diffEditor.insertedLineBackground']).toBe('#e7f4e7');
-        expect(lightMonacoTheme.colors['diffEditor.insertedTextBackground']).toBe('#e7f4e7');
-        expect(lightMonacoTheme.colors['diffEditor.removedLineBackground']).toBe('#fbe6e2');
-        expect(lightMonacoTheme.colors['diffEditor.removedTextBackground']).toBe('#fbe6e2');
-        expect(lightMonacoTheme.colors['sash.hoverBorder']).toBe('#f0f2f3');
     });
 });
 

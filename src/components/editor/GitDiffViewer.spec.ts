@@ -6,41 +6,35 @@ import { createDefaultAppSettings } from '@/types/settings';
 import type { IGitDiffPreviewPayload } from '@/types/git';
 import type { IEditorSettings } from '@/types/settings';
 
-const monacoFacadeMock = vi.hoisted(() => {
-  const createDiffEditorOptions: unknown[] = [];
-  const diffEditor = {
-    dispose: vi.fn(),
-    layout: vi.fn(),
-    setModel: vi.fn(),
-    updateOptions: vi.fn(),
+const mergeViewMock = vi.hoisted(() => {
+  const configs: unknown[] = [];
+  const view = {
+    a: { requestMeasure: vi.fn() },
+    b: { requestMeasure: vi.fn() },
+    destroy: vi.fn(),
   };
 
   return {
-    applyMonacoTheme: vi.fn(),
-    createDiffEditor: vi.fn((_host: HTMLElement, options: unknown) => {
-      createDiffEditorOptions.push(options);
-      return diffEditor;
-    }),
-    createDiffEditorOptions,
-    createModel: vi.fn((content: string, language: string) => ({
-      content,
-      dispose: vi.fn(),
-      language,
-    })),
-    diffEditor,
-    resolveLanguageForPath: vi.fn(() => 'c'),
+    configs,
+    destroy: view.destroy,
+    requestMeasureA: view.a.requestMeasure,
+    requestMeasureB: view.b.requestMeasure,
   };
 });
 
-vi.mock('@/utils/monaco', () => ({
-  applyMonacoTheme: monacoFacadeMock.applyMonacoTheme,
-  monaco: {
-    editor: {
-      createDiffEditor: monacoFacadeMock.createDiffEditor,
-      createModel: monacoFacadeMock.createModel,
-    },
+vi.mock('@codemirror/merge', () => ({
+  MergeView: class {
+    a = { requestMeasure: mergeViewMock.requestMeasureA };
+    b = { requestMeasure: mergeViewMock.requestMeasureB };
+
+    constructor(config: unknown) {
+      mergeViewMock.configs.push(config);
+    }
+
+    destroy() {
+      mergeViewMock.destroy();
+    }
   },
-  resolveLanguageForPath: monacoFacadeMock.resolveLanguageForPath,
 }));
 
 class ResizeObserverMock {
@@ -66,20 +60,23 @@ const createEditorSettings = (): IEditorSettings => createDefaultAppSettings().e
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const getFirstDiffEditorOptions = (): Record<string, unknown> => {
-  const options = monacoFacadeMock.createDiffEditorOptions[0];
-  if (!isRecord(options)) {
-    throw new Error('DiffEditor options 未被创建');
+const getFirstMergeViewConfig = (): Record<string, unknown> => {
+  const config = mergeViewMock.configs[0];
+  if (!isRecord(config)) {
+    throw new Error('MergeView config 未被创建');
   }
-  return options;
+  return config;
 };
 
 describe('GitDiffViewer', () => {
   beforeEach(() => {
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
-    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    }));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
-    monacoFacadeMock.createDiffEditorOptions.splice(0);
+    mergeViewMock.configs.splice(0);
   });
 
   afterEach(() => {
@@ -87,7 +84,7 @@ describe('GitDiffViewer', () => {
     vi.clearAllMocks();
   });
 
-  it('Git Diff 超长行按视口自动换行，行号仍按模型行渲染', async () => {
+  it('Git Diff 使用 CodeMirror MergeView 并保留只读双栏与折叠未变更配置', async () => {
     const wrapper = mount(GitDiffViewer, {
       props: {
         editorSettings: createEditorSettings(),
@@ -98,12 +95,15 @@ describe('GitDiffViewer', () => {
 
     await flushPromises();
 
-    const options = getFirstDiffEditorOptions();
-    expect(options.diffWordWrap).toBe('on');
-    expect(options.wordWrap).toBe('on');
-    expect(options.wrappingIndent).toBe('same');
-    expect(options.lineNumbers).toBe('on');
+    const config = getFirstMergeViewConfig();
+    expect(mergeViewMock.configs).toHaveLength(1);
+    expect(config.gutter).toBe(true);
+    expect(config.highlightChanges).toBe(true);
+    expect(config.revertControls).toBeUndefined();
+    expect(config.collapseUnchanged).toEqual({ margin: 3, minSize: 8 });
+    expect(config.diffConfig).toEqual({ scanLimit: 1_000, timeout: 500 });
 
     wrapper.unmount();
+    expect(mergeViewMock.destroy).toHaveBeenCalled();
   });
 });

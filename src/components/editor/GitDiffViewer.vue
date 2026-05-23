@@ -10,16 +10,17 @@
 </template>
 
 <script setup lang="ts">
+import { buildCodeMirrorSettingsExtensions } from '@/services/editor/codemirror-config';
+import { resolveCodeMirrorLanguageExtension } from '@/services/editor/codemirror-language';
 import type { TThemeMode } from '@/types/app';
 import type { IGitDiffPreviewPayload } from '@/types/git';
 import type { IEditorSettings } from '@/types/settings';
-import { applyShikiTheme, ensureShikiLanguageLoaded } from '@/services/editor/monaco-shiki';
-import { applyMonacoTheme, monaco, resolveLanguageForPath } from '@/utils/monaco';
+import { resolveLanguageForPath } from '@/utils/editor-language';
+import { MergeView } from '@codemirror/merge';
+import type { Extension } from '@codemirror/state';
+import { EditorView, highlightSpecialChars } from '@codemirror/view';
+import { githubLight } from '@fsegurai/codemirror-theme-github-light';
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-
-const DEFAULT_DIFF_EDITOR_FONT_FAMILY =
-  "Berkeley Mono, JetBrains Mono, Consolas, 'Courier New', monospace";
-
 
 const props = defineProps<{
   preview: IGitDiffPreviewPayload;
@@ -29,136 +30,88 @@ const props = defineProps<{
 
 const diffHostRef = ref<HTMLElement | null>(null);
 
-let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
-let originalModel: monaco.editor.ITextModel | null = null;
-let modifiedModel: monaco.editor.ITextModel | null = null;
+let mergeView: MergeView | null = null;
 let resizeObserver: ResizeObserver | null = null;
 let layoutFrameId: number | null = null;
-let pendingLayoutRetryId: number | null = null;
 
-const resolveEditorFontFamily = (fontFamily: string): string => {
-  const normalizedFontFamily = fontFamily.trim();
-  return normalizedFontFamily.length > 0
-    ? `${normalizedFontFamily}, ${DEFAULT_DIFF_EDITOR_FONT_FAMILY}`
-    : DEFAULT_DIFF_EDITOR_FONT_FAMILY;
+const buildDiffEditorExtensions = (language: string): Extension[] => [
+  highlightSpecialChars(),
+  githubLight,
+  resolveCodeMirrorLanguageExtension(language),
+  buildCodeMirrorSettingsExtensions(props.editorSettings, {
+    activeLine: false,
+    autoClosingPairs: false,
+    editable: false,
+    foldGutter: false,
+    readOnly: true,
+  }),
+  EditorView.contentAttributes.of({ 'aria-readonly': 'true' }),
+];
+
+const buildMergeView = (host: HTMLElement): MergeView => {
+  const language = resolveLanguageForPath(props.preview.relativePath);
+  const extensions = buildDiffEditorExtensions(language);
+
+  return new MergeView({
+    a: {
+      doc: props.preview.originalContent,
+      extensions,
+    },
+    b: {
+      doc: props.preview.modifiedContent,
+      extensions,
+    },
+    collapseUnchanged: {
+      margin: 3,
+      minSize: 8,
+    },
+    diffConfig: {
+      scanLimit: 1_000,
+      timeout: 500,
+    },
+    gutter: true,
+    highlightChanges: true,
+    parent: host,
+    revertControls: undefined,
+  });
 };
-
-const resolveLineHeight = (
-  fontSize: number,
-  lineHeight: IEditorSettings['lineHeight'],
-): number => Math.max(fontSize + 4, Math.round(fontSize * Number(lineHeight)));
-
-const resolveLineNumbers = (enabled: boolean): 'off' | 'on' => (enabled ? 'on' : 'off');
-
-const resolveRuntimeOptions = (): monaco.editor.IDiffEditorConstructionOptions => ({
-  automaticLayout: false,
-  contextmenu: false,
-  diffWordWrap: 'on',
-  enableSplitViewResizing: true,
-  fixedOverflowWidgets: true,
-  fontFamily: resolveEditorFontFamily(props.editorSettings.fontFamily),
-  fontLigatures: props.editorSettings.fontLigatures,
-  fontSize: props.editorSettings.fontSize,
-  lineDecorationsWidth: 16,
-  lineHeight: resolveLineHeight(props.editorSettings.fontSize, props.editorSettings.lineHeight),
-  lineNumbers: resolveLineNumbers(props.editorSettings.lineNumbers),
-  lineNumbersMinChars: 3,
-  minimap: { enabled: props.editorSettings.minimap },
-  originalEditable: false,
-  renderOverviewRuler: false,
-  'semanticHighlighting.enabled': false,
-  overviewRulerBorder: false,
-  padding: {
-    top: 0,
-    bottom: 0,
-  },
-  readOnly: true,
-  renderSideBySide: true,
-  roundedSelection: false,
-  scrollBeyondLastLine: false,
-  scrollbar: {
-    verticalScrollbarSize: 6,
-    horizontalScrollbarSize: 6,
-    useShadows: false,
-  },
-  useInlineViewWhenSpaceIsLimited: false,
-  useShadowDOM: false,
-  wordWrap: 'on',
-  wrappingIndent: 'same',
-});
 
 const layoutDiffEditor = (): boolean => {
   const host = diffHostRef.value;
-  if (!host || !diffEditor) {
+  if (!host || !mergeView) {
     return false;
   }
 
-  const width = Math.floor(host.clientWidth);
-  const height = Math.floor(host.clientHeight);
-  if (width <= 0 || height <= 0) {
+  if (host.clientWidth <= 0 || host.clientHeight <= 0) {
     return false;
   }
 
-  diffEditor.layout({ width, height });
+  mergeView.a.requestMeasure();
+  mergeView.b.requestMeasure();
   return true;
 };
 
-const clearLayoutRetry = (): void => {
-  if (pendingLayoutRetryId !== null) {
-    window.clearTimeout(pendingLayoutRetryId);
-    pendingLayoutRetryId = null;
-  }
-};
-
-const scheduleLayout = (retryWhenEmpty = true): void => {
+const scheduleLayout = (): void => {
   if (layoutFrameId !== null) {
     window.cancelAnimationFrame(layoutFrameId);
   }
 
   layoutFrameId = window.requestAnimationFrame(() => {
     layoutFrameId = null;
-    clearLayoutRetry();
-    const didLayout = layoutDiffEditor();
-    if (!didLayout && retryWhenEmpty) {
-      pendingLayoutRetryId = window.setTimeout(() => {
-        pendingLayoutRetryId = null;
-        scheduleLayout(false);
-      }, 32);
-    }
+    layoutDiffEditor();
   });
 };
 
-const disposeModels = (): void => {
-  originalModel?.dispose();
-  modifiedModel?.dispose();
-  originalModel = null;
-  modifiedModel = null;
-};
-
-const syncModels = async (
-  targetDiffEditor: monaco.editor.IStandaloneDiffEditor,
-): Promise<void> => {
-  if (props.preview.isEmpty) {
-    return;
+const disposeDiffEditor = (): void => {
+  if (layoutFrameId !== null) {
+    window.cancelAnimationFrame(layoutFrameId);
+    layoutFrameId = null;
   }
 
-  disposeModels();
-  const language = resolveLanguageForPath(props.preview.relativePath);
-  await ensureShikiLanguageLoaded(language).catch((error) => {
-    console.error('Shiki 语法加载失败', error);
-  });
-
-  if (diffEditor !== targetDiffEditor) {
-    return;
-  }
-
-  originalModel = monaco.editor.createModel(props.preview.originalContent, language);
-  modifiedModel = monaco.editor.createModel(props.preview.modifiedContent, language);
-  targetDiffEditor.setModel({
-    original: originalModel,
-    modified: modifiedModel,
-  });
-  scheduleLayout();
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  mergeView?.destroy();
+  mergeView = null;
 };
 
 const mountDiffEditor = async (): Promise<void> => {
@@ -167,30 +120,20 @@ const mountDiffEditor = async (): Promise<void> => {
     return;
   }
 
-  applyMonacoTheme(props.theme);
-  applyShikiTheme();
-  diffEditor = monaco.editor.createDiffEditor(host, resolveRuntimeOptions());
-  await syncModels(diffEditor);
+  mergeView = buildMergeView(host);
   await nextTick();
   scheduleLayout();
-  window.requestAnimationFrame(() => scheduleLayout());
 
-  resizeObserver = new ResizeObserver(() => scheduleLayout());
-  resizeObserver.observe(host);
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(() => scheduleLayout());
+    resizeObserver.observe(host);
+  }
 };
 
-const disposeDiffEditor = (): void => {
-  if (layoutFrameId !== null) {
-    window.cancelAnimationFrame(layoutFrameId);
-    layoutFrameId = null;
-  }
-  clearLayoutRetry();
-
-  resizeObserver?.disconnect();
-  resizeObserver = null;
-  diffEditor?.dispose();
-  diffEditor = null;
-  disposeModels();
+const remountDiffEditor = async (): Promise<void> => {
+  disposeDiffEditor();
+  await nextTick();
+  await mountDiffEditor();
 };
 
 onMounted(() => {
@@ -207,28 +150,11 @@ watch(
     props.preview.originalContent,
     props.preview.modifiedContent,
     props.preview.isEmpty,
+    props.theme,
+    props.editorSettings,
   ],
-  async () => {
-    disposeDiffEditor();
-    await nextTick();
-    await mountDiffEditor();
-  },
-);
-
-watch(
-  () => props.theme,
   () => {
-    applyMonacoTheme(props.theme);
-    applyShikiTheme();
-    scheduleLayout();
-  },
-);
-
-watch(
-  () => props.editorSettings,
-  () => {
-    diffEditor?.updateOptions(resolveRuntimeOptions());
-    scheduleLayout();
+    void remountDiffEditor();
   },
   { deep: true },
 );
@@ -245,18 +171,27 @@ watch(
 }
 
 .git-diff-viewer-surface {
-  --vscode-sash-hover-size: var(--diff-resize-handle-width);
-
   min-height: 0;
   height: 100%;
   flex: 1 1 auto;
   overflow: hidden;
 }
 
-.git-diff-viewer-surface :global(.monaco-diff-editor) {
+.git-diff-viewer-surface :deep(.cm-mergeView) {
   width: 100%;
   height: 100%;
+  min-height: 0;
+  overflow: auto;
   outline: none;
+}
+
+.git-diff-viewer-surface :deep(.cm-mergeViewEditors) {
+  height: 100%;
+  min-height: 0;
+}
+
+.git-diff-viewer-surface :deep(.cm-mergeViewEditor) {
+  min-width: 0;
 }
 
 .git-diff-viewer-empty {

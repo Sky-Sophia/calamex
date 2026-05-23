@@ -1,5 +1,5 @@
 import { SHIKI_THEME } from '@/constants/editor/shiki';
-import { ensureMonacoShikiReady, ensureShikiLanguageLoaded, getShikiHighlighter } from '@/services/editor/monaco-shiki';
+import { ensureShikiLanguageLoaded, ensureShikiReady, getShikiHighlighter } from '@/services/editor/shiki';
 import type { BundledLanguage, ThemedToken } from 'shiki';
 
 export interface ITokenizedCode {
@@ -63,9 +63,9 @@ export const highlightCode = (
 
   void ensureShikiLanguageLoaded(language)
     .then(async (languageToUse) => {
-      await ensureMonacoShikiReady();
+      await ensureShikiReady();
       const highlighter = getShikiHighlighter();
-      if (!highlighter) {
+      if (!highlighter || !languageToUse) {
         return;
       }
 

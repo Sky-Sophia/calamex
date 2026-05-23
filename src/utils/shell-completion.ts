@@ -9,7 +9,8 @@ import type {
     IShellCommandValueSuggestionSpec,
     IShellCompletionEntry,
 } from '@/types/shell-completion';
-import type * as MonacoEditor from 'monaco-editor';
+import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
+import { snippet } from '@codemirror/autocomplete';
 import bashLanguageWasmUrl from 'tree-sitter-bash/tree-sitter-bash.wasm?url';
 import {
     Language,
@@ -20,7 +21,6 @@ import {
 } from 'web-tree-sitter';
 import treeSitterWasmUrl from 'web-tree-sitter/web-tree-sitter.wasm?url';
 
-const SHELL_LANGUAGE_ID = 'shell';
 const MAX_SUGGESTIONS = 80;
 
 const textEncoder = new TextEncoder();
@@ -84,7 +84,6 @@ interface ICommandCatalogContext {
 }
 
 let runtimePromise: Promise<Language> | null = null;
-let providerRegistered = false;
 let commandCatalogRootEntriesPromise: Promise<IShellCompletionEntry[]> | null = null;
 let lastProviderErrorMessage: string | null = null;
 
@@ -957,15 +956,6 @@ const buildCompletionEntries = async (
     return dedupeEntries(entries).slice(0, MAX_SUGGESTIONS);
 };
 
-const resolveReplaceRange = (
-    monaco: typeof MonacoEditor,
-    position: MonacoEditor.Position,
-    prefixLength: number,
-): MonacoEditor.IRange => {
-    const startColumn = Math.max(1, position.column - prefixLength);
-    return new monaco.Range(position.lineNumber, startColumn, position.lineNumber, position.column);
-};
-
 const resolveInsertText = (
     entry: IShellCompletionEntry,
     context: ICompletionContext,
@@ -979,109 +969,100 @@ const resolveInsertText = (
     return context.lineSuffix.startsWith('}') ? entry.label : `${entry.label}}`;
 };
 
-const resolveCompletionKind = (
-    monaco: typeof MonacoEditor,
-    kind: IShellCompletionEntry['kind'],
-): MonacoEditor.languages.CompletionItemKind => {
+const resolveCodeMirrorCompletionType = (kind: IShellCompletionEntry['kind']): Completion['type'] => {
     switch (kind) {
         case 'keyword':
-            return monaco.languages.CompletionItemKind.Keyword;
+            return 'keyword';
         case 'command':
-            return monaco.languages.CompletionItemKind.Function;
+            return 'function';
         case 'flag':
-            return monaco.languages.CompletionItemKind.Property;
+            return 'property';
         case 'value':
-            return monaco.languages.CompletionItemKind.Value;
+            return 'constant';
         case 'variable':
-            return monaco.languages.CompletionItemKind.Variable;
+            return 'variable';
         case 'snippet':
-            return monaco.languages.CompletionItemKind.Snippet;
+            return 'text';
         default:
-            return monaco.languages.CompletionItemKind.Operator;
+            return 'operator';
     }
 };
 
-const toMonacoSuggestions = (
-    monaco: typeof MonacoEditor,
-    position: MonacoEditor.Position,
+const toCodeMirrorCompletion = (
+    entry: IShellCompletionEntry,
     context: ICompletionContext,
-    entries: IShellCompletionEntry[],
-): MonacoEditor.languages.CompletionItem[] => {
-    const prefixLength = context.variableContext
-        ? context.variableContext.partial.length
-        : context.optionPrefix
-            ? context.optionPrefix.length
-            : context.wordPrefix.length;
-    const range = resolveReplaceRange(monaco, position, prefixLength);
-    return entries.map((entry) => ({
+): Completion => {
+    const insertText = resolveInsertText(entry, context);
+    const completion: Completion = {
         label: entry.label,
         detail: entry.detail,
-        documentation: entry.documentation,
-        filterText: entry.aliases && entry.aliases.length > 0
-            ? `${entry.label} ${entry.aliases.join(' ')}`
-            : entry.label,
-        kind: resolveCompletionKind(monaco, entry.kind),
-        insertText: resolveInsertText(entry, context),
-        insertTextRules: entry.insertAsSnippet
-            ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-            : undefined,
-        range,
-        sortText: `${String(entry.priority ?? 99).padStart(2, '0')}-${entry.label}`,
-    }));
+        info: entry.documentation,
+        type: resolveCodeMirrorCompletionType(entry.kind),
+        boost: -1 * (entry.priority ?? 99),
+    };
+
+    if (entry.insertAsSnippet) {
+        completion.apply = snippet(insertText);
+        return completion;
+    }
+
+    if (insertText !== entry.label) {
+        completion.apply = insertText;
+    }
+
+    return completion;
 };
 
-export const registerShellCompletionProvider = (monaco: typeof MonacoEditor): void => {
-    if (providerRegistered) {
-        return;
-    }
-    monaco.languages.registerCompletionItemProvider(SHELL_LANGUAGE_ID, {
-        triggerCharacters: ['$', '{', '-', '='],
-        provideCompletionItems: async (model, position, _context, token) => {
-            try {
-                const source = model.getValue();
-                const lineContent = model.getLineContent(position.lineNumber);
-                const linePrefix = lineContent.slice(0, position.column - 1);
-                const lineSuffix = lineContent.slice(position.column - 1);
-                const cursorCharOffset = model.getOffsetAt(position);
-                const cursorByteOffset = getUtf8ByteLength(source.slice(0, cursorCharOffset));
-                const point = {
-                    row: Math.max(0, position.lineNumber - 1),
-                    column: getUtf8ByteLength(linePrefix),
-                };
-                const parsedDocument = await parseShellDocument(source);
-                if (token.isCancellationRequested) {
-                    parsedDocument.tree?.delete();
-                    parsedDocument.parser.delete();
-                    return { suggestions: [] };
-                }
-                try {
-                    if (!parsedDocument.tree) {
-                        return { suggestions: [] };
-                    }
-                    const completionContext = resolveCompletionContext(
-                        parsedDocument.tree,
-                        cursorByteOffset,
-                        linePrefix,
-                        lineSuffix,
-                        point,
-                    );
-                    const entries = await buildCompletionEntries(
-                        parsedDocument.language,
-                        completionContext,
-                    );
-                    lastProviderErrorMessage = null;
-                    return {
-                        suggestions: toMonacoSuggestions(monaco, position, completionContext, entries),
-                    };
-                } finally {
-                    parsedDocument.tree?.delete();
-                    parsedDocument.parser.delete();
-                }
-            } catch (error) {
-                reportShellCompletionProviderError(error);
-                return { suggestions: [] };
+export const createShellCodeMirrorCompletionSource = () => async (
+    completionContext: CompletionContext,
+): Promise<CompletionResult | null> => {
+    try {
+        const source = completionContext.state.doc.toString();
+        const line = completionContext.state.doc.lineAt(completionContext.pos);
+        const linePrefix = source.slice(line.from, completionContext.pos);
+        const lineSuffix = source.slice(completionContext.pos, line.to);
+        const cursorByteOffset = getUtf8ByteLength(source.slice(0, completionContext.pos));
+        const point = {
+            row: Math.max(0, line.number - 1),
+            column: getUtf8ByteLength(linePrefix),
+        };
+        const parsedDocument = await parseShellDocument(source);
+        if (completionContext.aborted) {
+            parsedDocument.tree?.delete();
+            parsedDocument.parser.delete();
+            return null;
+        }
+
+        try {
+            if (!parsedDocument.tree) {
+                return null;
             }
-        },
-    });
-    providerRegistered = true;
+            const shellContext = resolveCompletionContext(
+                parsedDocument.tree,
+                cursorByteOffset,
+                linePrefix,
+                lineSuffix,
+                point,
+            );
+            const entries = await buildCompletionEntries(parsedDocument.language, shellContext);
+            lastProviderErrorMessage = null;
+            const prefixLength = shellContext.variableContext
+                ? shellContext.variableContext.partial.length
+                : shellContext.optionPrefix
+                    ? shellContext.optionPrefix.length
+                    : shellContext.wordPrefix.length;
+            const from = Math.max(0, completionContext.pos - prefixLength);
+            return {
+                from,
+                options: entries.map((entry) => toCodeMirrorCompletion(entry, shellContext)),
+                validFor: /^[A-Za-z0-9_./:${}-]*$/u,
+            };
+        } finally {
+            parsedDocument.tree?.delete();
+            parsedDocument.parser.delete();
+        }
+    } catch (error) {
+        reportShellCompletionProviderError(error);
+        return null;
+    }
 };

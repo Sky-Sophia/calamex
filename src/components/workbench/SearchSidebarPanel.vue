@@ -7,7 +7,7 @@
         </span>
 
         <Input v-model="searchQuery" class="search-panel-input" type="text" aria-label="搜索关键字"
-          :placeholder="useStructural ? '输入 ast-grep Bash 模式…' : '输入关键字搜索…'" autocomplete="off" spellcheck="false" />
+          :placeholder="useStructural ? '输入 ast-grep 模式…' : '输入关键字搜索…'" autocomplete="off" spellcheck="false" />
 
         <button v-if="hasSearchQuery" type="button" class="search-panel-clear-btn" aria-label="清空搜索" title="清空搜索"
           @click.stop="searchQuery = ''">
@@ -21,7 +21,7 @@
         </span>
 
         <Input v-model="replacementQuery" class="search-panel-input" type="text" aria-label="替换内容"
-          :placeholder="useStructural ? '输入 ast-grep 替换模板…' : '输入替换内容…'" autocomplete="off" spellcheck="false"
+          :placeholder="useStructural ? '输入 ast-grep 替换…' : '输入替换内容…'" autocomplete="off" spellcheck="false"
           @keydown.enter="handleReplacementAction" />
 
         <button type="button" class="search-panel-apply-btn" :disabled="!canApplyReplacement" aria-label="全部替换"
@@ -72,13 +72,12 @@
     <div v-if="showPathFilters && !useStructural" class="search-panel-path-filter-row">
       <label class="search-panel-path-filter">
         <span>包含</span>
-        <input v-model="includePattern" type="text" placeholder="例如 src/**/*.vue" autocomplete="off"
-          spellcheck="false" />
+        <input v-model="includePattern" type="text" placeholder="" autocomplete="off" spellcheck="false" />
       </label>
 
       <label class="search-panel-path-filter">
         <span>排除</span>
-        <input v-model="excludePattern" type="text" placeholder="例如 target/**" autocomplete="off" spellcheck="false" />
+        <input v-model="excludePattern" type="text" placeholder="" autocomplete="off" spellcheck="false" />
       </label>
     </div>
 
@@ -236,6 +235,7 @@ import type {
   TWorkspaceSearchScope,
 } from '@/types/search';
 import { toErrorMessage } from '@/utils/error';
+import { computed, onScopeDispose, ref, watch } from 'vue';
 import Braces from '~icons/lucide/braces';
 import CaseSensitive from '~icons/lucide/case-sensitive';
 import Check from '~icons/lucide/check';
@@ -246,7 +246,6 @@ import Replace from '~icons/lucide/replace';
 import Search from '~icons/lucide/search';
 import WholeWord from '~icons/lucide/whole-word';
 import X from '~icons/lucide/x';
-import { computed, onScopeDispose, ref, watch } from 'vue';
 
 type TSearchReason = TWorkspaceSearchResultKind;
 type TSearchToggleOption = 'matchCase' | 'wholeWord' | 'useRegex' | 'showPathFilters';
@@ -357,7 +356,7 @@ const message = useMessage();
 const { refreshSidecarChangedDocuments } = useSidecarChangedDocumentRefresh();
 
 const isWordCharacter = (value: string | undefined): boolean =>
-  Boolean(value) && /[A-Za-z0-9_\-\u4E00-\u9FFF]/u.test(value);
+  typeof value === 'string' && /[A-Za-z0-9_\-\u4E00-\u9FFF]/u.test(value);
 
 const isBoundaryWhitespace = (value: string): boolean => /^\s$/u.test(value);
 
@@ -1140,7 +1139,7 @@ const confirmReplacementPreview = async (): Promise<void> => {
       })),
     });
     const refreshResult = await refreshSidecarChangedDocuments({
-      changedFilePaths: payload.files.map((file) => file.path),
+      changedFilePaths: payload.files.map((changedFile) => changedFile.path),
       hasFileMutations: true,
       workspaceRootPath: payload.rootPath,
     });

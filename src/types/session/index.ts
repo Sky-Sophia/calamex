@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { WORKBENCH_SIDEBAR_VIEWS } from '@/types/app';
 
-/** Monaco 视图态是黑盒结构，这里仅做 JSON object 守卫。 */
-export const MonacoViewStateSchema = z.record(z.string(), z.unknown());
+/** 编辑器视图态是黑盒结构，这里仅做 JSON object 守卫。 */
+export const EditorViewStateSchema = z.record(z.string(), z.unknown());
 export const SessionTabKindSchema = z.enum(['text', 'image']);
 export const SessionWorkbenchSidebarViewSchema = z.enum(WORKBENCH_SIDEBAR_VIEWS);
 
@@ -15,7 +15,7 @@ export const TabStateSchema = z.object({
 
 export const EditorViewStateEntrySchema = z.object({
   path: z.string().min(1),
-  viewState: MonacoViewStateSchema,
+  viewState: EditorViewStateSchema,
   updatedAt: z.string().datetime(),
 });
 
