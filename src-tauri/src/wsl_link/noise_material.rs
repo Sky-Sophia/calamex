@@ -12,10 +12,6 @@ use super::{
     types::now_unix_ms,
 };
 
-#[cfg(not(feature = "wsl-link-agent"))]
-const KEYRING_SERVICE_NAME: &str = "calamex.wsl-link";
-#[cfg(not(feature = "wsl-link-agent"))]
-const DESKTOP_NOISE_ACCOUNT: &str = "noise.desktop.v1";
 const MATERIAL_VERSION: u32 = 1;
 
 #[derive(Debug, Error)]
@@ -95,13 +91,17 @@ impl WslLinkDesktopNoiseMaterial {
 
 impl std::fmt::Debug for WslLinkDesktopNoiseMaterial {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // 改动 4: 公钥指纹比 _len 更有诊断价值
         formatter
             .debug_struct("WslLinkDesktopNoiseMaterial")
             .field(
-                "desktop_static_public_len",
-                &self.desktop_static.public().len(),
+                "desktop_static_public",
+                &public_key_fingerprint(self.desktop_static.public()),
             )
-            .field("agent_static_public_len", &self.agent_static_public.len())
+            .field(
+                "agent_static_public",
+                &public_key_fingerprint(&self.agent_static_public),
+            )
             .field("psk", &"<redacted>")
             .field("created_at_unix_ms", &self.created_at_unix_ms)
             .finish()
@@ -142,10 +142,13 @@ impl std::fmt::Debug for WslLinkAgentNoiseMaterial {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("WslLinkAgentNoiseMaterial")
-            .field("agent_static_public_len", &self.agent_static.public().len())
             .field(
-                "desktop_static_public_len",
-                &self.desktop_static_public.len(),
+                "agent_static_public",
+                &public_key_fingerprint(self.agent_static.public()),
+            )
+            .field(
+                "desktop_static_public",
+                &public_key_fingerprint(&self.desktop_static_public),
             )
             .field("psk", &"<redacted>")
             .field("created_at_unix_ms", &self.created_at_unix_ms)
@@ -163,52 +166,74 @@ pub trait WslLinkNoiseMaterialStore {
     fn load_desktop_material(
         &self,
     ) -> Result<Option<WslLinkDesktopNoiseMaterial>, WslLinkNoiseMaterialError>;
-
     fn save_desktop_material(
         &self,
         material: &WslLinkDesktopNoiseMaterial,
     ) -> Result<(), WslLinkNoiseMaterialError>;
-
     fn delete_desktop_material(&self) -> Result<(), WslLinkNoiseMaterialError>;
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+// 改动 3: 把分散的 4 处 cfg 收进一个 mod。外部 import 路径不变(pub use 重新导出)。
 #[cfg(not(feature = "wsl-link-agent"))]
-pub struct KeyringWslLinkNoiseMaterialStore;
+mod keyring_store {
+    use super::{
+        decode_desktop_material, encode_desktop_material, WslLinkDesktopNoiseMaterial,
+        WslLinkNoiseMaterialError, WslLinkNoiseMaterialStore,
+    };
 
-#[cfg(not(feature = "wsl-link-agent"))]
-impl WslLinkNoiseMaterialStore for KeyringWslLinkNoiseMaterialStore {
-    fn load_desktop_material(
-        &self,
-    ) -> Result<Option<WslLinkDesktopNoiseMaterial>, WslLinkNoiseMaterialError> {
-        let entry = keyring_entry()?;
-        let encoded = match entry.get_password() {
-            Ok(value) => value,
-            Err(keyring::Error::NoEntry) => return Ok(None),
-            Err(error) => return Err(WslLinkNoiseMaterialError::Keyring(error.to_string())),
-        };
+    const KEYRING_SERVICE_NAME: &str = "calamex.wsl-link";
+    const DESKTOP_NOISE_ACCOUNT: &str = "noise.desktop.v1";
 
-        Ok(Some(decode_desktop_material(&encoded)?))
-    }
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct KeyringWslLinkNoiseMaterialStore;
 
-    fn save_desktop_material(
-        &self,
-        material: &WslLinkDesktopNoiseMaterial,
-    ) -> Result<(), WslLinkNoiseMaterialError> {
-        keyring_entry()?
-            .set_password(&encode_desktop_material(material)?)
-            .map_err(|error| WslLinkNoiseMaterialError::Keyring(error.to_string()))
-    }
-
-    fn delete_desktop_material(&self) -> Result<(), WslLinkNoiseMaterialError> {
-        let entry = keyring_entry()?;
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(error) => Err(WslLinkNoiseMaterialError::Keyring(error.to_string())),
+    impl WslLinkNoiseMaterialStore for KeyringWslLinkNoiseMaterialStore {
+        fn load_desktop_material(
+            &self,
+        ) -> Result<Option<WslLinkDesktopNoiseMaterial>, WslLinkNoiseMaterialError> {
+            let entry = keyring_entry()?;
+            let encoded = match entry.get_password() {
+                Ok(value) => value,
+                Err(keyring::Error::NoEntry) => return Ok(None),
+                Err(error) => {
+                    return Err(WslLinkNoiseMaterialError::Keyring(error.to_string()))
+                }
+            };
+            Ok(Some(decode_desktop_material(&encoded)?))
         }
+
+        fn save_desktop_material(
+            &self,
+            material: &WslLinkDesktopNoiseMaterial,
+        ) -> Result<(), WslLinkNoiseMaterialError> {
+            keyring_entry()?
+                .set_password(&encode_desktop_material(material)?)
+                .map_err(|error| WslLinkNoiseMaterialError::Keyring(error.to_string()))
+        }
+
+        fn delete_desktop_material(&self) -> Result<(), WslLinkNoiseMaterialError> {
+            let entry = keyring_entry()?;
+            match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(error) => Err(WslLinkNoiseMaterialError::Keyring(error.to_string())),
+            }
+        }
+    }
+
+    fn keyring_entry() -> Result<keyring::Entry, WslLinkNoiseMaterialError> {
+        keyring::Entry::new(KEYRING_SERVICE_NAME, DESKTOP_NOISE_ACCOUNT)
+            .map_err(|error| WslLinkNoiseMaterialError::Keyring(error.to_string()))
     }
 }
 
+#[cfg(not(feature = "wsl-link-agent"))]
+pub use keyring_store::KeyringWslLinkNoiseMaterialStore;
+
+// 改动 1: 重排序消除两次不必要的 clone。
+//   - desktop_static 原本 .clone() 一次进 desktop material,然后 .public() 取 bytes 进 agent material;
+//     现在先取 public bytes 到栈,再把 desktop_static *move* 进 desktop material。
+//   - psk 同理,最后一次使用 move 而非 clone。
+//   私钥与 PSK 在内存中的拷贝数 -2,归零失败的攻击面相应减少。
 pub fn generate_pairing_material() -> Result<WslLinkNoisePairingMaterial, WslLinkNoiseMaterialError>
 {
     let desktop_static = generate_static_keypair()?;
@@ -216,16 +241,19 @@ pub fn generate_pairing_material() -> Result<WslLinkNoisePairingMaterial, WslLin
     let psk = generate_psk()?;
     let created_at_unix_ms = now_unix_ms();
 
+    let desktop_static_public = *desktop_static.public();
+    let agent_static_public = *agent_static.public();
+
     Ok(WslLinkNoisePairingMaterial {
         desktop: WslLinkDesktopNoiseMaterial::new(
-            desktop_static.clone(),
-            *agent_static.public(),
+            desktop_static,
+            agent_static_public,
             psk.clone(),
             created_at_unix_ms,
         ),
         agent: WslLinkAgentNoiseMaterial {
             agent_static,
-            desktop_static_public: *desktop_static.public(),
+            desktop_static_public,
             psk,
             created_at_unix_ms,
         },
@@ -260,7 +288,6 @@ pub fn decode_agent_material(
             serialized.version,
         ));
     }
-
     Ok(WslLinkAgentNoiseMaterial {
         agent_static: WslLinkNoiseKeypair::from_parts(
             decode_key("agent_static_public", &serialized.agent_static_public)?,
@@ -285,24 +312,16 @@ pub fn load_agent_material_from_file(
 #[cfg(unix)]
 fn validate_agent_config_permissions(path: &Path) -> Result<(), WslLinkNoiseMaterialError> {
     use std::os::unix::fs::PermissionsExt;
-
     let mode = std::fs::metadata(path)?.permissions().mode() & 0o777;
     if mode & 0o077 != 0 {
         return Err(WslLinkNoiseMaterialError::InsecureAgentConfigMode { mode });
     }
-
     Ok(())
 }
 
 #[cfg(not(unix))]
 fn validate_agent_config_permissions(_path: &Path) -> Result<(), WslLinkNoiseMaterialError> {
     Ok(())
-}
-
-#[cfg(not(feature = "wsl-link-agent"))]
-fn keyring_entry() -> Result<keyring::Entry, WslLinkNoiseMaterialError> {
-    keyring::Entry::new(KEYRING_SERVICE_NAME, DESKTOP_NOISE_ACCOUNT)
-        .map_err(|error| WslLinkNoiseMaterialError::Keyring(error.to_string()))
 }
 
 fn encode_desktop_material(
@@ -327,7 +346,6 @@ fn decode_desktop_material(
             serialized.version,
         ));
     }
-
     Ok(WslLinkDesktopNoiseMaterial::new(
         WslLinkNoiseKeypair::from_parts(
             decode_key("desktop_static_public", &serialized.desktop_static_public)?,
@@ -354,7 +372,6 @@ fn decode_key(
                 field,
                 message: error.to_string(),
             })?;
-
     decoded.try_into().map_err(
         |bytes: Vec<u8>| WslLinkNoiseMaterialError::InvalidKeyLength {
             field,
@@ -362,6 +379,13 @@ fn decode_key(
             actual: bytes.len(),
         },
     )
+}
+
+// 改动 4: 公钥指纹 —— 取 base64 前 12 字符,~72 bits 熵足够识别同一对密钥
+fn public_key_fingerprint(key: &[u8; WSL_LINK_NOISE_KEY_BYTES]) -> String {
+    let encoded = STANDARD.encode(key);
+    // 32 字节 base64 = 44 字符,索引 [..12] 永远安全
+    format!("{}…", &encoded[..12])
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -451,7 +475,6 @@ mod tests {
         let plaintext = agent
             .decrypt_frame(&ciphertext)
             .expect("agent should decrypt");
-
         assert_eq!(plaintext, b"hello-agent");
         assert_eq!(
             material.desktop.agent_static_public(),
@@ -470,7 +493,6 @@ mod tests {
             encode_desktop_material(&material.desktop).expect("material should serialize");
         let decoded = decode_desktop_material(&encoded).expect("material should deserialize");
         let json: Value = serde_json::from_str(&encoded).expect("encoded material should be JSON");
-
         assert_eq!(decoded, material.desktop);
         assert!(json.get("agentStaticPrivate").is_none());
         assert!(json.get("psk").is_some());
@@ -482,7 +504,6 @@ mod tests {
         let encoded = encode_agent_material(&material.agent).expect("material should serialize");
         let decoded = decode_agent_material(&encoded).expect("material should deserialize");
         let json: Value = serde_json::from_str(&encoded).expect("encoded material should be JSON");
-
         assert_eq!(decoded, material.agent);
         assert!(json.get("desktopStaticPrivate").is_none());
         assert!(json.get("agentStaticPrivate").is_some());
@@ -498,11 +519,19 @@ mod tests {
             std::process::id(),
             now_unix_ms()
         ));
-
         fs::write(&path, encoded).expect("test config should write");
+
+        // 改动 2: Unix 默认 umask 通常是 022,导致文件落地为 0644,
+        // validate_agent_config_permissions 会拒绝。这里显式 chmod 0600。
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                .expect("test should set 0600");
+        }
+
         let loaded = load_agent_material_from_file(&path).expect("agent material should load");
         let _ = fs::remove_file(path);
-
         assert_eq!(loaded, material.agent);
     }
 
@@ -510,7 +539,6 @@ mod tests {
     fn desktop_material_store_roundtrips_and_deletes() {
         let store = MemoryNoiseMaterialStore::default();
         let material = generate_pairing_material().expect("pairing material should generate");
-
         store
             .save_desktop_material(&material.desktop)
             .expect("save should work");
@@ -519,7 +547,6 @@ mod tests {
             .expect("load should work")
             .expect("material should exist");
         store.delete_desktop_material().expect("delete should work");
-
         assert_eq!(loaded, material.desktop);
         assert!(store.load_desktop_material().unwrap().is_none());
     }
@@ -534,9 +561,7 @@ mod tests {
             "psk": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
             "createdAtUnixMs": 1
         }"#;
-
         let result = decode_desktop_material(payload);
-
         assert!(matches!(
             result,
             Err(WslLinkNoiseMaterialError::UnsupportedVersion(99))

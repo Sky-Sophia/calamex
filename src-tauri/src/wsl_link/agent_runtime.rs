@@ -36,6 +36,7 @@ where
 {
     let mut noise_config_path = normalize_path_value(env_noise_config_path)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_AGENT_NOISE_CONFIG_PATH));
+
     let mut args = args.into_iter().map(Into::into);
     let _program = args.next();
 
@@ -46,7 +47,11 @@ where
                 let value = args
                     .next()
                     .ok_or(WslLinkAgentStartupError::MissingValue("--noise-config"))?;
-                noise_config_path = normalize_required_path_value(value)?;
+                // 改动 1: 防止 `--noise-config --help` 把另一个 flag 当 path 吞掉
+                if value.starts_with("--") || value == "-h" {
+                    return Err(WslLinkAgentStartupError::MissingValue("--noise-config"));
+                }
+                noise_config_path = normalize_required_path_value(&value)?;
             }
             _ => return Err(WslLinkAgentStartupError::UnknownArgument(arg)),
         }
@@ -57,21 +62,31 @@ where
     }))
 }
 
+// 改动 3: raw string,消除续行反斜杠
 pub fn agent_help_text() -> &'static str {
-    "用法：wsl-link-agent [--noise-config <path>]\n\n\
-     --noise-config <path>  指定 Noise agent 配置 JSON，默认读取 /etc/calamex/wsl-link/agent-noise.json。\n\
-     -h, --help             显示帮助。"
+    r#"用法：wsl-link-agent [--noise-config <path>]
+
+    --noise-config <path>  指定 Noise agent 配置 JSON，默认读取 /etc/calamex/wsl-link/agent-noise.json。
+    -h, --help             显示帮助。"#
 }
 
-fn normalize_required_path_value(value: String) -> Result<PathBuf, WslLinkAgentStartupError> {
-    normalize_path_value(Some(value)).ok_or(WslLinkAgentStartupError::EmptyNoiseConfigPath)
+// 改动 2: 直接接 &str,不再包 Option
+fn normalize_required_path_value(value: &str) -> Result<PathBuf, WslLinkAgentStartupError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(WslLinkAgentStartupError::EmptyNoiseConfigPath);
+    }
+    Ok(PathBuf::from(trimmed))
 }
 
 fn normalize_path_value(value: Option<String>) -> Option<PathBuf> {
-    value
-        .map(|item| item.trim().to_string())
-        .filter(|item| !item.is_empty())
-        .map(PathBuf::from)
+    let trimmed = value?;
+    let trimmed = trimmed.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
 }
 
 #[cfg(test)]
@@ -79,18 +94,17 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        resolve_agent_startup_action, WslLinkAgentStartupAction, WslLinkAgentStartupError,
-        DEFAULT_AGENT_NOISE_CONFIG_PATH,
+        resolve_agent_startup_action, WslLinkAgentStartupAction, WslLinkAgentStartupConfig,
+        WslLinkAgentStartupError, DEFAULT_AGENT_NOISE_CONFIG_PATH,
     };
 
     #[test]
     fn startup_uses_default_noise_config_path() {
         let action =
             resolve_agent_startup_action(["wsl-link-agent"], None).expect("args should parse");
-
         assert_eq!(
             action,
-            WslLinkAgentStartupAction::Run(super::WslLinkAgentStartupConfig {
+            WslLinkAgentStartupAction::Run(WslLinkAgentStartupConfig {
                 noise_config_path: PathBuf::from(DEFAULT_AGENT_NOISE_CONFIG_PATH),
             })
         );
@@ -103,10 +117,9 @@ mod tests {
             Some("/home/me/agent-noise.json".to_string()),
         )
         .expect("args should parse");
-
         assert_eq!(
             action,
-            WslLinkAgentStartupAction::Run(super::WslLinkAgentStartupConfig {
+            WslLinkAgentStartupAction::Run(WslLinkAgentStartupConfig {
                 noise_config_path: PathBuf::from("/home/me/agent-noise.json"),
             })
         );
@@ -119,10 +132,9 @@ mod tests {
             Some("/home/me/agent-noise.json".to_string()),
         )
         .expect("args should parse");
-
         assert_eq!(
             action,
-            WslLinkAgentStartupAction::Run(super::WslLinkAgentStartupConfig {
+            WslLinkAgentStartupAction::Run(WslLinkAgentStartupConfig {
                 noise_config_path: PathBuf::from("/tmp/agent-noise.json"),
             })
         );
@@ -131,7 +143,6 @@ mod tests {
     #[test]
     fn startup_rejects_missing_noise_config_value() {
         let result = resolve_agent_startup_action(["wsl-link-agent", "--noise-config"], None);
-
         assert_eq!(
             result,
             Err(WslLinkAgentStartupError::MissingValue("--noise-config"))
@@ -141,7 +152,6 @@ mod tests {
     #[test]
     fn startup_rejects_empty_noise_config_value() {
         let result = resolve_agent_startup_action(["wsl-link-agent", "--noise-config", "  "], None);
-
         assert_eq!(result, Err(WslLinkAgentStartupError::EmptyNoiseConfigPath));
     }
 
@@ -149,7 +159,45 @@ mod tests {
     fn startup_supports_help_action() {
         let action =
             resolve_agent_startup_action(["wsl-link-agent", "--help"], None).expect("help works");
-
         assert_eq!(action, WslLinkAgentStartupAction::PrintHelp);
+    }
+
+    // 改动 4: 以下三个测试补齐之前没覆盖的分支
+
+    #[test]
+    fn startup_rejects_unknown_argument() {
+        let result = resolve_agent_startup_action(["wsl-link-agent", "--bogus"], None);
+        assert_eq!(
+            result,
+            Err(WslLinkAgentStartupError::UnknownArgument(
+                "--bogus".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn startup_falls_back_to_default_when_env_is_blank() {
+        // 空字符串 / 仅空白 应当被当作未设置
+        let action = resolve_agent_startup_action(["wsl-link-agent"], Some("   ".to_string()))
+            .expect("args should parse");
+        assert_eq!(
+            action,
+            WslLinkAgentStartupAction::Run(WslLinkAgentStartupConfig {
+                noise_config_path: PathBuf::from(DEFAULT_AGENT_NOISE_CONFIG_PATH),
+            })
+        );
+    }
+
+    #[test]
+    fn startup_rejects_flag_consumed_as_noise_config_value() {
+        // `--noise-config --help` 不应让 --help 成为 path
+        let result = resolve_agent_startup_action(
+            ["wsl-link-agent", "--noise-config", "--help"],
+            None,
+        );
+        assert_eq!(
+            result,
+            Err(WslLinkAgentStartupError::MissingValue("--noise-config"))
+        );
     }
 }

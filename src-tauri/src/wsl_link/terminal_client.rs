@@ -91,54 +91,81 @@ impl WslLinkInteractiveTerminalHandle {
 pub async fn run_terminal_script_over_wsl_link<F>(
     desktop_material: &WslLinkDesktopNoiseMaterial,
     request: WslLinkTerminalRunScriptRequest,
-    mut on_event: F,
+    on_event: F,
 ) -> Result<(), WslLinkTerminalClientError>
 where
     F: FnMut(WslLinkTerminalServerPayload),
 {
     request.validate()?;
-    let mut supervisor = WslLinkPrimarySupervisor::new(
+    // 改动 2: 提前借出 run_id,避免克隆整个含 script_content 的 request。
+    let run_id = request.run_id.clone();
+    execute_one_shot_terminal_rpc(
         "calamex-desktop-terminal",
-        WslLinkTransportConfig::default(),
-    );
-    let mut connection = supervisor.open_noise_connection(desktop_material).await?;
-    let session_id = connection.session.session_id.clone();
-    let client_seq = supervisor.allocate_client_seq();
-    let trace_id = format!("wsl-link-terminal-{}", now_unix_ms());
-    let payload =
-        encode_terminal_client_payload(&WslLinkTerminalClientPayload::RunScript(request.clone()))?;
-    let frame = ClientFrame {
-        session_id: session_id.clone(),
-        request_id: request.run_id,
-        idempotency_key: format!("terminal-run-{client_seq}"),
-        client_seq,
-        ack_server_seq: supervisor.last_ack_server_seq(),
-        payload,
-        trace_id,
-    };
+        "wsl-link-terminal",
+        "terminal-run",
+        desktop_material,
+        WslLinkTerminalClientPayload::RunScript(request),
+        move |_client_seq| run_id,
+        |payload| {
+            matches!(
+                payload,
+                WslLinkTerminalServerPayload::RunCompleted(_)
+                    | WslLinkTerminalServerPayload::RunError(_)
+            )
+        },
+        on_event,
+    )
+    .await
+}
 
-    let response = connection
-        .client
-        .duplex(Request::new(tokio_stream::iter([frame])))
-        .await?;
-    let mut stream = response.into_inner();
-    while let Some(frame) = stream.message().await? {
-        if frame.session_id != session_id {
-            return Err(WslLinkTerminalClientError::SessionMismatch);
-        }
-        let payload = decode_terminal_server_payload(&frame.payload)?;
-        let is_finished = matches!(
-            &payload,
-            WslLinkTerminalServerPayload::RunCompleted(_)
-                | WslLinkTerminalServerPayload::RunError(_)
-        );
-        on_event(payload);
-        if is_finished {
-            break;
-        }
-    }
+pub async fn signal_terminal_process_over_wsl_link(
+    desktop_material: &WslLinkDesktopNoiseMaterial,
+    request: WslLinkTerminalSignalProcess,
+) -> Result<(), WslLinkTerminalClientError> {
+    request.validate()?;
+    execute_one_shot_terminal_rpc(
+        "calamex-desktop-terminal-signal",
+        "wsl-link-terminal-signal",
+        "terminal-signal",
+        desktop_material,
+        WslLinkTerminalClientPayload::SignalProcess(request),
+        |client_seq| format!("terminal-signal-{client_seq}"),
+        |payload| {
+            matches!(
+                payload,
+                WslLinkTerminalServerPayload::InteractiveAck(_)
+                    | WslLinkTerminalServerPayload::InteractiveError(_)
+            )
+        },
+        |_| {},
+    )
+    .await
+}
 
-    Ok(())
+pub async fn write_terminal_run_input_over_wsl_link(
+    desktop_material: &WslLinkDesktopNoiseMaterial,
+    request: WslLinkTerminalRunInput,
+) -> Result<(), WslLinkTerminalClientError> {
+    request.validate()?;
+    // 改动 2: 同 run_script,run_input 也提前借出 run_id。
+    let run_id = request.run_id.clone();
+    execute_one_shot_terminal_rpc(
+        "calamex-desktop-terminal-run-input",
+        "wsl-link-terminal-run-input",
+        "terminal-run-input",
+        desktop_material,
+        WslLinkTerminalClientPayload::RunInput(request),
+        move |client_seq| format!("terminal-run-input-{run_id}-{client_seq}"),
+        |payload| {
+            matches!(
+                payload,
+                WslLinkTerminalServerPayload::InteractiveAck(_)
+                    | WslLinkTerminalServerPayload::InteractiveError(_)
+            )
+        },
+        |_| {},
+    )
+    .await
 }
 
 pub async fn open_interactive_terminal_over_wsl_link<F>(
@@ -151,17 +178,20 @@ where
 {
     request.validate()?;
     let terminal_session_id = request.session_id.clone();
+
     let mut supervisor = WslLinkPrimarySupervisor::new(
         "calamex-desktop-interactive-terminal",
         WslLinkTransportConfig::default(),
     );
     let mut connection = supervisor.open_noise_connection(desktop_material).await?;
     let wsl_link_session_id = connection.session.session_id.clone();
+
     let (frame_tx, frame_rx) = mpsc::channel::<ClientFrame>(32);
     let response = connection
         .client
         .duplex(Request::new(ReceiverStream::new(frame_rx)))
         .await?;
+
     send_terminal_payload_frame(
         &mut supervisor,
         &frame_tx,
@@ -177,10 +207,10 @@ where
         session_id: terminal_session_id,
         command_tx,
     };
-    let task_session_id = handle.session_id.clone();
+
+    // 改动 3: 删除 task_session_id 死代码 —— 它被 clone 进 task 仅为压 warning,从未被读取。
     tokio::spawn(async move {
         let mut stream = response.into_inner();
-
         loop {
             tokio::select! {
                 command = command_rx.recv() => {
@@ -239,39 +269,58 @@ where
                 }
             }
         }
-
         drop(frame_tx);
-        let _ = task_session_id;
     });
 
     Ok(handle)
 }
 
-pub async fn signal_terminal_process_over_wsl_link(
+// 改动 1: 把 3 个 one-shot RPC 共通的流水线集中到这里。
+//
+// 流水线步骤:
+//   1. 用给定 client_id 新建一次性 supervisor + Noise 连接;
+//   2. 分配 client_seq,生成 trace_id = "{trace_prefix}-{now_unix_ms}";
+//   3. 编码 payload,组装一帧 ClientFrame:
+//        - request_id 由 request_id_for_seq(client_seq) 决定;
+//        - idempotency_key = "{idempotency_prefix}-{client_seq}";
+//   4. 通过 duplex 发送单帧请求,流式消费服务端响应;
+//   5. 每收到一帧:校验 session_id、推进 supervisor ack 状态、解码 payload、
+//      回调 on_event,直到 is_finished(payload) 返回 true 后退出。
+//
+// 改动 4: 与 interactive 路径对齐,在 helper 内统一调用 apply_server_frame_ack。
+// 由于 supervisor 在函数返回时就被丢弃,这一调用没有外部可观测效果,但消除了
+// "interactive 路径维护 ack 状态、one-shot 路径不维护" 的不一致认知负担。
+async fn execute_one_shot_terminal_rpc<RID, FIN, EVT>(
+    client_id: &'static str,
+    trace_prefix: &'static str,
+    idempotency_prefix: &'static str,
     desktop_material: &WslLinkDesktopNoiseMaterial,
-    request: WslLinkTerminalSignalProcess,
-) -> Result<(), WslLinkTerminalClientError> {
-    request.validate()?;
-    let mut supervisor = WslLinkPrimarySupervisor::new(
-        "calamex-desktop-terminal-signal",
-        WslLinkTransportConfig::default(),
-    );
+    payload: WslLinkTerminalClientPayload,
+    request_id_for_seq: RID,
+    is_finished: FIN,
+    mut on_event: EVT,
+) -> Result<(), WslLinkTerminalClientError>
+where
+    RID: FnOnce(u64) -> String,
+    FIN: Fn(&WslLinkTerminalServerPayload) -> bool,
+    EVT: FnMut(WslLinkTerminalServerPayload),
+{
+    let mut supervisor =
+        WslLinkPrimarySupervisor::new(client_id, WslLinkTransportConfig::default());
     let mut connection = supervisor.open_noise_connection(desktop_material).await?;
     let session_id = connection.session.session_id.clone();
     let client_seq = supervisor.allocate_client_seq();
-    let trace_id = format!("wsl-link-terminal-signal-{}", now_unix_ms());
-    let payload =
-        encode_terminal_client_payload(&WslLinkTerminalClientPayload::SignalProcess(request))?;
+    let trace_id = format!("{trace_prefix}-{}", now_unix_ms());
+    let encoded_payload = encode_terminal_client_payload(&payload)?;
     let frame = ClientFrame {
         session_id: session_id.clone(),
-        request_id: format!("terminal-signal-{client_seq}"),
-        idempotency_key: format!("terminal-signal-{client_seq}"),
+        request_id: request_id_for_seq(client_seq),
+        idempotency_key: format!("{idempotency_prefix}-{client_seq}"),
         client_seq,
         ack_server_seq: supervisor.last_ack_server_seq(),
-        payload,
+        payload: encoded_payload,
         trace_id,
     };
-
     let response = connection
         .client
         .duplex(Request::new(tokio_stream::iter([frame])))
@@ -281,63 +330,14 @@ pub async fn signal_terminal_process_over_wsl_link(
         if frame.session_id != session_id {
             return Err(WslLinkTerminalClientError::SessionMismatch);
         }
+        supervisor.apply_server_frame_ack(frame.server_seq, frame.ack_client_seq);
         let payload = decode_terminal_server_payload(&frame.payload)?;
-        if matches!(
-            payload,
-            WslLinkTerminalServerPayload::InteractiveAck(_)
-                | WslLinkTerminalServerPayload::InteractiveError(_)
-        ) {
+        let finished = is_finished(&payload);
+        on_event(payload);
+        if finished {
             break;
         }
     }
-
-    Ok(())
-}
-
-pub async fn write_terminal_run_input_over_wsl_link(
-    desktop_material: &WslLinkDesktopNoiseMaterial,
-    request: WslLinkTerminalRunInput,
-) -> Result<(), WslLinkTerminalClientError> {
-    request.validate()?;
-    let mut supervisor = WslLinkPrimarySupervisor::new(
-        "calamex-desktop-terminal-run-input",
-        WslLinkTransportConfig::default(),
-    );
-    let mut connection = supervisor.open_noise_connection(desktop_material).await?;
-    let session_id = connection.session.session_id.clone();
-    let client_seq = supervisor.allocate_client_seq();
-    let trace_id = format!("wsl-link-terminal-run-input-{}", now_unix_ms());
-    let payload =
-        encode_terminal_client_payload(&WslLinkTerminalClientPayload::RunInput(request.clone()))?;
-    let frame = ClientFrame {
-        session_id: session_id.clone(),
-        request_id: format!("terminal-run-input-{}-{client_seq}", request.run_id),
-        idempotency_key: format!("terminal-run-input-{client_seq}"),
-        client_seq,
-        ack_server_seq: supervisor.last_ack_server_seq(),
-        payload,
-        trace_id,
-    };
-
-    let response = connection
-        .client
-        .duplex(Request::new(tokio_stream::iter([frame])))
-        .await?;
-    let mut stream = response.into_inner();
-    while let Some(frame) = stream.message().await? {
-        if frame.session_id != session_id {
-            return Err(WslLinkTerminalClientError::SessionMismatch);
-        }
-        let payload = decode_terminal_server_payload(&frame.payload)?;
-        if matches!(
-            payload,
-            WslLinkTerminalServerPayload::InteractiveAck(_)
-                | WslLinkTerminalServerPayload::InteractiveError(_)
-        ) {
-            break;
-        }
-    }
-
     Ok(())
 }
 
@@ -380,7 +380,6 @@ mod tests {
             cols: 120,
             rows: 40,
         };
-
         assert!(request.validate().is_err());
     }
 }

@@ -23,6 +23,9 @@ pub enum WslLinkGrpcTransportError {
     InvalidOpenSessionRequest(&'static str),
     #[error("WSL Link OpenSession 响应无效：{0}")]
     InvalidOpenSessionResponse(&'static str),
+    // 改动 1: heartbeat 校验失败独立成桶,便于上层按来源分发
+    #[error("WSL Link Heartbeat 响应无效：{0}")]
+    InvalidHeartbeatResponse(&'static str),
     #[error("WSL Link gRPC 主通道暂不支持当前平台：{0:?}")]
     UnsupportedPlatform(WslLinkTransportKind),
     #[error("WSL Link gRPC 主通道建立失败：{0}")]
@@ -58,14 +61,12 @@ impl WslLinkOpenSessionHandshake {
                 "client_id 不能为空。",
             ));
         }
-
         let trace_id = trace_id.into();
         if trace_id.trim().is_empty() {
             return Err(WslLinkGrpcTransportError::InvalidOpenSessionRequest(
                 "trace_id 不能为空。",
             ));
         }
-
         Ok(Self {
             client_id,
             trace_id,
@@ -109,7 +110,6 @@ impl WslLinkGrpcSession {
                 "server_seq 必须大于 0。",
             ));
         }
-
         let transport = match TransportKind::try_from(response.transport)
             .unwrap_or(TransportKind::Unspecified)
         {
@@ -120,7 +120,6 @@ impl WslLinkGrpcSession {
                 ));
             }
         };
-
         Ok(Self {
             session_id: response.session_id,
             server_seq: response.server_seq,
@@ -148,17 +147,17 @@ impl WslLinkGrpcHeartbeatAck {
     pub fn try_from_response(
         response: HeartbeatResponse,
     ) -> Result<Self, WslLinkGrpcTransportError> {
+        // 改动 1: 错误变体改为 InvalidHeartbeatResponse;message 不再重复 "heartbeat " 前缀。
         if response.session_id.trim().is_empty() {
-            return Err(WslLinkGrpcTransportError::InvalidOpenSessionResponse(
-                "heartbeat session_id 不能为空。",
+            return Err(WslLinkGrpcTransportError::InvalidHeartbeatResponse(
+                "session_id 不能为空。",
             ));
         }
         if response.server_seq == 0 {
-            return Err(WslLinkGrpcTransportError::InvalidOpenSessionResponse(
-                "heartbeat server_seq 必须大于 0。",
+            return Err(WslLinkGrpcTransportError::InvalidHeartbeatResponse(
+                "server_seq 必须大于 0。",
             ));
         }
-
         Ok(Self {
             session_id: response.session_id,
             server_seq: response.server_seq,
@@ -235,7 +234,6 @@ pub async fn open_noise_session_with_grpc_client(
         })
         .await?
         .into_inner();
-
     read_empty_handshake_message(&mut initiator, &response.handshake_message)?;
     let mut transport = into_transport_mode(initiator)?;
     let open_session =
@@ -249,7 +247,6 @@ pub async fn open_noise_session_with_grpc_client(
     if proof != expected {
         return Err(WslLinkGrpcTransportError::InvalidNoiseServerProof);
     }
-
     WslLinkGrpcSession::try_from_open_session_response(open_session)
 }
 
@@ -365,6 +362,11 @@ mod windows {
             Poll::Ready(Ok(()))
         }
 
+        // 改动 2: 显式说明为何丢弃 Uri 参数。
+        // tonic 的 channel 会按 endpoint URI dispatch,但 AF_HYPERV vsock 连接的目标
+        // 完全由 (running WSL2 VM GUID, vsock_grpc_port) 决定 —— host/port/scheme
+        // 在 vsock 语义里都无意义。这里的 _request: Uri 仅用于满足
+        // tower::Service<Uri> trait 签名,运行时被有意忽略。
         fn call(&mut self, _request: Uri) -> Self::Future {
             let timeout = self.connect_timeout;
             let vsock_grpc_port = self.vsock_grpc_port;
@@ -386,13 +388,11 @@ mod windows {
 mod tests {
     #[cfg(not(windows))]
     use super::*;
-
     use crate::wsl_link::protocol::v1::TransportKind;
 
     #[test]
     fn open_session_handshake_rejects_empty_client_id() {
         let result = super::WslLinkOpenSessionHandshake::new("  ", "trace-1", 0);
-
         assert!(matches!(
             result,
             Err(super::WslLinkGrpcTransportError::InvalidOpenSessionRequest(
@@ -406,7 +406,6 @@ mod tests {
         let request = super::WslLinkOpenSessionHandshake::new("desktop-1", "trace-1", 7)
             .expect("handshake should be valid")
             .into_proto();
-
         assert_eq!(request.client_id, "desktop-1");
         assert_eq!(
             request.protocol_version,
@@ -427,7 +426,6 @@ mod tests {
             },
         )
         .expect("response should map");
-
         assert_eq!(session.session_id, "s1");
         assert_eq!(session.server_seq, 1);
         assert_eq!(session.ack_client_seq, 7);
@@ -447,13 +445,13 @@ mod tests {
                 transport: TransportKind::Unspecified as i32,
             },
         );
-
         assert!(matches!(
             result,
             Err(super::WslLinkGrpcTransportError::InvalidOpenSessionResponse(_))
         ));
     }
 
+    // 改动 1: heartbeat 错误必须使用 InvalidHeartbeatResponse,而不是 InvalidOpenSessionResponse。
     #[test]
     fn heartbeat_response_rejects_empty_session_id() {
         let result = super::WslLinkGrpcHeartbeatAck::try_from_response(
@@ -464,10 +462,26 @@ mod tests {
                 received_at_unix_ms: 1,
             },
         );
-
         assert!(matches!(
             result,
-            Err(super::WslLinkGrpcTransportError::InvalidOpenSessionResponse(_))
+            Err(super::WslLinkGrpcTransportError::InvalidHeartbeatResponse(_))
+        ));
+    }
+
+    // 改动 1 的补强:server_seq=0 同样进入 heartbeat 错误桶,不再混入 OpenSession。
+    #[test]
+    fn heartbeat_response_rejects_zero_server_seq_with_heartbeat_variant() {
+        let result = super::WslLinkGrpcHeartbeatAck::try_from_response(
+            crate::wsl_link::protocol::v1::HeartbeatResponse {
+                session_id: "s1".to_string(),
+                server_seq: 0,
+                ack_client_seq: 0,
+                received_at_unix_ms: 1,
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(super::WslLinkGrpcTransportError::InvalidHeartbeatResponse(_))
         ));
     }
 
@@ -479,7 +493,6 @@ mod tests {
             std::time::Duration::from_millis(123),
             super::windows::new_connector_error_slot(),
         );
-
         assert_eq!(
             connector.connect_timeout(),
             std::time::Duration::from_millis(123)
@@ -494,9 +507,7 @@ mod tests {
     #[test]
     fn windows_connector_error_slot_is_consumed_once() {
         let slot = super::windows::new_connector_error_slot();
-
         super::windows::record_connector_error(&slot, "WSL Link 连接失败".to_string());
-
         assert_eq!(
             super::windows::take_connector_error(&slot),
             Some("WSL Link 连接失败".to_string())
@@ -508,7 +519,6 @@ mod tests {
     #[tokio::test]
     async fn primary_grpc_channel_reports_unsupported_platform() {
         let result = connect_primary_grpc_channel(WslLinkTransportConfig::default()).await;
-
         assert!(matches!(
             result,
             Err(WslLinkGrpcTransportError::UnsupportedPlatform(

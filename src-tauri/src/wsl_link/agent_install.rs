@@ -61,15 +61,32 @@ pub fn install_agent_noise_material(
         std::process::id(),
         now_unix_ms()
     ));
-
     let encoded = encode_agent_material(material)?;
-    fs::write(&temp_path, encoded)?;
-    set_secret_file_permissions(&temp_path)?;
-    fs::rename(&temp_path, &target_path)?;
-    set_secret_file_permissions(&target_path)?;
-
+    // 改动 2 + 3: 写入 + rename 失败时清理临时文件,避免在 /etc 下留点文件残留
+    write_atomically_with_secret_mode(&temp_path, &target_path, encoded.as_bytes())?;
+    // Round-trip 校验:确保刚落盘的 agent-noise.json 能被 agent 解析回来。
     let _ = load_agent_material_from_file(&target_path)?;
     Ok(target_path)
+}
+
+// 改动 1 + 2 + 3: 把 "atomic write + chmod 0600 + 失败清理" 集中,
+// 删除原本 rename 之后的多余 chmod(Unix rename 已经保留临时文件的权限位)。
+fn write_atomically_with_secret_mode(
+    temp_path: &Path,
+    target_path: &Path,
+    bytes: &[u8],
+) -> Result<(), WslLinkAgentInstallError> {
+    let outcome = (|| -> Result<(), WslLinkAgentInstallError> {
+        fs::write(temp_path, bytes)?;
+        set_secret_file_permissions(temp_path)?;
+        fs::rename(temp_path, target_path)?;
+        Ok(())
+    })();
+    if outcome.is_err() {
+        // 失败时尽力删除残留的临时文件;忽略二次错误,保留原始错误向上传递。
+        let _ = fs::remove_file(temp_path);
+    }
+    outcome
 }
 
 fn prepare_config_dir(config_dir: &Path) -> Result<(), WslLinkAgentInstallError> {
@@ -86,7 +103,6 @@ fn prepare_config_dir(config_dir: &Path) -> Result<(), WslLinkAgentInstallError>
 #[cfg(unix)]
 fn set_secret_dir_permissions(path: &Path) -> Result<(), std::io::Error> {
     use std::os::unix::fs::PermissionsExt;
-
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))
 }
 
@@ -98,7 +114,6 @@ fn set_secret_dir_permissions(_path: &Path) -> Result<(), std::io::Error> {
 #[cfg(unix)]
 fn set_secret_file_permissions(path: &Path) -> Result<(), std::io::Error> {
     use std::os::unix::fs::PermissionsExt;
-
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))
 }
 
@@ -113,8 +128,8 @@ mod tests {
 
     use super::{
         super::noise_material::{generate_pairing_material, load_agent_material_from_file},
-        install_agent_noise_material, WslLinkAgentInstallPlan, AGENT_NOISE_CONFIG_FILE_NAME,
-        DEFAULT_AGENT_CONFIG_DIR,
+        install_agent_noise_material, write_atomically_with_secret_mode, WslLinkAgentInstallPlan,
+        AGENT_NOISE_CONFIG_FILE_NAME, DEFAULT_AGENT_CONFIG_DIR,
     };
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
@@ -128,7 +143,6 @@ mod tests {
     #[test]
     fn default_install_plan_matches_agent_runtime_path() {
         let plan = WslLinkAgentInstallPlan::default_linux();
-
         assert_eq!(
             plan.config_dir,
             std::path::PathBuf::from(DEFAULT_AGENT_CONFIG_DIR)
@@ -143,17 +157,14 @@ mod tests {
     fn install_agent_noise_material_writes_loadable_config() {
         let dir = temp_dir("write-loadable");
         let material = generate_pairing_material().expect("pairing material should generate");
-
         let path =
             install_agent_noise_material(&dir, &material.agent).expect("install should work");
         let loaded = load_agent_material_from_file(&path).expect("installed material should load");
-
         assert_eq!(
             path.file_name().and_then(|name| name.to_str()),
             Some(AGENT_NOISE_CONFIG_FILE_NAME)
         );
         assert_eq!(loaded, material.agent);
-
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -161,11 +172,32 @@ mod tests {
     fn install_agent_noise_material_rejects_file_target_dir() {
         let dir = temp_dir("file-target");
         let material = generate_pairing_material().expect("pairing material should generate");
-
         fs::write(&dir, "not-a-dir").expect("test file should write");
         let result = install_agent_noise_material(&dir, &material.agent);
-
         assert!(result.is_err());
         let _ = fs::remove_file(dir);
+    }
+
+    // 改动 2 的回归测试:rename 失败时临时文件必须被清理。
+    // 通过把 target 设成一个已存在的目录(`rename` 到目录会失败)来触发失败路径。
+    #[test]
+    fn atomic_write_cleans_up_temp_when_rename_fails() {
+        let dir = temp_dir("rename-fail");
+        fs::create_dir_all(&dir).expect("test dir should create");
+        let temp_path = dir.join(".agent-noise.json.tmp-rename-fail");
+        let target_path = dir.join("target-as-dir");
+        fs::create_dir(&target_path).expect("target dir should create");
+        // 在该目录下再放一个文件,使 rename(temp -> dir) 在 Linux 上必然返回 EISDIR/ENOTEMPTY。
+        fs::write(target_path.join("guard"), b"x").expect("guard file should write");
+
+        let result = write_atomically_with_secret_mode(&temp_path, &target_path, b"payload");
+        assert!(result.is_err(), "rename 到非空目录应当失败");
+        assert!(
+            !temp_path.exists(),
+            "失败路径必须清理临时文件,实际仍存在：{}",
+            temp_path.display()
+        );
+
+        let _ = fs::remove_dir_all(dir);
     }
 }

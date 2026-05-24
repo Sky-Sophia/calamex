@@ -20,6 +20,10 @@ pub const TERMINAL_INTERACTIVE_CLOSED_KIND: &str = "terminal.interactiveClosed.v
 pub const TERMINAL_INTERACTIVE_ACK_KIND: &str = "terminal.interactiveAck.v1";
 pub const TERMINAL_INTERACTIVE_ERROR_KIND: &str = "terminal.interactiveError.v1";
 
+// 改动 3: 把 signal mode 字面量提到常量,作为协议层唯一可信来源。
+pub const SIGNAL_MODE_GRACEFUL: &str = "graceful";
+pub const SIGNAL_MODE_KILL: &str = "kill";
+
 #[derive(Debug, Error)]
 pub enum WslLinkTerminalExecError {
     #[error("WSL Link terminal payload 无效：{0}")]
@@ -44,27 +48,12 @@ pub struct WslLinkTerminalRunScriptRequest {
 
 impl WslLinkTerminalRunScriptRequest {
     pub fn validate(&self) -> Result<(), WslLinkTerminalExecError> {
-        if self.run_id.trim().is_empty() {
-            return Err(WslLinkTerminalExecError::Payload(
-                "run_id 不能为空。".to_string(),
-            ));
-        }
-        if self.working_directory.trim().is_empty() {
-            return Err(WslLinkTerminalExecError::Payload(
-                "working_directory 不能为空。".to_string(),
-            ));
-        }
-        if self.execution_path.trim().is_empty() {
-            return Err(WslLinkTerminalExecError::Payload(
-                "execution_path 不能为空。".to_string(),
-            ));
-        }
-        if self.cols < 2 || self.rows < 1 {
-            return Err(WslLinkTerminalExecError::Payload(
-                "终端尺寸必须有效。".to_string(),
-            ));
-        }
-        Ok(())
+        // 改动 1: helper 化空值校验;错误消息与原版字符串等价。
+        ensure_field_non_empty(&self.run_id, "run_id")?;
+        ensure_field_non_empty(&self.working_directory, "working_directory")?;
+        ensure_field_non_empty(&self.execution_path, "execution_path")?;
+        // 改动 2: 复用 validate_terminal_size,消除字面重复。
+        validate_terminal_size(self.cols, self.rows)
     }
 }
 
@@ -79,16 +68,8 @@ pub struct WslLinkTerminalOpenInteractiveRequest {
 
 impl WslLinkTerminalOpenInteractiveRequest {
     pub fn validate(&self) -> Result<(), WslLinkTerminalExecError> {
-        if self.session_id.trim().is_empty() {
-            return Err(WslLinkTerminalExecError::Payload(
-                "session_id 不能为空。".to_string(),
-            ));
-        }
-        if self.working_directory.trim().is_empty() {
-            return Err(WslLinkTerminalExecError::Payload(
-                "working_directory 不能为空。".to_string(),
-            ));
-        }
+        ensure_field_non_empty(&self.session_id, "session_id")?;
+        ensure_field_non_empty(&self.working_directory, "working_directory")?;
         validate_terminal_size(self.cols, self.rows)
     }
 }
@@ -102,12 +83,7 @@ pub struct WslLinkTerminalRunInput {
 
 impl WslLinkTerminalRunInput {
     pub fn validate(&self) -> Result<(), WslLinkTerminalExecError> {
-        if self.run_id.trim().is_empty() {
-            return Err(WslLinkTerminalExecError::Payload(
-                "run_id 不能为空。".to_string(),
-            ));
-        }
-        Ok(())
+        ensure_field_non_empty(&self.run_id, "run_id")
     }
 }
 
@@ -120,12 +96,7 @@ pub struct WslLinkTerminalInteractiveInput {
 
 impl WslLinkTerminalInteractiveInput {
     pub fn validate(&self) -> Result<(), WslLinkTerminalExecError> {
-        if self.session_id.trim().is_empty() {
-            return Err(WslLinkTerminalExecError::Payload(
-                "session_id 不能为空。".to_string(),
-            ));
-        }
-        Ok(())
+        ensure_field_non_empty(&self.session_id, "session_id")
     }
 }
 
@@ -139,11 +110,7 @@ pub struct WslLinkTerminalInteractiveResize {
 
 impl WslLinkTerminalInteractiveResize {
     pub fn validate(&self) -> Result<(), WslLinkTerminalExecError> {
-        if self.session_id.trim().is_empty() {
-            return Err(WslLinkTerminalExecError::Payload(
-                "session_id 不能为空。".to_string(),
-            ));
-        }
+        ensure_field_non_empty(&self.session_id, "session_id")?;
         validate_terminal_size(self.cols, self.rows)
     }
 }
@@ -156,12 +123,7 @@ pub struct WslLinkTerminalInteractiveClose {
 
 impl WslLinkTerminalInteractiveClose {
     pub fn validate(&self) -> Result<(), WslLinkTerminalExecError> {
-        if self.session_id.trim().is_empty() {
-            return Err(WslLinkTerminalExecError::Payload(
-                "session_id 不能为空。".to_string(),
-            ));
-        }
-        Ok(())
+        ensure_field_non_empty(&self.session_id, "session_id")
     }
 }
 
@@ -179,11 +141,12 @@ impl WslLinkTerminalSignalProcess {
                 "pid 必须有效。".to_string(),
             ));
         }
+        // 改动 3: 用 SIGNAL_MODE_* 常量取代 magic string。
         let mode = self.mode.trim();
-        if mode != "graceful" && mode != "kill" {
-            return Err(WslLinkTerminalExecError::Payload(
-                "mode 只能是 graceful 或 kill。".to_string(),
-            ));
+        if mode != SIGNAL_MODE_GRACEFUL && mode != SIGNAL_MODE_KILL {
+            return Err(WslLinkTerminalExecError::Payload(format!(
+                "mode 只能是 {SIGNAL_MODE_GRACEFUL} 或 {SIGNAL_MODE_KILL}。"
+            )));
         }
         Ok(())
     }
@@ -345,6 +308,19 @@ fn home_directory() -> Result<PathBuf, WslLinkTerminalExecError> {
         .ok_or_else(|| WslLinkTerminalExecError::InvalidWorkingDirectory("HOME 未设置。".into()))
 }
 
+// 改动 1: 集中实现 trim().is_empty() 空值校验,错误消息与各处原版字符串等价。
+fn ensure_field_non_empty(
+    value: &str,
+    field: &'static str,
+) -> Result<(), WslLinkTerminalExecError> {
+    if value.trim().is_empty() {
+        return Err(WslLinkTerminalExecError::Payload(format!(
+            "{field} 不能为空。"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_terminal_size(cols: u16, rows: u16) -> Result<(), WslLinkTerminalExecError> {
     if cols < 2 || rows < 1 {
         return Err(WslLinkTerminalExecError::Payload(
@@ -364,12 +340,10 @@ impl WslLinkUtf8ChunkDecoder {
         if !input.is_empty() {
             self.pending.extend_from_slice(input);
         }
-
         loop {
             if self.pending.is_empty() {
                 return;
             }
-
             match std::str::from_utf8(&self.pending) {
                 Ok(valid) => {
                     output.push_str(valid);
@@ -379,20 +353,20 @@ impl WslLinkUtf8ChunkDecoder {
                 Err(error) => {
                     let valid_up_to = error.valid_up_to();
                     if valid_up_to > 0 {
-                        if let Ok(valid_prefix) = std::str::from_utf8(&self.pending[..valid_up_to])
-                        {
-                            output.push_str(valid_prefix);
-                        }
+                        // 改动 4: valid_up_to 由 Utf8Error 保证 [..valid_up_to] 是合法 UTF-8,
+                        // 这里不存在 Err 分支;使用 expect 让契约显式,避免 if-let 误导读者
+                        // 以为有静默错误路径需要处理。
+                        let valid_prefix = std::str::from_utf8(&self.pending[..valid_up_to])
+                            .expect("valid_up_to guarantees the prefix is valid UTF-8");
+                        output.push_str(valid_prefix);
                         self.pending.drain(..valid_up_to);
                         continue;
                     }
-
                     if let Some(error_len) = error.error_len() {
                         output.push('\u{FFFD}');
                         self.pending.drain(..error_len);
                         continue;
                     }
-
                     if last {
                         output.push('\u{FFFD}');
                         self.pending.clear();
@@ -419,10 +393,8 @@ mod tests {
             cols: 120,
             rows: 40,
         });
-
         let encoded = encode_terminal_client_payload(&payload).expect("payload should encode");
         let decoded = decode_terminal_client_payload(&encoded).expect("payload should decode");
-
         assert_eq!(decoded, payload);
     }
 
@@ -433,10 +405,8 @@ mod tests {
                 session_id: "main-terminal".to_string(),
                 data: "printf '你好 🌟'\n".to_string(),
             });
-
         let encoded = encode_terminal_client_payload(&payload).expect("payload should encode");
         let decoded = decode_terminal_client_payload(&encoded).expect("payload should decode");
-
         assert_eq!(decoded, payload);
     }
 
@@ -446,10 +416,8 @@ mod tests {
             run_id: "run-交互-1".to_string(),
             data: "你好 🌟\n".to_string(),
         });
-
         let encoded = encode_terminal_client_payload(&payload).expect("payload should encode");
         let decoded = decode_terminal_client_payload(&encoded).expect("payload should decode");
-
         assert_eq!(decoded, payload);
     }
 
@@ -458,10 +426,78 @@ mod tests {
         let mut decoder = WslLinkUtf8ChunkDecoder::default();
         let bytes = "你".as_bytes();
         let mut output = String::new();
-
         decoder.decode_into(&bytes[..1], &mut output, false);
         decoder.decode_into(&bytes[1..], &mut output, true);
-
         assert_eq!(output, "你");
+    }
+
+    // 改动 5: 防止 *_KIND 常量与 enum variant 的 serde rename 漂移。
+    // serde 的 rename 不能引用 const,只能用字符串字面量,这是唯一可靠抓漂移的办法。
+    #[test]
+    fn client_payload_serde_tag_matches_kind_constant() {
+        let payload = WslLinkTerminalClientPayload::RunScript(WslLinkTerminalRunScriptRequest {
+            run_id: "run-1".into(),
+            working_directory: "/tmp".into(),
+            execution_path: "/tmp/x.sh".into(),
+            script_content: None,
+            cleanup_paths: vec![],
+            cols: 80,
+            rows: 24,
+        });
+        let value = serde_json::to_value(&payload).expect("serializes");
+        assert_eq!(value["type"], TERMINAL_RUN_SCRIPT_KIND);
+    }
+
+    #[test]
+    fn server_payload_serde_tag_matches_kind_constant() {
+        let payload = WslLinkTerminalServerPayload::RunStarted(WslLinkTerminalRunStarted {
+            run_id: "run-1".into(),
+            pid: 1234,
+            started_at_unix_ms: 1_700_000_000_000,
+        });
+        let value = serde_json::to_value(&payload).expect("serializes");
+        assert_eq!(value["type"], TERMINAL_RUN_STARTED_KIND);
+    }
+
+    // 改动 3: signal mode 常量被实际使用 + 校验拒绝未知值。
+    #[test]
+    fn signal_process_validate_accepts_known_modes_and_rejects_others() {
+        let graceful = WslLinkTerminalSignalProcess {
+            pid: 1,
+            mode: SIGNAL_MODE_GRACEFUL.to_string(),
+        };
+        assert!(graceful.validate().is_ok());
+
+        let kill = WslLinkTerminalSignalProcess {
+            pid: 1,
+            mode: SIGNAL_MODE_KILL.to_string(),
+        };
+        assert!(kill.validate().is_ok());
+
+        let unknown = WslLinkTerminalSignalProcess {
+            pid: 1,
+            mode: "SIGTERM".to_string(),
+        };
+        assert!(unknown.validate().is_err());
+
+        let zero_pid = WslLinkTerminalSignalProcess {
+            pid: 0,
+            mode: SIGNAL_MODE_GRACEFUL.to_string(),
+        };
+        assert!(zero_pid.validate().is_err());
+    }
+
+    // 改动 1 续: helper 错误消息与重构前字面等价。
+    #[test]
+    fn ensure_field_non_empty_error_message_is_backward_compatible() {
+        let request = WslLinkTerminalRunInput {
+            run_id: "   ".to_string(),
+            data: "noop".to_string(),
+        };
+        let err = request.validate().expect_err("blank run_id should error");
+        assert_eq!(
+            err.to_string(),
+            "WSL Link terminal payload 无效：run_id 不能为空。"
+        );
     }
 }

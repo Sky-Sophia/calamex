@@ -100,13 +100,15 @@ impl WslLinkManager {
     }
 
     pub fn connect_plan(&self) -> WslLinkConnectPlan {
+        let next_backoff_ms = u64::try_from(
+            self.backoff_policy
+                .delay_for_attempt(self.reconnect_attempt)
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX);
         WslLinkConnectPlan {
             primary: self.transport_config.primary_transport(),
-            next_backoff_ms: self
-                .backoff_policy
-                .delay_for_attempt(self.reconnect_attempt)
-                .as_millis()
-                .min(u128::from(u64::MAX)) as u64,
+            next_backoff_ms,
         }
     }
 
@@ -117,7 +119,6 @@ impl WslLinkManager {
         self.metrics.active_transport = Some(active_transport);
         self.metrics.last_error = None;
         self.reconnect_attempt = 0;
-
         match self.state() {
             WslLinkConnectionState::Connecting => {
                 self.state_machine.transition(WslLinkEvent::HandshakeOk)?;
@@ -127,7 +128,6 @@ impl WslLinkManager {
             }
             _ => {}
         }
-
         Ok(())
     }
 
@@ -139,7 +139,6 @@ impl WslLinkManager {
         self.metrics.active_transport = None;
         self.metrics.reconnects_total = self.metrics.reconnects_total.saturating_add(1);
         self.reconnect_attempt = self.reconnect_attempt.saturating_add(1);
-
         match self.state() {
             WslLinkConnectionState::Connecting | WslLinkConnectionState::Reconnecting => {
                 self.state_machine.transition(WslLinkEvent::ConnectError)?;
@@ -149,7 +148,6 @@ impl WslLinkManager {
             }
             _ => {}
         }
-
         Ok(())
     }
 
@@ -223,6 +221,7 @@ impl WslLinkManager {
             self.state_machine.transition(WslLinkEvent::Stop)?;
         }
         self.metrics.active_transport = None;
+        self.reconnect_attempt = 0;
         Ok(())
     }
 }
@@ -241,9 +240,7 @@ mod tests {
     fn manager_builds_single_channel_plan() {
         let mut manager = WslLinkManager::default();
         manager.start_connecting().expect("start should work");
-
         let plan = manager.connect_plan();
-
         assert_eq!(plan.primary, WslLinkTransportKind::VsockGrpc);
         assert!(plan.next_backoff_ms >= 1);
     }
@@ -251,12 +248,9 @@ mod tests {
     #[test]
     fn manager_records_resume_ack_state_from_server_ack() {
         let mut manager = WslLinkManager::default();
-
         assert_eq!(manager.allocate_client_seq(), 1);
         manager.record_request_ack(1, 7);
-
         let resume = manager.resume_frame("s1");
-
         assert_eq!(resume.last_ack_server_seq, 7);
         assert_eq!(resume.last_client_seq, 1);
     }
@@ -269,9 +263,7 @@ mod tests {
             .record_connect_error("connect failed")
             .expect("first error should work");
         assert_eq!(manager.state(), WslLinkConnectionState::Backoff);
-
         let plan = manager.connect_plan();
-
         assert!(plan.next_backoff_ms >= 1);
     }
 
@@ -282,11 +274,25 @@ mod tests {
         manager
             .record_connect_error("connect failed")
             .expect("error should record");
-
         manager
             .begin_manual_connect_attempt()
             .expect("manual retry should work");
-
         assert_eq!(manager.state(), WslLinkConnectionState::Connecting);
+    }
+
+    #[test]
+    fn stop_resets_reconnect_attempt_counter() {
+        let mut manager = WslLinkManager::default();
+        manager.start_connecting().expect("start should work");
+        manager
+            .record_connect_error("e1")
+            .expect("error should record");
+        manager
+            .record_connect_error("e2")
+            .expect("error should record");
+        let attempts_before_stop = manager.reconnect_attempt;
+        manager.stop().expect("stop should work");
+        assert_eq!(manager.reconnect_attempt, 0);
+        assert!(attempts_before_stop > 0);
     }
 }

@@ -21,6 +21,8 @@ pub enum WslLinkNoiseError {
     },
     #[error("WSL Link Noise 消息超过上限：{len} > {max}。")]
     MessageTooLarge { len: usize, max: usize },
+    #[error("WSL Link Noise 明文超过上限：{len} > {max}。")]
+    PlaintextTooLarge { len: usize, max: usize },
     #[error("WSL Link Noise 握手不允许携带明文 payload，实际收到 {len} 字节。")]
     UnexpectedHandshakePayload { len: usize },
     #[error("WSL Link Noise 协议失败：{0}")]
@@ -52,9 +54,10 @@ impl WslLinkNoiseKeypair {
 
 impl fmt::Debug for WslLinkNoiseKeypair {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // 改动 4: 公钥指纹比 _len 更有诊断价值;私钥严格 redacted
         formatter
             .debug_struct("WslLinkNoiseKeypair")
-            .field("public_len", &self.public.len())
+            .field("public", &public_key_fingerprint(&self.public))
             .field("private", &"<redacted>")
             .finish()
     }
@@ -75,11 +78,8 @@ impl WslLinkNoisePsk {
 
 impl fmt::Debug for WslLinkNoisePsk {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("WslLinkNoisePsk")
-            .field("len", &self.0.len())
-            .field("value", &"<redacted>")
-            .finish()
+        // 改动 5: PSK 是机密,Debug 不暴露任何属性
+        formatter.write_str("WslLinkNoisePsk(<redacted>)")
     }
 }
 
@@ -121,7 +121,10 @@ impl fmt::Debug for WslLinkNoiseHandshakeConfig {
         formatter
             .debug_struct("WslLinkNoiseHandshakeConfig")
             .field("local_static_private", &"<redacted>")
-            .field("remote_static_public_len", &self.remote_static_public.len())
+            .field(
+                "remote_static_public",
+                &public_key_fingerprint(&self.remote_static_public),
+            )
             .field("psk", &self.psk)
             .finish()
     }
@@ -133,6 +136,14 @@ pub struct WslLinkNoiseTransport {
 
 impl WslLinkNoiseTransport {
     pub fn encrypt_frame(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, WslLinkNoiseError> {
+        // 先校验 plaintext,错误信息明确指出是明文超限
+        if plaintext.len() > WSL_LINK_NOISE_MAX_PLAINTEXT_BYTES {
+            return Err(WslLinkNoiseError::PlaintextTooLarge {
+                len: plaintext.len(),
+                max: WSL_LINK_NOISE_MAX_PLAINTEXT_BYTES,
+            });
+        }
+        // 总长度防御性再检查一次 —— 理论上由上面那条保证,但保留作为协议合约文档
         ensure_noise_message_len(
             plaintext.len().saturating_add(WSL_LINK_NOISE_TAG_BYTES),
             WSL_LINK_NOISE_MAX_MESSAGE_BYTES,
@@ -146,7 +157,6 @@ impl WslLinkNoiseTransport {
 
     pub fn decrypt_frame(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, WslLinkNoiseError> {
         ensure_noise_message_len(ciphertext.len(), WSL_LINK_NOISE_MAX_MESSAGE_BYTES)?;
-
         let mut plaintext = vec![0_u8; ciphertext.len()];
         let len = self.inner.read_message(ciphertext, &mut plaintext)?;
         plaintext.truncate(len);
@@ -187,7 +197,6 @@ pub fn complete_handshake(
 
     let message = write_empty_handshake_message(&mut initiator)?;
     read_empty_handshake_message(&mut responder, &message)?;
-
     let message = write_empty_handshake_message(&mut responder)?;
     read_empty_handshake_message(&mut initiator, &message)?;
 
@@ -200,6 +209,7 @@ pub fn complete_handshake(
 pub fn write_empty_handshake_message(
     state: &mut HandshakeState,
 ) -> Result<Vec<u8>, WslLinkNoiseError> {
+    // 写消息时不知道实际长度,保留 MAX 分配作为安全上界
     let mut message = vec![0_u8; WSL_LINK_NOISE_MAX_MESSAGE_BYTES];
     let message_len = state.write_message(&[], &mut message)?;
     message.truncate(message_len);
@@ -211,8 +221,7 @@ pub fn read_empty_handshake_message(
     message: &[u8],
 ) -> Result<(), WslLinkNoiseError> {
     ensure_noise_message_len(message.len(), WSL_LINK_NOISE_MAX_MESSAGE_BYTES)?;
-
-    let mut payload = vec![0_u8; WSL_LINK_NOISE_MAX_MESSAGE_BYTES];
+    let mut payload = vec![0_u8; message.len()];
     let payload_len = state.read_message(message, &mut payload)?;
     if payload_len != 0 {
         return Err(WslLinkNoiseError::UnexpectedHandshakePayload { len: payload_len });
@@ -233,9 +242,9 @@ fn noise_builder() -> Result<Builder<'static>, WslLinkNoiseError> {
     Ok(Builder::new(params))
 }
 
-fn noise_builder_with_config<'a>(
-    config: &'a WslLinkNoiseHandshakeConfig,
-) -> Result<Builder<'a>, WslLinkNoiseError> {
+fn noise_builder_with_config(
+    config: &WslLinkNoiseHandshakeConfig,
+) -> Result<Builder<'static>, WslLinkNoiseError> {
     Ok(noise_builder()?
         .local_private_key(config.local_static_private())?
         .remote_public_key(config.remote_static_public())?
@@ -262,6 +271,14 @@ fn vec_to_key_bytes(
         })
 }
 
+// 公钥指纹:取前 6 字节 hex = 48 bits 熵,够识别一对密钥;不引入 base64/hex crate 依赖
+fn public_key_fingerprint(key: &[u8; WSL_LINK_NOISE_KEY_BYTES]) -> String {
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}…",
+        key[0], key[1], key[2], key[3], key[4], key[5]
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,7 +290,6 @@ mod tests {
     fn configs(psk: WslLinkNoisePsk) -> (WslLinkNoiseHandshakeConfig, WslLinkNoiseHandshakeConfig) {
         let desktop = generate_static_keypair().expect("desktop keypair should generate");
         let agent = generate_static_keypair().expect("agent keypair should generate");
-
         (
             WslLinkNoiseHandshakeConfig::new(*desktop.private(), *agent.public(), psk.clone()),
             WslLinkNoiseHandshakeConfig::new(*agent.private(), *desktop.public(), psk),
@@ -283,7 +299,6 @@ mod tests {
     fn configs_with_different_psks() -> (WslLinkNoiseHandshakeConfig, WslLinkNoiseHandshakeConfig) {
         let desktop = generate_static_keypair().expect("desktop keypair should generate");
         let agent = generate_static_keypair().expect("agent keypair should generate");
-
         (
             WslLinkNoiseHandshakeConfig::new(*desktop.private(), *agent.public(), psk(1)),
             WslLinkNoiseHandshakeConfig::new(*agent.private(), *desktop.public(), psk(2)),
@@ -295,14 +310,12 @@ mod tests {
         let params = WSL_LINK_NOISE_PATTERN
             .parse::<snow::params::NoiseParams>()
             .expect("requested Noise pattern should parse");
-
         assert_eq!(params.name, WSL_LINK_NOISE_PATTERN);
     }
 
     #[test]
     fn generated_static_keypair_has_expected_key_lengths() {
         let keypair = generate_static_keypair().expect("keypair should generate");
-
         assert_eq!(keypair.public().len(), WSL_LINK_NOISE_KEY_BYTES);
         assert_eq!(keypair.private().len(), WSL_LINK_NOISE_KEY_BYTES);
     }
@@ -335,9 +348,7 @@ mod tests {
     #[test]
     fn wrong_psk_rejects_handshake() {
         let (initiator_config, responder_config) = configs_with_different_psks();
-
         let result = complete_handshake(&initiator_config, &responder_config);
-
         assert!(matches!(result, Err(WslLinkNoiseError::Snow(_))));
     }
 
@@ -350,9 +361,7 @@ mod tests {
             *wrong_remote.public(),
             psk(3),
         );
-
         let result = complete_handshake(&bad_initiator_config, &responder_config);
-
         assert!(matches!(result, Err(WslLinkNoiseError::Snow(_))));
     }
 
@@ -361,13 +370,12 @@ mod tests {
         let (initiator_config, responder_config) = configs(psk(4));
         let (mut initiator, _) = complete_handshake(&initiator_config, &responder_config)
             .expect("handshake should complete");
+
         let payload = vec![0_u8; WSL_LINK_NOISE_MAX_PLAINTEXT_BYTES + 1];
-
         let result = initiator.encrypt_frame(&payload);
-
         assert!(matches!(
             result,
-            Err(WslLinkNoiseError::MessageTooLarge { .. })
+            Err(WslLinkNoiseError::PlaintextTooLarge { .. })
         ));
     }
 }

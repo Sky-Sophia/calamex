@@ -164,7 +164,7 @@ pub enum WslLinkAgentDistributionError {
     InvalidDistroName,
     #[error("WSL agent 路径不能为空。")]
     EmptyPath,
-    #[error("WSL agent 路径必须使用绝对路径、~ 或 ${{HOME}} 前缀：{0}")]
+    #[error("WSL agent 路径必须使用绝对路径、~ 或 $HOME 前缀：{0}")]
     UnsupportedPath(String),
     #[error("WSL agent 路径包含不支持的 NUL 字符。")]
     InvalidPath,
@@ -241,7 +241,6 @@ impl WslLinkAgentDistributionPlan {
         let noise_config_path = join_linux_path(&config_dir, AGENT_NOISE_CONFIG_FILE_NAME);
         let pid_path = join_linux_path(&install_dir, AGENT_PID_FILE_NAME);
         let log_path = join_linux_path(&install_dir, AGENT_LOG_FILE_NAME);
-
         Ok(Self {
             distro,
             install_dir,
@@ -307,7 +306,7 @@ impl WslLinkAgentDistributionPlan {
              test -r \"$config\"\n\
              mkdir -p {install_dir}\n\
              chmod 700 {install_dir}\n\
-             stop_agent_pid() {{\n\
+             stop_agent_pid() \n\
                target_pid=\"$1\"\n\
                if [ -z \"$target_pid\" ] || [ \"$target_pid\" = \"$$\" ]; then\n\
                  return 0\n\
@@ -323,7 +322,7 @@ impl WslLinkAgentDistributionPlan {
                    kill -KILL \"$target_pid\" 2>/dev/null || true\n\
                  fi\n\
                fi\n\
-             }}\n\
+             \n\
              if [ -f \"$pid_file\" ]; then\n\
                old_pid=$(tr -cd '0-9' < \"$pid_file\" 2>/dev/null || true)\n\
                stop_agent_pid \"$old_pid\"\n\
@@ -391,7 +390,6 @@ impl WslLinkAgentDistributionPlan {
             "-lc".to_string(),
             script,
         ]);
-
         WslLinkWslCommandSpec {
             program: WSL_EXE_PROGRAM,
             args,
@@ -407,7 +405,6 @@ pub fn build_agent_distribution_bundle(
     if agent_binary.is_empty() {
         return Err(WslLinkAgentDistributionError::EmptyAgentBinary);
     }
-
     let pairing = generate_pairing_material()?;
     let agent_noise_config = encode_agent_material(&pairing.agent)?.into_bytes();
     let steps = vec![
@@ -432,7 +429,6 @@ pub fn build_agent_distribution_bundle(
             payload: None,
         },
     ];
-
     Ok(WslLinkAgentDistributionBundle {
         plan,
         desktop_material: pairing.desktop,
@@ -468,7 +464,6 @@ where
     for step in &bundle.steps {
         outputs.push(runner.run(&step.command, step.payload.as_deref()).await?);
     }
-
     store.save_desktop_material(&bundle.desktop_material)?;
     Ok(WslLinkAgentDistributionOutcome {
         binary_path: bundle.plan.binary_path.clone(),
@@ -530,16 +525,15 @@ pub fn resolve_agent_binary_path_with_extra_candidates<I>(
 where
     I: IntoIterator<Item = PathBuf>,
 {
-    if let Some(path) = env::var_os(AGENT_BINARY_ENV).filter(|value| !value.is_empty()) {
-        return require_agent_binary_file(PathBuf::from(path));
+    // 改动 3: 通过 helper 读取 env 路径,避免与下方 report 函数逻辑漂移
+    if let Some(path) = agent_binary_env_path() {
+        return require_agent_binary_file(path);
     }
-
     for path in agent_binary_candidates(extra_candidates)? {
         if path.is_file() {
             return Ok(path);
         }
     }
-
     Err(WslLinkAgentDistributionError::AgentArtifactNotFound)
 }
 
@@ -550,9 +544,8 @@ where
     I: IntoIterator<Item = PathBuf>,
 {
     let candidates = agent_binary_candidates(extra_candidates)?;
-
-    if let Some(path) = env::var_os(AGENT_BINARY_ENV).filter(|value| !value.is_empty()) {
-        let path = normalize_host_path(&PathBuf::from(path))?;
+    if let Some(path) = agent_binary_env_path() {
+        let path = normalize_host_path(&path)?;
         return Ok(if path.is_file() {
             WslLinkAgentArtifactReport {
                 found: true,
@@ -576,7 +569,6 @@ where
             }
         });
     }
-
     let found = candidates.iter().find(|path| path.is_file()).cloned();
     Ok(match found {
         Some(path) => WslLinkAgentArtifactReport {
@@ -609,13 +601,19 @@ where
     Ok(dedupe_paths(candidates))
 }
 
+// 改动 3: 单一职责的 env 读取 helper
+fn agent_binary_env_path() -> Option<PathBuf> {
+    env::var_os(AGENT_BINARY_ENV)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 fn default_agent_binary_candidates() -> Result<Vec<PathBuf>, WslLinkAgentDistributionError> {
     let exe = env::current_exe()
         .map_err(|error| WslLinkAgentDistributionError::AgentArtifactPath(error.to_string()))?;
     let Some(dir) = exe.parent() else {
         return Err(WslLinkAgentDistributionError::AgentArtifactNotFound);
     };
-
     let mut candidates = vec![
         dir.join("wsl_link_agent"),
         dir.join("wsl-link-agent"),
@@ -623,7 +621,6 @@ fn default_agent_binary_candidates() -> Result<Vec<PathBuf>, WslLinkAgentDistrib
         dir.join("wsl-link").join("wsl-link-agent"),
         dir.join(PACKAGED_AGENT_RESOURCE_PATH),
     ];
-
     candidates.extend(workspace_agent_artifact_candidates(&exe));
     Ok(dedupe_paths(candidates))
 }
@@ -648,11 +645,13 @@ fn prepend_candidate(path: PathBuf, candidates: Vec<PathBuf>) -> Vec<PathBuf> {
     dedupe_paths(merged)
 }
 
+// 改动 2: 直接用 PathBuf 作 HashSet key,省 to_string_lossy + to_string 两次分配
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen: std::collections::HashSet<PathBuf> =
+        std::collections::HashSet::with_capacity(paths.len());
     paths
         .into_iter()
-        .filter(|path| seen.insert(path.to_string_lossy().to_string()))
+        .filter(|path| seen.insert(path.clone()))
         .collect()
 }
 
@@ -734,13 +733,11 @@ pub async fn run_distribution_command_with_timeout(
         }
         Err(_) => return Err(WslLinkAgentDistributionError::Timeout(timeout)),
     };
-
     let output = WslLinkDistributionCommandOutput {
         status_code: output.status.code(),
         stdout: decode_command_output(&output.stdout),
         stderr: decode_command_output(&output.stderr),
     };
-
     if output.status_code == Some(0) {
         Ok(output)
     } else {
@@ -790,14 +787,15 @@ fn sh_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
+// 改动 1: 合并 ${HOME}/ 和 ~/ 等价分支
 fn sh_path_expr(value: &str) -> String {
-    if let Some(rest) = value.strip_prefix("${HOME}/") {
-        return format!("\"$HOME/{}\"", sh_double_quote_body(rest));
+    let home_rest = value
+        .strip_prefix("${HOME}/")
+        .or_else(|| value.strip_prefix("~/"));
+    match home_rest {
+        Some(rest) => format!("\"$HOME/{}\"", sh_double_quote_body(rest)),
+        None => sh_quote(value),
     }
-    if let Some(rest) = value.strip_prefix("~/") {
-        return format!("\"$HOME/{}\"", sh_double_quote_body(rest));
-    }
-    sh_quote(value)
 }
 
 fn sh_double_quote_body(value: &str) -> String {
@@ -920,7 +918,6 @@ mod tests {
     #[test]
     fn default_plan_uses_user_scoped_paths() {
         let plan = WslLinkAgentDistributionPlan::user_default();
-
         assert_eq!(plan.install_dir, USER_AGENT_INSTALL_DIR);
         assert_eq!(plan.config_dir, USER_AGENT_CONFIG_DIR);
         assert_eq!(
@@ -951,7 +948,6 @@ mod tests {
         )
         .expect("plan should build");
         let command = plan.prepare_command();
-
         assert_eq!(command.program, WSL_EXE_PROGRAM);
         assert_eq!(command.args[0], "--distribution");
         assert_eq!(command.args[1], "Ubuntu 中文 24.04");
@@ -961,7 +957,6 @@ mod tests {
     #[test]
     fn named_distro_rejects_line_breaks() {
         let result = WslLinkDistroTarget::named("Ubuntu\n24.04");
-
         assert_eq!(
             result,
             Err(WslLinkAgentDistributionError::InvalidDistroName)
@@ -973,7 +968,6 @@ mod tests {
         let plan = WslLinkAgentDistributionPlan::user_default();
         let command = plan.write_agent_binary_command();
         let script = command.args.last().expect("script should exist");
-
         assert_eq!(
             command.stdin_payload,
             Some(WslLinkDistributionPayload::AgentBinary)
@@ -987,7 +981,6 @@ mod tests {
         let plan = WslLinkAgentDistributionPlan::user_default();
         let command = plan.write_noise_config_command();
         let script = command.args.last().expect("script should exist");
-
         assert_eq!(
             command.stdin_payload,
             Some(WslLinkDistributionPayload::NoiseConfig)
@@ -1001,14 +994,13 @@ mod tests {
         let plan = WslLinkAgentDistributionPlan::user_default();
         let command = plan.start_command();
         let script = command.args.last().expect("script should exist");
-
         assert_eq!(command.stdin_payload, None);
         assert!(script.contains("nohup \"$binary\" --noise-config \"$config\""));
         assert!(script.contains("agent.pid"));
         assert!(script.contains("kill -0 \"$pid\""));
         assert!(script.contains("old_pid=$(tr -cd '0-9' < \"$pid_file\""));
         assert!(script.contains("printf '%s' \"$pid\" >\"$pid_file\""));
-        assert!(!script.contains("printf '%s\\\\n' \"$pid\" >\"$pid_file\""));
+        assert!(!script.contains("printf '%s\\n' \"$pid\" >\"$pid_file\""));
     }
 
     #[test]
@@ -1018,7 +1010,6 @@ mod tests {
             "relative/path",
             USER_AGENT_CONFIG_DIR,
         );
-
         assert!(matches!(
             result,
             Err(WslLinkAgentDistributionError::UnsupportedPath(_))
@@ -1035,17 +1026,24 @@ mod tests {
         let plan = WslLinkAgentDistributionPlan::user_default();
         let command = plan.prepare_command();
         let script = command.args.last().expect("script should exist");
-
         assert!(script.contains("\"$HOME/.local/share/calamex/wsl-link\""));
         assert!(!script.contains("'${HOME}/"));
         assert!(!script.contains("\\$HOME"));
+    }
+
+    // 改动 1 的新增回归测试
+    #[test]
+    fn tilde_prefix_and_home_brace_prefix_produce_same_expansion() {
+        assert_eq!(
+            sh_path_expr("${HOME}/calamex/wsl-link"),
+            sh_path_expr("~/calamex/wsl-link"),
+        );
     }
 
     #[test]
     fn distribution_bundle_rejects_empty_agent_binary() {
         let result =
             build_agent_distribution_bundle(WslLinkAgentDistributionPlan::user_default(), vec![]);
-
         assert!(matches!(
             result,
             Err(WslLinkAgentDistributionError::EmptyAgentBinary)
@@ -1055,27 +1053,22 @@ mod tests {
     #[test]
     fn artifact_report_finds_extra_candidate() {
         let path = temp_agent_file("extra-candidate");
-
         let report = agent_binary_artifact_report([path.clone()]).expect("report should build");
-
         assert!(report.found);
         assert_eq!(report.path, Some(path.clone()));
         assert_eq!(report.candidates.first(), Some(&path));
-
         let _ = std::fs::remove_dir_all(path.parent().expect("path has parent"));
     }
 
     #[test]
     fn artifact_candidates_are_deduplicated() {
         let path = std::path::PathBuf::from("agent-candidate");
-
         let candidates =
             agent_binary_candidates([path.clone(), path.clone()]).expect("candidates should build");
         let count = candidates
             .iter()
             .filter(|candidate| **candidate == path)
             .count();
-
         assert_eq!(count, 1);
     }
 
@@ -1086,7 +1079,6 @@ mod tests {
             b"agent-binary".to_vec(),
         )
         .expect("bundle should build");
-
         let step_kinds = bundle
             .steps
             .iter()
@@ -1124,7 +1116,6 @@ mod tests {
         let noise_json = std::str::from_utf8(noise_payload).expect("payload should be utf8 json");
         let agent_material = crate::wsl_link::noise_material::decode_agent_material(noise_json)
             .expect("agent material should decode");
-
         assert_eq!(
             agent_material.desktop_static_public(),
             bundle.desktop_material.desktop_static_public()
@@ -1145,7 +1136,6 @@ mod tests {
             std::time::Duration::from_millis(1),
         )
         .await;
-
         assert_eq!(
             result,
             Err(WslLinkAgentDistributionError::MissingPayload(
@@ -1164,7 +1154,6 @@ mod tests {
             std::time::Duration::from_millis(1),
         )
         .await;
-
         assert_eq!(
             result,
             Err(WslLinkAgentDistributionError::UnexpectedPayload)
@@ -1183,11 +1172,9 @@ mod tests {
             seen: Arc::new(Mutex::new(Vec::new())),
             fail_at: None,
         };
-
         let outcome = install_agent_distribution_bundle_with_runner(&bundle, &store, &runner)
             .await
             .expect("install should work");
-
         assert_eq!(outcome.outputs.len(), 4);
         assert_eq!(
             *runner.seen.lock().expect("test runner lock should work"),
@@ -1213,9 +1200,7 @@ mod tests {
             seen: Arc::new(Mutex::new(Vec::new())),
             fail_at: Some(2),
         };
-
         let result = install_agent_distribution_bundle_with_runner(&bundle, &store, &runner).await;
-
         assert!(matches!(
             result,
             Err(WslLinkAgentDistributionError::CommandFailed { .. })
@@ -1230,11 +1215,9 @@ mod tests {
             seen: Arc::new(Mutex::new(Vec::new())),
             fail_at: None,
         };
-
         let outcome = start_installed_agent_with_runner(&plan, &runner)
             .await
             .expect("start should work");
-
         assert_eq!(outcome.binary_path, plan.binary_path);
         assert_eq!(outcome.noise_config_path, plan.noise_config_path);
         assert_eq!(outcome.pid_path, plan.pid_path);
