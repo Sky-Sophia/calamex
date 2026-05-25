@@ -389,8 +389,7 @@ onBeforeUnmount(() => {
     <!-- ═══ Header ═══ -->
 <div class="template-header">
   <div class="template-title-row">
-    <!-- 你可以在这里放标题 -->
-    <!-- <h2>模板管理</h2> -->
+    
   </div>
 
   <div class="template-search-row">

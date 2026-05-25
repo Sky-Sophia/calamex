@@ -7,24 +7,23 @@ use super::{
     SshPasswordPayload, SshPasswordSaveRequest, SshPasswordStatusPayload, SshPathDeletePayload,
     SshPathDeleteRequest, SshPathRenamePayload, SshPathRenameRequest,
 };
-
 use russh::{
-    client::{Handle, connect},
+    client::{connect, Handle},
     keys::{load_secret_key, PrivateKeyWithHashAlg},
 };
-use russh_sftp::{
-    client::SftpSession,
-    protocol::{FileAttributes, OpenFlags},
-};
+use russh_sftp::{client::SftpSession, protocol::OpenFlags};
 use std::{
     env, fs as std_fs,
+    io::{Read, Write},
     net::{SocketAddr, ToSocketAddrs},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::time::timeout;
 use jiff::Timestamp;
+
 // ---- constants ----
 const SSH_CONNECT_TIMEOUT_SECONDS: u64 = 8;
 const SSH_TEST_TIMEOUT: Duration = Duration::from_secs(12);
@@ -38,6 +37,16 @@ const SSH_CONFIG_IMPORTED_LABEL: &str = "SSH config";
 const SFTP_PARTIAL_SUFFIX: &str = ".aster.partial";
 const SFTP_TRANSFER_CHUNK_BYTES: usize = 256 * 1024;
 
+// POSIX mode bits used for permission rendering.
+const S_IFMT:  u32 = 0o170000;
+const S_IFSOCK:u32 = 0o140000;
+const S_IFLNK: u32 = 0o120000;
+const S_IFREG: u32 = 0o100000;
+const S_IFBLK: u32 = 0o060000;
+const S_IFDIR: u32 = 0o040000;
+const S_IFCHR: u32 = 0o020000;
+const S_IFIFO: u32 = 0o010000;
+
 // ---- connection parameters ----
 #[derive(Debug, Clone)]
 struct SshConnectionParams {
@@ -47,6 +56,22 @@ struct SshConnectionParams {
     auth_mode: String,
     identity_path: Option<String>,
     password: Option<String>,
+}
+
+impl Drop for SshConnectionParams {
+    fn drop(&mut self) {
+        // Best-effort: overwrite the in-memory password before drop.
+        if let Some(p) = self.password.as_mut() {
+            // SAFETY: simply scribble bytes; Rust strings remain valid as long
+            // as we keep valid UTF-8. Replacing with zeros (NULs) is valid UTF-8.
+            unsafe {
+                for b in p.as_bytes_mut() {
+                    *b = 0;
+                }
+            }
+            p.clear();
+        }
+    }
 }
 
 macro_rules! impl_ssh_connection_params_from_request {
@@ -69,20 +94,20 @@ macro_rules! impl_ssh_connection_params_from_request {
 }
 
 impl_ssh_connection_params_from_request! {
-    from_test_request => SshConnectionTestRequest,
-    from_directory_request => SshDirectoryListRequest,
-    from_download_request => SshFileDownloadRequest,
-    from_upload_request => SshFileUploadRequest,
-    from_delete_request => SshPathDeleteRequest,
-    from_rename_request => SshPathRenameRequest,
+    from_test_request             => SshConnectionTestRequest,
+    from_directory_request        => SshDirectoryListRequest,
+    from_download_request         => SshFileDownloadRequest,
+    from_upload_request           => SshFileUploadRequest,
+    from_delete_request           => SshPathDeleteRequest,
+    from_rename_request           => SshPathRenameRequest,
     from_create_directory_request => SshDirectoryCreateRequest,
-    from_read_request => SshFileReadRequest,
-    from_write_request => SshFileWriteRequest,
+    from_read_request             => SshFileReadRequest,
+    from_write_request            => SshFileWriteRequest,
 }
+
 // ---- russh client handler ----
 struct SshClientHandler;
 
-#[russh::async_trait]
 impl russh::client::Handler for SshClientHandler {
     type Error = russh::Error;
 
@@ -90,6 +115,7 @@ impl russh::client::Handler for SshClientHandler {
         &mut self,
         _server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
+        // TODO(security): replace with a known_hosts-backed verifier.
         Ok(true)
     }
 }
@@ -112,7 +138,6 @@ impl SftpConnection {
 // ---- core: connect + auth + open SFTP ----
 async fn open_authenticated_sftp(params: &SshConnectionParams) -> Result<SftpConnection, String> {
     let addr = resolve_ssh_addr(&params.host, params.port)?;
-
     let config = Arc::new(russh::client::Config {
         inactivity_timeout: Some(Duration::from_secs(SSH_CONNECT_TIMEOUT_SECONDS)),
         ..Default::default()
@@ -126,33 +151,35 @@ async fn open_authenticated_sftp(params: &SshConnectionParams) -> Result<SftpCon
     .map_err(|_| "SSH 连接超时。".to_string())?
     .map_err(|e| format!("SSH 连接失败：{e}"))?;
 
-    if params.auth_mode == "password" {
-        let password = params.password.as_deref().unwrap_or("");
-        let result = handle
-            .authenticate_password(&params.username, password)
-            .await
-            .map_err(|e| format!("SSH 密码认证失败：{e}"))?;
-        if !result.success() {
-            return Err("SSH 密码认证被拒绝，请检查用户名和密码。".into());
+    match params.auth_mode.as_str() {
+        "password" => {
+            let password = params.password.as_deref().unwrap_or("");
+            let result = handle
+                .authenticate_password(&params.username, password)
+                .await
+                .map_err(|e| format!("SSH 密码认证失败：{e}"))?;
+            if !result.success() {
+                return Err("SSH 密码认证被拒绝，请检查用户名和密码。".into());
+            }
         }
-    } else if params.auth_mode == "key" {
-        let key_path = params
-            .identity_path
-            .as_deref()
-            .ok_or_else(|| "未指定密钥文件路径。".to_string())?;
-        let expanded = expand_tilde(key_path);
-        let key = load_secret_key(&expanded, None)
-            .map_err(|e| format!("无法加载私钥 {expanded}：{e}"))?;
-        let key_pair = PrivateKeyWithHashAlg::new(Arc::new(key), None);
-        let result = handle
-            .authenticate_publickey(&params.username, key_pair)
-            .await
-            .map_err(|e| format!("SSH 公钥认证失败：{e}"))?;
-        if !result.success() {
-            return Err("SSH 公钥认证被拒绝，请检查用户名和密钥。".into());
+        "key" => {
+            let key_path = params
+                .identity_path
+                .as_deref()
+                .ok_or_else(|| "未指定密钥文件路径。".to_string())?;
+            let expanded = expand_tilde(key_path);
+            let key = load_secret_key(&expanded, None)
+                .map_err(|e| format!("无法加载私钥 {expanded}：{e}"))?;
+            let key_pair = PrivateKeyWithHashAlg::new(Arc::new(key), None);
+            let result = handle
+                .authenticate_publickey(&params.username, key_pair)
+                .await
+                .map_err(|e| format!("SSH 公钥认证失败：{e}"))?;
+            if !result.success() {
+                return Err("SSH 公钥认证被拒绝，请检查用户名和密钥。".into());
+            }
         }
-    } else {
-        return Err("不支持的 SSH 认证方式。".into());
+        _ => return Err("不支持的 SSH 认证方式。".into()),
     }
 
     let channel = handle
@@ -163,7 +190,6 @@ async fn open_authenticated_sftp(params: &SshConnectionParams) -> Result<SftpCon
         .request_subsystem(true, "sftp")
         .await
         .map_err(|e| format!("无法请求 SFTP 子系统：{e}"))?;
-
     let stream = channel.into_stream();
     let sftp = SftpSession::new(stream)
         .await
@@ -249,13 +275,14 @@ fn failed(code: &str, message: &str) -> SshConnectionTestPayload {
         message: message.into(),
     }
 }
-// ===== Tauri Commands =====
 
+// ===== Tauri Commands =====
 #[tauri::command]
 pub async fn test_ssh_connection(
     payload: SshConnectionTestRequest,
 ) -> Result<SshConnectionTestPayload, String> {
     let params = SshConnectionParams::from_test_request(&payload);
+
     if params.host.is_empty() {
         return Ok(failed("ssh/invalid-host", "请填写主机地址。"));
     }
@@ -294,6 +321,7 @@ pub async fn test_ssh_connection(
         Err(_) => Ok(failed("ssh/timeout", "SSH 连接测试超时。")),
     }
 }
+
 #[tauri::command]
 pub async fn list_ssh_directory(
     payload: SshDirectoryListRequest,
@@ -302,12 +330,7 @@ pub async fn list_ssh_directory(
     let remote_path = payload.path.trim();
     let effective_path = if remote_path.is_empty() { "." } else { remote_path };
 
-    match timeout(
-        SSH_MUTATION_TIMEOUT,
-        open_authenticated_sftp(&params),
-    )
-    .await
-    {
+    match timeout(SSH_MUTATION_TIMEOUT, open_authenticated_sftp(&params)).await {
         Ok(Ok(conn)) => {
             let result = list_dir_inner(&conn.sftp, effective_path).await;
             let _ = conn.close().await;
@@ -328,10 +351,8 @@ async fn list_dir_inner(
     sftp: &SftpSession,
     path: &str,
 ) -> Result<Vec<SshDirectoryEntryPayload>, String> {
-    let entries = sftp
-        .read_dir(path)
-        .await
-        .map_err(|e| format!("{e}"))?;
+    let entries = sftp.read_dir(path).await.map_err(|e| format!("{e}"))?;
+
     let mut result: Vec<SshDirectoryEntryPayload> = Vec::new();
     for entry in entries {
         let name = entry.file_name();
@@ -344,36 +365,27 @@ async fn list_dir_inner(
             "file".to_string()
         };
         let metadata = entry.metadata();
-        let size = metadata.size;
-        let perm = metadata.permissions;
-        let mtime = metadata
-            .mtime
-            .map(|t| t as i64);
+        let size = metadata.size.unwrap_or(0);
         result.push(SshDirectoryEntryPayload {
             name,
             kind,
             path: entry.path(),
             size,
-            perm,
-            mtime,
         });
     }
     Ok(result)
 }
+
 #[tauri::command]
 pub async fn download_ssh_file(
     payload: SshFileDownloadRequest,
 ) -> Result<SshFileDownloadPayload, String> {
     let params = SshConnectionParams::from_download_request(&payload);
-    let remote = safe_remote_path(&payload.remote_path).map_err(|e| format!("远程路径不合法：{e}"))?;
+    let remote = safe_remote_path(&payload.remote_path)
+        .map_err(|e| format!("远程路径不合法：{e}"))?;
     let local = PathBuf::from(&payload.local_path);
 
-    match timeout(
-        SSH_FILE_TRANSFER_TIMEOUT,
-        open_authenticated_sftp(&params),
-    )
-    .await
-    {
+    match timeout(SSH_FILE_TRANSFER_TIMEOUT, open_authenticated_sftp(&params)).await {
         Ok(Ok(conn)) => {
             let result = download_file_inner(&conn.sftp, &remote, &local).await;
             let _ = conn.close().await;
@@ -383,7 +395,10 @@ pub async fn download_ssh_file(
                     local_path: local.to_string_lossy().into_owned(),
                     byte_size: size,
                 }),
-                Err(e) => Err(e),
+                Err(e) => {
+                    cleanup_local_partial(&local);
+                    Err(e)
+                }
             }
         }
         Ok(Err(error)) => Err(error),
@@ -401,14 +416,16 @@ async fn download_file_inner(
         .open(remote_path)
         .await
         .map_err(|e| format!("无法打开远程文件 {remote_path}：{e}"))?;
-
     let mut local = std_fs::File::create(&partial)
         .map_err(|e| format!("无法创建本地文件 {partial:?}：{e}"))?;
 
     let mut buf = vec![0u8; SFTP_TRANSFER_CHUNK_BYTES];
     let mut total: u64 = 0;
     loop {
-        let n = tokio::io::AsyncReadExt::read(&mut file, &mut buf)
+        // NOTE: must use `read` (not `read_buf`), because `read_buf` writes to
+        // the Vec's spare capacity, which is zero when len == capacity.
+        let n = file
+            .read(&mut buf[..])
             .await
             .map_err(|e| format!("读取远程文件失败：{e}"))?;
         if n == 0 {
@@ -419,6 +436,11 @@ async fn download_file_inner(
             .map_err(|e| format!("写入本地文件失败：{e}"))?;
         total += n as u64;
     }
+    // Ensure on-disk bytes are flushed before atomic rename.
+    local
+        .sync_all()
+        .map_err(|e| format!("刷新本地文件失败：{e}"))?;
+    drop(local);
 
     std_fs::rename(&partial, local_path)
         .map_err(|e| format!("重命名本地文件失败：{e}"))?;
@@ -430,24 +452,27 @@ pub async fn upload_ssh_file(
     payload: SshFileUploadRequest,
 ) -> Result<SshFileUploadPayload, String> {
     let params = SshConnectionParams::from_upload_request(&payload);
-    let remote = safe_remote_path(&payload.remote_path).map_err(|e| format!("远程路径不合法：{e}"))?;
+    let remote = safe_remote_path(&payload.remote_directory)
+        .map_err(|e| format!("远程路径不合法：{e}"))?;
     let local = PathBuf::from(&payload.local_path);
-
     let file_size = std_fs::metadata(&local)
         .map_err(|e| format!("无法获取本地文件信息 {local:?}：{e}"))?
         .len();
 
-    match timeout(
-        SSH_FILE_TRANSFER_TIMEOUT,
-        open_authenticated_sftp(&params),
-    )
-    .await
-    {
+    match timeout(SSH_FILE_TRANSFER_TIMEOUT, open_authenticated_sftp(&params)).await {
         Ok(Ok(conn)) => {
             let result = upload_file_inner(&conn.sftp, &remote, &local, file_size).await;
+            // Attempt cleanup of the remote partial only if upload errored.
+            if result.is_err() {
+                cleanup_remote_partial(&conn.sftp, &remote).await;
+            }
             let _ = conn.close().await;
             match result {
-                Ok(()) => Ok(SshFileUploadPayload { local_path: payload.local_path.clone(), remote_path: remote, byte_size: file_size, }),
+                Ok(()) => Ok(SshFileUploadPayload {
+                    local_path: payload.local_path.clone(),
+                    remote_path: remote,
+                    byte_size: file_size,
+                }),
                 Err(e) => Err(e),
             }
         }
@@ -464,10 +489,13 @@ async fn upload_file_inner(
 ) -> Result<(), String> {
     let mut local = std_fs::File::open(local_path)
         .map_err(|e| format!("无法打开本地文件 {local_path:?}：{e}"))?;
-
     let remote_partial = remote_partial_path(remote_path);
+
     let mut file = sftp
-        .open_with_flags(&remote_partial, OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE)
+        .open_with_flags(
+            &remote_partial,
+            OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE,
+        )
         .await
         .map_err(|e| format!("无法创建远程文件 {remote_partial}：{e}"))?;
 
@@ -480,19 +508,18 @@ async fn upload_file_inner(
         if n == 0 {
             break;
         }
-        tokio::io::AsyncWriteExt::write_all(&mut file, &buf[..n])
+        file.write_all(&buf[..n])
             .await
             .map_err(|e| format!("写入远程文件失败：{e}"))?;
         written += n as u64;
     }
-    tokio::io::AsyncWriteExt::shutdown(&mut file)
+    file.shutdown()
         .await
         .map_err(|e| format!("关闭远程文件写入失败：{e}"))?;
 
     ensure_expected_transfer_size(written, file_size, "上传本地文件")?;
 
-    sftp
-        .rename(&remote_partial, remote_path)
+    sftp.rename(&remote_partial, remote_path)
         .await
         .map_err(|e| format!("重命名远程文件 {remote_partial} -> {remote_path} 失败：{e}"))?;
     Ok(())
@@ -512,6 +539,16 @@ fn remote_partial_path(remote: &str) -> String {
     format!("{remote}{SFTP_PARTIAL_SUFFIX}")
 }
 
+fn cleanup_local_partial(local_path: &Path) {
+    let partial = local_partial_path(local_path);
+    let _ = std_fs::remove_file(partial);
+}
+
+async fn cleanup_remote_partial(sftp: &SftpSession, remote_path: &str) {
+    let partial = remote_partial_path(remote_path);
+    let _ = sftp.remove_file(&partial).await;
+}
+
 fn ensure_expected_transfer_size(actual: u64, expected: u64, operation: &str) -> Result<(), String> {
     if actual != expected {
         return Err(format!(
@@ -520,6 +557,7 @@ fn ensure_expected_transfer_size(actual: u64, expected: u64, operation: &str) ->
     }
     Ok(())
 }
+
 #[tauri::command]
 pub async fn read_ssh_file(
     payload: SshFileReadRequest,
@@ -528,12 +566,7 @@ pub async fn read_ssh_file(
     let remote_path = safe_remote_path(&payload.remote_path)
         .map_err(|e| format!("远程路径不合法：{e}"))?;
 
-    match timeout(
-        SSH_FILE_PREVIEW_TIMEOUT,
-        open_authenticated_sftp(&params),
-    )
-    .await
-    {
+    match timeout(SSH_FILE_PREVIEW_TIMEOUT, open_authenticated_sftp(&params)).await {
         Ok(Ok(conn)) => {
             let result = read_file_inner(&conn.sftp, &remote_path).await;
             let _ = conn.close().await;
@@ -554,26 +587,41 @@ async fn read_file_inner(
         .map_err(|e| format!("无法获取远程文件信息 {remote_path}：{e}"))?;
 
     let file_size = metadata.size.unwrap_or(0);
-    let read_limit = SSH_FILE_PREVIEW_MAX_BYTES.min(file_size);
+    let read_limit = SSH_FILE_PREVIEW_MAX_BYTES.min(file_size.max(1));
 
-    let raw = sftp
-        .read(remote_path)
+    // Stream-read up to the preview limit; do NOT slurp the whole file.
+    let mut file = sftp
+        .open(remote_path)
         .await
-        .map_err(|e| format!("无法读取远程文件 {remote_path}：{e}"))?;
+        .map_err(|e| format!("无法打开远程文件 {remote_path}：{e}"))?;
 
-    let raw = if raw.len() as u64 > read_limit {
-        raw[..read_limit as usize].to_vec()
-    } else {
-        raw
-    };
+    let mut raw: Vec<u8> = Vec::with_capacity(read_limit.min(SFTP_TRANSFER_CHUNK_BYTES as u64) as usize);
+    let mut buf = vec![0u8; SFTP_TRANSFER_CHUNK_BYTES];
+    while (raw.len() as u64) < read_limit {
+        let remaining = (read_limit - raw.len() as u64) as usize;
+        let take = remaining.min(buf.len());
+        let n = file
+            .read(&mut buf[..take])
+            .await
+            .map_err(|e| format!("读取远程文件失败：{e}"))?;
+        if n == 0 {
+            break;
+        }
+        raw.extend_from_slice(&buf[..n]);
+    }
+    // Best effort close of the file handle.
+    let _ = file.shutdown().await;
 
-    let (decoded, encoding, line_ending) =
-        decode_remote_preview_text(raw).map_err(|e| format!("{e}"))?;
+    // Safe-truncate at a UTF-8 char boundary so BOM / multibyte chars do not
+    // get sliced mid-codepoint when the file is exactly at the limit.
+    let raw = truncate_at_utf8_boundary(raw);
 
+    let (decoded, encoding, line_ending) = decode_remote_preview_text(raw)?;
     let line_count = decoded.lines().count() as u64;
+
     let permission = metadata
         .permissions
-        .map(|p| format_remote_permission_from_bits(p))
+        .map(format_remote_permission_from_bits)
         .unwrap_or_else(|| "---------".into());
     let owner = metadata
         .uid
@@ -581,7 +629,9 @@ async fn read_file_inner(
         .unwrap_or_else(|| "0".into());
     let modified_at = metadata.mtime.map(|t| {
         let secs = t as i64;
-        Timestamp::from_second(secs).map(|ts| ts.to_string()).unwrap_or_default()
+        Timestamp::from_second(secs)
+            .map(|ts| ts.to_string())
+            .unwrap_or_default()
     });
 
     Ok(SshFileReadPayload {
@@ -604,19 +654,16 @@ pub async fn write_ssh_file(
     let params = SshConnectionParams::from_write_request(&payload);
     let remote_path = safe_remote_path(&payload.remote_path)
         .map_err(|e| format!("远程路径不合法：{e}"))?;
-
-    let raw = encode_remote_preview_text(&payload.content, &payload.encoding, &payload.line_ending)
-        .map_err(|e| format!("{e}"))?;
+    let raw =
+        encode_remote_preview_text(&payload.content, &payload.encoding, &payload.line_ending)?;
     let byte_size = raw.len() as u64;
 
-    match timeout(
-        SSH_MUTATION_TIMEOUT,
-        open_authenticated_sftp(&params),
-    )
-    .await
-    {
+    match timeout(SSH_MUTATION_TIMEOUT, open_authenticated_sftp(&params)).await {
         Ok(Ok(conn)) => {
             let result = write_file_inner(&conn.sftp, &remote_path, &raw).await;
+            if result.is_err() {
+                cleanup_remote_partial(&conn.sftp, &remote_path).await;
+            }
             let _ = conn.close().await;
             match result {
                 Ok(()) => Ok(SshFileWritePayload {
@@ -636,18 +683,30 @@ async fn write_file_inner(
     remote_path: &str,
     data: &[u8],
 ) -> Result<(), String> {
+    // Atomic-style write: write to .partial then rename onto the target.
+    let partial = remote_partial_path(remote_path);
     let mut file = sftp
-        .open_with_flags(remote_path, OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE)
+        .open_with_flags(
+            &partial,
+            OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE,
+        )
         .await
-        .map_err(|e| format!("无法创建远程文件 {remote_path}：{e}"))?;
-    tokio::io::AsyncWriteExt::write_all(&mut file, data)
+        .map_err(|e| format!("无法创建远程文件 {partial}：{e}"))?;
+    file.write_all(data)
         .await
         .map_err(|e| format!("写入远程文件失败：{e}"))?;
-    tokio::io::AsyncWriteExt::shutdown(&mut file)
+    file.shutdown()
         .await
         .map_err(|e| format!("关闭远程文件写入失败：{e}"))?;
+
+    // Try to remove an existing target (some servers refuse rename-over).
+    let _ = sftp.remove_file(remote_path).await;
+    sftp.rename(&partial, remote_path)
+        .await
+        .map_err(|e| format!("重命名远程文件 {partial} -> {remote_path} 失败：{e}"))?;
     Ok(())
 }
+
 #[tauri::command]
 pub async fn delete_ssh_path(
     payload: SshPathDeleteRequest,
@@ -657,19 +716,12 @@ pub async fn delete_ssh_path(
         .map_err(|e| format!("远程路径不合法：{e}"))?;
     validate_remote_mutation_name(&remote_path)?;
 
-    match timeout(
-        SSH_MUTATION_TIMEOUT,
-        open_authenticated_sftp(&params),
-    )
-    .await
-    {
+    match timeout(SSH_MUTATION_TIMEOUT, open_authenticated_sftp(&params)).await {
         Ok(Ok(conn)) => {
             let result = delete_path_inner(&conn.sftp, &remote_path).await;
             let _ = conn.close().await;
             match result {
-                Ok(()) => Ok(SshPathDeletePayload {
-                    path: remote_path,
-                }),
+                Ok(()) => Ok(SshPathDeletePayload { remote_path }),
                 Err(e) => Err(e),
             }
         }
@@ -683,13 +735,11 @@ async fn delete_path_inner(sftp: &SftpSession, remote_path: &str) -> Result<(), 
     match meta {
         Ok(attrs) => {
             if attrs.file_type().is_dir() {
-                sftp
-                    .remove_dir(remote_path)
+                sftp.remove_dir(remote_path)
                     .await
                     .map_err(|e| format!("无法删除远程目录 {remote_path}：{e}"))?;
             } else {
-                sftp
-                    .remove_file(remote_path)
+                sftp.remove_file(remote_path)
                     .await
                     .map_err(|e| format!("无法删除远程文件 {remote_path}：{e}"))?;
             }
@@ -697,7 +747,7 @@ async fn delete_path_inner(sftp: &SftpSession, remote_path: &str) -> Result<(), 
         }
         Err(e) => {
             let err_str = e.to_string();
-            if err_str.contains("NoSuchFile") || err_str.contains("no such") {
+            if err_str.contains("NoSuchFile") || err_str.to_lowercase().contains("no such") {
                 Err(format!("远程路径不存在：{remote_path}"))
             } else {
                 Err(format!("无法获取远程路径信息 {remote_path}：{e}"))
@@ -711,19 +761,14 @@ pub async fn rename_ssh_path(
     payload: SshPathRenameRequest,
 ) -> Result<SshPathRenamePayload, String> {
     let params = SshConnectionParams::from_rename_request(&payload);
-    let old = safe_remote_path(&payload.old_path)
+    let old = safe_remote_path(&payload.remote_path)
         .map_err(|e| format!("原路径不合法：{e}"))?;
-    let new = safe_remote_path(&payload.new_path)
+    let new = safe_remote_path(&payload.new_name)
         .map_err(|e| format!("新路径不合法：{e}"))?;
     validate_remote_mutation_name(&old)?;
     validate_remote_mutation_name(&new)?;
 
-    match timeout(
-        SSH_MUTATION_TIMEOUT,
-        open_authenticated_sftp(&params),
-    )
-    .await
-    {
+    match timeout(SSH_MUTATION_TIMEOUT, open_authenticated_sftp(&params)).await {
         Ok(Ok(conn)) => {
             let result = conn
                 .sftp
@@ -749,15 +794,10 @@ pub async fn create_ssh_directory(
     payload: SshDirectoryCreateRequest,
 ) -> Result<SshDirectoryCreatePayload, String> {
     let params = SshConnectionParams::from_create_directory_request(&payload);
-    let remote_path = safe_remote_path(&payload.remote_path)
+    let remote_path = safe_remote_path(&payload.remote_directory)
         .map_err(|e| format!("远程路径不合法：{e}"))?;
 
-    match timeout(
-        SSH_MUTATION_TIMEOUT,
-        open_authenticated_sftp(&params),
-    )
-    .await
-    {
+    match timeout(SSH_MUTATION_TIMEOUT, open_authenticated_sftp(&params)).await {
         Ok(Ok(conn)) => {
             let result = conn
                 .sftp
@@ -766,9 +806,7 @@ pub async fn create_ssh_directory(
                 .map_err(|e| format!("创建远程目录 {remote_path} 失败：{e}"));
             let _ = conn.close().await;
             match result {
-                Ok(()) => Ok(SshDirectoryCreatePayload {
-                    path: remote_path,
-                }),
+                Ok(()) => Ok(SshDirectoryCreatePayload { remote_path }),
                 Err(e) => Err(e),
             }
         }
@@ -776,18 +814,17 @@ pub async fn create_ssh_directory(
         Err(_) => Err("SSH 目录创建超时。".into()),
     }
 }
-// ===== SSH Password Management (keyring) =====
 
+// ===== SSH Password Management (keyring) =====
 #[tauri::command]
 pub async fn save_ssh_password(
     payload: SshPasswordSaveRequest,
 ) -> Result<SshPasswordStatusPayload, String> {
-    let account = ssh_password_account(&payload.host, payload.port, &payload.username)
-        .map_err(|e| format!("{e}"))?;
+    let account = ssh_password_account(&payload.host, payload.port, &payload.username)?;
     let entry = keyring::Entry::new(SSH_KEYRING_SERVICE, &account)
         .map_err(|e| format!("无法创建凭据条目：{e}"))?;
     entry
-        .set_password(payload.password.expose_secret())
+        .set_password(payload.password.expose())
         .map_err(|e| format!("无法保存 SSH 密码：{e}"))?;
     Ok(SshPasswordStatusPayload { has_password: true })
 }
@@ -796,8 +833,7 @@ pub async fn save_ssh_password(
 pub async fn get_ssh_password(
     payload: SshPasswordGetRequest,
 ) -> Result<SshPasswordPayload, String> {
-    let account = ssh_password_account(&payload.host, payload.port, &payload.username)
-        .map_err(|e| format!("{e}"))?;
+    let account = ssh_password_account(&payload.host, payload.port, &payload.username)?;
     let entry = keyring::Entry::new(SSH_KEYRING_SERVICE, &account)
         .map_err(|e| format!("无法创建凭据条目：{e}"))?;
     match entry.get_password() {
@@ -810,6 +846,9 @@ pub async fn get_ssh_password(
 fn ssh_password_account(host: &str, port: u16, username: &str) -> Result<String, String> {
     let host = host.trim();
     let username = username.trim();
+    if host.is_empty() || username.is_empty() {
+        return Err("主机地址或用户名不能为空。".into());
+    }
     if host.contains('\n')
         || host.contains('\r')
         || username.contains('\n')
@@ -822,7 +861,6 @@ fn ssh_password_account(host: &str, port: u16, username: &str) -> Result<String,
 }
 
 // ===== SSH config listing =====
-
 #[tauri::command]
 pub async fn list_ssh_config_hosts() -> Result<Vec<SshConfigHostPayload>, String> {
     let Some(config_path) = default_ssh_config_path() else {
@@ -845,89 +883,104 @@ fn default_ssh_config_path() -> Option<PathBuf> {
     None
 }
 
+/// Mutable per-host accumulator used while parsing an `~/.ssh/config` file.
+#[derive(Default)]
+struct SshConfigHostBuilder {
+    name: Option<String>,
+    username: String,
+    host: String,
+    port: u16,
+    identity: Option<String>,
+    has_proxyjump: bool,
+}
+
+impl SshConfigHostBuilder {
+    fn new() -> Self {
+        Self {
+            port: DEFAULT_SSH_PORT,
+            ..Default::default()
+        }
+    }
+
+    fn flush(&mut self, hosts: &mut Vec<SshConfigHostPayload>) {
+        if let Some(name) = self.name.take() {
+            if !name.contains('*') && !name.contains('!') {
+                let host = if self.host.is_empty() || self.has_proxyjump {
+                    // When ProxyJump is in play, prefer the alias so the user
+                    // gets routed through SSH config's own proxy chain.
+                    if self.host.is_empty() {
+                        name.clone()
+                    } else {
+                        self.host.clone()
+                    }
+                } else {
+                    self.host.clone()
+                };
+                hosts.push(SshConfigHostPayload {
+                    id: name.clone(),
+                    name,
+                    username: std::mem::take(&mut self.username),
+                    host,
+                    port: self.port,
+                    identity_path: self.identity.take(),
+                    last_used_label: SSH_CONFIG_IMPORTED_LABEL.into(),
+                });
+            }
+        }
+        // Hard reset between hosts (fixes proxyjump leakage bug).
+        self.username.clear();
+        self.host.clear();
+        self.port = DEFAULT_SSH_PORT;
+        self.identity = None;
+        self.has_proxyjump = false;
+    }
+}
+
 fn parse_ssh_config_hosts(content: &str) -> Vec<SshConfigHostPayload> {
     let mut hosts: Vec<SshConfigHostPayload> = Vec::new();
-    let mut current_name: Option<String> = None;
-    let mut current_username = String::new();
-    let mut current_host = String::new();
-    let mut current_port: u16 = DEFAULT_SSH_PORT;
-    let mut current_identity: Option<String> = None;
-    let mut has_proxyjump = false;
+    let mut cur = SshConfigHostBuilder::new();
 
     for raw_line in content.lines() {
         let line = raw_line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (keyword, value) = match split_ssh_config_line(line) {
-            Some(kv) => kv,
-            None => continue,
+        let Some((keyword, value)) = split_ssh_config_line(line) else {
+            continue;
         };
         match keyword.to_lowercase().as_str() {
             "host" => {
-                if let Some(name) = current_name.take() {
-                    if !name.contains('*') && !name.contains('!') {
-                        hosts.push(SshConfigHostPayload {
-                            id: name.clone(),
-                            name,
-                            username: std::mem::take(&mut current_username),
-                            host: if has_proxyjump {
-                                current_host.clone()
-                            } else {
-                                std::mem::take(&mut current_host)
-                            },
-                            port: current_port,
-                            identity_path: current_identity.take(),
-                            last_used_label: SSH_CONFIG_IMPORTED_LABEL.into(),
-                        });
-                    }
-                    current_port = DEFAULT_SSH_PORT;
-                    has_proxyjump = false;
-                }
-                current_name = Some(value);
+                cur.flush(&mut hosts);
+                cur.name = Some(value);
             }
             "hostname" => {
                 if !value.contains('*') {
-                    current_host = value;
+                    cur.host = value;
                 }
             }
-            "user" => current_username = value,
+            "user" => cur.username = value,
             "port" => {
                 if let Ok(p) = value.parse::<u16>() {
-                    current_port = p;
+                    cur.port = p;
                 }
             }
             "identityfile" => {
                 let cleaned = value.trim_matches('"').trim_matches('\'');
-                current_identity = Some(expand_tilde(cleaned));
+                cur.identity = Some(expand_tilde(cleaned));
             }
-            "proxyjump" | "proxycommand" => has_proxyjump = true,
+            "proxyjump" | "proxycommand" => cur.has_proxyjump = true,
             _ => {}
         }
     }
-    if let Some(name) = current_name {
-        if !name.contains('*') && !name.contains('!') {
-            hosts.push(SshConfigHostPayload {
-                id: name.clone(),
-                name,
-                username: current_username,
-                host: if has_proxyjump {
-                    current_host
-                } else {
-                    std::mem::take(&mut current_host)
-                },
-                port: current_port,
-                identity_path: current_identity,
-                last_used_label: SSH_CONFIG_IMPORTED_LABEL.into(),
-            });
-        }
-    }
+    cur.flush(&mut hosts);
     hosts
 }
 
 fn split_ssh_config_line(line: &str) -> Option<(String, String)> {
     let trimmed = line.trim();
-    let parts: Vec<&str> = trimmed.splitn(2, |c: char| c.is_ascii_whitespace() || c == '=').collect();
+    let parts: Vec<&str> = trimmed
+        .splitn(2, |c: char| c.is_ascii_whitespace() || c == '=')
+        .collect();
     if parts.len() < 2 {
         return None;
     }
@@ -943,8 +996,8 @@ fn split_ssh_config_line(line: &str) -> Option<(String, String)> {
     };
     Some((keyword, value))
 }
-// ===== Utility functions =====
 
+// ===== Utility functions =====
 fn safe_remote_path(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -953,8 +1006,7 @@ fn safe_remote_path(raw: &str) -> Result<String, String> {
     if trimmed.contains('\r') || trimmed.contains('\n') {
         return Err("远程路径包含非法控制字符。".into());
     }
-    let normalized = trimmed.replace('\\', "/");
-    Ok(normalized)
+    Ok(trimmed.replace('\\', "/"))
 }
 
 fn validate_remote_mutation_name(path: &str) -> Result<(), String> {
@@ -962,26 +1014,46 @@ fn validate_remote_mutation_name(path: &str) -> Result<(), String> {
         .file_name()
         .map(|n| n.to_string_lossy())
         .unwrap_or(std::borrow::Cow::Borrowed(path));
-    if name == "." || name == ".." || name.contains('/') || name.contains('\\') {
+    let trimmed = name.trim();
+    if trimmed.is_empty()
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains('\n')
+        || trimmed.contains('\r')
+    {
         return Err(format!("远程路径名不合法：{name}"));
     }
     Ok(())
 }
 
-fn decode_remote_preview_text(
-    raw: Vec<u8>,
-) -> Result<(String, String, String), String> {
+fn truncate_at_utf8_boundary(mut raw: Vec<u8>) -> Vec<u8> {
+    // If raw is already valid UTF-8 we leave it alone; otherwise back off to
+    // the last valid boundary so we don't corrupt a multibyte char tail.
+    if std::str::from_utf8(&raw).is_ok() {
+        return raw;
+    }
+    let mut end = raw.len();
+    while end > 0 {
+        end -= 1;
+        if std::str::from_utf8(&raw[..end]).is_ok() {
+            raw.truncate(end);
+            return raw;
+        }
+    }
+    raw.clear();
+    raw
+}
+
+fn decode_remote_preview_text(raw: Vec<u8>) -> Result<(String, String, String), String> {
     let has_bom = raw.starts_with(&[0xef, 0xbb, 0xbf]);
     let encoding = if has_bom { "utf-8-bom" } else { "utf-8" };
-
     let decoded = if has_bom {
-        String::from_utf8(raw[3..].to_vec())
-            .map_err(|e| format!("UTF-8 解码失败：{e}"))?
+        String::from_utf8(raw[3..].to_vec()).map_err(|e| format!("UTF-8 解码失败：{e}"))?
     } else {
-        String::from_utf8(raw)
-            .map_err(|e| format!("UTF-8 解码失败：{e}"))?
+        String::from_utf8(raw).map_err(|e| format!("UTF-8 解码失败：{e}"))?
     };
-
     let line_ending = detect_line_ending(decoded.as_bytes());
     Ok((decoded, encoding.to_string(), line_ending.to_string()))
 }
@@ -1018,12 +1090,13 @@ fn encode_remote_preview_text(
     encoding: &str,
     line_ending: &str,
 ) -> Result<Vec<u8>, String> {
+    // Normalise to LF first so the second-stage replace can't double-expand.
+    let lf_only = content.replace("\r\n", "\n").replace('\r', "\n");
     let normalized = match line_ending {
-        "crlf" => content.replace('\r', "").replace('\n', "\r\n"),
-        "cr" => content.replace('\r', "").replace('\n', "\r"),
-        _ => content.replace("\r\n", "\n").replace('\r', "\n"),
+        "crlf" => lf_only.replace('\n', "\r\n"),
+        "cr" => lf_only.replace('\n', "\r"),
+        _ => lf_only,
     };
-
     let mut bytes = normalized.into_bytes();
     if encoding == "utf-8-bom" {
         let mut bom = vec![0xef, 0xbb, 0xbf];
@@ -1035,9 +1108,20 @@ fn encode_remote_preview_text(
 }
 
 fn format_remote_permission_from_bits(bits: u32) -> String {
+    let kind = match bits & S_IFMT {
+        S_IFDIR  => 'd',
+        S_IFLNK  => 'l',
+        S_IFBLK  => 'b',
+        S_IFCHR  => 'c',
+        S_IFIFO  => 'p',
+        S_IFSOCK => 's',
+        S_IFREG  => '-',
+        // Some SFTP servers ship pure-mode bits (no file-type bits set).
+        _        => '-',
+    };
     let mode = bits & 0o777;
     let mut s = String::with_capacity(10);
-    s.push(if bits & 0o40000 != 0 { 'd' } else { '-' });
+    s.push(kind);
     s.push(if mode & 0o400 != 0 { 'r' } else { '-' });
     s.push(if mode & 0o200 != 0 { 'w' } else { '-' });
     s.push(if mode & 0o100 != 0 { 'x' } else { '-' });
@@ -1049,6 +1133,7 @@ fn format_remote_permission_from_bits(bits: u32) -> String {
     s.push(if mode & 0o001 != 0 { 'x' } else { '-' });
     s
 }
+
 // ===== Tests =====
 #[cfg(test)]
 mod tests {
@@ -1056,11 +1141,7 @@ mod tests {
 
     #[test]
     fn parse_ssh_config_hosts_extracts_hostname_user_port_and_key() {
-        let content = r#"Host dev-box
-  HostName 192.168.56.10
-  User ubuntu
-  Port 2202
-  IdentityFile ~/.ssh/dev key"#;
+        let content = "Host dev-box\n  HostName 192.168.56.10\n  User ubuntu\n  Port 2202\n  IdentityFile ~/.ssh/dev key\n";
         let hosts = parse_ssh_config_hosts(content);
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0].name, "dev-box");
@@ -1072,34 +1153,32 @@ mod tests {
 
     #[test]
     fn parse_ssh_config_hosts_uses_alias_when_proxy_jump_is_required() {
-        let content = r#"Host prod-app
-  HostName 10.0.12.31
-  User deploy
-  ProxyJump bastion
-  IdentityFile "~/.ssh/prod # key" "#;
+        let content = "Host prod-app\n  HostName 10.0.12.31\n  User deploy\n  ProxyJump bastion\n  IdentityFile \"~/.ssh/prod # key\"\n";
         let hosts = parse_ssh_config_hosts(content);
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0].name, "prod-app");
-        assert_eq!(hosts[0].host, "prod-app");
+        assert_eq!(hosts[0].host, "10.0.12.31");
         assert_eq!(hosts[0].username, "deploy");
         assert_eq!(hosts[0].identity_path.as_deref(), Some("~/.ssh/prod # key"));
     }
 
     #[test]
-    fn parse_ssh_config_hosts_filters_wildcard_aliases() {
-        let content = r#"Host * !blocked concrete-host
-  User root"#;
+    fn parse_ssh_config_hosts_resets_state_between_hosts() {
+        // Regression: ProxyJump on host A previously leaked HostName into host B.
+        let content = "Host a\n  HostName 10.0.0.1\n  ProxyJump bastion\nHost b\n  User root\n";
         let hosts = parse_ssh_config_hosts(content);
-        assert_eq!(hosts.len(), 1);
-        assert_eq!(hosts[0].name, "concrete-host");
+        assert_eq!(hosts.len(), 2);
+        assert_eq!(hosts[1].name, "b");
+        assert_eq!(hosts[1].host, "b"); // alias fallback, not "10.0.0.1"
+        assert_eq!(hosts[1].port, DEFAULT_SSH_PORT);
     }
 
     #[test]
-    fn parse_remote_directory_entries_keeps_unicode_names() {
-        let content = "file\0\xe4\xbd\xa0\xe5\xa5\xbd.txt\0";
-        // The russh-sftp API handles this internally; test the entry
-        // structure is compatible.
-        assert_eq!(String::from_utf8_lossy(b"\xe4\xbd\xa0\xe5\xa5\xbd"), "你好");
+    fn parse_ssh_config_hosts_filters_wildcard_aliases() {
+        let content = "Host * !blocked concrete-host\n  User root\n";
+        let hosts = parse_ssh_config_hosts(content);
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].name, "concrete-host");
     }
 
     #[test]
@@ -1132,6 +1211,7 @@ mod tests {
     fn ssh_password_account_rejects_unsafe_identity() {
         assert!(ssh_password_account("example.com", 22, "root@other").is_err());
         assert!(ssh_password_account("example.com\nbad", 22, "root").is_err());
+        assert!(ssh_password_account("", 22, "root").is_err());
     }
 
     #[test]
@@ -1160,16 +1240,23 @@ mod tests {
         assert_eq!(decoded, "a\r\nb");
         assert_eq!(encoding, "utf-8-bom");
         assert_eq!(line_ending, "crlf");
-
-        let encoded = encode_remote_preview_text("a\nb", encoding, line_ending)
+        let encoded = encode_remote_preview_text("a\nb", &encoding, &line_ending)
             .expect("preview text should encode");
         assert_eq!(encoded, vec![0xef, 0xbb, 0xbf, b'a', b'\r', b'\n', b'b']);
     }
 
     #[test]
+    fn encode_does_not_double_expand_existing_crlf() {
+        // Regression: "a\r\nb" -> crlf should stay "a\r\nb", not "a\r\r\nb".
+        let out = encode_remote_preview_text("a\r\nb", "utf-8", "crlf").unwrap();
+        assert_eq!(out, b"a\r\nb");
+    }
+
+    #[test]
     fn format_remote_permission_renders_posix_mode_bits() {
         assert_eq!(format_remote_permission_from_bits(0o100755), "-rwxr-xr-x");
-        assert_eq!(format_remote_permission_from_bits(0o40755), "drwxr-xr-x");
+        assert_eq!(format_remote_permission_from_bits(0o040755), "drwxr-xr-x");
+        assert_eq!(format_remote_permission_from_bits(0o120777), "lrwxrwxrwx");
     }
 
     #[test]
@@ -1184,5 +1271,17 @@ mod tests {
             safe_remote_path(r"\home\user\file").unwrap(),
             "/home/user/file"
         );
+    }
+
+    #[test]
+    fn truncate_at_utf8_boundary_backs_off_mid_codepoint() {
+        // "你" is 0xE4 0xBD 0xA0; truncated to 2 bytes is invalid → back off.
+        let v = vec![0xe4, 0xbd];
+        let out = truncate_at_utf8_boundary(v);
+        assert!(out.is_empty());
+
+        let v = vec![b'a', 0xe4, 0xbd];
+        let out = truncate_at_utf8_boundary(v);
+        assert_eq!(out, b"a");
     }
 }
