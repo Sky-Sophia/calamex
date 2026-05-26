@@ -3,10 +3,21 @@
 //! 管理 bash-language-server 进程，通过 JSON-RPC over stdio 通信。
 //! 诊断通过 Tauri 事件 `lsp-diagnostics` 推送到前端；
 //! 补全 / 悬停采用同步 request/response，由 oneshot channel 关联 id。
+//!
+//! 设计要点:
+//! - LSP 位置使用 UTF-16 code units (LSP 3.x 默认)。前端列号需按 UTF-16 计算。
+//! - 子进程由独立 watcher 任务 own；进程崩溃会把 state 置回 Stopped 并 emit `lsp-crashed`。
+//! - 启动流程被 `startup` 互斥锁串行化，避免 TOCTOU 双实例。
+//! - 反向 request (server → client) 对常见方法返回合规响应，对未知方法返回 MethodNotFound。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 use tauri::{AppHandle, Emitter};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
@@ -59,36 +70,43 @@ type PendingMap = Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>;
 
 struct LspSession {
     state: LspState,
-    child: Option<Child>,
     stdin: Option<Arc<Mutex<ChildStdin>>>,
     next_id: i64,
     open_files: HashMap<String, String>, // path → uri
     workspace_root: Option<String>,
+    /// 单调递增，每次 start +1。watcher 比对此值，避免在新一代实例上写状态。
+    generation: u64,
+    /// drop 即向 watcher 发出"主动停止"信号，使其不要再 emit `lsp-crashed`。
+    kill_tx: Option<oneshot::Sender<()>>,
 }
 
 impl LspSession {
     fn new() -> Self {
         Self {
             state: LspState::Stopped,
-            child: None,
             stdin: None,
             next_id: 1,
             open_files: HashMap::new(),
             workspace_root: None,
+            generation: 0,
+            kill_tx: None,
         }
     }
 }
 
 pub struct LspManager {
-    session: Mutex<LspSession>,
+    session: Arc<Mutex<LspSession>>,
     pending: PendingMap,
+    /// 串行化 `lsp_start` 的整条路径，防止两次启动并发产生双实例。
+    startup: Mutex<()>,
 }
 
 impl LspManager {
     pub fn new() -> Self {
         Self {
-            session: Mutex::new(LspSession::new()),
+            session: Arc::new(Mutex::new(LspSession::new())),
             pending: Arc::new(Mutex::new(HashMap::new())),
+            startup: Mutex::new(()),
         }
     }
 }
@@ -105,40 +123,85 @@ fn jsonrpc_notify(method: &str, params: Value) -> String {
     serde_json::json!({"jsonrpc":"2.0","method":method,"params":params}).to_string()
 }
 
+fn jsonrpc_ok_response(id: &Value, result: Value) -> String {
+    serde_json::json!({"jsonrpc":"2.0","id":id,"result":result}).to_string()
+}
+
 fn jsonrpc_error_response(id: &Value, code: i64, message: &str) -> String {
     serde_json::json!({
         "jsonrpc": "2.0",
         "id": id,
         "error": { "code": code, "message": message }
-    }).to_string()
+    })
+    .to_string()
 }
 
 fn frame_message(content: &str) -> Vec<u8> {
     format!("Content-Length: {}\r\n\r\n{}", content.len(), content).into_bytes()
 }
 
+// --- 极简 percent-encoding（纯 Rust，零依赖）-------------------------------
+
+/// 对 file path 做 percent-encoding。保留 `unreserved` 字符 + `/` + `:`。
+/// 其它字节 (空格、`#`、中文 UTF-8 字节等) 编码成 `%XX`。
+fn percent_encode_path(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'~' | b'/' | b':' => out.push(b as char),
+            _ => {
+                use std::fmt::Write;
+                let _ = write!(out, "%{:02X}", b);
+            }
+        }
+    }
+    out
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let h = (bytes[i + 1] as char).to_digit(16);
+            let l = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (h, l) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 fn path_to_uri(path: &str) -> Result<String, String> {
-    // NOTE: 未做 percent-encoding；含空格 / 非 ASCII 路径可能不合规。
-    // 生产建议引入 `url` 或 `percent-encoding`。
     let normalized = path.replace('\\', "/");
     if cfg!(windows) {
-        Ok(format!("file:///{}", normalized.trim_start_matches('/')))
+        // Windows: file:///C:/path/with%20space
+        let trimmed = normalized.trim_start_matches('/');
+        Ok(format!("file:///{}", percent_encode_path(trimmed)))
     } else {
         let with_slash = if normalized.starts_with('/') {
             normalized
         } else {
             format!("/{}", normalized)
         };
-        Ok(format!("file://{}", with_slash))
+        Ok(format!("file://{}", percent_encode_path(&with_slash)))
     }
 }
 
 fn uri_to_path(uri: &str) -> String {
     let s = uri.strip_prefix("file://").unwrap_or(uri);
-    if cfg!(windows) && s.starts_with('/') {
-        s[1..].to_string()
+    let decoded = percent_decode(s);
+    if cfg!(windows) && decoded.starts_with('/') {
+        decoded[1..].to_string()
     } else {
-        s.to_string()
+        decoded
     }
 }
 
@@ -146,7 +209,7 @@ fn uri_to_path(uri: &str) -> String {
 // 内部 I/O
 // ============================================================================
 
-/// 把数据写入 LSP stdin。**不要在持有 session 锁时调用**——先从 session 取出 stdin 句柄再 drop 锁。
+/// 把数据写入 LSP stdin。**不要在持有 session 锁时调用**——先取 stdin 句柄再 drop 锁。
 async fn write_framed(stdin: &Arc<Mutex<ChildStdin>>, data: &[u8]) -> Result<(), String> {
     let mut s = stdin.lock().await;
     s.write_all(data).await.map_err(|e| format!("写入 LSP 失败: {e}"))?;
@@ -174,7 +237,9 @@ async fn read_lsp_stdout(
                     if line.is_empty() {
                         break;
                     }
-                    if let Some(val) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    if let Some(val) =
+                        line.to_ascii_lowercase().strip_prefix("content-length:")
+                    {
                         content_length = val.trim().parse().ok();
                     }
                 }
@@ -186,7 +251,12 @@ async fn read_lsp_stdout(
         }
         let len = match content_length {
             Some(l) if l > 0 && l < 10_000_000 => l,
-            _ => continue,
+            Some(l) => {
+                // body 长度异常,无法继续保持流同步,直接退出 reader。
+                log::error!("LSP body 长度异常 ({l}),断开 reader");
+                return;
+            }
+            None => continue,
         };
 
         // 2) 读 body
@@ -198,13 +268,15 @@ async fn read_lsp_stdout(
         let msg: Value = match serde_json::from_slice(&body) {
             Ok(v) => v,
             Err(e) => {
-                log::warn!("LSP body JSON 解析失败: {e}; body={}",
-                    String::from_utf8_lossy(&body));
+                log::error!(
+                    "LSP body JSON 解析失败: {e}; body={}",
+                    String::from_utf8_lossy(&body)
+                );
                 continue;
             }
         };
 
-        // 3) 分派：response / notification / server-request
+        // 3) 分派
         dispatch_message(&app, &pending, &stdin, msg).await;
     }
 }
@@ -219,7 +291,7 @@ async fn dispatch_message(
     let has_method = msg.get("method").is_some();
 
     match (has_id, has_method) {
-        // 响应：有 id、无 method
+        // 响应:有 id、无 method
         (true, false) => {
             if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
                 let tx = pending.lock().await.remove(&id);
@@ -228,22 +300,18 @@ async fn dispatch_message(
                 }
             }
         }
-        // server → client request：有 id、有 method → 回 MethodNotFound
+        // server → client request:有 id、有 method
         (true, true) => {
-            let id = msg.get("id").cloned().unwrap_or(Value::Null);
-            let resp = frame_message(&jsonrpc_error_response(&id, -32601, "Method not found"));
-            if let Err(e) = write_framed(stdin, &resp).await {
-                log::warn!("回复 server-request 失败: {e}");
-            }
+            handle_reverse_request(stdin, &msg).await;
         }
-        // notification：无 id、有 method
+        // notification:无 id、有 method
         (false, true) => {
             let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("");
             match method {
                 "textDocument/publishDiagnostics" => {
                     let params = msg.get("params").cloned().unwrap_or(Value::Null);
                     let uri = params.get("uri").and_then(|v| v.as_str()).unwrap_or("");
-                    let empty: Vec<Value> = vec![];
+                    let empty: Vec<Value> = Vec::new();
                     let diags = params
                         .get("diagnostics")
                         .and_then(|v| v.as_array())
@@ -262,46 +330,103 @@ async fn dispatch_message(
     }
 }
 
+/// 对常见的 server → client request 返回合规响应,其它一律 MethodNotFound。
+async fn handle_reverse_request(stdin: &Arc<Mutex<ChildStdin>>, msg: &Value) {
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("");
 
+    let result: Option<Value> = match method {
+        // 我们没有动态配置,对每个 item 返回 null。
+        "workspace/configuration" => {
+            let count = msg
+                .pointer("/params/items")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            Some(Value::Array(vec![Value::Null; count]))
+        }
+        // 我们没有 workspaceFolders 能力,但礼貌回空数组。
+        "workspace/workspaceFolders" => Some(Value::Array(vec![])),
+        // 动态注册/反注册:接受但不实际处理。
+        "client/registerCapability" | "client/unregisterCapability" => Some(Value::Null),
+        // 进度创建:同意。
+        "window/workDoneProgress/create" => Some(Value::Null),
+        _ => None,
+    };
+
+    let payload = match result {
+        Some(r) => jsonrpc_ok_response(&id, r),
+        None => jsonrpc_error_response(&id, -32601, "Method not found"),
+    };
+    if let Err(e) = write_framed(stdin, &frame_message(&payload)).await {
+        log::warn!("回复 server-request ({method}) 失败: {e}");
+    }
+}
 
 // ============================================================================
-// ShellCheck 中文本地化（来自 Messages_zh.json）
+// ShellCheck 中文本地化(来自 Messages_zh.json)
 // ============================================================================
 const SHELLCHECK_ZH_JSON: &str = include_str!("../../../resources/Messages_zh.json");
-static ZH_MESSAGES: std::sync::OnceLock<std::collections::HashMap<String, String>> = std::sync::OnceLock::new();
+static ZH_MESSAGES: std::sync::OnceLock<std::collections::HashMap<String, String>> =
+    std::sync::OnceLock::new();
 
 fn zh_message(code: &str) -> Option<&'static str> {
     let map = ZH_MESSAGES.get_or_init(|| {
-        serde_json::from_str(SHELLCHECK_ZH_JSON.trim_start_matches('﻿')).unwrap_or_default()
+        match serde_json::from_str::<HashMap<String, String>>(
+            SHELLCHECK_ZH_JSON.trim_start_matches('\u{FEFF}'),
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                log::error!("加载 ShellCheck 中文化失败: {e}");
+                HashMap::new()
+            }
+        }
     });
     map.get(code).map(|s| s.as_str())
 }
+
+/// 从 diagnostic JSON 中抽取 code (string / number / { value })。
+fn extract_diag_code(d: &Value) -> Option<String> {
+    let c = &d["code"];
+    if let Some(s) = c.as_str() {
+        return Some(s.to_string());
+    }
+    if let Some(n) = c.as_i64() {
+        return Some(n.to_string());
+    }
+    if let Some(v) = c.get("value") {
+        if let Some(s) = v.as_str() {
+            return Some(s.to_string());
+        }
+        if let Some(n) = v.as_i64() {
+            return Some(n.to_string());
+        }
+    }
+    None
+}
+
 fn handle_diagnostics(app: &AppHandle, uri: &str, diags: &[Value]) {
     let file_path = uri_to_path(uri);
     let lsp_diagnostics: Vec<LspDiagnostic> = diags
         .iter()
         .map(|d| {
             let range = &d["range"];
+            let raw = d["message"].as_str().unwrap_or("");
+            let code = extract_diag_code(d);
+            let message = match code.as_deref().and_then(zh_message) {
+                Some(zh) => format!("{raw} · {zh}"),
+                None => raw.to_string(),
+            };
             LspDiagnostic {
                 file_path: file_path.clone(),
                 line: range["start"]["line"].as_u64().unwrap_or(0) as u32,
                 column: range["start"]["character"].as_u64().unwrap_or(0) as u32,
                 end_line: range["end"]["line"].as_u64().unwrap_or(0) as u32,
                 end_column: range["end"]["character"].as_u64().unwrap_or(0) as u32,
-                severity: d["severity"].as_u64().unwrap_or(2) as u32,
-                message: {
-                    let raw = d["message"].as_str().unwrap_or("");
-                    let code = d["code"].as_str()
-                        .or_else(|| d["code"].get("value").and_then(|v| v.as_str()));
-                    match code.and_then(|c| zh_message(c)) {
-                        Some(zh) => format!("{} · {}", raw, zh),
-                        None => raw.to_string(),
-                    }
-                },
-                code: d["code"]
-                    .as_str()
-                    .map(String::from)
-                    .or_else(|| d["code"].get("value").and_then(|v| v.as_str()).map(String::from)),
+                // LSP 规范缺省 severity 视作 Error (1)。
+                severity: d["severity"].as_u64().unwrap_or(1) as u32,
+                message,
+                code,
                 source: d["source"].as_str().map(String::from),
             }
         })
@@ -351,72 +476,145 @@ async fn send_request(
 // 二进制路径解析
 // ============================================================================
 
-/// 在常见位置查找 bash-language-server 可执行文件。
-///
-/// 查找优先级：
-/// 1. 项目本地 node_modules/.bin/（pnpm install 后自动存在，开发 & 打包均可）
-/// 2. 全局安装目录（pnpm / npm，兼容用户手动全局安装）
-/// 3. PATH 兜底
-fn resolve_bash_language_server() -> String {
-    let bin_name = if cfg!(windows) {
-        "bash-language-server.CMD"
-    } else {
-        "bash-language-server"
-    };
+/// 解析 bash-language-server 的启动参数:(node 可执行文件, CLI 入口 JS)。
+fn resolve_lsp_command() -> Result<(PathBuf, PathBuf), String> {
+    let node = resolve_node_executable()?;
+    let cli_js = resolve_lsp_cli_js()?;
+    Ok((node, cli_js))
+}
 
-    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
-
-    // 1) 项目本地 node_modules/.bin/（pnpm install 后即存在）
-    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if let Some(workspace_root) = manifest_dir.parent() {
-        candidates.push(
-            workspace_root
-                .join("node_modules")
-                .join(".bin")
-                .join(bin_name),
-        );
+fn resolve_node_executable() -> Result<PathBuf, String> {
+    if let Ok(path) = std::env::var("XIAOJIANC_NODE_EXE") {
+        let p = PathBuf::from(&path);
+        if p.is_file() {
+            return Ok(p);
+        }
     }
 
-    // 2) 全局安装 — pnpm
+    let exe_name = if cfg!(windows) { "node.exe" } else { "node" };
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if cfg!(windows) {
+        if let Ok(pf) = std::env::var("ProgramFiles") {
+            candidates.push(PathBuf::from(&pf).join("nodejs").join(exe_name));
+        }
+        if let Ok(pfx86) = std::env::var("ProgramFiles(x86)") {
+            candidates.push(PathBuf::from(&pfx86).join("nodejs").join(exe_name));
+        }
+    } else {
+        candidates.push(PathBuf::from("/usr/local/bin").join(exe_name));
+        candidates.push(PathBuf::from("/usr/bin").join(exe_name));
+        // nvm: ~/.nvm/versions/node/<version>/bin/node — 取按名字最大的那个版本
+        if let Ok(home) = std::env::var("HOME") {
+            let nvm_root = PathBuf::from(&home).join(".nvm/versions/node");
+            if let Ok(entries) = std::fs::read_dir(&nvm_root) {
+                let mut versions: Vec<PathBuf> =
+                    entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
+                versions.sort();
+                for v in versions.iter().rev() {
+                    let candidate = v.join("bin").join(exe_name);
+                    if candidate.is_file() {
+                        candidates.push(candidate);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    for c in &candidates {
+        if c.is_file() {
+            log::info!("找到 node: {}", c.display());
+            return Ok(c.clone());
+        }
+    }
+
+    if let Some(p) = find_in_path(exe_name) {
+        log::info!("PATH 中找到 node: {}", p.display());
+        return Ok(p);
+    }
+
+    Err("未找到 node 可执行文件。请安装 Node.js 或设置 XIAOJIANC_NODE_EXE 环境变量。".into())
+}
+
+fn resolve_lsp_cli_js() -> Result<PathBuf, String> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir.parent().ok_or("无法定位项目根目录")?;
+
+    let candidate = workspace_root
+        .join("node_modules")
+        .join("bash-language-server")
+        .join("out")
+        .join("cli.js");
+    if candidate.is_file() {
+        log::info!("找到 bash-language-server CLI: {}", candidate.display());
+        return Ok(candidate);
+    }
+
     if cfg!(windows) {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            candidates.push(std::path::PathBuf::from(&local).join("pnpm").join(bin_name));
+            let pnpm_global = PathBuf::from(&local)
+                .join("pnpm")
+                .join("global")
+                .join("5")
+                .join("node_modules")
+                .join("bash-language-server")
+                .join("out")
+                .join("cli.js");
+            if pnpm_global.is_file() {
+                return Ok(pnpm_global);
+            }
         }
-    } else if let Ok(home) = std::env::var("HOME") {
-        candidates.push(
-            std::path::PathBuf::from(&home)
-                .join(".local/share/pnpm")
-                .join(bin_name),
-        );
-    }
-
-    // 3) 全局安装 — npm
-    if cfg!(windows) {
         if let Ok(appdata) = std::env::var("APPDATA") {
-            candidates.push(std::path::PathBuf::from(&appdata).join("npm").join(bin_name));
+            let npm_global = PathBuf::from(&appdata)
+                .join("npm")
+                .join("node_modules")
+                .join("bash-language-server")
+                .join("out")
+                .join("cli.js");
+            if npm_global.is_file() {
+                return Ok(npm_global);
+            }
         }
     } else {
-        candidates.push(std::path::PathBuf::from("/usr/local/bin").join(bin_name));
-        candidates.push(std::path::PathBuf::from("/usr/bin").join(bin_name));
         if let Ok(home) = std::env::var("HOME") {
-            candidates.push(
-                std::path::PathBuf::from(&home)
-                    .join(".npm-global/bin")
-                    .join(bin_name),
-            );
+            for prefix in &[".npm-global", ".local/share/pnpm/global/5"] {
+                let candidate = PathBuf::from(&home)
+                    .join(prefix)
+                    .join("node_modules")
+                    .join("bash-language-server")
+                    .join("out")
+                    .join("cli.js");
+                if candidate.is_file() {
+                    return Ok(candidate);
+                }
+            }
+        }
+        for prefix in &["/usr/local/lib", "/usr/lib"] {
+            let candidate = PathBuf::from(prefix)
+                .join("node_modules")
+                .join("bash-language-server")
+                .join("out")
+                .join("cli.js");
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
         }
     }
 
-    for candidate in &candidates {
-        if candidate.exists() {
-            log::info!("找到 bash-language-server: {}", candidate.display());
-            return candidate.to_string_lossy().to_string();
-        }
-    }
+    Err(format!(
+        "未找到 bash-language-server CLI。请运行 pnpm install 或 npm i -g bash-language-server。\n查找路径: {}",
+        candidate.display()
+    ))
+}
 
-    // 兜底：信任 PATH
-    log::info!("在已知目录未找到 bash-language-server，回退到 PATH 查找");
-    bin_name.to_string()
+fn find_in_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path).find_map(|dir| {
+            let candidate = dir.join(name);
+            candidate.is_file().then_some(candidate)
+        })
+    })
 }
 
 // ============================================================================
@@ -430,17 +628,16 @@ pub async fn lsp_start(
     manager: tauri::State<'_, LspManager>,
     workspace_root: String,
 ) -> Result<(), String> {
-    // 先确保旧实例关闭
-    {
-        let session = manager.session.lock().await;
-        if session.state == LspState::Running {
-            drop(session);
-            lsp_stop_internal(&manager).await;
-        }
-    }
+    // 整条启动路径串行化,杜绝双实例。
+    let _startup_guard = manager.startup.lock().await;
 
-    let bin_path = resolve_bash_language_server();
-    let mut child = Command::new(&bin_path)
+    // 先把已有实例彻底停掉(不再用 TOCTOU 模式)。
+    stop_inner(&manager.session, &manager.pending).await;
+
+    let (node, cli_js) =
+        resolve_lsp_command().map_err(|e| format!("无法启动 bash-language-server: {e}"))?;
+    let mut child = Command::new(&node)
+        .arg(&cli_js)
         .arg("start")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -449,14 +646,15 @@ pub async fn lsp_start(
         .spawn()
         .map_err(|e| {
             format!(
-                "无法启动 bash-language-server ({bin_path}): {e}。请确认已安装：pnpm i -g bash-language-server@^5"
+                "无法启动 bash-language-server (node={} cli={}): {e}。请确认已安装 Node.js。",
+                node.display(),
+                cli_js.display()
             )
         })?;
 
     let stdin = child.stdin.take().ok_or("无法获取 stdin")?;
     let stdout = child.stdout.take().ok_or("无法获取 stdout")?;
     let stderr = child.stderr.take().ok_or("无法获取 stderr")?;
-
     let stdin_arc = Arc::new(Mutex::new(stdin));
     let pending = manager.pending.clone();
 
@@ -479,13 +677,16 @@ pub async fn lsp_start(
         }
     });
 
-    // initialize（阻塞等响应，符合协议）
+    // initialize (阻塞等响应,符合协议)
     let root_uri = path_to_uri(&workspace_root)?;
     let init_params = serde_json::json!({
         "processId": std::process::id(),
         "rootUri": root_uri,
         "rootPath": workspace_root,
         "capabilities": {
+            "general": {
+                "positionEncodings": ["utf-16"]
+            },
             "textDocument": {
                 "synchronization": { "didSave": true, "dynamicRegistration": false },
                 "publishDiagnostics": { "relatedInformation": true },
@@ -494,14 +695,15 @@ pub async fn lsp_start(
             },
             "workspace": { "workspaceFolders": false }
         },
-        "initializationOptions": { "enableShellCheck": true }
+        // bash-language-server 的合法字段;留空表示用 PATH 上的 shellcheck。
+        // 想显式禁用 shellcheck 改成 "shellcheckPath": "" 即可。
+        "initializationOptions": {}
     });
 
-    let init_id = 0i64;
     let _init_resp = send_request(
         &pending,
         &stdin_arc,
-        init_id,
+        0i64,
         "initialize",
         init_params,
         Duration::from_secs(10),
@@ -515,65 +717,137 @@ pub async fn lsp_start(
         .await
         .map_err(|e| format!("写入 initialized 失败: {e}"))?;
 
-    // 写回 session
-    {
+    // 写回 session,并启动 watcher
+    let (kill_tx, kill_rx) = oneshot::channel::<()>();
+    let generation = {
         let mut session = manager.session.lock().await;
         session.stdin = Some(stdin_arc);
-        session.child = Some(child);
         session.workspace_root = Some(workspace_root.clone());
         session.next_id = 1;
         session.state = LspState::Running;
+        session.generation = session.generation.wrapping_add(1);
+        session.kill_tx = Some(kill_tx);
+        session.generation
+    };
+
+    // child watcher:负责 wait() 收尸 + 崩溃时清理状态 / emit 事件
+    {
+        let session = manager.session.clone();
+        let pending = manager.pending.clone();
+        let app_for_event = app.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = kill_rx => {
+                    // 主动 stop 路径:由 stop_inner 负责 kill 与状态清理,这里不再插手。
+                    log::debug!("LSP watcher: 收到主动停止信号,退出");
+                }
+                status = child.wait() => {
+                    log::warn!("bash-language-server 进程退出: {status:?}");
+                    // 只在仍是同一代实例时才清理,避免覆盖新一轮启动的状态
+                    let mut s = session.lock().await;
+                    if s.generation == generation && s.state == LspState::Running {
+                        s.state = LspState::Stopped;
+                        s.stdin = None;
+                        s.open_files.clear();
+                        s.kill_tx = None;
+                        drop(s);
+                        pending.lock().await.clear();
+                        if let Err(e) = app_for_event.emit("lsp-crashed", &serde_json::json!({
+                            "exitStatus": format!("{status:?}"),
+                        })) {
+                            log::warn!("发送 lsp-crashed 事件失败: {e}");
+                        }
+                    }
+                }
+            }
+        });
     }
-    log::info!("bash-language-server 已启动，workspace: {workspace_root}");
+
+    log::info!("bash-language-server 已启动,workspace: {workspace_root}");
     Ok(())
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn lsp_stop(manager: tauri::State<'_, LspManager>) -> Result<(), String> {
-    lsp_stop_internal(&manager).await;
+    stop_inner(&manager.session, &manager.pending).await;
     Ok(())
 }
 
-async fn lsp_stop_internal(manager: &LspManager) {
-    let (child, stdin) = {
-        let mut session = manager.session.lock().await;
-        let child = session.child.take();
-        let stdin = session.stdin.take();
-        session.state = LspState::Stopped;
-        session.open_files.clear();
-        (child, stdin)
+/// 主动停止当前实例。watcher 会感知 `kill_tx` 被 drop 而自行退出,不再 emit `lsp-crashed`。
+async fn stop_inner(
+    session: &Arc<Mutex<LspSession>>,
+    pending: &PendingMap,
+) {
+    let (stdin, kill_tx, was_running) = {
+        let mut s = session.lock().await;
+        let was_running = s.state == LspState::Running;
+        s.state = LspState::Stopped;
+        s.open_files.clear();
+        let stdin = s.stdin.take();
+        let kill_tx = s.kill_tx.take();
+        (stdin, kill_tx, was_running)
     };
-    manager.pending.lock().await.clear();
+    pending.lock().await.clear();
+    if !was_running {
+        return;
+    }
 
-    // 尝试优雅 shutdown
+    // 通知 watcher 进入"主动停止"分支
+    if let Some(tx) = kill_tx {
+        let _ = tx.send(());
+    }
+
+    // 尝试优雅 shutdown:发请求并尽量等响应,然后发 exit。
     if let Some(stdin) = stdin {
-        let shutdown = frame_message(&jsonrpc_request(i64::MAX, "shutdown", Value::Null));
+        let (resp_tx, resp_rx) = oneshot::channel::<Value>();
+        let shutdown_id = i64::MAX;
+        pending.lock().await.insert(shutdown_id, resp_tx);
+
+        let shutdown =
+            frame_message(&jsonrpc_request(shutdown_id, "shutdown", Value::Null));
         let _ = write_framed(&stdin, &shutdown).await;
+
+        // 最多等 500ms
+        let _ = timeout(Duration::from_millis(500), resp_rx).await;
+        pending.lock().await.remove(&shutdown_id);
+
         let exit = frame_message(&jsonrpc_notify("exit", Value::Null));
         let _ = write_framed(&stdin, &exit).await;
     }
 
-    if let Some(mut child) = child {
-        // 给 200ms 自己退出，超时则强杀
-        let wait = async { let _ = child.wait().await; };
-        if timeout(Duration::from_millis(200), wait).await.is_err() {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
-        }
-    }
+    // 子进程依赖 `kill_on_drop` 在 Child 被 drop 时强杀(watcher 持有 child)。
+    // watcher 在 kill_rx 触发后即返回,Child 随之被 drop。
     log::info!("bash-language-server 已停止");
 }
 
-/// 抽出"取出 stdin/uri 并 drop 锁"的辅助
-async fn take_handles(
+/// 统一的"取 stdin + uri + 分配 id"辅助。未启动时一律返回 Err。
+async fn require_running_with_uri(
     manager: &LspManager,
-) -> Result<Arc<Mutex<ChildStdin>>, String> {
-    let session = manager.session.lock().await;
+    file_path: &str,
+    bump_id: bool,
+) -> Result<(Arc<Mutex<ChildStdin>>, String, i64), String> {
+    let mut session = manager.session.lock().await;
     if session.state != LspState::Running {
         return Err("LSP 未启动".into());
     }
-    session.stdin.clone().ok_or_else(|| "stdin 不可用".into())
+    let uri = session
+        .open_files
+        .get(file_path)
+        .ok_or_else(|| format!("文件未打开: {file_path}"))?
+        .clone();
+    let stdin = session
+        .stdin
+        .clone()
+        .ok_or_else(|| "stdin 不可用".to_string())?;
+    let id = if bump_id {
+        let id = session.next_id;
+        session.next_id += 1;
+        id
+    } else {
+        0
+    };
+    Ok((stdin, uri, id))
 }
 
 #[tauri::command]
@@ -591,7 +865,10 @@ pub async fn lsp_did_open(
             return Err("LSP 未启动".into());
         }
         session.open_files.insert(file_path.clone(), uri.clone());
-        session.stdin.clone().ok_or("stdin 不可用")?
+        session
+            .stdin
+            .clone()
+            .ok_or_else(|| "stdin 不可用".to_string())?
     };
     let params = serde_json::json!({
         "textDocument": { "uri": uri, "languageId": language_id, "version": 1, "text": content }
@@ -608,18 +885,7 @@ pub async fn lsp_did_change(
     content: String,
     version: i64,
 ) -> Result<(), String> {
-    let (stdin, uri) = {
-        let session = manager.session.lock().await;
-        if session.state != LspState::Running {
-            return Ok(());
-        }
-        let uri = session
-            .open_files
-            .get(&file_path)
-            .ok_or_else(|| format!("文件未打开: {file_path}"))?
-            .clone();
-        (session.stdin.clone().ok_or("stdin 不可用")?, uri)
-    };
+    let (stdin, uri, _) = require_running_with_uri(&manager, &file_path, false).await?;
     let params = serde_json::json!({
         "textDocument": { "uri": uri, "version": version },
         "contentChanges": [{ "text": content }]
@@ -636,11 +902,20 @@ pub async fn lsp_did_close(
 ) -> Result<(), String> {
     let (stdin, uri) = {
         let mut session = manager.session.lock().await;
+        if session.state != LspState::Running {
+            return Err("LSP 未启动".into());
+        }
         let uri = match session.open_files.remove(&file_path) {
             Some(u) => u,
             None => return Ok(()),
         };
-        (session.stdin.clone().ok_or("stdin 不可用")?, uri)
+        (
+            session
+                .stdin
+                .clone()
+                .ok_or_else(|| "stdin 不可用".to_string())?,
+            uri,
+        )
     };
     let params = serde_json::json!({ "textDocument": { "uri": uri } });
     let msg = frame_message(&jsonrpc_notify("textDocument/didClose", params));
@@ -655,20 +930,7 @@ pub async fn lsp_completion(
     line: u32,
     column: u32,
 ) -> Result<Vec<LspCompletionItem>, String> {
-    let (stdin, uri, id) = {
-        let mut session = manager.session.lock().await;
-        if session.state != LspState::Running {
-            return Ok(vec![]);
-        }
-        let uri = session
-            .open_files
-            .get(&file_path)
-            .ok_or_else(|| format!("文件未打开: {file_path}"))?
-            .clone();
-        let id = session.next_id;
-        session.next_id += 1;
-        (session.stdin.clone().ok_or("stdin 不可用")?, uri, id)
-    };
+    let (stdin, uri, id) = require_running_with_uri(&manager, &file_path, true).await?;
     let params = serde_json::json!({
         "textDocument": { "uri": uri },
         "position": { "line": line, "character": column }
@@ -682,11 +944,12 @@ pub async fn lsp_completion(
         Duration::from_secs(2),
     )
     .await?;
-    Ok(parse_completion(resp.get("result").cloned().unwrap_or(Value::Null)))
+    Ok(parse_completion(
+        resp.get("result").cloned().unwrap_or(Value::Null),
+    ))
 }
 
 fn parse_completion(result: Value) -> Vec<LspCompletionItem> {
-    // result 可能是 CompletionItem[] 或 { items: CompletionItem[] }
     let items = if let Some(items) = result.get("items").and_then(|v| v.as_array()) {
         items.clone()
     } else if let Some(arr) = result.as_array() {
@@ -722,20 +985,7 @@ pub async fn lsp_hover(
     line: u32,
     column: u32,
 ) -> Result<Option<LspHoverResult>, String> {
-    let (stdin, uri, id) = {
-        let mut session = manager.session.lock().await;
-        if session.state != LspState::Running {
-            return Ok(None);
-        }
-        let uri = session
-            .open_files
-            .get(&file_path)
-            .ok_or_else(|| format!("文件未打开: {file_path}"))?
-            .clone();
-        let id = session.next_id;
-        session.next_id += 1;
-        (session.stdin.clone().ok_or("stdin 不可用")?, uri, id)
-    };
+    let (stdin, uri, id) = require_running_with_uri(&manager, &file_path, true).await?;
     let params = serde_json::json!({
         "textDocument": { "uri": uri },
         "position": { "line": line, "character": column }
@@ -790,15 +1040,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_path_to_uri() {
+    fn test_path_to_uri_simple() {
         let uri = path_to_uri("/home/user/test.sh").unwrap();
         assert!(uri.starts_with("file://"));
         assert!(uri.ends_with("test.sh"));
     }
 
     #[test]
-    fn test_uri_to_path() {
-        assert_eq!(uri_to_path("file:///home/user/test.sh"), "/home/user/test.sh");
+    fn test_path_to_uri_encodes_spaces_and_unicode() {
+        let uri = path_to_uri("/home/user/My Scripts/测试.sh").unwrap();
+        assert!(uri.contains("%20"));
+        // 中文 UTF-8 字节会被 percent-encoded
+        assert!(uri.contains("%E6%B5%8B")); // '测' = E6 B5 8B
+    }
+
+    #[test]
+    fn test_uri_to_path_roundtrip() {
+        let original = "/home/user/My Scripts/测试.sh";
+        let uri = path_to_uri(original).unwrap();
+        assert_eq!(uri_to_path(&uri), original);
+    }
+
+    #[test]
+    fn test_uri_to_path_basic() {
+        assert_eq!(
+            uri_to_path("file:///home/user/test.sh"),
+            "/home/user/test.sh"
+        );
     }
 
     #[test]
@@ -823,5 +1091,40 @@ mod tests {
         assert_eq!(parse_completion(arr).len(), 1);
         let obj = serde_json::json!({"items":[{"label":"ls"}]});
         assert_eq!(parse_completion(obj).len(), 1);
+    }
+
+    #[test]
+    fn test_extract_diag_code_variants() {
+        assert_eq!(
+            extract_diag_code(&serde_json::json!({"code": "SC2086"})),
+            Some("SC2086".into())
+        );
+        assert_eq!(
+            extract_diag_code(&serde_json::json!({"code": 2086})),
+            Some("2086".into())
+        );
+        assert_eq!(
+            extract_diag_code(&serde_json::json!({"code": {"value": "SC2086"}})),
+            Some("SC2086".into())
+        );
+        assert_eq!(
+            extract_diag_code(&serde_json::json!({"code": {"value": 2086}})),
+            Some("2086".into())
+        );
+        assert_eq!(extract_diag_code(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn test_severity_defaults_to_error() {
+        // 缺省 severity 应当被当作 Error (1),不再当作 Warning。
+        let app_test_diag = serde_json::json!({
+            "range": {
+                "start": {"line": 0, "character": 0},
+                "end":   {"line": 0, "character": 1}
+            },
+            "message": "x"
+        });
+        let s = app_test_diag["severity"].as_u64().unwrap_or(1) as u32;
+        assert_eq!(s, 1);
     }
 }

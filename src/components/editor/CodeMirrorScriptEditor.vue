@@ -206,7 +206,11 @@ const inlineCompletionController = createCodeMirrorInlineCompletionController({
 // ──────────────────────────────────────────────────────────────────────
 // Completion / language
 // ──────────────────────────────────────────────────────────────────────
-const buildCompletionExtension = (editorSettings: IEditorSettings, language: string): Extension =>
+const buildCompletionExtension = (
+  editorSettings: IEditorSettings,
+  language: string,
+  lspCompletionSource?: CompletionSource | null,
+): Extension =>
   editorSettings.commandCompletion
     ? autocompletion({
         activateOnTyping: true,
@@ -218,6 +222,7 @@ const buildCompletionExtension = (editorSettings: IEditorSettings, language: str
                   const source = await getShellCompletionSource();
                   return source(completionContext);
                 },
+                ...(lspCompletionSource ? [lspCompletionSource] : []),
               ]
             : [completeAnyWord],
         maxRenderedOptions: 80,
@@ -756,7 +761,7 @@ const buildLspExtension = (): Extension => {
   currentLsp = null;
 
   const lang = getCurrentLanguage();
-  if (lang !== 'Shell' || !props.documentPath) return [];
+  if (lang !== 'shell' || !props.documentPath) return [];
 
   currentLsp = createLspExtension({
     filePath: props.documentPath,
@@ -805,7 +810,9 @@ const createBaseExtensions = (language: string): Extension[] => [
   lspCompartment.of(buildLspExtension()),
   languageCompartment.of(resolveCodeMirrorLanguageExtension(language)),
   settingsCompartment.of(buildCodeMirrorSettingsExtensions(props.editorSettings)),
-  completionCompartment.of(buildCompletionExtension(props.editorSettings, language)),
+  completionCompartment.of(
+    buildCompletionExtension(props.editorSettings, language, currentLsp?.completionSource),
+  ),
   EditorView.updateListener.of(handleEditorUpdate),
 ];
 
@@ -830,7 +837,16 @@ const reconfigureLsp = (): void => {
   const view = editorView;
   if (!view) return;
   view.dispatch({
-    effects: [lspCompartment.reconfigure(buildLspExtension())],
+    effects: [
+      lspCompartment.reconfigure(buildLspExtension()),
+      completionCompartment.reconfigure(
+        buildCompletionExtension(
+          props.editorSettings,
+          getCurrentLanguage(),
+          currentLsp?.completionSource,
+        ),
+      ),
+    ],
   });
   // 文件切换后重新 attach（didOpen 新文件，didClose 旧文件已在 buildLspExtension 中处理）
   if (currentLsp && view) {
@@ -845,7 +861,9 @@ const reconfigureLanguage = (): void => {
   view.dispatch({
     effects: [
       languageCompartment.reconfigure(resolveCodeMirrorLanguageExtension(language)),
-      completionCompartment.reconfigure(buildCompletionExtension(props.editorSettings, language)),
+      completionCompartment.reconfigure(
+        buildCompletionExtension(props.editorSettings, language, currentLsp?.completionSource),
+      ),
     ],
   });
 };
@@ -857,7 +875,11 @@ const reconfigureSettings = (): void => {
     effects: [
       settingsCompartment.reconfigure(buildCodeMirrorSettingsExtensions(props.editorSettings)),
       completionCompartment.reconfigure(
-        buildCompletionExtension(props.editorSettings, getCurrentLanguage()),
+        buildCompletionExtension(
+          props.editorSettings,
+          getCurrentLanguage(),
+          currentLsp?.completionSource,
+        ),
       ),
     ],
   });
