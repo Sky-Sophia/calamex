@@ -1,3 +1,11 @@
 packages:
   - .
   - agent-sidecar
+minimumReleaseAge: 0
+allowBuilds:
+  agent-browser: true
+  esbuild: true
+  tree-sitter-bash: true
+  vue-demi: true
+  edgedriver: false
+  geckodriver: false
