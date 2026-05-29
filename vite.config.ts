@@ -67,38 +67,6 @@ export default defineConfig(({ command }) => ({
             return 'vendor-core'
           }
 
-          // ── Monaco ─────────────────────────────────────────────────────
-          if (normalizedId.includes('/node_modules/monaco-editor/')) {
-            const monacoPath =
-              normalizedId.split('/node_modules/monaco-editor/esm/')[1] ?? ''
-            const monacoContribMatch = monacoPath.match(/^vs\/editor\/contrib\/([^/]+)/)
-            const monacoBaseMatch = monacoPath.match(/^vs\/base\/([^/]+)/)
-            const monacoStandaloneMatch = monacoPath.match(/^vs\/editor\/standalone\/([^/]+)/)
-            const monacoPlatformMatch = monacoPath.match(/^vs\/platform\/([^/]+)/)
-            const monacoEditorBrowserMatch = monacoPath.match(/^vs\/editor\/browser\/([^/]+)/)
-            const monacoEditorCommonMatch = monacoPath.match(/^vs\/editor\/common\/([^/]+)/)
-
-            if (monacoContribMatch) return `monaco-contrib-${monacoContribMatch[1]}`
-            if (monacoBaseMatch) return `monaco-base-${monacoBaseMatch[1]}`
-            if (
-              normalizedId.includes('/monaco-editor/esm/vs/editor/contrib/') ||
-              normalizedId.includes('/monaco-editor/esm/vs/editor/standalone/browser/quickAccess/')
-            ) {
-              return 'monaco-quickaccess'
-            }
-            if (
-              normalizedId.includes('/monaco-editor/esm/vs/basic-languages/') ||
-              normalizedId.includes('/monaco-editor/esm/vs/language/')
-            ) {
-              return 'monaco-language'
-            }
-            if (monacoStandaloneMatch) return 'monaco-standalone'
-            if (monacoPlatformMatch) return 'monaco-platform'
-            if (monacoEditorBrowserMatch) return 'monaco-editor-browser'
-            if (monacoEditorCommonMatch) return 'monaco-editor-common'
-            return 'monaco-core'
-          }
-
           // ── xterm ──────────────────────────────────────────────────────
           if (normalizedId.includes('/node_modules/@xterm/')) {
             return 'vendor-xterm'
