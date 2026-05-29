@@ -5,12 +5,14 @@
  *
  * Goals:
  *   - 单一全局 diagnostics 监听 + 按 filePath 分派(多编辑器、同文件多订阅者都安全)
- *   - 监听 Rust 端 `lsp-crashed` 事件,自动切回 stopped 并清屏诊断
- *   - completion / hover 前自动 flush 未发的 didChange,且 flush 串行化
+ *   - 监听 Rust 端 `lsp-crashed` 事件，自动切回 stopped 并清屏诊断
+ *   - completion / hover 前自动 flush 未发的 didChange，且 flush 串行化
  *   - didOpen → didChange 因果链:didChange/completion/hover 都等 openPromise
- *   - attach / detach 严格成对,双重 attach 自动 detach 旧的,无监听泄漏
+ *   - attach / detach 严格成对，双重 attach 自动 detach 旧的，无监听泄漏
  *   - lspBridge.start 自动去重 + HMR 兼容单例
- *   - filePath 跨前后端归一化(POSIX 正斜杠),避免 Windows 反斜杠错配
+ *   - filePath 跨前后端归一化(POSIX 正斜杠)，避免 Windows 反斜杠错配
+ *   - 跟踪已打开文档，崩溃自动重启后重放 didOpen，恢复诊断/补全
+ *   - 诊断不自行 dispatch，交由上层与 ShellCheck 合并为单一来源(见 createLspExtension 的 onDiagnostics)
  */
 
 import type {
@@ -30,19 +32,6 @@ import {
 } from "@codemirror/view";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { highlightCodeToHtml } from "@/services/editor/codemirror-static-highlight";
-
-// ============================================================================
-// 补全 / 悬停全局样式（!important 暴力覆盖 CM6 暗色主题）
-// ============================================================================
-(function injectCm6Styles() {
-  if (typeof document === "undefined") return;
-  const id = "cm6-lsp-style";
-  if (document.getElementById(id)) return;
-  const s = document.createElement("style");
-  s.id = id;
-  s.textContent = `.cm-tooltip-autocomplete{background:#fff!important;border:1px solid rgba(0,0,0,.08)!important;border-radius:10px!important;box-shadow:0 8px 24px rgba(0,0,0,.08)!important;max-width:none!important}.cm-tooltip.cm-tooltip-hover{max-width:none!important}.cm-tooltip-autocomplete .cm-completionInfo{max-width:none!important;background:#fff!important;border-left:1px solid rgba(0,0,0,.06)!important}.cm-completionOption{display:flex!important;flex-direction:row!important;align-items:center!important;gap:8px!important;padding:4px 10px!important}.cm-completionIcon{display:flex!important;flex-shrink:0!important;width:22px!important;height:22px!important;align-items:center!important;justify-content:center!important;border-radius:5px!important;opacity:1!important}.cm-completionIcon svg{width:14px!important;height:14px!important;color:#fff!important}.cm-completionLabel{flex:1!important;min-width:0!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important;font-family:var(--font-mono)!important;font-size:12.5px!important;color:#111317!important}.cm-completionDetail{flex-shrink:0!important;font-size:11px!important;color:#8a8f98!important}.cm-completionMatchedText{color:#3872e0!important;font-weight:600!important}.cm-completionOption[aria-selected]{background:rgba(56,114,224,.06)!important}.cm-completionList::-webkit-scrollbar{width:6px!important}.cm-completionList::-webkit-scrollbar-thumb{background:rgba(0,0,0,.12)!important;border-radius:8px!important}.cm-lsp-doc{max-width:520px!important;max-height:320px!important;overflow:auto!important;padding:10px 14px!important;font-size:12px!important;line-height:1.55!important;color:#5b6068!important;word-break:break-word!important}.cm-lsp-doc .cm-lsp-code-block{max-width:100%!important;overflow:auto!important}.cm-lsp-doc .cm-lsp-code-block pre{white-space:pre-wrap!important;word-break:break-all!important}`;
-  document.head.appendChild(s);
-})();
 
 export const lspCompletionTheme = EditorView.theme({}, {});
 
@@ -88,7 +77,7 @@ export function createLucideCompletionIcon(type: string): HTMLElement {
 }
 
 // ============================================================================
-// Tauri IPC(懒加载,避免 SSR / 测试环境炸)
+// Tauri IPC(懒加载，避免 SSR / 测试环境炸)
 // ============================================================================
 type TauriCore = typeof import("@tauri-apps/api/core");
 type TauriEvent = typeof import("@tauri-apps/api/event");
@@ -148,11 +137,11 @@ interface LspHover {
 // 路径归一化
 // ============================================================================
 /**
- * 统一前后端 filePath 表示:去掉 Windows 扩展路径前缀,全部用正斜杠。
+ * 统一前后端 filePath 表示:去掉 Windows 扩展路径前缀，全部用正斜杠。
  *
  * Windows 上 Tauri 可能返回 `\\?\D:\workspace\test.sh` 这样的
  * 扩展路径(extended-length path)。`\\?\` 前缀在 Rust 的
- * path_to_uri → uri_to_path 往返中会被错误截断,导致前后端路径不一致。
+ * path_to_uri → uri_to_path 往返中会被错误截断，导致前后端路径不一致。
  * 这里统一剥掉前缀再归一化。
  */
 function normalizePath(p: string): string {
@@ -180,10 +169,11 @@ export type BridgeStateEvent =
   | { type: "crashed"; exitStatus?: string };
 export type BridgeStateListener = (e: BridgeStateEvent) => void;
 
-interface PendingDidOpen {
+interface OpenDocument {
   filePath: string;
   content: string;
   languageId: string;
+  version: number;
 }
 
 class LspBridge {
@@ -193,8 +183,12 @@ class LspBridge {
   private unlistenCrashed: UnlistenFn | null = null;
   /** 同一文件可有多个订阅者(diff 视图、并排编辑等场景) */
   private fileHandlers = new Map<string, Set<FileHandler>>();
-  /** 启动前到达的 didOpen,按 filePath 去重,后写覆盖 */
-  private pendingOps = new Map<string, PendingDidOpen>();
+  /**
+   * 已打开文档的最新快照，按 filePath 去重。用于:
+   *  1) 启动前到达的 didOpen 排队;
+   *  2) 崩溃自动重启后重放 didOpen，恢复服务端文档状态。
+   */
+  private openDocuments = new Map<string, OpenDocument>();
   private stateListeners = new Set<BridgeStateListener>();
 
   async start(workspaceRoot: string): Promise<void> {
@@ -202,15 +196,14 @@ class LspBridge {
     if (this.startPromise) return this.startPromise;
 
     this.startPromise = (async () => {
-      // 先建监听,避免 didOpen → 第一波诊断丢失
+      // 幂等:重启(尤其崩溃后)前先拆掉可能残留的监听，避免重复注册导致泄漏
+      this.tearDownListeners();
+      // 先建监听，避免 didOpen → 第一波诊断丢失
       this.unlistenDiagnostics = await tauriListen<LspDiagEvent>(
         "lsp-diagnostics",
         (e) => {
           const key = normalizePath(e.filePath);
           const handlers = this.fileHandlers.get(key);
-          console.log(
-            `[lsp] diagnostics event: filePath=${key} diags=${e.diagnostics.length} handlers=${handlers?.size ?? 0}`,
-          );
           if (!handlers) return;
           for (const h of handlers) {
             try {
@@ -229,17 +222,11 @@ class LspBridge {
       );
 
       try {
-        console.log(
-          "[lsp] invoking lsp_start with workspaceRoot:",
-          workspaceRoot,
-        );
         await tauriInvoke<void>("lsp_start", { workspaceRoot });
         this.started = true;
-        console.log("[lsp] lsp_start succeeded, started=true");
         this.emitState({ type: "started" });
-        await this.flushPendingOps();
+        await this.replayOpenDocuments();
       } catch (err) {
-        console.error("[lsp] lsp_start FAILED:", err);
         this.tearDownListeners();
         throw err;
       }
@@ -253,7 +240,7 @@ class LspBridge {
   }
 
   async stop(): Promise<void> {
-    // 如果还在 start,等它结束(成功或失败)再 stop
+    // 如果还在 start，等它结束(成功或失败)再 stop
     if (this.startPromise) {
       try {
         await this.startPromise;
@@ -265,7 +252,8 @@ class LspBridge {
       return;
 
     this.started = false;
-    this.pendingOps.clear();
+    // 主动停止 = 彻底遗忘已打开文档(与崩溃区别:崩溃保留以便重放)
+    this.openDocuments.clear();
     this.clearAllDiagnostics();
     this.fileHandlers.clear();
     this.tearDownListeners();
@@ -290,10 +278,9 @@ class LspBridge {
     };
   }
 
-  /** 注册按文件的诊断 handler,返回解注册函数。同一文件可注册多个 handler。 */
+  /** 注册按文件的诊断 handler，返回解注册函数。同一文件可注册多个 handler。 */
   registerFile(filePath: string, handler: FileHandler): () => void {
     const key = normalizePath(filePath);
-    console.log(`[lsp] registerFile: key=${key}`);
     let set = this.fileHandlers.get(key);
     if (!set) {
       set = new Set();
@@ -314,39 +301,45 @@ class LspBridge {
     languageId: string,
   ): Promise<void> {
     const key = normalizePath(filePath);
+    // 记录最新快照:崩溃重启重放、启动前排队都依赖它
+    this.openDocuments.set(key, {
+      filePath: key,
+      content,
+      languageId,
+      version: 1,
+    });
     if (this.startPromise) {
-      console.log(`[lsp] didOpen WAITING for start: key=${key}`);
       try {
         await this.startPromise;
       } catch {
-        console.log(`[lsp] didOpen start FAILED, aborting: key=${key}`);
         return;
       }
     }
     if (this.started) {
-      console.log(
-        `[lsp] didOpen SENDING: key=${key} lang=${languageId} len=${content.length}`,
-      );
       await tauriInvoke<void>("lsp_did_open", {
         filePath: key,
         content,
         languageId,
       });
-      return;
     }
-    console.log(`[lsp] didOpen QUEUED: key=${key}`);
-    this.pendingOps.set(key, { filePath: key, content, languageId });
+    // 未启动:已记入 openDocuments，待 start 成功后由 replayOpenDocuments 重放
   }
 
-  /** @returns 是否真正发送出去(false = 当前未启动,调用方应自行处理重发) */
+  /** @returns 是否真正发送出去(false = 当前未启动，调用方应自行处理重发) */
   async didChange(
     filePath: string,
     content: string,
     version: number,
   ): Promise<boolean> {
+    const key = normalizePath(filePath);
+    const doc = this.openDocuments.get(key);
+    if (doc) {
+      doc.content = content;
+      doc.version = version;
+    }
     if (!this.started) return false;
     await tauriInvoke<void>("lsp_did_change", {
-      filePath: normalizePath(filePath),
+      filePath: key,
       content,
       version,
     });
@@ -355,7 +348,7 @@ class LspBridge {
 
   async didClose(filePath: string): Promise<void> {
     const key = normalizePath(filePath);
-    this.pendingOps.delete(key);
+    this.openDocuments.delete(key);
     if (!this.started) return;
     await tauriInvoke<void>("lsp_did_close", { filePath: key });
   }
@@ -410,23 +403,23 @@ class LspBridge {
   private onBackendCrashed(exitStatus?: string) {
     if (!this.started) return;
     this.started = false;
-    // 不清空 fileHandlers——编辑器可能想保留监听等候自动重启
+    // 保留 fileHandlers 与 openDocuments——自动重启后可重放 didOpen 并继续接收诊断
     this.clearAllDiagnostics();
     this.emitState({ type: "crashed", exitStatus });
   }
 
-  private async flushPendingOps(): Promise<void> {
-    const ops = Array.from(this.pendingOps.values());
-    this.pendingOps.clear();
-    for (const op of ops) {
+  /** 向(重新)启动的服务重放所有已打开文档的最新内容，恢复服务端文档状态。 */
+  private async replayOpenDocuments(): Promise<void> {
+    const docs = Array.from(this.openDocuments.values());
+    for (const doc of docs) {
       try {
         await tauriInvoke<void>("lsp_did_open", {
-          filePath: op.filePath,
-          content: op.content,
-          languageId: op.languageId,
+          filePath: doc.filePath,
+          content: doc.content,
+          languageId: doc.languageId,
         });
       } catch (err) {
-        console.warn("[lsp-bridge] replay didOpen failed", op.filePath, err);
+        console.warn("[lsp-bridge] replay didOpen failed", doc.filePath, err);
       }
     }
   }
@@ -442,7 +435,7 @@ class LspBridge {
   }
 }
 
-// HMR / SSR 安全的全局单例:Vite 热更新不会复制 bridge,避免监听泄漏。
+// HMR / SSR 安全的全局单例:Vite 热更新不会复制 bridge，避免监听泄漏。
 declare global {
   // eslint-disable-next-line no-var
   var __lspBridge__: LspBridge | undefined;
@@ -542,7 +535,7 @@ function lspDiagToPositioned(d: LspDiag, doc: Text): Diagnostic {
     to,
     severity: severityToCm6(d.severity),
     message: d.message,
-    source: d.code ?? d.source ?? "shellcheck",
+    source: d.code ?? d.source ?? "bash-language-server",
   };
 }
 
@@ -649,6 +642,12 @@ export interface LspExtensionOptions {
   changeDebounceMs?: number;
   /** 内部失败时的回调(IPC 失败、解析失败等)。默认 console.warn */
   onError?: (err: unknown) => void;
+  /**
+   * 收到该文件的 LSP 诊断时回调(已映射为 CM6 Diagnostic[]，可为空表示清空)。
+   * 提供后，扩展不再自行 setDiagnostics —— 由上层把 LSP 与 ShellCheck 等来源
+   * 合并为单一诊断集合后统一写入，避免两套来源互相覆盖。
+   */
+  onDiagnostics?: (diags: Diagnostic[]) => void;
 }
 
 export interface LspExtensionHandle {
@@ -746,10 +745,14 @@ export function createLspExtension(
 
   function onDiagnostics(diags: LspDiag[]): void {
     if (!view || detached) return;
-    // 空诊断不覆盖 ShellCheck 的结果
-    if (diags.length === 0) return;
     const doc = view.state.doc;
     const positioned = diags.map((d) => lspDiagToPositioned(d, doc));
+    if (opts.onDiagnostics) {
+      // 交给上层合并(LSP + ShellCheck → 单一来源);空数组用于清空 LSP 部分
+      opts.onDiagnostics(positioned);
+      return;
+    }
+    // 兜底:无上层合并时退回自管理(仍会覆盖其它 lint 来源,故推荐提供 onDiagnostics)
     view.dispatch(setDiagnostics(view.state, positioned));
   }
 
