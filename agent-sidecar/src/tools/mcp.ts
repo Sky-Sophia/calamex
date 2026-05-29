@@ -280,20 +280,6 @@ const appendMcpRuntimeError = (
   serverErrorCounts.set(logMessage.serverName, currentCount + 1);
 };
 
-const mergeHeaders = (
-  baseHeaders: HeadersInit | undefined,
-  // extraHeaders 优先于 baseHeaders（用于注入 Authorization 等覆盖头）。
-  extraHeaders: Record<string, string>,
-): Headers => {
-  const headers = new Headers(baseHeaders);
-  for (const [key, value] of Object.entries(extraHeaders)) {
-    headers.set(key, value);
-  }
-  return headers;
-};
-// NOTE: 使用 MCPClient 的 `requestInit` 支持传入 headers，
-// 所以不再需要自定义的 fetch 包装器。保留注释便于回退。
-
 const toMastraMcpServerDefinition = (
   config: IMcpServerConfig,
   errors: string[],

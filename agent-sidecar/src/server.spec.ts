@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
+import { makeToolExecutionContext } from './test-support/tool-context.js';
 
 import type { MastraModelConfig } from '@mastra/core/llm';
 import { ModelRouterLanguageModel } from '@mastra/core/llm';
@@ -12,7 +13,7 @@ import { createTool } from '@mastra/core/tools';
 import type { WorkspaceToolsConfig } from '@mastra/core/workspace';
 import { z } from 'zod';
 
-import { buildSystemPrompt, extractVisibleAgentResultText } from './engines/prompts/system-prompt.js';
+import { decodeApprovalRequestId } from './engines/approval-client/utils.js';
 import {
   createMastraMemoryScope,
   mastraWorkingMemorySchema,
@@ -27,33 +28,33 @@ import {
 import {
   MastraRuntime,
 } from './engines/mastra-runtime.js';
-import { decodeApprovalRequestId } from './engines/approval-client/utils.js';
-import { allowWorkspaceWriteAfterVerifiedRead } from './engines/workspace.js';
 import {
   LibsqlAgentPlanStore,
   type IAgentPlanStore,
   type TAgentPlanRecord,
 } from './engines/plan/plan-store.js';
 import { LibsqlAgentPlanWorkflowStore } from './engines/plan/plan-workflow-store.js';
+import { buildSystemPrompt, extractVisibleAgentResultText } from './engines/prompts/system-prompt.js';
 import {
   createConfiguredRuntime,
   resolveConfiguredRuntimeName,
   type IAgentSidecarRuntime,
 } from './engines/runtime.js';
+import { allowWorkspaceWriteAfterVerifiedRead } from './engines/workspace.js';
 import type { IMastraResolvedModelConfig } from './models/config.js';
 import {
   createMastraObserverModelConfig,
   createMastraReflectorModelConfig,
 } from './models/config.js';
+import { compactModelOutput } from './models/output-budget.js';
+import {
+  createDeepSeekMastraGateway,
+} from './models/providers/deepseek-mastra-gateway.js';
 import {
   clearDeepSeekReasoningStoreForTest,
   deepseekReasoningFetch,
   runWithDeepSeekReasoningContext,
 } from './models/providers/deepseek-reasoning-fetch.js';
-import {
-  createDeepSeekMastraGateway,
-} from './models/providers/deepseek-mastra-gateway.js';
-import { compactModelOutput } from './models/output-budget.js';
 import {
   agentPlanDeltaSchema,
   agentPlanValidationReportSchema,
@@ -1871,7 +1872,7 @@ describe('Mastra runtime chat', () => {
         configs: [],
         errors: [],
         tools: {},
-        disconnectAll: async () => {},
+        disconnectAll: async () => { },
       }),
       createAgent: () => ({
         stream: async () => ({
@@ -2755,7 +2756,7 @@ describe('Mastra native time tools', () => {
       throw new Error('get_current_time execute is not available.');
     }
 
-    const result = await executeCurrentTime({}, {});
+    const result = await executeCurrentTime({}, makeToolExecutionContext());
 
     assert.deepEqual(result, {
       timezone: 'Asia/Shanghai',
@@ -2778,7 +2779,7 @@ describe('Mastra native time tools', () => {
       throw new Error('get_current_time execute is not available.');
     }
 
-    const result = await executeCurrentTime({ input: {} }, {});
+    const result = await executeCurrentTime({ input: {} }, makeToolExecutionContext());
 
     assert.deepEqual(result, {
       timezone: 'Asia/Shanghai',
@@ -2801,7 +2802,7 @@ describe('Mastra native time tools', () => {
       throw new Error('get_current_time execute is not available.');
     }
 
-    const result = await executeCurrentTime({ input: { timezone: null } }, {});
+    const result = await executeCurrentTime({ input: { timezone: null } }, makeToolExecutionContext());
 
     assert.deepEqual(result, {
       timezone: 'Asia/Shanghai',
@@ -2824,8 +2825,8 @@ describe('Mastra native time tools', () => {
       throw new Error('get_current_time execute is not available.');
     }
 
-    const rootNullResult = await executeCurrentTime({ timezone: null }, {});
-    const argumentsNullResult = await executeCurrentTime({ arguments: { timezone: null } }, {});
+    const rootNullResult = await executeCurrentTime({ timezone: null }, makeToolExecutionContext());
+    const argumentsNullResult = await executeCurrentTime({ arguments: { timezone: null } }, makeToolExecutionContext());
 
     assert.deepEqual(rootNullResult, {
       timezone: 'Asia/Shanghai',
@@ -2855,7 +2856,7 @@ describe('Mastra native time tools', () => {
         time: '18:30',
         target_timezone: 'America/New_York',
       },
-    }, {});
+    }, makeToolExecutionContext());
 
     assert.equal(result.target.timezone, 'America/New_York');
     assert.equal(result.target.datetime, '2026-05-09T06:30:00-04:00');
@@ -2878,7 +2879,7 @@ describe('Mastra native time tools', () => {
       source_timezone: 'Asia/Shanghai',
       time: '18:30',
       target_timezone: 'America/New_York',
-    }, {});
+    }, makeToolExecutionContext());
 
     assert.deepEqual(result, {
       source: {

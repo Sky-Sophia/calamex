@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { makeToolExecutionContext } from '../test-support/tool-context.js';
 
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
@@ -11,9 +12,9 @@ import { createMcpGatewayWarmPool } from './mcp-gateway.js';
 import {
   createMastraMcpClientBundle,
   getMcpRuntimeStatus,
+  loadMcpServerConfigs,
   MCP_SERVER_NAMES,
   type IMcpServerConfig,
-  loadMcpServerConfigs,
 } from './mcp.js';
 
 const WORKSPACE_ROOT = resolve('D:/com.xiaojianc/my_desktop_app');
@@ -112,12 +113,12 @@ describe('MCP gateway warm pool', () => {
       serverName: 'git',
       toolName: 'status',
       arguments: { repository: '.' },
-    }, {});
+    }, makeToolExecutionContext());
     const second = await executeCall({
       serverName: 'git',
       toolName: 'git_status',
       arguments: { repository: '.' },
-    }, {});
+    }, makeToolExecutionContext());
 
     assert.deepEqual(first, {
       serverName: 'git',
@@ -170,8 +171,8 @@ describe('MCP gateway warm pool', () => {
       throw new Error('mcp_list_tools execute 不可用。');
     }
 
-    const first = await executeList({}, {});
-    const second = await executeList({}, {});
+    const first = await executeList({}, makeToolExecutionContext());
+    const second = await executeList({}, makeToolExecutionContext());
 
     assert.deepEqual(first, second);
     assert.equal(createBundleCalls, MCP_SERVER_NAMES.length);
@@ -210,7 +211,7 @@ describe('MCP gateway warm pool', () => {
       throw new Error('mcp_list_tools execute 不可用。');
     }
 
-    const catalog = await executeList({}, {});
+    const catalog = await executeList({}, makeToolExecutionContext());
 
     assert.equal(loadedServers.length, MCP_SERVER_NAMES.length);
     assert.deepEqual(
@@ -255,7 +256,7 @@ describe('MCP gateway warm pool', () => {
     }
 
     const catalogs = await Promise.all(
-      Array.from({ length: 10 }, () => executeList({}, {})),
+      Array.from({ length: 10 }, () => executeList({}, makeToolExecutionContext())),
     );
 
     assert.equal(createBundleCalls, MCP_SERVER_NAMES.length);
@@ -298,7 +299,7 @@ describe('MCP gateway warm pool', () => {
       throw new Error('mcp_list_tools execute 不可用。');
     }
 
-    const catalog = await executeList({}, {});
+    const catalog = await executeList({}, makeToolExecutionContext());
     const serialized = JSON.stringify(tools.mcp_list_tools.toModelOutput?.(catalog)) ?? '';
 
     assert.equal(typeof serialized, 'string');
@@ -341,7 +342,7 @@ describe('MCP gateway warm pool', () => {
       serverName: 'git',
       toolName: 'diff_unstaged',
       arguments: { repository: '.' },
-    }, {});
+    }, makeToolExecutionContext());
     const rawSerialized = JSON.stringify(rawResult) ?? '';
     const modelSerialized = JSON.stringify(tools.mcp_call_tool.toModelOutput?.(rawResult)) ?? '';
 
@@ -390,7 +391,7 @@ describe('MCP gateway warm pool', () => {
       serverName: 'tavily-mcp',
       toolName: 'tavily_search',
       arguments: { query: '2026年5月 最新闻' },
-    }, {});
+    }, makeToolExecutionContext());
 
     assert.deepEqual(capturedInput, { query: '2026年5月 最新闻' });
     assert.deepEqual(result, {
@@ -443,7 +444,7 @@ describe('MCP gateway warm pool', () => {
       serverName: 'memory',
       toolName: 'lookup',
       arguments: { key: 'session-1' },
-    }, {});
+    }, makeToolExecutionContext());
 
     assert.equal(rawAttemptCount, 1);
     assert.equal(wrappedAttemptCount, 1);
@@ -491,7 +492,7 @@ describe('MCP gateway warm pool', () => {
         serverName: 'git',
         toolName: 'commit',
         arguments: { message: 'test' },
-      }, {}),
+      }, makeToolExecutionContext()),
       /当前 readonly profile 不允许使用 git 的任何 MCP tool/u,
     );
 
@@ -536,7 +537,7 @@ describe('MCP gateway warm pool', () => {
       throw new Error('MCP gateway tools execute 不可用。');
     }
 
-    const catalogCollection = await executeList({}, {});
+    const catalogCollection = await executeList({}, makeToolExecutionContext());
     const catalog = catalogCollection.catalogs.find((item: { serverName: string }) => item.serverName === 'git');
 
     assert.deepEqual(catalog, {
@@ -550,7 +551,7 @@ describe('MCP gateway warm pool', () => {
         serverName: 'git',
         toolName: 'read_file',
         arguments: { path: 'README.md' },
-      }, {}),
+      }, makeToolExecutionContext()),
       /file primitives 接管/u,
     );
 
