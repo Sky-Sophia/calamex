@@ -1793,17 +1793,14 @@ onBeforeUnmount(() => {
 }
 
 .ai-suggestion-empty {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  justify-items: center;
   width: 100%;
   min-width: 0;
-  min-height: 100%;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  align-items: center;
-  align-content: center;
-  justify-content: center;
   gap: 12px;
-  padding: 0 8px;
+  padding: clamp(72px, 22vh, 220px) 16px 0;
 }
 
 .ai-suggestion-empty :deep(button) {
