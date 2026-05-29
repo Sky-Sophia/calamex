@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CopilotChatSuggestionView, useFrontendTool } from '@copilotkit/vue';
+import { useFrontendTool } from '@copilotkit/vue';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { z } from 'zod';
 import Checkpoint from '@/components/ai-elements/checkpoint/Checkpoint.vue';
@@ -1242,8 +1242,9 @@ onBeforeUnmount(() => {
       @changed-files-pin="assistant.setChangedFilesSummaryPin">
       <template #empty>
         <div class="ai-suggestion-empty">
-          <CopilotChatSuggestionView :suggestions="suggestionPool.suggestions.value"
-            @select-suggestion="(s: { message: string }) => handleSuggestionSelect(s.message)" />
+          <button v-for="suggestion in suggestionPool.suggestions.value" :key="suggestion.message" type="button"
+            class="ai-suggestion-chip" :disabled="composerDisabled"
+            @click="handleSuggestionSelect(suggestion.message)" v-text="suggestion.title"></button>
         </div>
       </template>
       <template #after-message="{ message }">
@@ -1795,10 +1796,14 @@ onBeforeUnmount(() => {
   display: flex;
   width: 100%;
   min-width: 0;
+  min-height: 100%;
+  flex: 1 1 auto;
   flex-wrap: wrap;
   align-items: center;
+  align-content: center;
   justify-content: center;
   gap: 12px;
+  padding: 0 8px;
 }
 
 .ai-suggestion-empty :deep(button) {
