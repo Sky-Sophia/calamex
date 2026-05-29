@@ -91,6 +91,11 @@ export type TCompatibleToolResultPayload = ToolResultPayload | DynamicToolResult
 export interface IMastraAgentStreamLike {
     fullStream: AsyncIterable<unknown>;
     runId?: string;
+    /**
+     * Mastra 官方 trace id（来自 `agent.stream()` 返回值）。
+     * 仅在 Mastra 提供时存在；透传给运行时事件供前端深链 observability。
+     */
+    traceId?: string;
     cleanup?: () => void;
 }
 
