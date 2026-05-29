@@ -1,0 +1,17 @@
+# Lefthook 配置：取代 husky + lint-staged
+# 安装：`pnpm install` 会通过 package.json 的 prepare 脚本执行 `lefthook install`
+
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      # 与原 lint-staged glob 保持一致
+      glob: "*.{ts,vue,css,json}"
+      run: pnpm exec biome check --write --no-errors-on-unmatched {staged_files}
+      # biome 修复后重新暂存，等价于 lint-staged 的行为
+      stage_fixed: true
+
+commit-msg:
+  commands:
+    commitlint:
+      run: pnpm exec commitlint --edit {1}

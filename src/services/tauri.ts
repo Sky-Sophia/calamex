@@ -1,4 +1,3 @@
-import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 import { commands } from '@/bindings/tauri';
 import { aiChatStreamEventPayloadSchema } from '@/types/ai/schema';
@@ -121,8 +120,7 @@ const loadTauriEvent = (): Promise<TauriEventModule> => {
 };
 
 const createTraceId = (): string => {
-  return uuidv7();
-  return `trace-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return crypto.randomUUID();
 };
 
 const serializeForLog = (value: unknown): string => {

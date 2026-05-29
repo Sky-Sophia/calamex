@@ -1,5 +1,4 @@
 import { Store } from '@tauri-apps/plugin-store';
-import { v7 as uuidv7 } from 'uuid';
 
 import { AppError } from '@/types/app-error';
 import { SessionSnapshotSchema, type TSessionSnapshot } from '@/types/session';
@@ -24,7 +23,7 @@ type TRawSnapshot = unknown;
 // ---------------------------------------------------------------------------
 
 const createTraceId = (): string => {
-  return uuidv7();
+  return crypto.randomUUID();
 };
 
 /**
