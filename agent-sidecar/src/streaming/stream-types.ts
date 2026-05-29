@@ -58,6 +58,11 @@ export interface IAgentRuntimeEventBase {
   level?: TAgentRuntimeLevel;
   parentId?: string;
   spanId?: string;
+  /**
+   * Mastra 官方 trace id（来自 `agent.stream()` / `agent.generate()` 返回值）。
+   * 仅在 Mastra 提供时存在；前端可用于深链到 observability 平台查看思考树。
+   */
+  traceId?: string;
 }
 
 // -----------------------------------------------------------------------
@@ -335,6 +340,8 @@ export interface IAgentRuntimeEventContext {
   runId: string;
   sessionId: string;
   agentId: string;
+  /** Mastra 官方 trace id；传入后会被写到每个 runtime event 的 `traceId` 字段。 */
+  traceId?: string;
   now?: () => string;
 }
 
@@ -364,5 +371,6 @@ export const createAgentRuntimeEvent = <T extends TAgentRuntimeEventDraft>(
   seq,
   schemaVersion: AGENT_RUNTIME_EVENT_SCHEMA_VERSION,
   redacted: true,
+  ...(context.traceId ? { traceId: context.traceId } : {}),
   ...draft,
 } as T & IAgentRuntimeEventBase);
