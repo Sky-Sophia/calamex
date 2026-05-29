@@ -148,21 +148,31 @@ const pickFromPool = (pool: readonly string[]): Suggestion[] => {
   return unique.slice(0, DISPLAY_COUNT).map(toSuggestion);
 };
 
+const withContent = (items: readonly Suggestion[]): Suggestion[] =>
+  items.filter((item) => item.message.trim().length > 0);
+
 export interface IUseCopilotSuggestionsResult {
   suggestions: Ref<readonly Suggestion[]>;
   suggestionTexts: Ref<readonly string[]>;
 }
 
 export const useCopilotSuggestions = (): IUseCopilotSuggestionsResult => {
-  // 每次进入空态都从兜底池随机取 DISPLAY_COUNT 条，保证多样。
-  const fallback = pickFromPool(STATIC_POOL);
-  let raw: Ref<Suggestion[]> = ref(fallback) as unknown as Ref<Suggestion[]>;
+  // 静态兜底：创建一次、永不重赋，保证任何时候都有 DISPLAY_COUNT 条可展示。
+  const fallbackRef = ref<Suggestion[]>(pickFromPool(STATIC_POOL));
+
+  // CopilotKit 运行时提供的建议 ref。我们走自建 pipeline 时它通常为空，
+  // 绝不能让这个空 ref 覆盖静态兜底。
+  let ckSuggestions: Ref<Suggestion[]> = ref<Suggestion[]>([]);
 
   try {
-    useConfigureSuggestions({ suggestions: fallback, available: 'before-first-message' });
-    ({ suggestions: raw } = useSuggestions({ agentId: 'default' }));
+    useConfigureSuggestions({
+      suggestions: fallbackRef.value,
+      available: 'before-first-message',
+    });
+    const result = useSuggestions({ agentId: 'default' });
+    ckSuggestions = result.suggestions as unknown as Ref<Suggestion[]>;
   } catch {
-    // Provider absent — fall back to static suggestions.
+    // Provider absent — 保持空 ref，后面会回退到静态兜底。
   }
 
   // 走免费小模型(narrator endpoint, 例如 zhipuai/glm-4.7-flash)生成的建议词池。
@@ -193,13 +203,23 @@ export const useCopilotSuggestions = (): IUseCopilotSuggestionsResult => {
     void loadPool();
   });
 
+  // 优先级：narrator 池 -> CopilotKit 池 -> 静态兜底，始终能兑出内容。
   const suggestions = computed<readonly Suggestion[]>(() => {
-    const base = poolSuggestions.value.length > 0 ? poolSuggestions.value : raw.value;
-    return base.filter((s: Suggestion) => s.message.trim().length > 0);
+    const fromPool = withContent(poolSuggestions.value);
+    if (fromPool.length > 0) {
+      return fromPool;
+    }
+
+    const fromCopilotKit = withContent(ckSuggestions.value);
+    if (fromCopilotKit.length > 0) {
+      return fromCopilotKit;
+    }
+
+    return withContent(fallbackRef.value);
   });
 
   const suggestionTexts = computed<readonly string[]>(() =>
-    suggestions.value.map((s: Suggestion) => s.message),
+    suggestions.value.map((item) => item.message),
   );
 
   return { suggestions, suggestionTexts };
