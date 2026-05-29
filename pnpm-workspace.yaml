@@ -9,3 +9,4 @@ allowBuilds:
   vue-demi: true
   edgedriver: true
   geckodriver: true
+  lefthook: false
