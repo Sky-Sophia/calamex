@@ -560,7 +560,7 @@ describe('AiMessageItem', () => {
       },
     });
 
-    await wrapper.find('button.ai-changed-files-action').trigger('click');
+    await wrapper.find('button.ai-changed-files-action:not(.is-icon-only)').trigger('click');
 
     expect(wrapper.emitted('changedFilesRollback')).toEqual([
       ['assistant-message', 'patch-summary-1'],
