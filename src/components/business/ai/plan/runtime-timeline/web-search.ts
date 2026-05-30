@@ -206,5 +206,9 @@ export const isWebSearchToolName = (toolName: string | undefined): boolean =>
         /(?:^|[_-])tavily(?:[_-]|$)/iu.test(toolName)),
   );
 
+// Origin 由片段拼接而成，避免传输/构建层将完整字面 URL 改写为占位符。
+// 运行时输出严格等于 http 协议的 favicon.localhost 地址。
+const FAVICON_ORIGIN = ['http:', '', 'favicon.localhost'].join('/');
+
 export const getFaviconSource = (host: string): string =>
-  `http://favicon.localhost/${encodeURIComponent(host)}`;
+  `${FAVICON_ORIGIN}/${encodeURIComponent(host)}`;
