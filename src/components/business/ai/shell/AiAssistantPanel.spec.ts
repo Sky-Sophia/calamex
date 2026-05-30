@@ -556,7 +556,7 @@ describe('AiAssistantPanel', () => {
             props: ['disabled', 'tooltip'],
             emits: ['click'],
             template:
-              '<button class="checkpoint-trigger-stub" :disabled="disabled" :title="tooltip" @click="$emit(\\'click\\')"><slot /></button>',
+              '<button class="checkpoint-trigger-stub" :disabled="disabled" :title="tooltip" @click="$emit(\'click\')"><slot /></button>',
           },
           CheckpointIcon: { template: '<span class="checkpoint-icon-stub" />' },
           Loader: { template: '<span class="loader-stub" />' },
@@ -949,7 +949,7 @@ describe('AiAssistantPanel', () => {
           AiPromptInput: {
             emits: ['update:activeMode'],
             template:
-              '<button data-testid="switch-plan" @click="$emit(\\'update:activeMode\\', \\'plan\\')">切到 Plan</button>',
+              '<button data-testid="switch-plan" @click="$emit(\'update:activeMode\', \'plan\')">切到 Plan</button>',
           },
           AiProviderSettings: { template: '<div />' },
           AiPlanModePanel: { template: '<div data-testid="plan-mode-panel" />' },
