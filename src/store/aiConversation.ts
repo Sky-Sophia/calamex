@@ -6,6 +6,7 @@ import {
   aiConversationLegacyPersistSchema,
   aiConversationPersistSchema,
 } from '@/types/ai/conversation.schema';
+import { getAiConversationPersistStorage } from './plugins/debouncedPersistStorage';
 
 // ---------------------------------------------------------------------------
 // Public constants & types
@@ -462,6 +463,7 @@ export const useAiConversationStore = defineStore(
     persist: {
       key: 'shell-ide.ai-conversation',
       pick: ['activeThreadId', 'threads'],
+      storage: getAiConversationPersistStorage(),
       afterHydrate(ctx) {
         const store = ctx.store as unknown as IAiConversationPersistShape & {
           activeMessages?: IAiChatMessage[];
