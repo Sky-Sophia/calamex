@@ -215,13 +215,20 @@ const buildCompletionExtension = (
     ? autocompletion({
       activateOnTyping: true,
       activateOnTypingDelay: editorSettings.suggestionDelay,
-      icons: (completion) => {
-        try {
-          return createLucideCompletionIcon(completion.type ?? 'text');
-        } catch {
-          return null;
-        }
-      },
+      // CM6 的 icons 是布尔开关:关掉内置字形，改用 Lucide SVG（addToOptions 渲染）
+      icons: false,
+      addToOptions: [
+        {
+          position: 20, // 图标槽位（label=50 / detail=80）
+          render: (completion) => {
+            try {
+              return createLucideCompletionIcon(completion.type ?? 'text');
+            } catch {
+              return null;
+            }
+          },
+        },
+      ],
       override:
         language === 'shell'
           ? [
@@ -1035,144 +1042,179 @@ defineExpose<IEditorExpose>({
 <style scoped src="./CodeMirrorScriptEditor.css"></style>
 
 <style>
-/* ================================================================
-   CM6 补全 / hover 全局样式（非 scoped — CM6 弹窗不在组件 DOM 内）
-   颜色走主题变量，跟随明暗主题；不使用 !important。
-   ================================================================ */
+/* CM6 补全 / hover 全局样式(非 scoped — 弹窗在 body，不在组件 DOM 内)
+   主色纯白 #ffffff，图标 Lucide，颜色按语义区分 */
 
-/* -- 弹窗外观 + 覆盖 CM6 内置 max-width -- */
-.cm-tooltip.cm-tooltip-hover,
+/* 弹窗：纯白卡片 */
 .cm-tooltip.cm-tooltip-autocomplete {
-  max-width: none;
-  border: 1px solid color-mix(in srgb, var(--text-quaternary) 45%, transparent);
-  border-radius: 10px;
-  background: var(--editor-bg);
-  color: var(--text-primary);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  background: #ffffff;
+  border: 1px solid #e6e8eb;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12), 0 0 0 0.5px rgba(15, 23, 42, 0.04);
+  padding: 4px;
   overflow: hidden;
 }
 
-.cm-tooltip-autocomplete .cm-completionInfo {
+.cm-tooltip.cm-tooltip-hover,
+.cm-tooltip-autocomplete {
   max-width: none;
-  border-left: 1px solid color-mix(in srgb, var(--text-quaternary) 45%, transparent);
-  background: var(--editor-bg);
 }
 
-/* -- 补全列表行布局 -- */
+/* 列表项 */
+.cm-tooltip-autocomplete>ul {
+  max-height: 320px;
+  font-family: var(--font-mono);
+}
+
 .cm-tooltip-autocomplete>ul>li {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 10px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  color: #1f2937;
 }
 
-/* -- 补全列表图标 -- */
-.cm-tooltip-autocomplete .cm-completionIcon {
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
-  opacity: 1;
-  display: flex;
+.cm-tooltip-autocomplete>ul>li[aria-selected] {
+  background: #f1f5f9;
+  color: #111827;
+}
+
+/* Lucide 图标(addToOptions 注入，类名 cm-lsp-icon) */
+.cm-lsp-icon {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
+  color: #98a2b3;
 }
 
-.cm-tooltip-autocomplete .cm-completionIcon svg {
-  width: 14px;
-  height: 14px;
+.cm-lsp-icon svg {
+  width: 16px;
+  height: 16px;
 }
 
-.cm-tooltip-autocomplete .cm-completionIcon[data-type="function"],
-.cm-tooltip-autocomplete .cm-completionIcon[data-type="method"] {
-  background: var(--accent-strong);
-  color: #fff;
+.cm-lsp-icon[data-type="function"],
+.cm-lsp-icon[data-type="method"] {
+  color: #8b5cf6;
 }
 
-.cm-tooltip-autocomplete .cm-completionIcon[data-type="keyword"] {
-  background: color-mix(in srgb, #8b5cf6 88%, white);
-  color: #fff;
+.cm-lsp-icon[data-type="keyword"] {
+  color: #e0457b;
 }
 
-.cm-tooltip-autocomplete .cm-completionIcon[data-type="variable"] {
-  background: color-mix(in srgb, #0d9488 88%, white);
-  color: #fff;
+.cm-lsp-icon[data-type="variable"],
+.cm-lsp-icon[data-type="field"] {
+  color: #2f80ed;
 }
 
-.cm-tooltip-autocomplete .cm-completionIcon[data-type="text"] {
-  background: transparent;
-  color: var(--text-tertiary);
-  border: 1px dashed var(--text-quaternary);
+.cm-lsp-icon[data-type="property"] {
+  color: #0ea5b7;
 }
 
-/* -- 补全列表文字 -- */
+.cm-lsp-icon[data-type="constant"],
+.cm-lsp-icon[data-type="value"],
+.cm-lsp-icon[data-type="enum"] {
+  color: #0f9d58;
+}
+
+.cm-lsp-icon[data-type="class"],
+.cm-lsp-icon[data-type="interface"],
+.cm-lsp-icon[data-type="namespace"] {
+  color: #d97706;
+}
+
+.cm-lsp-icon[data-type="snippet"] {
+  color: #f59e0b;
+}
+
+.cm-lsp-icon[data-type="operator"] {
+  color: #6366f1;
+}
+
+.cm-lsp-icon[data-type="text"] {
+  color: #98a2b3;
+}
+
+/* 文字 */
 .cm-tooltip-autocomplete .cm-completionLabel {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  color: var(--text-primary);
 }
 
 .cm-tooltip-autocomplete .cm-completionDetail {
   flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 12px;
   font-size: 11px;
-  color: var(--text-tertiary);
-  opacity: 1;
   font-style: normal;
+  color: #98a2b3;
 }
 
 .cm-tooltip-autocomplete .cm-completionMatchedText {
-  color: var(--accent-strong);
+  color: #4f46e5;
   font-weight: 600;
   text-decoration: none;
 }
 
-/* -- 选中项 -- */
-.cm-tooltip-autocomplete li[aria-selected] {
-  background: color-mix(in srgb, var(--accent-strong) 10%, transparent);
-  color: var(--text-primary);
+/* 详情 / 文档面板：同样纯白 */
+.cm-tooltip.cm-completionInfo,
+.cm-tooltip-autocomplete .cm-completionInfo {
+  margin-left: 6px;
+  padding: 10px 12px;
+  max-width: none;
+  background: #ffffff;
+  border: 1px solid #e6e8eb;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+  color: #475467;
 }
 
-/* -- 补全列表滚动条 -- */
-.cm-tooltip-autocomplete ul::-webkit-scrollbar {
+/* 滚动条 */
+.cm-tooltip-autocomplete>ul::-webkit-scrollbar {
   width: 8px;
 }
 
-.cm-tooltip-autocomplete ul::-webkit-scrollbar-thumb {
-  background: var(--text-quaternary);
+.cm-tooltip-autocomplete>ul::-webkit-scrollbar-thumb {
+  background: #d0d5dd;
   border-radius: 8px;
 }
 
-/* -- 补全文档 / hover 容器（completion.info 渲染为 .cm-lsp-doc） -- */
-.cm-lsp-doc {
-  max-width: 520px;
-  max-height: 320px;
-  overflow: auto;
-  padding: 10px 14px;
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--text-secondary);
-  word-break: break-word;
+/* hover 卡片 */
+.cm-tooltip.cm-tooltip-hover {
+  background: #ffffff;
+  border: 1px solid #e6e8eb;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
 }
 
 .cm-lsp-hover {
   padding: 8px 10px;
   font-size: 12.5px;
   line-height: 1.55;
-  color: var(--text-primary);
+  color: #1f2937;
 }
 
-/* -- markdown 通用 -- */
+/* LSP 文档 markdown */
+.cm-lsp-doc {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #475467;
+}
+
 .cm-lsp-para {
   margin: 4px 0;
 }
 
 .cm-lsp-inline-code {
-  background: color-mix(in srgb, var(--surface-soft-strong) 60%, transparent);
+  background: #f2f4f7;
   border-radius: 3px;
   padding: 1px 5px;
   font-family: var(--font-mono);
@@ -1181,18 +1223,16 @@ defineExpose<IEditorExpose>({
 
 .cm-lsp-code-block {
   margin: 6px 0;
-  border-radius: 4px;
-  overflow: auto;
+  border-radius: 6px;
+  overflow: hidden;
 }
 
 .cm-lsp-code-block pre {
   margin: 0;
   padding: 8px 10px;
-  background: color-mix(in srgb, var(--app-bg) 86%, black);
+  background: #f7f8fa;
   font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-all;
 }
 </style>
