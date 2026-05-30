@@ -210,6 +210,7 @@ const createAssistantMock = (
   >([]);
   const restoringCheckpointId = ref<string | null>(null);
   const revertingChangedFilesSummaryId = ref<string | null>(null);
+  const pinningChangedFilesSummaryId = ref<string | null>(null);
   const fileRollbackPrompt = ref<{
     operationId: string;
     fileCount: number;
@@ -270,6 +271,7 @@ const createAssistantMock = (
     conversationCheckpoints,
     restoringCheckpointId,
     revertingChangedFilesSummaryId,
+    pinningChangedFilesSummaryId,
     fileRollbackPrompt,
     agentPlan: {
       store: agentPlanStore,
@@ -294,6 +296,7 @@ const createAssistantMock = (
     applyProposedPatch: vi.fn(),
     rollbackLatestFileChange: vi.fn(),
     rollbackChangedFilesSummary: vi.fn(),
+    setChangedFilesSummaryPin: vi.fn(),
     restoreConversationCheckpoint: vi.fn().mockResolvedValue(undefined),
     resolveSidecarToolConfirmation: vi.fn(),
     sendMessage: vi.fn(),
@@ -553,7 +556,7 @@ describe('AiAssistantPanel', () => {
             props: ['disabled', 'tooltip'],
             emits: ['click'],
             template:
-              '<button class="checkpoint-trigger-stub" :disabled="disabled" :title="tooltip" @click="$emit(\'click\')"><slot /></button>',
+              '<button class="checkpoint-trigger-stub" :disabled="disabled" :title="tooltip" @click="$emit(\\'click\\')"><slot /></button>',
           },
           CheckpointIcon: { template: '<span class="checkpoint-icon-stub" />' },
           Loader: { template: '<span class="loader-stub" />' },
@@ -830,7 +833,7 @@ describe('AiAssistantPanel', () => {
         stubs: {
           AiChatThread: {
             props: ['typingLabel'],
-            template: '<div class="chat-thread-stub">{{ typingLabel }}</div>',
+            template: '<div class="chat-thread-stub"> typingLabel </div>',
           },
           AiContextChips: { template: '<div />' },
           AiPatchPreview: { template: '<div />' },
@@ -946,7 +949,7 @@ describe('AiAssistantPanel', () => {
           AiPromptInput: {
             emits: ['update:activeMode'],
             template:
-              '<button data-testid="switch-plan" @click="$emit(\'update:activeMode\', \'plan\')">切到 Plan</button>',
+              '<button data-testid="switch-plan" @click="$emit(\\'update:activeMode\\', \\'plan\\')">切到 Plan</button>',
           },
           AiProviderSettings: { template: '<div />' },
           AiPlanModePanel: { template: '<div data-testid="plan-mode-panel" />' },
@@ -1055,7 +1058,7 @@ describe('AiAssistantPanel', () => {
             props: ['messages'],
             template: `
                             <section data-testid="chat-thread">
-                                <p v-for="message in messages" :key="message.id">{{ message.content }}</p>
+                                <p v-for="message in messages" :key="message.id"> message.content </p>
                             </section>
                         `,
           },
@@ -1147,13 +1150,13 @@ describe('AiAssistantPanel', () => {
                                     :key="message.id"
                                     :data-role="message.role"
                                 >
-                                    <p>{{ message.content }}</p>
+                                    <p> message.content </p>
                                     <ol v-if="message.toolCalls?.length">
                                         <li
                                             v-for="toolCall in message.toolCalls"
                                             :key="toolCall.id"
                                         >
-                                            {{ toolCall.name }}:{{ toolCall.status }}:{{ toolCall.summary }}
+                                             toolCall.name : toolCall.status : toolCall.summary 
                                         </li>
                                     </ol>
                                 </article>
@@ -1234,10 +1237,10 @@ describe('AiAssistantPanel', () => {
             template: `
                             <section data-testid="chat-thread">
                                 <article v-for="message in messages" :key="message.id">
-                                    <p>{{ message.content }}</p>
+                                    <p> message.content </p>
                                     <ol v-if="message.toolCalls?.length">
                                         <li v-for="toolCall in message.toolCalls" :key="toolCall.id">
-                                            {{ toolCall.name }}:{{ toolCall.status }}:{{ toolCall.summary }}
+                                             toolCall.name : toolCall.status : toolCall.summary 
                                         </li>
                                     </ol>
                                 </article>
