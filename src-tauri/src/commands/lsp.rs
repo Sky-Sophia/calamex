@@ -581,7 +581,11 @@ fn resolve_node_executable() -> Result<PathBuf, String> {
 /// bash-language-server 的诊断完全来自 shellcheck。若仅传裸名 "shellcheck"
 /// 让其在 PATH 中查找，GUI 进程拿到的精简 PATH 往往不含 scoop/winget/choco
 /// 等 shim 目录，导致 bash-ls 找不到 shellcheck 而静默不发诊断。
-/// 这里像解析 node 一样，主动在常见安装位置 + PATH 中定位绝对路径。
+/// 这里像解析 node / bash-ls CLI 一样，按优先级定位绝对路径:
+///   1. 环境变量 XIAOJIANC_SHELLCHECK_EXE
+///   2. 项目 node_modules 里 shellcheck npm 包自带的二进制(最常见)
+///   3. 常见系统安装位置(scoop/winget/choco/Homebrew 等)
+///   4. 兑底 PATH
 /// 找不到时返回 None，调用方退回裸名 "shellcheck"（至少保持旧行为）。
 fn resolve_shellcheck_executable() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("XIAOJIANC_SHELLCHECK_EXE") {
@@ -592,6 +596,24 @@ fn resolve_shellcheck_executable() -> Option<PathBuf> {
     }
 
     let exe_name = if cfg!(windows) { "shellcheck.exe" } else { "shellcheck" };
+
+    // 最优先:项目 node_modules 里 shellcheck npm 包自带的二进制。
+    // 该包(shellcheck@4.x)把真实二进制放在 <pkg>/bin/shellcheck(.exe)。
+    // 跟 bash-language-server CLI 一样优先用项目本地版本,避免依赖系统 PATH。
+    {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        if let Some(workspace_root) = manifest_dir.parent() {
+            let nm = workspace_root
+                .join("node_modules")
+                .join("shellcheck")
+                .join("bin")
+                .join(exe_name);
+            if nm.is_file() {
+                log::info!("找到 node_modules 内置 shellcheck: {}", nm.display());
+                return Some(nm);
+            }
+        }
+    }
 
     let mut candidates: Vec<PathBuf> = Vec::new();
     if cfg!(windows) {
