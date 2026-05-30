@@ -76,7 +76,7 @@ struct LspSession {
     workspace_root: Option<String>,
     /// 单调递增，每次 start +1。watcher 比对此值，避免在新一代实例上写状态。
     generation: u64,
-    /// drop 即向 watcher 发出"主动停止"信号，使其不要再 emit `lsp-crashed`。
+    /// drop 即向 watcher 发出\"主动停止\"信号，使其不要再 emit `lsp-crashed`。
     kill_tx: Option<oneshot::Sender<()>>,
 }
 
@@ -181,7 +181,7 @@ fn percent_decode(s: &str) -> String {
 
 fn path_to_uri(path: &str) -> Result<String, String> {
     let normalized = path.replace('\\', "/");
-    // 去掉 Windows 扩展路径前缀(\\?\ 或 //?/),避免打断后续 trim 逻辑
+    // 去掉 Windows 扩展路径前缀(\\?\ 或 //?/)，避免打断后续 trim 逻辑
     let cleaned = if cfg!(windows) {
         if let Some(rest) = normalized.strip_prefix("//?/UNC/") {
             format!("//{}", rest)
@@ -576,6 +576,76 @@ fn resolve_node_executable() -> Result<PathBuf, String> {
     Err("未找到 node 可执行文件。请安装 Node.js 或设置 XIAOJIANC_NODE_EXE 环境变量。".into())
 }
 
+/// 解析 shellcheck 可执行文件的绝对路径。
+///
+/// bash-language-server 的诊断完全来自 shellcheck。若仅传裸名 "shellcheck"
+/// 让其在 PATH 中查找，GUI 进程拿到的精简 PATH 往往不含 scoop/winget/choco
+/// 等 shim 目录，导致 bash-ls 找不到 shellcheck 而静默不发诊断。
+/// 这里像解析 node 一样，主动在常见安装位置 + PATH 中定位绝对路径。
+/// 找不到时返回 None，调用方退回裸名 "shellcheck"（至少保持旧行为）。
+fn resolve_shellcheck_executable() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("XIAOJIANC_SHELLCHECK_EXE") {
+        let p = PathBuf::from(&path);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+
+    let exe_name = if cfg!(windows) { "shellcheck.exe" } else { "shellcheck" };
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if cfg!(windows) {
+        // scoop (用户级): %USERPROFILE%\scoop\shims\shellcheck.exe
+        if let Ok(home) = std::env::var("USERPROFILE") {
+            candidates.push(PathBuf::from(&home).join("scoop").join("shims").join(exe_name));
+        }
+        if let Ok(progdata) = std::env::var("ProgramData") {
+            // scoop (全局)
+            candidates.push(
+                PathBuf::from(&progdata).join("scoop").join("shims").join(exe_name),
+            );
+            // chocolatey
+            candidates.push(
+                PathBuf::from(&progdata).join("chocolatey").join("bin").join(exe_name),
+            );
+        }
+        // winget links
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            candidates.push(
+                PathBuf::from(&local)
+                    .join("Microsoft")
+                    .join("WinGet")
+                    .join("Links")
+                    .join(exe_name),
+            );
+        }
+    } else {
+        candidates.push(PathBuf::from("/usr/local/bin").join(exe_name));
+        candidates.push(PathBuf::from("/usr/bin").join(exe_name));
+        candidates.push(PathBuf::from("/opt/homebrew/bin").join(exe_name));
+        if let Ok(home) = std::env::var("HOME") {
+            candidates.push(PathBuf::from(&home).join(".local").join("bin").join(exe_name));
+        }
+    }
+
+    for c in &candidates {
+        if c.is_file() {
+            log::info!("找到 shellcheck: {}", c.display());
+            return Some(c.clone());
+        }
+    }
+
+    if let Some(p) = find_in_path(exe_name) {
+        log::info!("PATH 中找到 shellcheck: {}", p.display());
+        return Some(p);
+    }
+
+    log::warn!(
+        "未找到 shellcheck 可执行文件。bash-language-server 的诊断依赖 shellcheck，未安装将不会出现任何诊断。请安装 shellcheck 或设置 XIAOJIANC_SHELLCHECK_EXE 环境变量。"
+    );
+    None
+}
+
 fn resolve_lsp_cli_js() -> Result<PathBuf, String> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().ok_or("无法定位项目根目录")?;
@@ -716,6 +786,12 @@ pub async fn lsp_start(
         }
     });
 
+    // 解析 shellcheck 绝对路径。shellcheck 是诊断的唯一来源,显式传给 bash-ls,
+    // 避免依赖 GUI 进程可能精简过的 PATH。找不到时退回裸名。
+    let shellcheck_path = resolve_shellcheck_executable()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "shellcheck".to_string());
+
     // initialize (阻塞等响应,符合协议)
     let root_uri = path_to_uri(&workspace_root)?;
     let init_params = serde_json::json!({
@@ -734,8 +810,8 @@ pub async fn lsp_start(
             },
             "workspace": { "workspaceFolders": false }
         },
-        // 启用 shellcheck(诊断来源)。空串=禁用;给 "shellcheck" 走 PATH,或换绝对路径
-        "initializationOptions": { "shellcheckPath": "shellcheck" }
+        // 启用 shellcheck(诊断来源)。传解析到的绝对路径;找不到时退回裸名走 PATH。
+        "initializationOptions": { "shellcheckPath": shellcheck_path }
     });
 
     let _init_resp = send_request(
@@ -831,7 +907,7 @@ async fn stop_inner(
         return;
     }
 
-    // 通知 watcher 进入"主动停止"分支
+    // 通知 watcher 进入\"主动停止\"分支
     if let Some(tx) = kill_tx {
         let _ = tx.send(());
     }
@@ -859,7 +935,7 @@ async fn stop_inner(
     log::info!("bash-language-server 已停止");
 }
 
-/// 统一的"取 stdin + uri + 分配 id"辅助。未启动时一律返回 Err。
+/// 统一的\"取 stdin + uri + 分配 id\"辅助。未启动时一律返回 Err。
 async fn require_running_with_uri(
     manager: &LspManager,
     file_path: &str,
