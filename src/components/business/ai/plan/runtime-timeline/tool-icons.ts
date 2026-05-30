@@ -179,6 +179,8 @@ export const TOOL_ICON_MATCHERS: readonly IToolIconMatcher[] = [
     icon: 'memory',
     patterns: [
       /^memory$/u,
+      /working_?memory/u,
+      /resolve_memory_file_uri/u,
       /read_graph/u,
       /search_nodes/u,
       /create_entities/u,
