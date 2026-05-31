@@ -1252,7 +1252,7 @@ onBeforeUnmount(() => {
               </div>
               <button v-if="activeHistoryThread" type="button" class="ai-history-clear-icon" aria-label="删除当前对话记录"
                 @click="openDeleteConversationDialog(activeHistoryThread.id)">
-                <span aria-hidden="true" class="icon-[lucide--trash2]" />
+                <span aria-hidden="true" class="icon-[lucide--trash-2]" />
               </button>
             </header>
             <div v-if="historyThreads.length" class="ai-history-scroll-area">
@@ -1268,7 +1268,7 @@ onBeforeUnmount(() => {
                   </button>
                   <button type="button" class="ai-history-delete-button" aria-label="删除这条对话记录"
                     @click.stop="openDeleteConversationDialog(thread.id)">
-                    <span aria-hidden="true" class="icon-[lucide--trash2]" />
+                    <span aria-hidden="true" class="icon-[lucide--trash-2]" />
                   </button>
                 </article>
               </div>
@@ -1371,23 +1371,21 @@ onBeforeUnmount(() => {
         @cancel-run="handleCancelRun" @resolve-tool-confirmation="handleResolveToolConfirmation" />
       <AiPromptInput v-model="assistant.draft.value" v-model:active-mode="assistant.activeMode.value"
         :disabled="composerDisabled" :stop-visible="assistant.isSending.value"
-        :error-message="assistant.errorMessage.value" :submit-label="submitLabel"
-        :config="assistant.config.value" :is-model-saving="isPromptModelSaving"
-        :network-permission="networkPermission" :is-network-permission-saving="agentNetwork.pending.value"
-        :attachments="assistant.attachedFiles.value"
+        :error-message="assistant.errorMessage.value" :submit-label="submitLabel" :config="assistant.config.value"
+        :is-model-saving="isPromptModelSaving" :network-permission="networkPermission"
+        :is-network-permission-saving="agentNetwork.pending.value" :attachments="assistant.attachedFiles.value"
         :has-attachments="assistant.attachedFiles.value.length > 0" :token-context="tokenContextProps"
         @submit="handleSubmitMessage" @stop="assistant.stopCurrentRequest" @file-selected="assistant.attachFile"
         @remove-file="assistant.removeAttachedFile" @model-change="handlePromptModelChange"
         @network-permission-change="handlePromptNetworkPermissionChange"
-        @information-sources-open="openPromptInformationSources"
-        @personalization-open="openPromptPersonalization" @prewarm="handlePromptPrewarm" />
+        @information-sources-open="openPromptInformationSources" @personalization-open="openPromptPersonalization"
+        @prewarm="handlePromptPrewarm" />
     </div>
 
     <AiProviderSettings v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
       v-model:tavily-api-key="settingsTavilyApiKey" :open="assistant.isSettingsOpen.value"
-      :config="assistant.config.value" @close="assistant.isSettingsOpen.value = false"
-      @save="saveSettings" @save-credentials="saveCredentials" @test-provider="testProvider"
-      @save-tavily-key="saveTavilyKey" />
+      :config="assistant.config.value" @close="assistant.isSettingsOpen.value = false" @save="saveSettings"
+      @save-credentials="saveCredentials" @test-provider="testProvider" @save-tavily-key="saveTavilyKey" />
 
     <Teleport to="body">
       <div v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop" @click.self="cancelClearConversation">
@@ -1809,14 +1807,12 @@ onBeforeUnmount(() => {
   left: 0;
   height: var(--ai-composer-fade-height);
   pointer-events: none;
-  background: linear-gradient(
-    to top,
-    var(--ai-composer-surface) 0%,
-    color-mix(in srgb, var(--ai-composer-surface) 74%, transparent) 24%,
-    color-mix(in srgb, var(--ai-composer-surface) 34%, transparent) 58%,
-    color-mix(in srgb, var(--ai-composer-surface) 10%, transparent) 82%,
-    transparent 100%
-  );
+  background: linear-gradient(to top,
+      var(--ai-composer-surface) 0%,
+      color-mix(in srgb, var(--ai-composer-surface) 74%, transparent) 24%,
+      color-mix(in srgb, var(--ai-composer-surface) 34%, transparent) 58%,
+      color-mix(in srgb, var(--ai-composer-surface) 10%, transparent) 82%,
+      transparent 100%);
   content: '';
 }
 

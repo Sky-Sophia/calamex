@@ -2,15 +2,9 @@
   <section class="run-panel-shell">
     <header class="run-panel-toolbar">
       <div class="run-panel-tab-list" role="tablist" aria-label="终端面板视图">
-        <button
-          v-for="item in tabs"
-          :key="item.value"
-          type="button"
-          class="run-panel-tab"
-          :class="{ 'is-active': activeTab === item.value }"
-          :aria-selected="activeTab === item.value"
-          @click="activeTab = item.value"
-        >
+        <button v-for="item in tabs" :key="item.value" type="button" class="run-panel-tab"
+          :class="{ 'is-active': activeTab === item.value }" :aria-selected="activeTab === item.value"
+          @click="activeTab = item.value">
           <span class="run-panel-tab-label">{{ item.label }}</span>
         </button>
       </div>
@@ -18,50 +12,26 @@
       <div class="run-panel-toolbar-spacer" />
 
       <div class="run-panel-actions">
-        <button
-          type="button"
-          class="icon-button app-tooltip-target run-panel-action-button"
-          data-tooltip="重连终端"
-          data-tooltip-placement="top"
-          aria-label="重连终端"
-          @click="void handleRestartTerminal()"
-        >
+        <button type="button" class="icon-button app-tooltip-target run-panel-action-button" data-tooltip="重连终端"
+          data-tooltip-placement="top" aria-label="重连终端" @click="void handleRestartTerminal()">
           <span aria-hidden="true" class="icon-[lucide--refresh-ccw]" />
         </button>
 
-        <button
-          type="button"
-          class="icon-button app-tooltip-target run-panel-action-button"
-          data-tooltip="清屏"
-          data-tooltip-placement="top"
-          aria-label="清屏"
-          :disabled="!isTerminalReady"
-          @click="void handleClearTerminal()"
-        >
+        <button type="button" class="icon-button app-tooltip-target run-panel-action-button" data-tooltip="清屏"
+          data-tooltip-placement="top" aria-label="清屏" :disabled="!isTerminalReady" @click="void handleClearTerminal()">
           <span aria-hidden="true" class="icon-[lucide--eraser]" />
         </button>
 
-        <button
-          type="button"
-          class="icon-button app-tooltip-target run-panel-action-button"
-          :data-tooltip="props.isMaximized ? '还原终端高度' : '最大化终端'"
-          data-tooltip-placement="top"
-          :aria-label="props.isMaximized ? '还原终端高度' : '最大化终端'"
-          :aria-pressed="props.isMaximized"
-          @click="$emit('toggle-maximize')"
-        >
-          <span v-if="!props.isMaximized" aria-hidden="true" class="icon-[lucide--maximize2]" />
-          <span v-else aria-hidden="true" class="icon-[lucide--minimize2]" />
+        <button type="button" class="icon-button app-tooltip-target run-panel-action-button"
+          :data-tooltip="props.isMaximized ? '还原终端高度' : '最大化终端'" data-tooltip-placement="top"
+          :aria-label="props.isMaximized ? '还原终端高度' : '最大化终端'" :aria-pressed="props.isMaximized"
+          @click="$emit('toggle-maximize')">
+          <span v-if="!props.isMaximized" aria-hidden="true" class="icon-[lucide--maximize-2]" />
+          <span v-else aria-hidden="true" class="icon-[lucide--minimize-2]" />
         </button>
 
-        <button
-          type="button"
-          class="icon-button app-tooltip-target run-panel-action-button"
-          data-tooltip="关闭终端面板"
-          data-tooltip-placement="top"
-          aria-label="关闭终端面板"
-          @click="$emit('hide')"
-        >
+        <button type="button" class="icon-button app-tooltip-target run-panel-action-button" data-tooltip="关闭终端面板"
+          data-tooltip-placement="top" aria-label="关闭终端面板" @click="$emit('hide')">
           <span aria-hidden="true" class="icon-[lucide--x]" />
         </button>
       </div>
@@ -69,53 +39,29 @@
 
     <div class="run-panel-body">
       <div v-show="activeTab === 'terminal'" class="run-panel-view is-terminal">
-        <EmbeddedTerminal
-          :visible="props.visible && activeTab === 'terminal'"
-          :theme="props.theme"
-          :terminal-settings="props.terminalSettings"
-          @status-change="handleTerminalStatusChange"
-          @run-chunk="$emit('terminal-run-chunk', $event)"
-          @run-completed="$emit('terminal-run-completed', $event)"
-        />
+        <EmbeddedTerminal :visible="props.visible && activeTab === 'terminal'" :theme="props.theme"
+          :terminal-settings="props.terminalSettings" @status-change="handleTerminalStatusChange"
+          @run-chunk="$emit('terminal-run-chunk', $event)" @run-completed="$emit('terminal-run-completed', $event)" />
       </div>
 
       <div v-show="activeTab === 'logs'" class="run-panel-view is-logs">
-        <StructuredRunInsights
-          :active="activeTab === 'logs'"
-          :terminal-output-length="props.terminalOutputLength"
-          :terminal-output-version="props.terminalOutputVersion"
-          :resolve-terminal-output="props.resolveTerminalOutput"
-          :run-logs="props.runLogs"
-          :last-run-result="props.lastRunResult"
-          :is-running="props.isRunning"
-          :executor="props.executor"
-          :document-name="props.documentName"
-          :document-path="props.documentPath"
-          :workspace-root-path="props.workspaceRootPath"
-          :is-terminal-ready="isTerminalReady"
-          @clear="void handleClearLogs()"
-          @submit-command="void handleSubmitCommand($event)"
-        />
+        <StructuredRunInsights :active="activeTab === 'logs'" :terminal-output-length="props.terminalOutputLength"
+          :terminal-output-version="props.terminalOutputVersion" :resolve-terminal-output="props.resolveTerminalOutput"
+          :run-logs="props.runLogs" :last-run-result="props.lastRunResult" :is-running="props.isRunning"
+          :executor="props.executor" :document-name="props.documentName" :document-path="props.documentPath"
+          :workspace-root-path="props.workspaceRootPath" :is-terminal-ready="isTerminalReady"
+          @clear="void handleClearLogs()" @submit-command="void handleSubmitCommand($event)" />
       </div>
 
       <div v-if="activeTab === 'flow'" class="run-panel-view is-flow">
-        <TerminalFlowPanel
-          :terminal-status="terminalStatus"
-          :is-running="props.isRunning"
-          :terminal-output-length="props.terminalOutputLength"
-          :terminal-output-version="props.terminalOutputVersion"
-        />
+        <TerminalFlowPanel :terminal-status="terminalStatus" :is-running="props.isRunning"
+          :terminal-output-length="props.terminalOutputLength" :terminal-output-version="props.terminalOutputVersion" />
       </div>
 
       <div v-show="activeTab === 'shellcheck'" class="run-panel-view is-shellcheck">
-        <DiagnosticsPanel
-          :analysis="props.scriptAnalysis"
-          :content="props.documentContent"
-          :document-name="props.documentName"
-          @select-diagnostic="handleSelectDiagnostic"
-          @rerun-analysis="emit('rerun-analysis')"
-          @ai-fix-diagnostic="emit('ai-fix-diagnostic', $event)"
-        />
+        <DiagnosticsPanel :analysis="props.scriptAnalysis" :content="props.documentContent"
+          :document-name="props.documentName" @select-diagnostic="handleSelectDiagnostic"
+          @rerun-analysis="emit('rerun-analysis')" @ai-fix-diagnostic="emit('ai-fix-diagnostic', $event)" />
       </div>
     </div>
   </section>

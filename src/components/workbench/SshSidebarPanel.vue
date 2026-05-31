@@ -1148,7 +1148,7 @@ onBeforeUnmount(() => {
       </form>
 
       <section v-else-if="isDisconnected" class="ssh-empty-state ssh-empty-state--disconnected" aria-label="SSH 未连接状态">
-        <span class="icon-[lucide--server] ssh-empty-icon" aria-hidden="true"  />
+        <span class="icon-[lucide--server] ssh-empty-icon" aria-hidden="true" />
 
         <div class="ssh-empty-copy">
           <div class="ssh-empty-title ssh-empty-title--disconnected">尚未连接到远程主机</div>
@@ -1180,7 +1180,7 @@ onBeforeUnmount(() => {
           <button v-for="connection in normalizedRecentConnections" :key="connection.id" type="button"
             class="ssh-recent-item ssh-recent-item--disconnected" @click="handleSelectRecentConnection(connection)">
             <span class="ssh-recent-icon ssh-recent-icon--disconnected" aria-hidden="true">
-              <span class="icon-[lucide--clock3]" />
+              <span class="icon-[lucide--clock-3]" />
             </span>
 
             <span class="ssh-recent-info">
@@ -1315,17 +1315,9 @@ onBeforeUnmount(() => {
   <LinearContextMenu :open="isConnected && contextMenu.open" :x="contextMenu.x" :y="contextMenu.y"
     :groups="SSH_CONTEXT_MENU_GROUPS" theme="dark" submenu-direction="right" @select="handleContextMenuSelect" />
 
-  <SshFilePreviewDialog
-    v-if="previewFileItem"
-    :file-item="previewFileItem"
-    :payload="previewPayload"
-    :is-loading="isPreviewLoading"
-    :is-saving="isPreviewSaving"
-    @close="closePreviewDialog"
-    @reload="reloadPreviewFile"
-    @download="downloadPreviewFile"
-    @save="savePreviewFile"
-  />
+  <SshFilePreviewDialog v-if="previewFileItem" :file-item="previewFileItem" :payload="previewPayload"
+    :is-loading="isPreviewLoading" :is-saving="isPreviewSaving" @close="closePreviewDialog" @reload="reloadPreviewFile"
+    @download="downloadPreviewFile" @save="savePreviewFile" />
 
   <Teleport to="body">
     <div v-if="isCreateDirectoryDialogOpen" class="ssh-modal-backdrop" @click.self="closeCreateDirectoryDialog">

@@ -93,17 +93,13 @@ const toggleCollapsed = (): void => {
   <section class="ai-element-plan" :class="{ 'is-collapsed': isCollapsed }" aria-label="已生成计划">
     <header class="ai-element-plan-header">
       <div class="ai-element-plan-title-group">
-        <span class="icon-[lucide--file-text] ai-element-plan-title-icon" aria-hidden="true"  />
+        <span class="icon-[lucide--file-text] ai-element-plan-title-icon" aria-hidden="true" />
         <h3 class="ai-element-plan-title">{{ goal || '确认计划' }}</h3>
       </div>
-      <button
-        type="button"
-        class="ai-element-plan-collapse"
-        :aria-expanded="!isCollapsed"
-        :aria-label="isCollapsed ? '展开计划' : '收起计划'"
-        @click="toggleCollapsed"
-      >
-        <span class="icon-[lucide--chevron-up] ai-element-plan-collapse-icon" :class="{ 'is-collapsed': isCollapsed }" aria-hidden="true"  />
+      <button type="button" class="ai-element-plan-collapse" :aria-expanded="!isCollapsed"
+        :aria-label="isCollapsed ? '展开计划' : '收起计划'" @click="toggleCollapsed">
+        <span class="icon-[lucide--chevron-up] ai-element-plan-collapse-icon" :class="{ 'is-collapsed': isCollapsed }"
+          aria-hidden="true" />
       </button>
     </header>
 
@@ -117,63 +113,35 @@ const toggleCollapsed = (): void => {
         <section class="ai-element-plan-section" aria-label="关键步骤">
           <h4>关键步骤</h4>
           <ol class="ai-element-plan-steps">
-            <li
-              v-for="step in steps"
-              :key="step.id"
-              class="ai-element-plan-step"
-              :class="[`is-${step.status}`, `risk-${step.riskLevel}`]"
-            >
+            <li v-for="step in steps" :key="step.id" class="ai-element-plan-step"
+              :class="[`is-${step.status}`, `risk-${step.riskLevel}`]">
               <span class="ai-element-plan-step-bullet" aria-hidden="true"></span>
-              <input
-                v-if="canEdit"
-                class="ai-element-plan-step-title"
-                :value="step.title"
-                aria-label="编辑计划步骤标题"
-                :disabled="isPlanning"
-                @keydown.enter.prevent="handleTitleEnter(step.id, $event)"
-                @blur="handleTitleBlur(step, $event)"
-              />
+              <input v-if="canEdit" class="ai-element-plan-step-title" :value="step.title" aria-label="编辑计划步骤标题"
+                :disabled="isPlanning" @keydown.enter.prevent="handleTitleEnter(step.id, $event)"
+                @blur="handleTitleBlur(step, $event)" />
               <span v-else class="ai-element-plan-step-title is-readonly">{{ step.title }}</span>
-              <button
-                v-if="canEdit"
-                type="button"
-                class="ai-plan-step-remove"
-                :disabled="steps.length <= MIN_STEP_COUNT || isPlanning"
-                aria-label="删除计划步骤"
-                title="删除计划步骤"
-                @click="emit('removeStep', step.id)"
-              >
-                <span aria-hidden="true" class="icon-[lucide--trash2]" />
+              <button v-if="canEdit" type="button" class="ai-plan-step-remove"
+                :disabled="steps.length <= MIN_STEP_COUNT || isPlanning" aria-label="删除计划步骤" title="删除计划步骤"
+                @click="emit('removeStep', step.id)">
+                <span aria-hidden="true" class="icon-[lucide--trash-2]" />
               </button>
             </li>
           </ol>
         </section>
 
         <footer class="ai-element-plan-actions">
-          <button
-            type="button"
-            class="ai-plan-button"
-            :disabled="isPlanning || isApproving"
-            @click="emit('regenerate')"
-          >
+          <button type="button" class="ai-plan-button" :disabled="isPlanning || isApproving"
+            @click="emit('regenerate')">
             <span aria-hidden="true" class="icon-[lucide--rotate-cw]" />
             重生成
           </button>
-          <button
-            type="button"
-            class="ai-plan-button"
-            :disabled="isPlanning || isApproving || !canReject"
-            @click="emit('reject')"
-          >
+          <button type="button" class="ai-plan-button" :disabled="isPlanning || isApproving || !canReject"
+            @click="emit('reject')">
             <span aria-hidden="true" class="icon-[lucide--x]" />
             拒绝
           </button>
-          <button
-            type="button"
-            class="ai-plan-button is-primary"
-            :disabled="!canApprove || isPlanning || isApproving"
-            @click="emit('approve')"
-          >
+          <button type="button" class="ai-plan-button is-primary" :disabled="!canApprove || isPlanning || isApproving"
+            @click="emit('approve')">
             <span aria-hidden="true" class="icon-[lucide--check]" />
             {{ approvalLabel }}
           </button>
@@ -460,6 +428,7 @@ const toggleCollapsed = (): void => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .ai-element-plan-collapse,
   .ai-element-plan-collapse-icon,
   .ai-element-plan-content-enter-active,

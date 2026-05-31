@@ -149,11 +149,7 @@ const handlePin = (): void => {
 </script>
 
 <template>
-  <section
-    class="ai-changed-files-summary"
-    :class="{ 'is-message': isMessageVariant }"
-    aria-label="已更改文件"
-  >
+  <section class="ai-changed-files-summary" :class="{ 'is-message': isMessageVariant }" aria-label="已更改文件">
     <header class="ai-changed-files-header">
       <div class="ai-changed-files-title">
         <strong>{{ changedFileCountLabel }}</strong>
@@ -161,47 +157,31 @@ const handlePin = (): void => {
         <span class="ai-changed-files-stat is-delete">-{{ summary.totalDeletions }}</span>
       </div>
       <div class="ai-changed-files-actions">
-        <button
-          type="button"
-          class="ai-changed-files-action is-icon-only"
-          :class="{ 'is-active': isPinned }"
-          :disabled="isPinning"
-          :aria-label="pinLabel"
-          :title="pinLabel"
-          @click="handlePin"
-        >
+        <button type="button" class="ai-changed-files-action is-icon-only" :class="{ 'is-active': isPinned }"
+          :disabled="isPinning" :aria-label="pinLabel" :title="pinLabel" @click="handlePin">
           <span v-if="isPinned" aria-hidden="true" class="icon-[lucide--pin-off]" />
           <span v-else aria-hidden="true" class="icon-[lucide--pin]" />
         </button>
-        <button
-          type="button"
-          class="ai-changed-files-action"
-          :disabled="isReverting || isReverted"
-          :aria-label="undoLabel"
-          @click="handleUndo"
-        >
+        <button type="button" class="ai-changed-files-action" :disabled="isReverting || isReverted"
+          :aria-label="undoLabel" @click="handleUndo">
           <span>{{ undoLabel }}</span>
-          <span aria-hidden="true" class="icon-[lucide--undo2]" />
+          <span aria-hidden="true" class="icon-[lucide--undo-2]" />
         </button>
         <span class="ai-changed-files-action" aria-hidden="true">审核 <span class="icon-[lucide--external-link]" /></span>
-        <span class="ai-changed-files-action is-icon-only"><span class="icon-[lucide--maximize2]" /></span>
+        <span class="ai-changed-files-action is-icon-only"><span class="icon-[lucide--maximize-2]" /></span>
       </div>
     </header>
 
     <div class="ai-changed-file-list">
-      <div
-        v-for="{ file, hunks } in changedFiles"
-        :key="getFileKey(file)"
-        class="ai-changed-file-item"
-        :class="{ 'is-open': isFileOpen(file) }"
-      >
+      <div v-for="{ file, hunks } in changedFiles" :key="getFileKey(file)" class="ai-changed-file-item"
+        :class="{ 'is-open': isFileOpen(file) }">
         <button type="button" class="ai-changed-file-summary" @click="toggleFile(file)">
           <span class="ai-changed-file-copy">
             <span class="ai-changed-file-path" :title="file.path">{{ file.path }}</span>
             <span class="ai-changed-file-stat is-add">+{{ file.additions }}</span>
             <span class="ai-changed-file-stat is-delete">-{{ file.deletions }}</span>
           </span>
-          <span class="icon-[lucide--chevron-down] ai-changed-file-chevron" aria-hidden="true"  />
+          <span class="icon-[lucide--chevron-down] ai-changed-file-chevron" aria-hidden="true" />
         </button>
 
         <div v-if="isFileOpen(file) && hunks.length > 0" class="ai-changed-file-diff">
@@ -210,12 +190,7 @@ const handlePin = (): void => {
               <div class="ai-changed-file-line is-hunk">
                 <span class="ai-changed-file-line-number"></span>
               </div>
-              <div
-                v-for="line in hunk.lines"
-                :key="line.id"
-                class="ai-changed-file-line"
-                :class="`is-${line.kind}`"
-              >
+              <div v-for="line in hunk.lines" :key="line.id" class="ai-changed-file-line" :class="`is-${line.kind}`">
                 <span class="ai-changed-file-line-number">{{ getLineNumber(line) }}</span>
               </div>
             </div>
