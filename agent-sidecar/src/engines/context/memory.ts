@@ -504,6 +504,14 @@ export const createMastraAgentMemory = (
         options.observationalMemory = observationalMemoryBufferingEnabled
             ? {
                 scope: 'thread',
+                // `activateAfterIdle: 'auto'` lets Mastra pick a provider-aware
+                // prompt-cache TTL and force-activate buffered observations once a
+                // thread has been idle long enough that the prompt cache would
+                // expire — so the next uncached request sends compressed
+                // observations instead of a large raw message window. Top-level
+                // setting applies to observations. Only meaningful when async
+                // buffering is on (this branch).
+                activateAfterIdle: 'auto',
                 observation: {
                     model: observationalMemoryModels.observer,
                 },
