@@ -15,8 +15,13 @@
 
         <div v-if="isUnavailable" class="embedded-terminal-overlay-caption">
           <div class="embedded-terminal-overlay-caption-copy">
-            <p class="embedded-terminal-overlay-caption-title"> status === 'closed' ? 'WSL2 终端已关闭' : 'WSL2 终端暂不可用' </p>
-            <p class="embedded-terminal-overlay-caption-text"> statusMessage </p>
+            <p class="embedded-terminal-overlay-caption-title">
+              <template v-if="status === 'closed'">WSL2 终端已关闭</template>
+              <template v-else>WSL2 终端暂不可用</template>
+            </p>
+            <p class="embedded-terminal-overlay-caption-text">
+              <span> statusMessage </span>
+            </p>
           </div>
 
           <button type="button" class="linear-button embedded-terminal-retry" @click.stop="retry">
