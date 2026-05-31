@@ -69,8 +69,7 @@
                   </CardContent>
                 </ResizablePanel>
 
-                <ResizableHandle
-                  class="bg-transparent after:rounded-full after:bg-(--shell-divider) data-[panel-group-direction=vertical]:after:h-1" />
+                <ResizableHandle class="terminal-resize-handle" />
 
                 <ResizablePanel class="min-h-0 overflow-hidden" :default-size="terminalHeight" :min-size="140"
                   size-unit="px" @resize="handleTerminalHeightChange">
@@ -323,3 +322,49 @@ const bindEditorViewportRef = (value: unknown): void => {
   editorViewportRef.value = value instanceof HTMLElement ? value : null;
 };
 </script>
+
+<style scoped>
+/* 终端面板顶部分隔手柄：常态 1px 细线(#ededed)，宽热区易抓取，悬停/拖拽平滑高亮 */
+.terminal-resize-handle {
+  background: transparent;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.terminal-resize-handle::after {
+  top: 50%;
+  bottom: auto;
+  height: 11px;
+  border-radius: 0;
+  background: transparent;
+  transform: translateY(-50%);
+}
+
+.terminal-resize-handle::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+  background: #ededed;
+  pointer-events: none;
+  transition:
+    height 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 160ms ease;
+}
+
+.terminal-resize-handle:hover::before,
+.terminal-resize-handle:active::before {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--accent-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-resize-handle::before {
+    transition: none;
+  }
+}
+</style>

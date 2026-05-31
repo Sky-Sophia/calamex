@@ -145,7 +145,7 @@ const handleClearTerminal = (): Promise<void> =>
 
 <style scoped>
 .run-panel-shell {
-  border-top-color: #ededed;
+  border-top: none;
 }
 
 .run-panel-tabbar {
