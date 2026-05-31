@@ -1,4 +1,3 @@
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { onScopeDispose } from 'vue';
 import { logger } from '@/utils/logger';
 import {
@@ -125,37 +124,57 @@ export const useWindowResizeState = () => {
     };
   }
 
-  let currentWindow: unknown;
-  try {
-    currentWindow = getCurrentWindow();
-  } catch (err) {
-    logger.warn({
-      event: 'window.resize_listener.failed',
-      err,
-    });
-    return {
-      markResizing,
-    };
-  }
-
-  if (isResizeEventSource(currentWindow)) {
-    void currentWindow
-      .onResized(markResizing)
-      .then((off) => {
-        if (isDisposed) {
-          off();
-          return;
-        }
-
-        unlisten = off;
-      })
-      .catch((err: unknown) => {
-        logger.warn({
-          event: 'window.resize_listener.failed',
-          err,
-        });
+  // 与本文件其余 Tauri 调用方保持一致：按需动态加载 @tauri-apps/api/window，
+  // 让该模块可被独立分包，并消除 INEFFECTIVE_DYNAMIC_IMPORT 构建警告。
+  const attachWindowResizeListener = async (): Promise<void> => {
+    let getCurrentWindow: (typeof import('@tauri-apps/api/window'))['getCurrentWindow'];
+    try {
+      const tauriWindow = await import('@tauri-apps/api/window');
+      getCurrentWindow = tauriWindow.getCurrentWindow;
+    } catch (err) {
+      logger.warn({
+        event: 'window.resize_listener.failed',
+        err,
       });
-  }
+      return;
+    }
+
+    if (isDisposed) {
+      return;
+    }
+
+    let currentWindow: unknown;
+    try {
+      currentWindow = getCurrentWindow();
+    } catch (err) {
+      logger.warn({
+        event: 'window.resize_listener.failed',
+        err,
+      });
+      return;
+    }
+
+    if (!isResizeEventSource(currentWindow)) {
+      return;
+    }
+
+    try {
+      const off = await currentWindow.onResized(markResizing);
+      if (isDisposed) {
+        off();
+        return;
+      }
+
+      unlisten = off;
+    } catch (err) {
+      logger.warn({
+        event: 'window.resize_listener.failed',
+        err,
+      });
+    }
+  };
+
+  void attachWindowResizeListener();
 
   return {
     markResizing,
