@@ -1,42 +1,43 @@
 {
-    "$schema": "https://unpkg.com/knip@5/schema.json",
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["src/router/**/*.ts", "scripts/**/*.{ts,mjs,js}"],
+  "project": ["src/**/*.{ts,tsx,vue}"],
+  "ignore": [
+    "src/env.d.ts",
+    "src/shims-icons.d.ts",
+    "src/types/window.d.ts",
+    "src/types/monaco-shims.d.ts",
+    "src/**/*.d.ts",
+    "agent-sidecar/**"
+  ],
+  "ignoreDependencies": [
+    "tailwindcss",
+    "tw-animate-css",
+    "@iconify-json/lucide",
+    "@tauri-apps/cli",
+    "@withfig/autocomplete-tools",
+    "@commitlint/cli",
+    "@commitlint/types",
+    "lint-staged",
+    "shellcheck",
+    "bash-language-server",
+    "stylelint",
+    "stylelint-config-tailwindcss",
+    "@axe-core/playwright",
+    "dpdm",
+    "@xterm/addon-search",
+    "@xterm/addon-web-links"
+  ],
+  "ignoreUnresolved": ["~icons/.*"],
+  "vite": {
+    "config": "vite.config.ts"
+  },
+  "vitest": {
+    "config": [],
     "entry": [
-        "src/router/**/*.ts",
-        "scripts/**/*.{ts,mjs,js}"
-    ],
-    "project": [
-        "src/**/*.{ts,tsx,vue}"
-    ],
-    "ignore": [
-        "src/env.d.ts",
-        "src/shims-icons.d.ts",
-        "src/types/window.d.ts",
-        "src/types/monaco-shims.d.ts",
-        "src/**/*.d.ts",
-        "agent-sidecar/**"
-    ],
-    "ignoreDependencies": [
-        "tailwindcss",
-        "tw-animate-css",
-        "@iconify-json/lucide",
-        "@tauri-apps/cli",
-        "@withfig/autocomplete-tools",
-        "@commitlint/cli",
-        "@commitlint/types",
-        "lint-staged",
-        "shellcheck",
-        "bash-language-server",
-        "stylelint",
-        "stylelint-config-tailwindcss",
-        "@axe-core/playwright",
-        "dpdm",
-        "@xterm/addon-search",
-        "@xterm/addon-web-links"
-    ],
-    "ignoreUnresolved": [
-        "~icons/.*"
-    ],
-    "vite": {
-        "config": "vite.config.ts"
-    }
+      "src/**/*.{spec,test}.{ts,vue}",
+      "src/**/__tests__/**/*.{ts,vue}",
+      "src/__tests__/setup.ts"
+    ]
+  }
 }
