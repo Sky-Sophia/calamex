@@ -1,5 +1,12 @@
 const BOX_COMMANDS = ['\\boxed', '\\fbox'] as const;
 
+const containsBoxCommand = (source: string): boolean => {
+  for (const command of BOX_COMMANDS) {
+    if (source.indexOf(command) !== -1) return true;
+  }
+  return false;
+};
+
 const readBalancedGroup = (
   source: string,
   openBraceIndex: number,
@@ -51,6 +58,12 @@ const unwrapCommandAt = (
 
 /** 移除 AI 输出里用于强调结果的盒子公式命令，避免 KaTeX 渲染出额外边框。 */
 export const normalizeAiMath = (source: string): string => {
+  // 快路径：不含 \boxed / \fbox 时，输出与输入完全一致。
+  // 流式渲染每帧都会带着不断增长的整段内容调用本函数；旧实现无论是否命中盒子
+  // 命令都逐字符重建字符串，使整段流式过程退化为 O(n^2) 并频繁分配字符串。
+  // 先用原生 indexOf 快速排除绝大多数无盒子命令的分片，避免重建与多余分配。
+  if (!containsBoxCommand(source)) return source;
+
   let normalized = '';
   for (let index = 0; index < source.length; index += 1) {
     let unwrapped: { value: string; endIndex: number } | null = null;
