@@ -4,7 +4,6 @@ import { computed } from 'vue';
 import { useStickToBottomContext } from 'vue-stick-to-bottom';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import ArrowDownIcon from '~icons/lucide/arrow-down';
 
 interface Props {
   class?: HTMLAttributes['class'];
@@ -35,6 +34,6 @@ function handleClick() {
     v-bind="$attrs"
     @click="handleClick"
   >
-    <ArrowDownIcon class="size-4" />
+    <span class="icon-[lucide--arrow-down] size-4"  />
   </Button>
 </template>

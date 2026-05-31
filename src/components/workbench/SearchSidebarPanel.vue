@@ -3,7 +3,7 @@
     <div class="search-panel-query-stack">
       <div class="search-panel-input-shell">
         <span class="search-panel-input-icon" aria-hidden="true">
-          <Search />
+          <span class="icon-[lucide--search]" />
         </span>
 
         <Input v-model="searchQuery" class="search-panel-input" type="text" aria-label="搜索关键字"
@@ -11,13 +11,13 @@
 
         <button v-if="hasSearchQuery" type="button" class="search-panel-clear-btn" aria-label="清空搜索" title="清空搜索"
           @click.stop="searchQuery = ''">
-          <X aria-hidden="true" />
+          <span aria-hidden="true" class="icon-[lucide--x]" />
         </button>
       </div>
 
       <div class="search-panel-input-shell search-panel-replace-shell">
         <span class="search-panel-input-icon" aria-hidden="true">
-          <Replace />
+          <span class="icon-[lucide--replace]" />
         </span>
 
         <Input v-model="replacementQuery" class="search-panel-input" type="text" aria-label="替换内容"
@@ -26,8 +26,8 @@
 
         <button type="button" class="search-panel-apply-btn" :disabled="!canApplyReplacement" aria-label="全部替换"
           title="全部替换" @click.stop="handleReplacementAction">
-          <LoaderCircle v-if="replaceRunning" class="search-panel-spin" aria-hidden="true" />
-          <Check v-else aria-hidden="true" />
+          <span v-if="replaceRunning" class="icon-[lucide--loader-circle] search-panel-spin" aria-hidden="true"  />
+          <span v-else aria-hidden="true" class="icon-[lucide--check]" />
         </button>
       </div>
     </div>
@@ -44,28 +44,28 @@
     <div class="search-panel-option-row" aria-label="搜索选项">
       <button type="button" class="search-panel-option-btn" :class="{ 'is-active': matchCase }"
         :aria-pressed="matchCase" title="区分大小写" @click="toggleSearchOption('matchCase')">
-        <CaseSensitive aria-hidden="true" />
+        <span aria-hidden="true" class="icon-[lucide--case-sensitive]" />
       </button>
 
       <button type="button" class="search-panel-option-btn" :class="{ 'is-active': wholeWord }"
         :aria-pressed="wholeWord" title="全字匹配" @click="toggleSearchOption('wholeWord')">
-        <WholeWord aria-hidden="true" />
+        <span aria-hidden="true" class="icon-[lucide--whole-word]" />
       </button>
 
       <button type="button" class="search-panel-option-btn" :class="{ 'is-active': useRegex }" :aria-pressed="useRegex"
         title="正则表达式" @click="toggleSearchOption('useRegex')">
-        <Regex aria-hidden="true" />
+        <span aria-hidden="true" class="icon-[lucide--regex]" />
       </button>
 
       <button type="button" class="search-panel-option-btn" :class="{ 'is-active': showPathFilters }"
         :aria-pressed="showPathFilters" title="包含 / 排除路径" @click="toggleSearchOption('showPathFilters')">
-        <ListFilter aria-hidden="true" />
+        <span aria-hidden="true" class="icon-[lucide--list-filter]" />
       </button>
 
       <button type="button" class="search-panel-option-btn search-panel-option-structural"
         :class="{ 'is-active': useStructural }" :aria-pressed="useStructural" title="结构化搜索与替换"
         @click="toggleStructuralSearch">
-        <Braces aria-hidden="true" />
+        <span aria-hidden="true" class="icon-[lucide--braces]" />
       </button>
     </div>
 
@@ -84,7 +84,7 @@
     <div class="search-panel-results" role="listbox">
       <div v-if="replacementPreviewOpen" class="search-replace-inline">
         <div v-if="replaceRunning && !replacementPreview" class="search-replace-inline-empty">
-          <LoaderCircle class="search-panel-spin" aria-hidden="true" />
+          <span class="icon-[lucide--loader-circle] search-panel-spin" aria-hidden="true"  />
           <span>正在生成替换预览…</span>
         </div>
 
@@ -126,13 +126,13 @@
                 <span class="search-replace-inline-line-actions">
                   <button type="button" class="search-replace-inline-icon-btn" :disabled="replacementApplying"
                     aria-label="替换此处" title="替换此处" @click.stop="replaceReplacementLine(file, line)">
-                    <LoaderCircle v-if="replacementApplyingLineId === line.id" class="search-panel-spin"
-                      aria-hidden="true" />
-                    <Replace v-else aria-hidden="true" />
+                    <span v-if="replacementApplyingLineId === line.id" class="icon-[lucide--loader-circle] search-panel-spin"
+                      aria-hidden="true"  />
+                    <span v-else aria-hidden="true" class="icon-[lucide--replace]" />
                   </button>
                   <button type="button" class="search-replace-inline-icon-btn" :disabled="replacementApplying"
                     aria-label="跳过此处" title="跳过此处" @click.stop="skipReplacementLine(line.id)">
-                    <X aria-hidden="true" />
+                    <span aria-hidden="true" class="icon-[lucide--x]" />
                   </button>
                 </span>
               </div>
@@ -236,16 +236,6 @@ import type {
   TWorkspaceSearchScope,
 } from '@/types/search';
 import { toErrorMessage } from '@/utils/error';
-import Braces from '~icons/lucide/braces';
-import CaseSensitive from '~icons/lucide/case-sensitive';
-import Check from '~icons/lucide/check';
-import ListFilter from '~icons/lucide/list-filter';
-import LoaderCircle from '~icons/lucide/loader-circle';
-import Regex from '~icons/lucide/regex';
-import Replace from '~icons/lucide/replace';
-import Search from '~icons/lucide/search';
-import WholeWord from '~icons/lucide/whole-word';
-import X from '~icons/lucide/x';
 
 type TSearchReason = TWorkspaceSearchResultKind;
 type TSearchToggleOption = 'matchCase' | 'wholeWord' | 'useRegex' | 'showPathFilters';

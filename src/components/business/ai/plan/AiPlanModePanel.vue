@@ -12,8 +12,6 @@ import type {
   TAiToolConfirmationDecision,
 } from '@/types/ai';
 import type { TAgentPlanStatus } from '@/types/ai/sidecar';
-import ChevronDown from '~icons/lucide/chevron-down';
-import Play from '~icons/lucide/play';
 
 const props = defineProps<{
   goal: string;
@@ -155,7 +153,7 @@ const toggleCollapsed = (): void => {
                 :aria-label="collapseLabel"
                 @click="toggleCollapsed"
             >
-                <ChevronDown class="ai-plan-caret" :class="{ 'is-collapsed': isCollapsed }" aria-hidden="true" />
+                <span class="icon-[lucide--chevron-down] ai-plan-caret" :class="{ 'is-collapsed': isCollapsed }" aria-hidden="true"  />
                 <h3>{{ todoTitle }}</h3>
             </button>
             <div class="ai-plan-header-actions">
@@ -167,7 +165,7 @@ const toggleCollapsed = (): void => {
                     aria-label="继续执行计划"
                     @click="emit('resumeRun')"
                 >
-                    <Play aria-hidden="true" />
+                    <span aria-hidden="true" class="icon-[lucide--play]" />
                     <span>继续</span>
                 </button>
                 <span class="ai-plan-state-label">{{ planStateLabel }}</span>

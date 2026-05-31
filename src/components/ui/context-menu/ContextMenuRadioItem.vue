@@ -4,7 +4,6 @@ import type { ContextMenuRadioItemEmits, ContextMenuRadioItemProps } from 'reka-
 import { ContextMenuItemIndicator, ContextMenuRadioItem, useForwardPropsEmits } from 'reka-ui';
 import type { HTMLAttributes } from 'vue';
 import { cn } from '@/lib/utils';
-import Circle from '~icons/lucide/circle';
 
 const props = defineProps<ContextMenuRadioItemProps & { class?: HTMLAttributes['class'] }>();
 const emits = defineEmits<ContextMenuRadioItemEmits>();
@@ -20,7 +19,7 @@ data-slot="context-menu-radio-item" v-bind="forwarded"
         <span class="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
             <ContextMenuItemIndicator>
                 <slot name="indicator-icon">
-                    <Circle class="size-2 fill-current" />
+                    <span class="icon-[lucide--circle] size-2 fill-current"  />
                 </slot>
             </ContextMenuItemIndicator>
         </span>

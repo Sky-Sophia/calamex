@@ -44,18 +44,6 @@ import {
   findAiServicePlatformByModel,
 } from '@/constants/ai/providers';
 import type { IAiAttachedFile, IAiConfigPayload, TAiAgentNetworkPermission } from '@/types/ai';
-import ArrowUpIcon from '~icons/lucide/arrow-up';
-import CheckIcon from '~icons/lucide/check';
-import ChevronRightIcon from '~icons/lucide/chevron-right';
-import GlobeIcon from '~icons/lucide/globe';
-import MessageCircleIcon from '~icons/lucide/message-circle';
-import NetworkIcon from '~icons/lucide/network';
-import PaintbrushIcon from '~icons/lucide/paintbrush';
-import PlusIcon from '~icons/lucide/plus';
-import RouteIcon from '~icons/lucide/route';
-import SlidersHorizontalIcon from '~icons/lucide/sliders-horizontal';
-import SquareIcon from '~icons/lucide/square';
-import WorkflowIcon from '~icons/lucide/workflow';
 
 type TAiPromptInputMode = 'chat' | 'agent' | 'plan';
 
@@ -318,7 +306,9 @@ const handlePaste = (event: ClipboardEvent): void => {
     return;
   }
   event.preventDefault();
-  pastedFiles.forEach((file) => emit('fileSelected', file));
+  for (const file of pastedFiles) {
+    emit('fileSelected', file);
+  }
 };
 
 const handleKeyDown = (event: KeyboardEvent): void => {
@@ -348,8 +338,8 @@ const handleStop = (): void => {
       <InputGroup class="ai-prompt-shell">
         <InputGroupTextarea v-model="modelValue" class="ai-prompt-textarea" placeholder="使用 AI 处理各种任务..."
           aria-label="输入消息" :disabled="disabled" @keydown="handleKeyDown" @paste="handlePaste"
-          @focus="handlePrewarmIntent" @mouseenter="handlePrewarmIntent"
-          @compositionstart="isComposing = true" @compositionend="isComposing = false" />
+          @focus="handlePrewarmIntent" @mouseenter="handlePrewarmIntent" @compositionstart="isComposing = true"
+          @compositionend="isComposing = false" />
         <InputGroupAddon align="block-end" class="ai-toolbar-row">
           <div class="ai-toolbar-left">
             <TooltipProvider>
@@ -357,7 +347,7 @@ const handleStop = (): void => {
                 <TooltipTrigger as-child>
                   <InputGroupButton type="button" variant="ghost" class="ai-icon-action ai-attachment-button"
                     size="icon-xs" :disabled="disabled" aria-label="提供背景信息" @click="handleOpenFileDialog">
-                    <PlusIcon class="size-5" />
+                    <span class="icon-[lucide--plus] size-5" />
                   </InputGroupButton>
                 </TooltipTrigger>
                 <TooltipContent side="top" align="start" :side-offset="10" class="ai-composer-tooltip">
@@ -370,13 +360,13 @@ const handleStop = (): void => {
               <DropdownMenuTrigger as-child>
                 <InputGroupButton type="button" variant="ghost" class="ai-icon-action ai-mode-trigger" size="icon-xs"
                   :disabled="disabled" aria-label="打开 AI 模式设置">
-                  <SlidersHorizontalIcon class="size-5" />
+                  <span class="icon-[lucide--sliders-horizontal] size-5" />
                 </InputGroupButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="start" :side-offset="8" class="ai-settings-menu">
                 <DropdownMenuItem class="ai-settings-menu-item" :disabled="disabled || isNetworkPermissionSaving"
                   @select.prevent="toggleNetworkPermission">
-                  <GlobeIcon class="ai-settings-menu-icon" />
+                  <span class="icon-[lucide--globe] ai-settings-menu-icon" />
                   <span class="ai-settings-menu-label">网络访问权限</span>
                   <button type="button" class="ai-network-switch" :class="{ 'is-on': networkPermissionEnabled }"
                     :aria-pressed="networkPermissionEnabled" tabindex="-1">
@@ -385,38 +375,38 @@ const handleStop = (): void => {
                   </button>
                 </DropdownMenuItem>
                 <DropdownMenuItem class="ai-settings-menu-item" @select.prevent="handleOpenInformationSources">
-                  <NetworkIcon class="ai-settings-menu-icon" />
+                  <span class="icon-[lucide--network] ai-settings-menu-icon" />
                   <span class="ai-settings-menu-label">我的信息源</span>
-                  <ChevronRightIcon class="ai-settings-menu-chevron" />
+                  <span class="icon-[lucide--chevron-right] ai-settings-menu-chevron" />
                 </DropdownMenuItem>
                 <DropdownMenuItem class="ai-settings-menu-item" @select.prevent="handleOpenInformationSources">
-                  <PlusIcon class="ai-settings-menu-icon" />
+                  <span class="icon-[lucide--plus] ai-settings-menu-icon" />
                   <span class="ai-settings-menu-label">添加信息源</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem class="ai-settings-menu-item is-mode" @pointerenter="isModeSubmenuOpen = true"
                   @pointerleave="isModeSubmenuOpen = false" @select.prevent>
-                  <RouteIcon class="ai-settings-menu-icon" />
+                  <span class="icon-[lucide--route] ai-settings-menu-icon" />
                   <span class="ai-settings-menu-label">模式</span>
                   <span class="ai-settings-menu-value">{{ activeModeOption.label }}</span>
-                  <ChevronRightIcon class="ai-settings-menu-chevron" />
+                  <span class="icon-[lucide--chevron-right] ai-settings-menu-chevron" />
                   <div v-if="isModeSubmenuOpen" class="ai-mode-submenu" @pointerenter="isModeSubmenuOpen = true"
                     @pointerleave="isModeSubmenuOpen = false">
                     <button v-for="option in modeOptions" :key="option.key" type="button" class="ai-mode-submenu-item"
                       :class="{ 'is-active': activeMode === option.key }"
                       @click="handleModeChange(option.key); isModeSubmenuOpen = false">
-                      <MessageCircleIcon v-if="option.key === 'chat'" class="ai-mode-submenu-icon" />
-                      <WorkflowIcon v-else-if="option.key === 'plan'" class="ai-mode-submenu-icon" />
-                      <SlidersHorizontalIcon v-else class="ai-mode-submenu-icon" />
+                      <span v-if="option.key === 'chat'" class="icon-[lucide--message-circle] ai-mode-submenu-icon" />
+                      <span v-else-if="option.key === 'plan'" class="icon-[lucide--workflow] ai-mode-submenu-icon" />
+                      <span v-else class="icon-[lucide--sliders-horizontal] ai-mode-submenu-icon" />
                       <span class="ai-mode-submenu-copy">
                         <span class="ai-mode-submenu-label">{{ option.label }}</span>
                         <span class="ai-mode-submenu-description">{{ option.description }}</span>
                       </span>
-                      <CheckIcon v-if="activeMode === option.key" class="ai-mode-submenu-check" />
+                      <span v-if="activeMode === option.key" class="icon-[lucide--check] ai-mode-submenu-check" />
                     </button>
                   </div>
                 </DropdownMenuItem>
                 <DropdownMenuItem class="ai-settings-menu-item" @select.prevent="handleOpenPersonalization">
-                  <PaintbrushIcon class="ai-settings-menu-icon" />
+                  <span class="icon-[lucide--paintbrush] ai-settings-menu-icon" />
                   <span class="ai-settings-menu-label">个性化</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -462,12 +452,12 @@ const handleStop = (): void => {
 
           <InputGroupButton v-if="disabled && stopVisible" type="button" variant="outline" class="ai-send-button"
             size="icon-xs" aria-label="停止" @click="handleStop">
-            <SquareIcon class="size-4" />
+            <span class="icon-[lucide--square] size-4" />
             <span class="sr-only">Stop</span>
           </InputGroupButton>
           <InputGroupButton v-else type="submit" variant="default" class="ai-send-button" size="icon-xs"
             :disabled="disabled || !canSubmit" :aria-label="submitLabel">
-            <ArrowUpIcon class="size-4" />
+            <span class="icon-[lucide--arrow-up] size-4" />
             <span class="sr-only">Send</span>
           </InputGroupButton>
         </InputGroupAddon>
@@ -725,7 +715,7 @@ const handleStop = (): void => {
   display: none;
 }
 
-.ai-model-trigger > :deep(svg:last-child) {
+.ai-model-trigger> :deep(svg:last-child) {
   display: none;
 }
 

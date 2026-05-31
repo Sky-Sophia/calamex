@@ -8,7 +8,6 @@ import {
 import type { IAiDiffHunkPreview, IAiPatchSet } from '@/types/ai';
 import type { IGitDiffPreviewPayload } from '@/types/git';
 import { tryWriteClipboardText } from '@/utils/clipboard';
-import CopyIcon from '~icons/lucide/copy';
 
 interface IPatchFileStats {
   additions: number;
@@ -132,7 +131,7 @@ const copyFileDiff = async (event: MouseEvent, file: IAiPatchPreviewFile): Promi
           title="复制 Diff"
           @click="copyFileDiff($event, file)"
         >
-          <CopyIcon aria-hidden="true" />
+          <span aria-hidden="true" class="icon-[lucide--copy]" />
         </button>
       </summary>
       <div class="ai-patch-file-body">

@@ -4,10 +4,6 @@ import ErrorDetails from '@/components/common/ErrorDetails.vue';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import type { IErrorPresentationAction, TErrorSeverity } from '@/types/app-error';
-import CircleAlert from '~icons/lucide/circle-alert';
-import Info from '~icons/lucide/info';
-import OctagonX from '~icons/lucide/octagon-x';
-import TriangleAlert from '~icons/lucide/triangle-alert';
 
 const props = withDefaults(
   defineProps<{
@@ -38,10 +34,10 @@ const alertVariant = computed(() =>
     :variant="alertVariant"
     class="border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--text-primary)]"
   >
-    <Info v-if="props.severity === 'info'" class="text-[var(--statusbar-accent)]" />
-    <TriangleAlert v-else-if="props.severity === 'warning'" class="text-[var(--warning)]" />
-    <OctagonX v-else-if="props.severity === 'fatal'" class="text-[var(--danger)]" />
-    <CircleAlert v-else class="text-[var(--danger)]" />
+    <span v-if="props.severity === 'info'" class="icon-[lucide--info] text-[var(--statusbar-accent)]"  />
+    <span v-else-if="props.severity === 'warning'" class="icon-[lucide--triangle-alert] text-[var(--warning)]"  />
+    <span v-else-if="props.severity === 'fatal'" class="icon-[lucide--octagon-x] text-[var(--danger)]"  />
+    <span v-else class="icon-[lucide--circle-alert] text-[var(--danger)]"  />
     <div class="min-w-0">
       <AlertTitle class="text-[13px] text-[var(--text-primary)]">
         {{ props.title }}

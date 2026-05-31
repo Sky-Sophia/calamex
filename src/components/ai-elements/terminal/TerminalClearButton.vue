@@ -2,7 +2,6 @@
 import type { HTMLAttributes } from 'vue';
 import { inject } from 'vue';
 import { cn } from '@/lib/utils';
-import Trash2 from '~icons/lucide/trash-2';
 import { TerminalKey } from './context';
 
 const props = defineProps<{ class?: HTMLAttributes['class'] }>();
@@ -21,6 +20,6 @@ const handleClear = (): void => {
     title="清空终端输出"
     @click="handleClear"
   >
-    <Trash2 aria-hidden="true" />
+    <span aria-hidden="true" class="icon-[lucide--trash-2]" />
   </button>
 </template>

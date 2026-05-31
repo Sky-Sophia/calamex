@@ -12,11 +12,6 @@ import type {
   TWorkbenchOpenFilePayload,
 } from '@/types/editor';
 import type { IGitDiffPreviewRequest } from '@/types/git';
-import FolderTree from '~icons/lucide/folder-tree';
-import GitBranch from '~icons/lucide/git-branch';
-import LibraryBig from '~icons/lucide/library-big';
-import Search from '~icons/lucide/search';
-import TerminalSquare from '~icons/lucide/terminal-square';
 import appBrandIcon from '../../../resources/logo.svg';
 
 type TPrimarySidebarView = Exclude<TWorkbenchSidebarView, 'ai'>;
@@ -109,11 +104,11 @@ v-for="item in sidebarTabs" :key="item.view" type="button"
                     :class="{ 'is-active': props.activeView === item.view }" :aria-label="item.label"
                     :aria-pressed="props.activeView === item.view" @click="emit('select-view', item.view)">
                     <span class="workbench-dashboard-sidebar__toolbar-icon" aria-hidden="true">
-                        <FolderTree v-if="item.view === 'explorer'" />
-                        <Search v-else-if="item.view === 'search'" />
-                        <GitBranch v-else-if="item.view === 'source-control'" />
-                        <LibraryBig v-else-if="item.view === 'run'" />
-                        <TerminalSquare v-else />
+                        <span v-if="item.view === 'explorer'" class="icon-[lucide--folder-tree]" />
+                        <span v-else-if="item.view === 'search'" class="icon-[lucide--search]" />
+                        <span v-else-if="item.view === 'source-control'" class="icon-[lucide--git-branch]" />
+                        <span v-else-if="item.view === 'run'" class="icon-[lucide--library-big]" />
+                        <span v-else class="icon-[lucide--terminal-square]" />
                     </span>
 
                     <span class="workbench-dashboard-sidebar__toolbar-label-wrap" aria-hidden="true">

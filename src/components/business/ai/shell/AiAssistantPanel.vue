@@ -46,8 +46,6 @@ import type {
 } from '@/types/editor';
 import type { IGitDiffPreviewPayload, IGitRepositoryStatusPayload } from '@/types/git';
 import { toErrorMessage } from '@/utils/error';
-import SquarePen from '~icons/lucide/square-pen';
-import Trash2 from '~icons/lucide/trash2';
 
 const splitSuggestionsIntoRows = <T extends { title: string }>(
   items: readonly T[],
@@ -1227,7 +1225,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="ai-panel-actions">
         <button type="button" class="ai-icon-button" aria-label="新建对话" @click="startNewConversation">
-          <SquarePen aria-hidden="true" />
+          <span aria-hidden="true" class="icon-[lucide--square-pen]" />
         </button>
         <button type="button" class="ai-icon-button" aria-label="AI 设置" @click="openSettings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
@@ -1254,7 +1252,7 @@ onBeforeUnmount(() => {
               </div>
               <button v-if="activeHistoryThread" type="button" class="ai-history-clear-icon" aria-label="删除当前对话记录"
                 @click="openDeleteConversationDialog(activeHistoryThread.id)">
-                <Trash2 aria-hidden="true" />
+                <span aria-hidden="true" class="icon-[lucide--trash2]" />
               </button>
             </header>
             <div v-if="historyThreads.length" class="ai-history-scroll-area">
@@ -1270,7 +1268,7 @@ onBeforeUnmount(() => {
                   </button>
                   <button type="button" class="ai-history-delete-button" aria-label="删除这条对话记录"
                     @click.stop="openDeleteConversationDialog(thread.id)">
-                    <Trash2 aria-hidden="true" />
+                    <span aria-hidden="true" class="icon-[lucide--trash2]" />
                   </button>
                 </article>
               </div>

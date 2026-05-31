@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { IAiWebActivity } from '@/types/ai';
-import LoaderCircle from '~icons/lucide/loader-circle';
 
 const props = defineProps<{
   activity: IAiWebActivity | null;
@@ -28,7 +27,7 @@ const shouldAnimate = computed(() => {
     aria-live="polite"
   >
     <span class="ai-web-activity-rail" aria-hidden="true">
-      <LoaderCircle v-if="shouldAnimate" class="ai-web-activity-spinner" aria-hidden="true" />
+      <span v-if="shouldAnimate" class="icon-[lucide--loader-circle] ai-web-activity-spinner" aria-hidden="true"  />
       <span v-else class="ai-web-activity-dot"></span>
     </span>
     <span class="ai-web-activity-copy">

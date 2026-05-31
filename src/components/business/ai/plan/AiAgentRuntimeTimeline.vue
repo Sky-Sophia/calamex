@@ -22,18 +22,14 @@ import {
 } from '@/components/ai-elements/terminal';
 import AiReasoningCodeBlock from '@/components/business/ai/chat/AiReasoningCodeBlock.vue';
 import type { TAgentRuntimeEvent } from '@/types/ai/sidecar';
-import Activity from '~icons/lucide/activity';
-import ChevronRight from '~icons/lucide/chevron-right';
-import Dot from '~icons/lucide/dot';
-import Globe from '~icons/lucide/globe';
 import {
   buildTimelineItems,
   COMMAND_TOOL_NAMES,
   getFaviconSource,
+  type ITaskNodeItem,
   parseReasoningMarkdownBlocks,
   TASK_ICON_MAP,
   tokenizeInlineMarkdown,
-  type ITaskNodeItem,
 } from './runtime-timeline';
 
 const props = withDefaults(
@@ -138,7 +134,7 @@ const shouldShowTaskStatus = (node: ITaskNodeItem): boolean => node.status !== '
         <ChainOfThoughtStep v-if="item.type === 'reasoning'" class="ai-runtime-step is-reasoning" label="Reasoning"
           status="complete">
           <template #icon>
-            <Dot class="ai-runtime-step-icon" aria-hidden="true" />
+            <span class="icon-[lucide--dot] ai-runtime-step-icon" aria-hidden="true"  />
           </template>
 
           <div class="agent-line">
@@ -212,7 +208,7 @@ const shouldShowTaskStatus = (node: ITaskNodeItem): boolean => node.status !== '
         <ChainOfThoughtStep v-else-if="item.type === 'event'" class="ai-runtime-step is-event" :label="item.text"
           status="complete">
           <template #icon>
-            <Activity class="ai-runtime-step-icon" aria-hidden="true" />
+            <span class="icon-[lucide--activity] ai-runtime-step-icon" aria-hidden="true"  />
           </template>
         </ChainOfThoughtStep>
 
@@ -234,7 +230,7 @@ const shouldShowTaskStatus = (node: ITaskNodeItem): boolean => node.status !== '
                 :title="isTerminalExpanded(item.node.id) ? '收起终端输出' : '展开终端输出'"
                 @click.stop="toggleTerminalNode(item.node.id)"
               >
-                <ChevronRight aria-hidden="true" />
+                <span aria-hidden="true" class="icon-[lucide--chevron-right]" />
               </button>
             </div>
           </template>
@@ -253,7 +249,7 @@ const shouldShowTaskStatus = (node: ITaskNodeItem): boolean => node.status !== '
                   <span class="ai-runtime-web-source-icon-wrap" aria-hidden="true">
                     <img class="ai-runtime-web-source-icon" :src="getFaviconSource(source.host)" alt="" loading="lazy"
                       decoding="async" @error="handleWebSourceIconError" />
-                    <Globe class="ai-runtime-web-source-icon-fallback" />
+                    <span class="icon-[lucide--globe] ai-runtime-web-source-icon-fallback"  />
                   </span>
                   <span class="ai-runtime-web-source-label" v-text="source.displayUrl" />
                 </div>

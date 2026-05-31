@@ -12,8 +12,6 @@ import type {
 } from '@/types/editor';
 import type { IGitDiffPreviewPayload, IGitRepositoryStatusPayload } from '@/types/git';
 import { toErrorMessage } from '@/utils/error';
-import PanelRight from '~icons/lucide/panel-right';
-import RotateCw from '~icons/lucide/rotate-cw';
 
 defineProps<{
   document: IEditorDocument;
@@ -71,7 +69,7 @@ v-if="!isRightSidebarVisible" type="button"
                                 class="ai-icon-button ai-right-sidebar-toggle-btn"
                                 :aria-label="isRightSidebarVisible ? '收起右侧面板' : '展开右侧面板'"
                                 :aria-expanded="isRightSidebarVisible" @click="toggleRightSidebar">
-                                <PanelRight aria-hidden="true" />
+                                <span aria-hidden="true" class="icon-[lucide--panel-right]" />
                             </button>
                             <button
                                 type="button"
@@ -80,7 +78,7 @@ v-if="!isRightSidebarVisible" type="button"
                                 aria-label="重启 Agent sidecar"
                                 :disabled="isRestartingSidecar"
                                 @click="void handleRestartSidecar()">
-                                <RotateCw :class="{ 'ai-sidecar-restart-btn__icon--spinning': isRestartingSidecar }" aria-hidden="true" />
+                                <span :class="{ 'ai-sidecar-restart-btn__icon--spinning': isRestartingSidecar }" aria-hidden="true" class="icon-[lucide--rotate-cw]" />
                             </button>
                         </template>
                     </AiAssistantPanel>
@@ -94,7 +92,7 @@ v-if="!isRightSidebarVisible" type="button"
                             <button
 type="button" class="ai-icon-button ai-right-sidebar-toggle-btn" aria-label="收起右侧面板"
                                 aria-expanded="true" @click="toggleRightSidebar">
-                                <PanelRight aria-hidden="true" />
+                                <span aria-hidden="true" class="icon-[lucide--panel-right]" />
                             </button>
                             <button
                                 type="button"
@@ -103,7 +101,7 @@ type="button" class="ai-icon-button ai-right-sidebar-toggle-btn" aria-label="收
                                 aria-label="重启 Agent sidecar"
                                 :disabled="isRestartingSidecar"
                                 @click="void handleRestartSidecar()">
-                                <RotateCw :class="{ 'ai-sidecar-restart-btn__icon--spinning': isRestartingSidecar }" aria-hidden="true" />
+                                <span :class="{ 'ai-sidecar-restart-btn__icon--spinning': isRestartingSidecar }" aria-hidden="true" class="icon-[lucide--rotate-cw]" />
                             </button>
                         </div>
                         <p class="ai-workspace-right-sidebar__empty">这里还没有内容</p>

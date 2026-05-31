@@ -4,7 +4,6 @@ import { CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import AlertCircle from '~icons/lucide/alert-circle';
 import Check from '~icons/lucide/check';
-import ChevronDown from '~icons/lucide/chevron-down';
 import Circle from '~icons/lucide/circle';
 import Loader2 from '~icons/lucide/loader2';
 
@@ -38,9 +37,9 @@ type="button" class="flex w-full cursor-pointer items-center gap-2 text-sm
                text-muted-foreground transition-colors hover:text-foreground">
         <component :is="statusMap[props.status].icon" :class="['size-4 shrink-0', statusMap[props.status].class]" />
         <span class="truncate text-foreground">{{ props.title }}</span>
-        <ChevronDown
-class="ml-auto size-4 shrink-0 transition-transform
-                 group-data-[state=open]:rotate-180" />
+        <span
+class="icon-[lucide--chevron-down] ml-auto size-4 shrink-0 transition-transform
+                 group-data-[state=open]:rotate-180"  />
       </button>
     </slot>
   </CollapsibleTrigger>

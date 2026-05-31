@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue';
 import { cn } from '@/lib/utils';
-import ChevronRight from '~icons/lucide/chevron-right';
 
 const props = defineProps<{
   class?: HTMLAttributes['class'];
@@ -16,7 +15,7 @@ const props = defineProps<{
     :class="cn('[&>svg]:size-3.5', props.class)"
   >
     <slot>
-      <ChevronRight />
+      <span class="icon-[lucide--chevron-right]" />
     </slot>
   </li>
 </template>

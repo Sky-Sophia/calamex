@@ -38,7 +38,6 @@ import Copy from '~icons/lucide/copy';
 import Cpu from '~icons/lucide/cpu';
 import Database from '~icons/lucide/database';
 import Equal from '~icons/lucide/equal';
-import Eye from '~icons/lucide/eye';
 import EyeOff from '~icons/lucide/eye-off';
 import File from '~icons/lucide/file';
 import FileCheck from '~icons/lucide/file-check';
@@ -72,14 +71,10 @@ import Mail from '~icons/lucide/mail';
 import MessageCircle from '~icons/lucide/message-circle';
 import MessageSquare from '~icons/lucide/message-square';
 import Monitor from '~icons/lucide/monitor';
-import MoreHorizontal from '~icons/lucide/more-horizontal';
 import MousePointer from '~icons/lucide/mouse-pointer';
 import OctagonAlert from '~icons/lucide/octagon-alert';
 import Package from '~icons/lucide/package';
-import Pencil from '~icons/lucide/pencil';
-import Pin from '~icons/lucide/pin';
 import Plug from '~icons/lucide/plug';
-import Plus from '~icons/lucide/plus';
 import RefreshCw from '~icons/lucide/refresh-cw';
 import Repeat from '~icons/lucide/repeat';
 import Replace from '~icons/lucide/replace';
@@ -465,14 +460,14 @@ onBeforeUnmount(() => {
                   title="插入到光标"
                   @click.stop="handleSnippetClick(item)"
                 >
-                  <Plus class="template-snip-btn-svg" />
+                  <span class="icon-[lucide--plus] template-snip-btn-svg"  />
                 </button>
                 <button
                   class="template-snip-btn"
                   title="更多"
                   @click.stop="openContextMenu($event, item)"
                 >
-                  <MoreHorizontal class="template-snip-btn-svg" />
+                  <span class="icon-[lucide--more-horizontal] template-snip-btn-svg"  />
                 </button>
               </span>
             </div>
@@ -493,7 +488,7 @@ onBeforeUnmount(() => {
         }"
       >
         <button class="template-menu-item" @click="handleMenuAction('insert')">
-          <Plus class="template-menu-icon" />
+          <span class="icon-[lucide--plus] template-menu-icon"  />
           插入到光标
           <span class="template-menu-kbd">↵</span>
         </button>
@@ -507,15 +502,15 @@ onBeforeUnmount(() => {
         </button>
         <div class="template-menu-sep"></div>
         <button class="template-menu-item" @click="handleMenuAction('pin')">
-          <Pin class="template-menu-icon" />
+          <span class="icon-[lucide--pin] template-menu-icon"  />
           钉到收藏
         </button>
         <button class="template-menu-item" @click="handleMenuAction('view')">
-          <Eye class="template-menu-icon" />
+          <span class="icon-[lucide--eye] template-menu-icon"  />
           在编辑器中查看
         </button>
         <button class="template-menu-item" @click="handleMenuAction('edit')">
-          <Pencil class="template-menu-icon" />
+          <span class="icon-[lucide--pencil] template-menu-icon"  />
           编辑片段
         </button>
         <div class="template-menu-sep"></div>

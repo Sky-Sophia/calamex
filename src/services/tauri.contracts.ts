@@ -559,7 +559,6 @@ export const tauriContracts = {
   createSshDirectory: {
     inSchema: sshConnectionInputSchema.extend({
       remoteDirectory: z.string(),
-      name: z.string().min(1),
     }),
     outSchema: z.object({
       remotePath: z.string(),

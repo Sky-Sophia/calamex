@@ -26,7 +26,7 @@
           aria-label="重连终端"
           @click="void handleRestartTerminal()"
         >
-          <RefreshCcw aria-hidden="true" />
+          <span aria-hidden="true" class="icon-[lucide--refresh-ccw]" />
         </button>
 
         <button
@@ -38,7 +38,7 @@
           :disabled="!isTerminalReady"
           @click="void handleClearTerminal()"
         >
-          <Eraser aria-hidden="true" />
+          <span aria-hidden="true" class="icon-[lucide--eraser]" />
         </button>
 
         <button
@@ -50,8 +50,8 @@
           :aria-pressed="props.isMaximized"
           @click="$emit('toggle-maximize')"
         >
-          <Maximize2 v-if="!props.isMaximized" aria-hidden="true" />
-          <Minimize2 v-else aria-hidden="true" />
+          <span v-if="!props.isMaximized" aria-hidden="true" class="icon-[lucide--maximize2]" />
+          <span v-else aria-hidden="true" class="icon-[lucide--minimize2]" />
         </button>
 
         <button
@@ -62,7 +62,7 @@
           aria-label="关闭终端面板"
           @click="$emit('hide')"
         >
-          <X aria-hidden="true" />
+          <span aria-hidden="true" class="icon-[lucide--x]" />
         </button>
       </div>
     </header>
@@ -144,11 +144,6 @@ import type {
   ITerminalStatusChangePayload,
 } from '@/types/terminal';
 import { toErrorMessage } from '@/utils/error';
-import Eraser from '~icons/lucide/eraser';
-import Maximize2 from '~icons/lucide/maximize2';
-import Minimize2 from '~icons/lucide/minimize2';
-import RefreshCcw from '~icons/lucide/refresh-ccw';
-import X from '~icons/lucide/x';
 
 const props = defineProps<{
   terminalOutputLength: number;

@@ -9,8 +9,6 @@ import {
 import { Message } from '@/components/ai-elements/message';
 import type { TAiServicePlatformId } from '@/constants/ai/providers';
 import type { IAiChatMessage, TAiChatMessageActionId } from '@/types/ai';
-import ArchiveIcon from '~icons/lucide/archive';
-import MessageSquareIcon from '~icons/lucide/message-square';
 import AiMessageItem from './AiMessageItem.vue';
 import AiThinkingStatus from './AiThinkingStatus.vue';
 
@@ -132,7 +130,7 @@ const hasContextCompressionMarker = (message: IAiChatMessage): boolean =>
       <slot v-if="shouldRenderEmptyState" name="empty">
         <ConversationEmptyState class="ai-chat-empty-state" title="还没有对话" description="选择一个提示词，或直接输入你的问题。">
           <template #icon>
-            <MessageSquareIcon class="size-6" />
+            <span class="icon-[lucide--message-square] size-6"  />
           </template>
         </ConversationEmptyState>
       </slot>
@@ -148,7 +146,7 @@ const hasContextCompressionMarker = (message: IAiChatMessage): boolean =>
           <div v-if="hasContextCompressionMarker(message)" class="ai-context-compression-divider" role="status"
             aria-label="上下文已自动压缩">
             <span class="ai-context-compression-divider__label">
-              <ArchiveIcon class="ai-context-compression-divider__icon" aria-hidden="true" />
+              <span class="icon-[lucide--archive] ai-context-compression-divider__icon" aria-hidden="true"  />
               <span>上下文已自动压缩</span>
             </span>
           </div>

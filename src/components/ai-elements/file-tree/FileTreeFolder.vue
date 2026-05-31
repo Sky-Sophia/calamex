@@ -3,9 +3,6 @@ import type { HTMLAttributes } from 'vue';
 import { computed, provide } from 'vue';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import ChevronRightIcon from '~icons/lucide/chevron-right';
-import FolderIcon from '~icons/lucide/folder';
-import FolderOpenIcon from '~icons/lucide/folder-open';
 import { FileTreeFolderKey, useFileTreeContext } from './context';
 import FileTreeIcon from './FileTreeIcon.vue';
 import FileTreeName from './FileTreeName.vue';
@@ -42,14 +39,14 @@ provide(FileTreeFolderKey, {
                     <slot
 name="content" :is-expanded="isExpanded" :is-selected="isSelected" :folder-name="props.name"
                         :path="props.path">
-                        <ChevronRightIcon
+                        <span
 :class="cn(
                             'size-4 shrink-0 text-muted-foreground transition-transform',
                             isExpanded && 'rotate-90',
-                        )" />
+                        )" class="icon-[lucide--chevron-right]" />
                         <FileTreeIcon>
-                            <FolderOpenIcon v-if="isExpanded" class="size-4 text-blue-500" />
-                            <FolderIcon v-else class="size-4 text-blue-500" />
+                            <span v-if="isExpanded" class="icon-[lucide--folder-open] size-4 text-blue-500"  />
+                            <span v-else class="icon-[lucide--folder] size-4 text-blue-500"  />
                         </FileTreeIcon>
                         <FileTreeName>{{ props.name }}</FileTreeName>
                     </slot>

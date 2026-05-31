@@ -22,8 +22,6 @@ import type {
 } from '@/types/ai';
 import type { TAgentRuntimeEvent } from '@/types/ai/sidecar';
 import { tryWriteClipboardText } from '@/utils/clipboard';
-import Check from '~icons/lucide/check';
-import Copy from '~icons/lucide/copy';
 import AiThinkingStatus from './AiThinkingStatus.vue';
 
 const props = defineProps<{
@@ -401,8 +399,8 @@ onBeforeUnmount(() => {
       <MessageActions class="ai-message-actions">
         <MessageAction class="ai-message-copy-button" :class="{ 'is-copied': isCopied }"
           :label="isCopied ? '已复制对话内容' : '复制对话内容'" @click.stop="copyMessageContent">
-          <Check v-if="isCopied" aria-hidden="true" />
-          <Copy v-else aria-hidden="true" />
+          <span v-if="isCopied" aria-hidden="true" class="icon-[lucide--check]" />
+          <span v-else aria-hidden="true" class="icon-[lucide--copy]" />
         </MessageAction>
       </MessageActions>
     </MessageToolbar>

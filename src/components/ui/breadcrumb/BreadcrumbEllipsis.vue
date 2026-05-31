@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue';
 import { cn } from '@/lib/utils';
-import Ellipsis from '~icons/lucide/ellipsis';
 
 const props = defineProps<{
   class?: HTMLAttributes['class'];
@@ -15,7 +14,7 @@ const props = defineProps<{
     aria-hidden="true"
     :class="cn('flex size-9 items-center justify-center', props.class)"
   >
-    <Ellipsis class="size-4" />
+    <span class="icon-[lucide--ellipsis] size-4"  />
     <span class="sr-only">更多</span>
   </span>
 </template>

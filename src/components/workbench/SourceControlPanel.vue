@@ -203,7 +203,7 @@
             <div class="source-control-history-header-actions">
               <button type="button" class="source-control-history-refresh" aria-label="刷新历史" title="刷新历史"
                 :disabled="isCommitHistoryLoading || isBusy" @click="handleReloadCommitHistory">
-                <RefreshCw aria-hidden="true" />
+                <span aria-hidden="true" class="icon-[lucide--refresh-cw]" />
               </button>
               <p class="source-control-history-summary">{{ historyPanelTitle }}</p>
             </div>
@@ -324,7 +324,7 @@
 
             <button type="button" class="source-control-btn source-control-stash-toolbar-btn"
               :disabled="isStashesLoading || isBusy" @click="handleReloadStashes">
-              <RefreshCw aria-hidden="true" />
+              <span aria-hidden="true" class="icon-[lucide--refresh-cw]" />
               <span>刷新</span>
             </button>
           </div>
@@ -447,7 +447,6 @@ import { openExternalUrl } from '@/utils/browser';
 import { writeFileSystemPathToClipboard } from '@/utils/clipboard';
 import { toErrorMessage } from '@/utils/error';
 import { areFileSystemPathsEqual, getPathBaseName, getPathDirectory } from '@/utils/path';
-import RefreshCw from '~icons/lucide/refresh-cw';
 
 const GIT_GETTING_STARTED_URL = 'https://git-scm.com/book/zh/v2';
 const GIT_CLONE_GUIDE_URL =

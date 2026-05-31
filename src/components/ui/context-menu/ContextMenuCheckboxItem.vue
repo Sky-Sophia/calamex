@@ -4,7 +4,6 @@ import type { ContextMenuCheckboxItemEmits, ContextMenuCheckboxItemProps } from 
 import { ContextMenuCheckboxItem, ContextMenuItemIndicator, useForwardPropsEmits } from 'reka-ui';
 import type { HTMLAttributes } from 'vue';
 import { cn } from '@/lib/utils';
-import Check from '~icons/lucide/check';
 
 const props = defineProps<ContextMenuCheckboxItemProps & { class?: HTMLAttributes['class'] }>();
 const emits = defineEmits<ContextMenuCheckboxItemEmits>();
@@ -20,7 +19,7 @@ data-slot="context-menu-checkbox-item" v-bind="forwarded"
         <span class="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
             <ContextMenuItemIndicator>
                 <slot name="indicator-icon">
-                    <Check class="size-4" />
+                    <span class="icon-[lucide--check] size-4"  />
                 </slot>
             </ContextMenuItemIndicator>
         </span>

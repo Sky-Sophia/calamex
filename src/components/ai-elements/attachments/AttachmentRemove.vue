@@ -2,7 +2,6 @@
 import type { HTMLAttributes } from 'vue';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import XIcon from '~icons/lucide/x';
 import { useAttachmentContext } from './context';
 
 interface IProps {
@@ -51,7 +50,7 @@ function handleClick(event: Event): void {
     @click="handleClick"
   >
     <slot>
-      <XIcon />
+      <span class="icon-[lucide--x]" />
     </slot>
     <span class="sr-only">{{ props.label }}</span>
   </Button>

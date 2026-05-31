@@ -1,10 +1,4 @@
 <script setup lang="ts">
-import AlertCircle from '~icons/lucide/alert-circle';
-import Check from '~icons/lucide/check';
-import Circle from '~icons/lucide/circle';
-import LoaderCircle from '~icons/lucide/loader-circle';
-import Trash2 from '~icons/lucide/trash2';
-
 export type TAiQueueItemStatus =
   | 'pending'
   | 'running'
@@ -61,24 +55,24 @@ const handleLabelBlur = (item: IAiQueueItem, event: Event): void => {
 <template>
   <ol class="ai-element-queue" aria-label="计划流程状态">
     <li v-for="item in items" :key="item.id" class="ai-element-queue-item" :class="`is-${item.status}`">
-      <LoaderCircle
+      <span
         v-if="item.status === 'running'"
-        class="ai-element-queue-icon ai-plan-status-icon is-spinning"
+        class="icon-[lucide--loader-circle] ai-element-queue-icon ai-plan-status-icon is-spinning"
         aria-hidden="true"
-      />
+       />
       <span
         v-else-if="item.status === 'done'"
         class="ai-element-queue-indicator"
         aria-hidden="true"
       >
-        <Check class="ai-element-queue-check" />
+        <span class="icon-[lucide--check] ai-element-queue-check"  />
       </span>
-      <AlertCircle
+      <span
         v-else-if="item.status === 'failed' || item.status === 'cancelled'"
-        class="ai-element-queue-icon"
+        class="icon-[lucide--alert-circle] ai-element-queue-icon"
         aria-hidden="true"
-      />
-      <Circle v-else class="ai-element-queue-icon" aria-hidden="true" />
+       />
+      <span v-else class="icon-[lucide--circle] ai-element-queue-icon" aria-hidden="true"  />
       <input
         v-if="item.editable"
         class="ai-element-queue-label ai-element-queue-input"
@@ -98,7 +92,7 @@ const handleLabelBlur = (item: IAiQueueItem, event: Event): void => {
         title="删除计划步骤"
         @click="emit('removeItem', item.id)"
       >
-        <Trash2 aria-hidden="true" />
+        <span aria-hidden="true" class="icon-[lucide--trash2]" />
       </button>
     </li>
   </ol>

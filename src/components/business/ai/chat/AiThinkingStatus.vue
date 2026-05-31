@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { Shimmer } from '@/components/ai-elements/shimmer';
-import BrainIcon from '~icons/lucide/brain';
 
 defineProps<{
   label: string;
@@ -9,7 +8,7 @@ defineProps<{
 
 <template>
   <div class="ai-thinking-status" role="status" aria-live="polite">
-    <BrainIcon class="ai-thinking-status__icon" aria-hidden="true" />
+    <span class="icon-[lucide--brain] ai-thinking-status__icon" aria-hidden="true"  />
     <Shimmer as="span" class="ai-thinking-status__label">
       {{ label }}
     </Shimmer>

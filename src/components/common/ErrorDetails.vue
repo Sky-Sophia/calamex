@@ -2,7 +2,6 @@
 import { ref } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import ChevronDown from '~icons/lucide/chevron-down';
 
 const props = withDefaults(
   defineProps<{
@@ -22,10 +21,10 @@ const isOpen = ref(false);
     <CollapsibleTrigger as-child>
       <Button variant="ghost" size="sm" class="h-7 px-2 text-[12px] text-[var(--text-tertiary)]">
         {{ props.label }}
-        <ChevronDown
-          class="size-3 transition-transform duration-[var(--motion-duration-fast)]"
+        <span
+          class="icon-[lucide--chevron-down] size-3 transition-transform duration-[var(--motion-duration-fast)]"
           :class="isOpen ? 'rotate-180' : ''"
-        />
+         />
       </Button>
     </CollapsibleTrigger>
     <CollapsibleContent>

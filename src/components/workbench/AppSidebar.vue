@@ -24,7 +24,7 @@
         <Empty v-else-if="!workspaceRootPath" class="explorer-empty-state explorer-empty-state--raised">
           <EmptyHeader class="gap-1.5">
             <EmptyMedia class="h-auto w-auto rounded-none border-0 bg-transparent p-0 shadow-none">
-              <FolderOpen class="h-14 w-14" />
+              <span class="icon-[lucide--folder-open] h-14 w-14"  />
             </EmptyMedia>
             <EmptyTitle class="text-[12px] font-medium">尚未打开工作区</EmptyTitle>
             <EmptyDescription class="text-[11px] leading-5">
@@ -42,7 +42,7 @@
         <Empty v-else-if="isExplorerWorkspaceEmpty" class="explorer-empty-state explorer-empty-state--raised">
           <EmptyHeader class="gap-1.5">
             <EmptyMedia class="h-auto w-auto rounded-none border-0 bg-transparent p-0 shadow-none">
-              <FolderOpen class="h-14 w-14" />
+              <span class="icon-[lucide--folder-open] h-14 w-14"  />
             </EmptyMedia>
             <EmptyTitle class="text-[12px] font-medium">This folder is empty</EmptyTitle>
             <EmptyDescription class="text-[11px] leading-5">
@@ -188,7 +188,6 @@ import {
   resolveWorkspaceKey,
   resolveWorkspaceRootPayload,
 } from '@/utils/workspace';
-import FolderOpen from '~icons/lucide/folder-open';
 
 const DeferredLinearContextMenu = defineAsyncComponent({
   loader: () => import('@/components/common/LinearContextMenu.vue'),

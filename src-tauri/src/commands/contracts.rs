@@ -508,7 +508,6 @@ pub struct SshDirectoryCreateRequest {
     pub(crate) identity_path: Option<String>,
     pub(crate) password: Option<String>,
     pub(crate) remote_directory: String,
-    pub(crate) name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

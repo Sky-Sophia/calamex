@@ -14,9 +14,6 @@ import {
   normalizeCodeMirrorLanguageTag,
   resolveCodeMirrorLanguageId,
 } from '@/services/editor/codemirror-language';
-import ChevronDown from '~icons/lucide/chevron-down';
-import ChevronUp from '~icons/lucide/chevron-up';
-import FileIcon from '~icons/lucide/file';
 
 const props = defineProps<Pick<CodeBlockNodeProps, 'node'>>();
 
@@ -99,7 +96,7 @@ function handleError(error: Error): void {
   >
     <CodeBlockHeader class="ai-markdown-code-block__header">
       <CodeBlockTitle class="ai-markdown-code-block__title">
-        <FileIcon :size="15" aria-hidden="true" />
+        <span :size="15" aria-hidden="true" class="icon-[lucide--file]" />
         <CodeBlockFilename class="ai-markdown-code-block__filename">
           {{ filename }}
         </CodeBlockFilename>
@@ -115,8 +112,8 @@ function handleError(error: Error): void {
           :aria-expanded="isExpanded"
           @click="toggleExpanded"
         >
-          <ChevronUp v-if="isExpanded" :size="15" aria-hidden="true" />
-          <ChevronDown v-else :size="15" aria-hidden="true" />
+          <span v-if="isExpanded" :size="15" aria-hidden="true" class="icon-[lucide--chevron-up]" />
+          <span v-else :size="15" aria-hidden="true" class="icon-[lucide--chevron-down]" />
         </button>
         <CodeBlockCopyButton
           class="ai-markdown-code-block__copy"

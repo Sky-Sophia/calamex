@@ -2,7 +2,6 @@
 import type { HTMLAttributes } from 'vue';
 import { inject } from 'vue';
 import { cn } from '@/lib/utils';
-import Copy from '~icons/lucide/copy';
 import { TerminalKey } from './context';
 
 const props = defineProps<{ class?: HTMLAttributes['class'] }>();
@@ -23,6 +22,6 @@ const handleCopy = async (): Promise<void> => {
     title="复制终端输出"
     @click="handleCopy"
   >
-    <Copy aria-hidden="true" />
+    <span aria-hidden="true" class="icon-[lucide--copy]" />
   </button>
 </template>

@@ -2,12 +2,6 @@
 import { computed, ref } from 'vue';
 import type { IAiTaskPlanStep } from '@/types/ai';
 import type { TAgentPlanStatus } from '@/types/ai/sidecar';
-import Check from '~icons/lucide/check';
-import ChevronUp from '~icons/lucide/chevron-up';
-import FileText from '~icons/lucide/file-text';
-import RotateCw from '~icons/lucide/rotate-cw';
-import Trash2 from '~icons/lucide/trash2';
-import X from '~icons/lucide/x';
 
 const props = defineProps<{
   goal: string;
@@ -99,7 +93,7 @@ const toggleCollapsed = (): void => {
   <section class="ai-element-plan" :class="{ 'is-collapsed': isCollapsed }" aria-label="已生成计划">
     <header class="ai-element-plan-header">
       <div class="ai-element-plan-title-group">
-        <FileText class="ai-element-plan-title-icon" aria-hidden="true" />
+        <span class="icon-[lucide--file-text] ai-element-plan-title-icon" aria-hidden="true"  />
         <h3 class="ai-element-plan-title">{{ goal || '确认计划' }}</h3>
       </div>
       <button
@@ -109,7 +103,7 @@ const toggleCollapsed = (): void => {
         :aria-label="isCollapsed ? '展开计划' : '收起计划'"
         @click="toggleCollapsed"
       >
-        <ChevronUp class="ai-element-plan-collapse-icon" :class="{ 'is-collapsed': isCollapsed }" aria-hidden="true" />
+        <span class="icon-[lucide--chevron-up] ai-element-plan-collapse-icon" :class="{ 'is-collapsed': isCollapsed }" aria-hidden="true"  />
       </button>
     </header>
 
@@ -149,7 +143,7 @@ const toggleCollapsed = (): void => {
                 title="删除计划步骤"
                 @click="emit('removeStep', step.id)"
               >
-                <Trash2 aria-hidden="true" />
+                <span aria-hidden="true" class="icon-[lucide--trash2]" />
               </button>
             </li>
           </ol>
@@ -162,7 +156,7 @@ const toggleCollapsed = (): void => {
             :disabled="isPlanning || isApproving"
             @click="emit('regenerate')"
           >
-            <RotateCw aria-hidden="true" />
+            <span aria-hidden="true" class="icon-[lucide--rotate-cw]" />
             重生成
           </button>
           <button
@@ -171,7 +165,7 @@ const toggleCollapsed = (): void => {
             :disabled="isPlanning || isApproving || !canReject"
             @click="emit('reject')"
           >
-            <X aria-hidden="true" />
+            <span aria-hidden="true" class="icon-[lucide--x]" />
             拒绝
           </button>
           <button
@@ -180,7 +174,7 @@ const toggleCollapsed = (): void => {
             :disabled="!canApprove || isPlanning || isApproving"
             @click="emit('approve')"
           >
-            <Check aria-hidden="true" />
+            <span aria-hidden="true" class="icon-[lucide--check]" />
             {{ approvalLabel }}
           </button>
         </footer>

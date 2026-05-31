@@ -2,7 +2,6 @@
 import type { HTMLAttributes, VNode } from 'vue';
 import { computed, provide } from 'vue';
 import { cn } from '@/lib/utils';
-import FileIcon from '~icons/lucide/file';
 import { FileTreeFileKey, useFileTreeContext } from './context';
 import FileTreeIcon from './FileTreeIcon.vue';
 import FileTreeName from './FileTreeName.vue';
@@ -38,7 +37,7 @@ provide(FileTreeFileKey, {
             <span class="size-4" />
             <FileTreeIcon>
                 <component :is="props.icon" v-if="props.icon" />
-                <FileIcon v-else class="size-4 text-muted-foreground" />
+                <span v-else class="icon-[lucide--file] size-4 text-muted-foreground"  />
             </FileTreeIcon>
             <FileTreeName>{{ props.name }}</FileTreeName>
         </slot>

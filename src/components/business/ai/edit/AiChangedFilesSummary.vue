@@ -12,12 +12,6 @@ import type {
   IAiDiffPreviewLine,
   IAiPatchSet,
 } from '@/types/ai';
-import ChevronDownIcon from '~icons/lucide/chevron-down';
-import ExternalLinkIcon from '~icons/lucide/external-link';
-import Maximize2Icon from '~icons/lucide/maximize2';
-import PinIcon from '~icons/lucide/pin';
-import PinOffIcon from '~icons/lucide/pin-off';
-import Undo2Icon from '~icons/lucide/undo2';
 
 interface IChangedFileViewModel {
   file: IAiAgentChangedFile;
@@ -176,8 +170,8 @@ const handlePin = (): void => {
           :title="pinLabel"
           @click="handlePin"
         >
-          <PinOffIcon v-if="isPinned" aria-hidden="true" />
-          <PinIcon v-else aria-hidden="true" />
+          <span v-if="isPinned" aria-hidden="true" class="icon-[lucide--pin-off]" />
+          <span v-else aria-hidden="true" class="icon-[lucide--pin]" />
         </button>
         <button
           type="button"
@@ -187,10 +181,10 @@ const handlePin = (): void => {
           @click="handleUndo"
         >
           <span>{{ undoLabel }}</span>
-          <Undo2Icon aria-hidden="true" />
+          <span aria-hidden="true" class="icon-[lucide--undo2]" />
         </button>
-        <span class="ai-changed-files-action" aria-hidden="true">审核 <ExternalLinkIcon /></span>
-        <span class="ai-changed-files-action is-icon-only"><Maximize2Icon /></span>
+        <span class="ai-changed-files-action" aria-hidden="true">审核 <span class="icon-[lucide--external-link]" /></span>
+        <span class="ai-changed-files-action is-icon-only"><span class="icon-[lucide--maximize2]" /></span>
       </div>
     </header>
 
@@ -207,7 +201,7 @@ const handlePin = (): void => {
             <span class="ai-changed-file-stat is-add">+{{ file.additions }}</span>
             <span class="ai-changed-file-stat is-delete">-{{ file.deletions }}</span>
           </span>
-          <ChevronDownIcon class="ai-changed-file-chevron" aria-hidden="true" />
+          <span class="icon-[lucide--chevron-down] ai-changed-file-chevron" aria-hidden="true"  />
         </button>
 
         <div v-if="isFileOpen(file) && hunks.length > 0" class="ai-changed-file-diff">
