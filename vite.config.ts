@@ -12,7 +12,9 @@ export default defineConfig(({ command }) => ({
     tailwindcss(),
     Icons({
       compiler: 'vue3',
-      autoInstall: true,
+      // 生产构建不在编译期触发图标集自动安装(@iconify-json/lucide 已作为 devDependency 显式安装),
+      // 避免 unplugin-icons 在 build 阶段做多余的依赖解析,从而缩短构建耗时。
+      autoInstall: false,
       // 让 Tailwind 的 size-* / text-* class 完全接管,不强加默认样式
       defaultStyle: '',
       defaultClass: '',
