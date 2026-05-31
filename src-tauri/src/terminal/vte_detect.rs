@@ -11,17 +11,22 @@ pub struct AnsiCsiEvents {
     pub cursor_position_query: bool,
 }
 
-pub fn scan_ansi_csi_events(data: &str) -> AnsiCsiEvents {
-    if data.is_empty() {
-        return AnsiCsiEvents::default();
-    }
-
+/// 用单个 vte 解析器扫描整段数据并返回检测结果。
+/// `scan_ansi_csi_events` 与 `has_cursor_position_query` 共用此实现，避免重复解析循环。
+fn detect_csi_events(data: &str) -> CsiDetector {
     let mut detector = CsiDetector::default();
-    let mut parser = Parser::new();
-    for byte in data.as_bytes() {
-        parser.advance(&mut detector, &[*byte]);
+    if data.is_empty() {
+        return detector;
     }
 
+    let mut parser = Parser::new();
+    // 一次性把整段字节交给解析器，避免逐字节调用 advance 带来的额外开销。
+    parser.advance(&mut detector, data.as_bytes());
+    detector
+}
+
+pub fn scan_ansi_csi_events(data: &str) -> AnsiCsiEvents {
+    let detector = detect_csi_events(data);
     AnsiCsiEvents {
         alt_screen_switched: detector.alt_screen_switched,
         alt_screen_active: detector.alt_screen_active,
@@ -31,12 +36,7 @@ pub fn scan_ansi_csi_events(data: &str) -> AnsiCsiEvents {
 }
 
 pub fn has_cursor_position_query(data: &str) -> bool {
-    let mut detector = CsiDetector::default();
-    let mut parser = Parser::new();
-    for byte in data.as_bytes() {
-        parser.advance(&mut detector, &[*byte]);
-    }
-    detector.cursor_position_query
+    detect_csi_events(data).cursor_position_query
 }
 
 #[derive(Debug, Default)]
@@ -46,6 +46,18 @@ struct CsiDetector {
     alt_screen_active: bool,
     scroll_region_changed: bool,
     cursor_position_query: bool,
+}
+
+/// 当 CSI 序列「恰好只有一个参数」时返回其首个子参数值，否则返回 None。
+/// 等价于原先 `params.iter().map(|p| p[0]).collect::<Vec<_>>()` 后判断 `slice == [x]`，
+/// 但无需为每次分发分配临时 Vec。
+fn single_param_value(params: &Params) -> Option<u16> {
+    let mut iter = params.iter();
+    let first = iter.next()?;
+    if iter.next().is_some() {
+        return None;
+    }
+    first.first().copied()
 }
 
 impl Perform for CsiDetector {
@@ -67,8 +79,7 @@ impl Perform for CsiDetector {
         match action {
             'h' | 'l' if self.private_mode => {
                 let entering = action == 'h';
-                let flat: Vec<u16> = params.iter().map(|p| p[0]).collect();
-                if flat.as_slice() == [47] || flat.as_slice() == [1047] || flat.as_slice() == [1049] {
+                if matches!(single_param_value(params), Some(47 | 1047 | 1049)) {
                     self.alt_screen_switched = true;
                     self.alt_screen_active = entering;
                 }
@@ -77,8 +88,7 @@ impl Perform for CsiDetector {
                 self.scroll_region_changed = true;
             }
             'n' if !self.private_mode => {
-                let flat: Vec<u16> = params.iter().map(|p| p[0]).collect();
-                if flat.as_slice() == [6] {
+                if single_param_value(params) == Some(6) {
                     self.cursor_position_query = true;
                 }
             }
