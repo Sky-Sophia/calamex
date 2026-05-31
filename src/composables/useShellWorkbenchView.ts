@@ -527,10 +527,6 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     workbench.editorStore.setWorkbenchSessionState({ isTerminalVisible: false });
   };
 
-  const clearTerminalLogs = (): void => {
-    workbench.editorStore.clearLogs();
-  };
-
   const emitWorkbenchReady = async (): Promise<void> => {
     if (hasEmittedReady.value || isUnmounted) {
       return;
@@ -650,14 +646,11 @@ export const useShellWorkbenchView = (onReady: () => void) => {
 
   const {
     titlebarRef,
-    runPanelRef,
     handleOpenCommandPalette,
     handleAiCodeAction,
     handleAiFixDiagnostic,
-    handleOpenShellCheck,
   } = useShellWorkbenchAiBridge({
     editorRef,
-    openTerminal,
     handleSelectDiagnostic,
   });
 
@@ -747,7 +740,6 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     ...workbench,
     gitStore,
     titlebarRef,
-    runPanelRef,
     editorRef,
     editorViewportRef,
     isTerminalVisible,
@@ -795,12 +787,10 @@ export const useShellWorkbenchView = (onReady: () => void) => {
     handleExplorerSessionStateChange,
     hideTerminal,
     openTerminal,
-    clearTerminalLogs,
     handleRunScript,
     handleIntegratedTerminalRunCompleted,
     handleOpenCommandPalette,
     handleAiCodeAction,
     handleAiFixDiagnostic,
-    handleOpenShellCheck,
   };
 };

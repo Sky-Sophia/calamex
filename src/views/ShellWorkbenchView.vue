@@ -74,36 +74,18 @@
 
                 <ResizablePanel class="min-h-0 overflow-hidden" :default-size="terminalHeight" :min-size="140"
                   size-unit="px" @resize="handleTerminalHeightChange">
-                  <DeferredRunPanel :ref="bindRunPanelRef" :terminal-output-length="editorStore.terminalOutputLength"
-                    :terminal-output-version="editorStore.terminalOutputVersion"
-                    :resolve-terminal-output="editorStore.getTerminalOutputSnapshot" :run-logs="editorStore.runLogs"
-                    :last-run-result="editorStore.lastRunResult" :is-running="editorStore.isRunning"
-                    :executor="editorStore.selectedExecutor" :document-name="editorStore.document.name"
-                    :document-content="editorStore.document.content" :document-path="editorStore.document.path"
-                    :script-analysis="editorStore.activeScriptAnalysis"
-                    :workspace-root-path="editorStore.workspaceRootPath" theme="light"
-                    :terminal-settings="appStore.settings.terminal" :visible="isTerminalPanelVisible"
-                    :is-maximized="false" @hide="hideTerminal" @toggle-maximize="toggleTerminalMaximize"
-                    @clear-logs="clearTerminalLogs" @terminal-run-completed="handleIntegratedTerminalRunCompleted"
-                    @select-diagnostic="handleSelectDiagnostic" @rerun-analysis="handleRerunDiagnostics"
-                    @ai-fix-diagnostic="handleAiFixDiagnostic" />
+                  <DeferredRunPanel theme="light" :terminal-settings="appStore.settings.terminal"
+                    :visible="isTerminalPanelVisible" :is-maximized="false" @hide="hideTerminal"
+                    @toggle-maximize="toggleTerminalMaximize"
+                    @terminal-run-completed="handleIntegratedTerminalRunCompleted" />
                 </ResizablePanel>
               </ResizablePanelGroup>
 
               <div v-else-if="isTerminalPanelVisible" class="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <DeferredRunPanel :ref="bindRunPanelRef" :terminal-output-length="editorStore.terminalOutputLength"
-                  :terminal-output-version="editorStore.terminalOutputVersion"
-                  :resolve-terminal-output="editorStore.getTerminalOutputSnapshot" :run-logs="editorStore.runLogs"
-                  :last-run-result="editorStore.lastRunResult" :is-running="editorStore.isRunning"
-                  :executor="editorStore.selectedExecutor" :document-name="editorStore.document.name"
-                  :document-content="editorStore.document.content" :document-path="editorStore.document.path"
-                  :script-analysis="editorStore.activeScriptAnalysis"
-                  :workspace-root-path="editorStore.workspaceRootPath" theme="light"
-                  :terminal-settings="appStore.settings.terminal" :visible="isTerminalPanelVisible" :is-maximized="true"
-                  @hide="hideTerminal" @toggle-maximize="toggleTerminalMaximize" @clear-logs="clearTerminalLogs"
-                  @terminal-run-completed="handleIntegratedTerminalRunCompleted"
-                  @select-diagnostic="handleSelectDiagnostic" @rerun-analysis="handleRerunDiagnostics"
-                  @ai-fix-diagnostic="handleAiFixDiagnostic" />
+                <DeferredRunPanel theme="light" :terminal-settings="appStore.settings.terminal"
+                  :visible="isTerminalPanelVisible" :is-maximized="true" @hide="hideTerminal"
+                  @toggle-maximize="toggleTerminalMaximize"
+                  @terminal-run-completed="handleIntegratedTerminalRunCompleted" />
               </div>
 
               <CardContent v-else class="flex min-h-0 flex-1 px-0 pb-0 pt-0">
@@ -202,7 +184,6 @@ const {
   appStore,
   editorStore,
   gitStore,
-  runPanelRef,
   isDesktopRuntime,
   canRun,
   commandTemplates,
@@ -231,8 +212,6 @@ const {
   handleCursorPositionChange,
   handleSelectionChange,
   handleDiagnosticsChange,
-  handleSelectDiagnostic,
-  handleRerunDiagnostics,
   handleTerminalHeightChange,
   toggleTerminalMaximize,
   openAiMode,
@@ -242,12 +221,10 @@ const {
   handleRequestCloseApplication,
   hideTerminal,
   openTerminal,
-  clearTerminalLogs,
   handleRunScript,
   handleInsertTemplate,
   handleIntegratedTerminalRunCompleted,
   handleOpenCommandPalette,
-  handleAiFixDiagnostic,
 } = useShellWorkbenchView(() => emit('ready'));
 
 const lsp = useLsp(visibleWorkspaceRootPath);
@@ -321,15 +298,6 @@ const handleTogglePrimaryMode = (): void => {
   openAiMode();
 };
 
-const isRunPanelExpose = (value: unknown): value is NonNullable<typeof runPanelRef.value> => {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'openShellCheck' in value &&
-    typeof value.openShellCheck === 'function'
-  );
-};
-
 const isEditorExpose = (value: unknown): value is NonNullable<typeof editorRef.value> => {
   return (
     typeof value === 'object' &&
@@ -345,10 +313,6 @@ const isEditorExpose = (value: unknown): value is NonNullable<typeof editorRef.v
     'layoutEditor' in value &&
     typeof value.layoutEditor === 'function'
   );
-};
-
-const bindRunPanelRef = (value: unknown): void => {
-  runPanelRef.value = isRunPanelExpose(value) ? value : null;
 };
 
 const bindEditorRef = (value: unknown): void => {
