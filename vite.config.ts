@@ -1,27 +1,17 @@
-import tailwindcss from '@tailwindcss/vite'
-import vue from '@vitejs/plugin-vue'
-import { fileURLToPath, URL } from 'node:url'
-import { visualizer } from 'rollup-plugin-visualizer'
-import Icons from 'unplugin-icons/vite'
-import { defineConfig } from 'vite'
+import { fileURLToPath, URL } from 'node:url';
+import tailwindcss from '@tailwindcss/vite';
+import vue from '@vitejs/plugin-vue';
+import { visualizer } from 'rollup-plugin-visualizer';
+import { defineConfig } from 'vite';
 
 export default defineConfig(({ command }) => ({
   base: command === 'build' ? './' : '/',
   plugins: [
     vue(),
     tailwindcss(),
-    Icons({
-      compiler: 'vue3',
-      // 生产构建不在编译期触发图标集自动安装(@iconify-json/lucide 已作为 devDependency 显式安装),
-      // 避免 unplugin-icons 在 build 阶段做多余的依赖解析,从而缩短构建耗时。
-      autoInstall: false,
-      // 让 Tailwind 的 size-* / text-* class 完全接管,不强加默认样式
-      defaultStyle: '',
-      defaultClass: '',
-    }),
     visualizer({
       filename: 'dist/stats.html',
-      template: 'treemap',   // 还可选 'sunburst' / 'network'
+      template: 'treemap', // 还可选 'sunburst' / 'network'
       gzipSize: true,
       brotliSize: true,
       open: true,
@@ -48,17 +38,7 @@ export default defineConfig(({ command }) => ({
       },
       output: {
         manualChunks(id) {
-          const normalizedId = id.replace(/\\/g, '/')
-
-          // ── unplugin-icons: 把所有 ~icons/* 虚拟模块归到一个 chunk ─────────────
-          // 虚拟 id 在 Rollup 这边通常带 \0 前缀或包含 "~icons/"
-          if (
-            normalizedId.includes('~icons/') ||
-            normalizedId.includes('virtual:icons') ||
-            normalizedId.includes('unplugin-icons')
-          ) {
-            return 'vendor-icons'
-          }
+          const normalizedId = id.replace(/\\/g, '/');
 
           // ── 核心框架 ────────────────────────────────────────────────────
           if (
@@ -66,12 +46,12 @@ export default defineConfig(({ command }) => ({
             normalizedId.includes('/node_modules/vue-router/') ||
             normalizedId.includes('/node_modules/pinia/')
           ) {
-            return 'vendor-core'
+            return 'vendor-core';
           }
 
           // ── xterm ──────────────────────────────────────────────────────
           if (normalizedId.includes('/node_modules/@xterm/')) {
-            return 'vendor-xterm'
+            return 'vendor-xterm';
           }
 
           // ── shell 分析 ─────────────────────────────────────────────────
@@ -84,10 +64,10 @@ export default defineConfig(({ command }) => ({
             normalizedId.includes('/src/generated/fig-shell-command-catalog.ts') ||
             normalizedId.includes('/src/utils/shfmt.ts')
           ) {
-            return 'vendor-shell-analysis'
+            return 'vendor-shell-analysis';
           }
         },
       },
     },
   },
-}))
+}));
