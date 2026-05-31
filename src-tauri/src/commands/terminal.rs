@@ -42,7 +42,7 @@ use crate::terminal::{
         LocalWslRunHandle,
     },
 };
-use crate::wsl_link::terminal_exec::{
+use crate::terminal::exec_protocol::{
     WslLinkTerminalOpenInteractiveRequest, WslLinkTerminalRunScriptRequest,
     WslLinkTerminalServerPayload,
 };
