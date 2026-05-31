@@ -37,18 +37,15 @@ use crate::terminal::{
         observe_visual_output_and_prefix, TerminalRunVisualObservation, TerminalRunVisualTracker,
     },
     wsl as terminal_wsl,
+    wsl_pty::{open_interactive_terminal_local, LocalWslPtyHandle},
 };
 use crate::wsl_link::{
-    agent_distribution::{start_installed_agent, WslLinkAgentDistributionPlan},
-    grpc_transport::WslLinkGrpcTransportError,
     noise_material::{
         KeyringWslLinkNoiseMaterialStore, WslLinkDesktopNoiseMaterial, WslLinkNoiseMaterialStore,
     },
-    primary_supervisor::WslLinkPrimarySupervisorError,
     terminal_client::{
-        open_interactive_terminal_over_wsl_link, run_terminal_script_over_wsl_link,
-        signal_terminal_process_over_wsl_link, write_terminal_run_input_over_wsl_link,
-        WslLinkInteractiveTerminalHandle, WslLinkTerminalClientError,
+        run_terminal_script_over_wsl_link, signal_terminal_process_over_wsl_link,
+        write_terminal_run_input_over_wsl_link,
     },
     terminal_exec::{
         WslLinkTerminalOpenInteractiveRequest, WslLinkTerminalRunInput,
@@ -68,7 +65,7 @@ static TERMINAL_RUN_CHUNK_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 static TERMINAL_RUN_VISUAL_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 struct TerminalSession {
-    handle: WslLinkInteractiveTerminalHandle,
+    handle: LocalWslPtyHandle,
     working_directory: String,
 }
 
@@ -120,7 +117,7 @@ pub async fn ensure_terminal_session(
     let terminal_state = state.inner().clone();
     update_terminal_geometry(payload.cols, payload.rows);
 
-    // Phase 1: 创建锁保护下检查现有会话、准备 WSL 连接参数。
+    // Phase 1: 创建锁保护下检查现有会话、准备 WSL 启动参数。
     // std::sync::MutexGuard 不能跨越 .await，必须在 await 前释放。
     let (terminal_cwd, created) = {
         let _creation_guard = terminal_state
@@ -158,35 +155,39 @@ pub async fn ensure_terminal_session(
             .map(|path| to_wsl_path(path.as_path()))
             .transpose()?
             .unwrap_or_else(|| DEFAULT_WSL_INTERACTIVE_CWD.to_string());
-        let desktop_material = load_required_desktop_noise_material()?;
 
-        // 释放 creation_guard 后再做异步 WSL 连接，避免 MutexGuard 跨越 .await
+        // 释放 creation_guard 后再打开本地 PTY，保持与原异步路径一致的锁释放时机。
         drop(_creation_guard);
 
-        let handle = open_interactive_terminal_with_agent_retry(
-            app.clone(),
-            terminal_state.clone(),
-            payload.session_id.clone(),
-            &desktop_material,
+        let event_app = app.clone();
+        let event_state = terminal_state.clone();
+        let event_session_id = payload.session_id.clone();
+        let handle = open_interactive_terminal_local(
             WslLinkTerminalOpenInteractiveRequest {
                 session_id: payload.session_id.clone(),
                 working_directory: terminal_cwd.clone(),
                 cols: payload.cols,
                 rows: payload.rows,
             },
+            move |event| {
+                handle_wsl_link_interactive_terminal_event(
+                    &event_app,
+                    &event_state,
+                    &event_session_id,
+                    event,
+                );
+            },
         )
-        .await
         .map_err(|error| error.to_string())?;
 
-        // Phase 2: 重新获取 creation_guard 后原子插入，防止并发创建
+        // Phase 2: 重新获取 creation_guard 后原子插入，防止并发创建。
         {
             let _creation_guard = terminal_state
                 .creation_guard
                 .lock()
                 .map_err(|_| "终端会话创建锁已损坏。".to_string())?;
-            // 再次检查：await 期间可能有其他调用者抢先生成了同一会话
+            // 再次检查：打开期间可能有其他调用者抢先生成了同一会话。
             if get_terminal_session(&terminal_state, &payload.session_id)?.is_some() {
-                // 已有会话，终止刚创建的连接
                 let _ = handle.close();
                 return Ok(TerminalSessionPayload {
                     session_id: payload.session_id,
@@ -309,82 +310,6 @@ pub fn shutdown_all_terminal_sessions(state: &TerminalSessionState) -> Result<()
         terminate_terminal_session(session.as_ref())?;
     }
     Ok(())
-}
-
-async fn open_interactive_terminal_with_agent_retry(
-    app: AppHandle,
-    terminal_state: TerminalSessionState,
-    session_id: String,
-    desktop_material: &WslLinkDesktopNoiseMaterial,
-    request: WslLinkTerminalOpenInteractiveRequest,
-) -> Result<WslLinkInteractiveTerminalHandle, String> {
-    match open_interactive_terminal_attempt(
-        app.clone(),
-        terminal_state.clone(),
-        session_id.clone(),
-        desktop_material,
-        request.clone(),
-    )
-    .await
-    {
-        Ok(handle) => Ok(handle),
-        Err(first_error) if should_retry_terminal_after_agent_start(&first_error) => {
-            start_installed_agent(&WslLinkAgentDistributionPlan::user_default())
-                .await
-                .map_err(|start_error| {
-                    format!(
-                        "WSL Link agent 自动启动失败：{start_error}；首次连接错误：{first_error}"
-                    )
-                })?;
-            open_interactive_terminal_attempt(
-                app,
-                terminal_state,
-                session_id,
-                desktop_material,
-                request,
-            )
-            .await
-            .map_err(|retry_error| {
-                format!(
-                    "WSL Link agent 已自动启动，但终端连接仍失败：{retry_error}；首次连接错误：{first_error}"
-                )
-            })
-        }
-        Err(error) => Err(error.to_string()),
-    }
-}
-
-async fn open_interactive_terminal_attempt(
-    app: AppHandle,
-    terminal_state: TerminalSessionState,
-    session_id: String,
-    desktop_material: &WslLinkDesktopNoiseMaterial,
-    request: WslLinkTerminalOpenInteractiveRequest,
-) -> Result<WslLinkInteractiveTerminalHandle, WslLinkTerminalClientError> {
-    open_interactive_terminal_over_wsl_link(desktop_material, request, move |event| {
-        handle_wsl_link_interactive_terminal_event(&app, &terminal_state, &session_id, event);
-    })
-    .await
-}
-
-fn should_retry_terminal_after_agent_start(error: &WslLinkTerminalClientError) -> bool {
-    match error {
-        WslLinkTerminalClientError::Grpc(error) => is_wsl_link_connection_error(error),
-        WslLinkTerminalClientError::Supervisor(WslLinkPrimarySupervisorError::Grpc(error)) => {
-            is_wsl_link_connection_error(error)
-        }
-        WslLinkTerminalClientError::Status(_)
-        | WslLinkTerminalClientError::Payload(_)
-        | WslLinkTerminalClientError::SessionMismatch
-        | WslLinkTerminalClientError::CommandChannelClosed => false,
-    }
-}
-
-fn is_wsl_link_connection_error(error: &WslLinkGrpcTransportError) -> bool {
-    matches!(
-        error,
-        WslLinkGrpcTransportError::Transport(_) | WslLinkGrpcTransportError::Connector(_)
-    )
 }
 
 #[tauri::command]
@@ -1184,20 +1109,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_agent_retry_is_limited_to_connection_errors() {
-        let connector_error = WslLinkTerminalClientError::Grpc(
-            WslLinkGrpcTransportError::Connector("WSL Link agent 未监听。".to_string()),
-        );
-        let payload_error = WslLinkTerminalClientError::Payload(
-            crate::wsl_link::terminal_exec::WslLinkTerminalExecError::Payload(
-                "session_id 不能为空。".to_string(),
-            ),
-        );
-        assert!(should_retry_terminal_after_agent_start(&connector_error));
-        assert!(!should_retry_terminal_after_agent_start(&payload_error));
-    }
-
-    #[test]
     fn wsl_link_active_run_is_serialized() {
         let state = TerminalSessionState::default();
         set_test_terminal_state(TerminalState::IdleInteractive);
@@ -1247,13 +1158,11 @@ mod tests {
         try_mark_active_terminal_run(&state, "session-A", "run-A").expect("active run should mark");
         set_test_terminal_state(TerminalState::Running);
 
-        // 拥有该 run 的会话 → 输入路由到 run 的 stdin
         assert!(matches!(
             get_active_terminal_run_input_target(&state, "session-A"),
             Ok(ActiveRunInputTarget::Run(run_id)) if run_id == "run-A"
         ));
 
-        // 其它会话 → 输入进入各自交互 shell，而不是串进别人的 run
         assert!(matches!(
             get_active_terminal_run_input_target(&state, "session-B"),
             Ok(ActiveRunInputTarget::None)
@@ -1268,13 +1177,11 @@ mod tests {
         buffer_pending_switch_input(&state, "session-1", "ab").expect("buffer ok");
         buffer_pending_switch_input(&state, "session-1", "cd").expect("buffer ok");
 
-        // 切换态缓冲的输入会在状态落定后按序补发，且原始输入排在新输入之前。
         let combined =
             take_and_prepend_pending_switch_input(&state, "session-1", "EF".to_string())
                 .expect("take ok");
         assert_eq!(combined, "abcdEF");
 
-        // 取出后缓冲被清空，不会重复补发。
         let again = take_and_prepend_pending_switch_input(&state, "session-1", "X".to_string())
             .expect("take ok");
         assert_eq!(again, "X");
