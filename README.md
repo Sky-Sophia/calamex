@@ -11,6 +11,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Rust](https://img.shields.io/badge/Rust-2021-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%2B%20WSL2-0078D6?logo=windows&logoColor=white)](#运行环境要求)
+[![License](https://img.shields.io/badge/License-Apache%202.0-D22128?logo=apache&logoColor=white)](LICENSE)
 
 </div>
 
@@ -194,6 +195,6 @@ pnpm build
 
 ## 许可证
 
-版权所有 © 2026 xiaojianc。保留所有权利。
+本项目以 [Apache License 2.0](LICENSE) 授权发布。
 
-> 如需以特定开源许可证（如 MIT / Apache-2.0）发布，请在仓库根目录添加 `LICENSE` 文件并更新本节。
+版权所有 © 2026 xiaojianc。
