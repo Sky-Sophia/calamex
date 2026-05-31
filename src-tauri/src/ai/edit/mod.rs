@@ -316,11 +316,14 @@ fn apply_retention_policy_with_policy(
             .map_err(|_| errors::state_poisoned())?;
         guard.retain(|entry| match entry {
             AiEditTimelineEntryPayload::Snapshot(snapshot) => {
-                !snapshot_outcome.removed_snapshot_ids.contains(&snapshot.id)
-                    && (referenced_snapshot_ids.contains(&snapshot.id)
-                        || snapshot.pinned
-                        || snapshot.content_available)
-            }
+    !snapshot_outcome.removed_snapshot_ids.contains(&snapshot.id)
+        && (referenced_snapshot_ids.contains(&snapshot.id)
+            || snapshot.pinned
+            || (snapshot.content_available
+                && !snapshot_outcome
+                    .downgraded_snapshot_ids
+                    .contains(&snapshot.id)))
+}
             AiEditTimelineEntryPayload::Operation(operation) => !journal_outcome
                 .removed_operation_ids
                 .contains(&operation.id),

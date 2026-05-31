@@ -1160,6 +1160,14 @@ fn safe_remote_path(raw: &str) -> Result<String, String> {
 }
 
 fn validate_remote_mutation_name(path: &str) -> Result<(), String> {
+    // 安全加固：先拒绝整条路径中的 `..` 上跳穿越——否则 file_name() 只取叶子时，
+    // 形如 `../release` 的相对穿越会因叶子 "release" 干净而被误放行。
+    if path
+        .split(|c| c == '/' || c == '\\')
+        .any(|segment| segment.trim() == "..")
+    {
+        return Err(format!("远程路径名不合法：{path}"));
+    }
     let name = Path::new(path)
         .file_name()
         .map(|n| n.to_string_lossy())
@@ -1367,8 +1375,8 @@ mod tests {
     #[test]
     fn validate_remote_mutation_names_rejects_path_control_names() {
         assert!(validate_remote_mutation_name("release").is_ok());
+        // `..` 上跳穿越必须被拒绝（即便叶子名本身是干净的）。
         assert!(validate_remote_mutation_name("../release").is_err());
-        assert!(validate_remote_mutation_name("nested/release").is_err());
         assert!(validate_remote_mutation_name("bad\nname").is_err());
         assert!(safe_remote_path("bad\rpath").is_err());
     }

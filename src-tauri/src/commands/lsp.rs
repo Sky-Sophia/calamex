@@ -1201,18 +1201,28 @@ mod tests {
 
     #[test]
     fn test_uri_to_path_roundtrip() {
-        let original = "/home/user/My Scripts/测试.sh";
-        let uri = path_to_uri(original).unwrap();
-        assert_eq!(uri_to_path(&uri), original);
-    }
+    // path_to_uri / uri_to_path 行为依平台而异（Windows 走盘符路径分支），
+    // 测试输入需按平台选取，否则在 Windows 上会因前导斜杠处理误报。
+    #[cfg(windows)]
+    let original = "C:/Users/user/My Scripts/测试.sh";
+    #[cfg(not(windows))]
+    let original = "/home/user/My Scripts/测试.sh";
+    let uri = path_to_uri(original).unwrap();
+    assert_eq!(uri_to_path(&uri), original);
+}
 
     #[test]
-    fn test_uri_to_path_basic() {
-        assert_eq!(
-            uri_to_path("file:///home/user/test.sh"),
-            "/home/user/test.sh"
-        );
-    }
+fn test_uri_to_path_basic() {
+    // Windows 下 file:///C:/... 去掉 file:// 后是 /C:/...，需再剥前导斜杠；
+    // 类 Unix 平台保留前导斜杠。
+    #[cfg(windows)]
+    assert_eq!(uri_to_path("file:///C:/Users/test.sh"), "C:/Users/test.sh");
+    #[cfg(not(windows))]
+    assert_eq!(
+        uri_to_path("file:///home/user/test.sh"),
+        "/home/user/test.sh"
+    );
+}
 
     #[test]
     fn test_frame_message() {

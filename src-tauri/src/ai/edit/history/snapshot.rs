@@ -30,6 +30,7 @@ pub struct SnapshotPruneOutcome {
     pub removed_blob_count: usize,
     pub reclaimed_bytes: u64,
     pub downgraded_snapshot_count: usize,
+    pub downgraded_snapshot_ids: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -659,8 +660,9 @@ fn strip_manifest_blobs(
         }
     }
 
-    outcome.downgraded_snapshot_count += 1;
-    Ok(())
+        outcome.downgraded_snapshot_count += 1;
+        outcome.downgraded_snapshot_ids.insert(manifest.id.clone());
+        Ok(())
 }
 
 fn remove_blob(
