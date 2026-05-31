@@ -11,16 +11,16 @@
         @click="emit('select', tab.sessionId)"
         @mousedown.middle.prevent="emit('close', tab.sessionId)"
       >
-        <span aria-hidden="true" class="terminal-tab-icon icon-[lucide--square-terminal]" />
-        <span class="terminal-tab-label" v-text="'终端 ' + (index + 1)" />
         <span
-          class="terminal-tab-close"
+          class="terminal-tab-icon"
           role="button"
           aria-label="关闭终端"
           @click.stop="emit('close', tab.sessionId)"
         >
-          <span aria-hidden="true" class="icon-[lucide--x]" />
+          <span aria-hidden="true" class="terminal-tab-icon-glyph terminal-tab-icon-default icon-[lucide--square-terminal]" />
+          <span aria-hidden="true" class="terminal-tab-icon-glyph terminal-tab-icon-close icon-[lucide--x]" />
         </span>
+        <span class="terminal-tab-label" v-text="'终端 ' + (index + 1)" />
       </div>
     </div>
 
@@ -79,8 +79,9 @@ const emit = defineEmits<{
   gap: 6px;
   height: 26px;
   max-width: 200px;
-  padding: 0 6px 0 9px;
+  padding: 0 10px 0 9px;
   border-radius: 6px;
+  background: #fafafa;
   color: var(--text-tertiary);
   font-size: 12px;
   line-height: 1;
@@ -92,52 +93,64 @@ const emit = defineEmits<{
 }
 
 .terminal-tab:hover {
-  background: color-mix(in srgb, var(--surface-hover) 100%, transparent);
+  background: #f4f4f4;
   color: var(--text-primary);
 }
 
 .terminal-tab.is-active {
-  background: color-mix(in srgb, var(--accent-strong) 14%, transparent);
+  background: #f4f4f4;
   color: var(--text-primary);
   font-weight: 600;
 }
 
+/* 图标槽固定 14×14：默认显示终端图标，悬停整条标签时整体切换为关闭叉叉，二者同尺寸避免宽度抖动 */
 .terminal-tab-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
   flex-shrink: 0;
+  width: 14px;
+  height: 14px;
   font-size: 14px;
+  cursor: pointer;
+}
+
+.terminal-tab-icon-glyph {
+  grid-area: 1 / 1;
+  display: block;
+  width: 14px;
+  height: 14px;
+  font-size: 14px;
+  line-height: 1;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease;
+}
+
+.terminal-tab-icon-default {
   opacity: 0.9;
+}
+
+.terminal-tab-icon-close {
+  opacity: 0;
+}
+
+.terminal-tab:hover .terminal-tab-icon-default {
+  opacity: 0;
+}
+
+.terminal-tab:hover .terminal-tab-icon-close {
+  opacity: 1;
+}
+
+.terminal-tab-icon:hover .terminal-tab-icon-close {
+  color: var(--danger);
 }
 
 .terminal-tab-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.terminal-tab-close {
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  opacity: 0;
-  flex-shrink: 0;
-  transition:
-    opacity 120ms ease,
-    background-color 120ms ease,
-    color 120ms ease;
-}
-
-.terminal-tab:hover .terminal-tab-close,
-.terminal-tab.is-active .terminal-tab-close {
-  opacity: 1;
-}
-
-.terminal-tab-close:hover {
-  background: color-mix(in srgb, var(--danger) 16%, transparent);
-  color: var(--danger);
 }
 
 .terminal-tabbar-new {
