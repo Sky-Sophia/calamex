@@ -13,7 +13,7 @@
         @mousedown.middle.prevent="onMiddleClick(tab.sessionId)"
       >
         <span aria-hidden="true" class="terminal-tab-icon icon-[lucide--square-terminal]" />
-        <span class="terminal-tab-label"> tab.title </span>
+        <span class="terminal-tab-label" v-text="tab.title" />
         <span
           v-if="isClosable(tab.sessionId)"
           class="terminal-tab-close"
@@ -54,7 +54,7 @@ const emit = defineEmits<{
   new: [];
 }>();
 
-/** 主会话（main-terminal）不可关闭。 */
+// 主会话（main-terminal）不可关闭。
 const isClosable = (sessionId: string): boolean =>
   sessionId !== DEFAULT_TERMINAL_SESSION_ID;
 

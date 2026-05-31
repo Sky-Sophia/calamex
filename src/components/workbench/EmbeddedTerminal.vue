@@ -20,7 +20,7 @@
               <template v-else>WSL2 终端暂不可用</template>
             </p>
             <p class="embedded-terminal-overlay-caption-text">
-              <span v-if="statusMessage"> statusMessage </span>
+              <span v-if="statusMessage" v-text="statusMessage" />
               <span v-else>WSL2 终端连接中断，请点击重新连接。</span>
             </p>
           </div>
