@@ -139,7 +139,7 @@ export class MastraRuntimeBase {
         const mode: IAgentRuntimeInput['mode'] = 'agent';
         const normalizedInput: IAgentRuntimeInput = {
             mode,
-            goal: input.goal?.trim() || '继续当前任务',
+            goal: input.goal?.trim() || '\u7ee7\u7eed\u5f53\u524d\u4efb\u52a1',
             messages: input.messages ?? [],
             context: input.context ?? [],
             ...(input.workspaceRootPath ? { workspaceRootPath: input.workspaceRootPath } : {}),
@@ -249,7 +249,6 @@ export class MastraRuntimeBase {
         workflowTracker?: IPlanWorkflowStepTracker,
     ): Promise<IMastraTextStreamSummary> {
         let visibleText = '';
-        let emittedVisibleText = '';
         let streamErrorMessage: string | null = null;
         let pendingApproval = false;
         let releaseResources = true;
@@ -306,15 +305,13 @@ export class MastraRuntimeBase {
                 }
 
                 visibleText += nextText;
-
-                if (visibleText !== emittedVisibleText) {
-                    emittedVisibleText = visibleText;
-                    pushUiEvent(events, {
-                        type: 'message_delta',
-                        text: visibleText,
-                        phase: 'final',
-                    }, options);
-                }
+                // Emit only the incremental text; the frontend accumulates it.
+                // The terminal done event still carries the full result.
+                pushUiEvent(events, {
+                    type: 'message_delta',
+                    text: nextText,
+                    phase: 'final',
+                }, options);
                 continue;
             }
 
@@ -438,7 +435,7 @@ export class MastraRuntimeBase {
                     request: {
                         id: pendingRequestId ?? chunk.payload.toolCallId,
                         toolName: chunk.payload.toolName,
-                        question: `${chunk.payload.toolName} 已暂停，等待继续信息。`,
+                        question: `${chunk.payload.toolName} \u5df2\u6682\u505c\uff0c\u7b49\u5f85\u7ee7\u7eed\u4fe1\u606f\u3002`,
                         summary: JSON.stringify(toJsonValue(chunk.payload.suspendPayload)),
                         riskLevel: 'medium',
                         reversible: true,
@@ -478,7 +475,7 @@ export class MastraRuntimeBase {
             }
 
             if (chunk.type === 'abort') {
-                streamErrorMessage = 'Mastra Agent 执行已中止。';
+                streamErrorMessage = 'Mastra Agent \u6267\u884c\u5df2\u4e2d\u6b62\u3002';
             }
         }
 
@@ -496,7 +493,7 @@ export class MastraRuntimeBase {
         sessionId: string,
         options: IAgentRuntimeRunOptions,
     ): IAgentRuntimeResponse {
-        const result = '审批结果已记录，等待下一次 Agent 执行继续消费。';
+        const result = '\u5ba1\u6279\u7ed3\u679c\u5df2\u8bb0\u5f55\uff0c\u7b49\u5f85\u4e0b\u4e00\u6b21 Agent \u6267\u884c\u7ee7\u7eed\u6d88\u8d39\u3002';
         const events: TAgentRuntimeOutputEvent[] = [];
 
         pushUiEvent(events, {
