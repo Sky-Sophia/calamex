@@ -6,6 +6,7 @@ pub mod ansi;
 pub mod command_contracts;
 pub mod dispatch;
 pub mod event_bus;
+pub mod exec_protocol;
 pub mod multiplexer;
 pub mod registry;
 pub mod snapshot;

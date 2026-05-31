@@ -4,9 +4,8 @@
 // gRPC / Noise / 旁路 agent，而是用 portable-pty 在桌面进程内直接拉起 wsl.exe，
 // 与 VS Code、Windows Terminal 走同一套官方方案。
 //
-// 为把命令层（commands/terminal.rs）的改动降到最低，本模块复用 wsl_link 既有的
-// WslLinkTerminalServerPayload 事件类型与 UTF-8 分块解码器；后续 PR 会把这些类型
-// 从 wsl_link 迁出后再清理依赖。
+// 事件类型（WslLinkTerminalServerPayload）、运行/交互请求与 UTF-8 分块解码器定义在
+// 同域的 terminal::exec_protocol；命令层与本模块共用这一套类型，不再依赖 wsl_link。
 
 use std::{
     io::{Read, Write},
@@ -19,14 +18,14 @@ use portable_pty::{
 };
 use thiserror::Error;
 
-use super::wsl::bash_quote;
-use crate::wsl_link::terminal_exec::{
+use super::exec_protocol::{
     WslLinkTerminalInteractiveClosed, WslLinkTerminalInteractiveData,
     WslLinkTerminalInteractiveOpened, WslLinkTerminalOpenInteractiveRequest,
     WslLinkTerminalRunChunk, WslLinkTerminalRunCompleted, WslLinkTerminalRunScriptRequest,
     WslLinkTerminalRunStarted, WslLinkTerminalServerPayload, WslLinkUtf8ChunkDecoder,
     SIGNAL_MODE_KILL,
 };
+use super::wsl::bash_quote;
 
 const TERMINAL_READ_BUFFER_BYTES: usize = 8192;
 
