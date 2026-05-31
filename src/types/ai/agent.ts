@@ -1,12 +1,12 @@
-import type { TAgentPlanStatus } from './agent-sidecar';
-import type { IAiContextReference } from './ai-context';
-import type { TAiAgentPermissionLevel, TAiAgentToolName } from './ai-tools';
+import type { IAiContextReference } from './context';
+import type { TAgentPlanStatus } from './sidecar';
+import type { TAiAgentPermissionLevel, TAiAgentToolName } from './tools';
 import type {
   IAiWebFetchInput,
   IAiWebSearchInput,
   TAiWebSourceEntryStatus,
   TAiWebSourceType,
-} from './ai-web';
+} from './web';
 
 export const AI_AGENT_PLAN_STEP_KINDS = [
   'inspect',

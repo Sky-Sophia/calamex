@@ -1,21 +1,4 @@
 import type {
-  IAgentSidecarApprovalResolveRequest,
-  IAgentSidecarChatRequest,
-  IAgentSidecarCheckpointRestoreRequest,
-  IAgentSidecarExecuteRequest,
-  IAgentSidecarHealthPayload,
-  IAgentSidecarPlanApproveRequest,
-  IAgentSidecarPlanFinishRequest,
-  IAgentSidecarPlanQueryRequest,
-  IAgentSidecarPlanRejectRequest,
-  IAgentSidecarPlanReplanRequest,
-  IAgentSidecarPlanRequest,
-  IAgentSidecarPlanValidateRequest,
-  IAgentSidecarResponsePayload,
-  IAgentSidecarStreamEventPayload,
-  IAgentSidecarWarmupPayload,
-} from './agent-sidecar';
-import type {
   IAiAgentClassifyTaskPayload,
   IAiAgentClassifyTaskRequest,
   IAiAgentNetworkPermissionPayload,
@@ -45,7 +28,7 @@ import type {
   IAiWebFetchPayload,
   IAiWebSearchInput,
   IAiWebSearchPayload,
-} from './ai';
+} from '../ai';
 import type {
   IAiEditAuthState,
   IAiEditCreateSnapshotPayload,
@@ -67,7 +50,24 @@ import type {
   IAiEditSetPinRequest,
   IAiEditUndoOperationPayload,
   IAiEditUndoOperationRequest,
-} from './ai-edit';
+} from '../ai/edit';
+import type {
+  IAgentSidecarApprovalResolveRequest,
+  IAgentSidecarChatRequest,
+  IAgentSidecarCheckpointRestoreRequest,
+  IAgentSidecarExecuteRequest,
+  IAgentSidecarHealthPayload,
+  IAgentSidecarPlanApproveRequest,
+  IAgentSidecarPlanFinishRequest,
+  IAgentSidecarPlanQueryRequest,
+  IAgentSidecarPlanRejectRequest,
+  IAgentSidecarPlanReplanRequest,
+  IAgentSidecarPlanRequest,
+  IAgentSidecarPlanValidateRequest,
+  IAgentSidecarResponsePayload,
+  IAgentSidecarStreamEventPayload,
+  IAgentSidecarWarmupPayload,
+} from '../ai/sidecar';
 import type {
   IAnalyzeScriptPayload,
   IAnalyzeScriptRequest,
@@ -84,7 +84,7 @@ import type {
   IWorkspacePathDeleteRequest,
   IWorkspacePathRenamePayload,
   IWorkspacePathRenameRequest,
-} from './editor';
+} from '../editor';
 import type {
   IGitBranchCheckoutRequest,
   IGitBranchCreateRequest,
@@ -104,7 +104,7 @@ import type {
   IGitStashDropRequest,
   IGitStashListPayload,
   IGitStashSaveRequest,
-} from './git';
+} from '../git';
 import type {
   IWorkspaceReplacementApplyPayload,
   IWorkspaceReplacementApplyRequest,
@@ -112,7 +112,7 @@ import type {
   IWorkspaceReplacementRequest,
   IWorkspaceSearchPayload,
   IWorkspaceSearchRequest,
-} from './search';
+} from '../search';
 import type {
   ICancelTerminalRunRequest,
   ICloseTerminalSessionRequest,
@@ -122,7 +122,7 @@ import type {
   IResizeTerminalSessionRequest,
   ITerminalSessionPayload,
   IWriteTerminalInputRequest,
-} from './terminal';
+} from '../terminal';
 
 export interface ISshConnectionTestRequest {
   host: string;

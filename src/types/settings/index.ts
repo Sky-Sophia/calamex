@@ -1,4 +1,4 @@
-import type { TAccentColor, TRadiusPreset, TThemePreference, TUiDensity } from './app';
+import type { TAccentColor, TRadiusPreset, TThemePreference, TUiDensity } from '../app';
 
 export type TSettingsSectionId =
   | 'general'
