@@ -32,6 +32,7 @@ export default defineConfig(({ command }) => ({
     },
   },
   build: {
+    chunkSizeWarningLimit: 1500,
     rollupOptions: {
       input: {
         index: fileURLToPath(new URL('./index.html', import.meta.url)),
