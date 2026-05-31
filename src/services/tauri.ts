@@ -182,8 +182,8 @@ const buildPayloadMetricsOmittingTextFields = <T extends Record<string, unknown>
   };
 };
 
-const measureScriptContentInput = <T extends { content: string }>(value: T): IPayloadMetrics =>
-  buildPayloadMetricsOmittingTextFields(value as unknown as Record<string, unknown>, ['content']);
+const measureScriptContentInput = (value: Record<string, unknown>): IPayloadMetrics =>
+  buildPayloadMetricsOmittingTextFields(value, ['content']);
 
 const measureAiChatInput = <T extends Record<string, unknown>>(value: T): IPayloadMetrics =>
   buildPayloadMetricsOmittingTextFields(value, ['messages', 'references']);
@@ -1404,26 +1404,30 @@ export const tauriService: ITauriService & {
   },
 
   startWorkspaceWatching(rootPath: string) {
-    return callSpectaCommand(
+    return callSpectaCommand<void>(
       {
         command: 'start_workspace_watching',
         guardHint: '启动文件监听',
-        audit: 'info',,
+        audit: 'info',
         input: rootPath,
       },
-      () => commands.startWorkspaceWatching(rootPath),
+      async () => {
+        await commands.startWorkspaceWatching(rootPath);
+      },
     );
   },
 
   stopWorkspaceWatching() {
-    return callSpectaCommand(
+    return callSpectaCommand<void>(
       {
         command: 'stop_workspace_watching',
         guardHint: '停止文件监听',
-        audit: 'info',,
+        audit: 'info',
         input: undefined,
       },
-      () => commands.stopWorkspaceWatching(),
+      async () => {
+        await commands.stopWorkspaceWatching();
+      },
     );
   },
   searchWorkspace(payload, options) {

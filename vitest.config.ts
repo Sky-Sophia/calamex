@@ -4,13 +4,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [
-    vue(),
-    Icons({
-      compiler: 'vue3',
-      autoInstall: true,
-      defaultStyle: '',
-      defaultClass: '',
-    }),
+    vue(), // 只保留 Vue 插件
   ],
   resolve: {
     alias: {
@@ -31,7 +25,6 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],
       reportsDirectory: './coverage',
-      // 关键模块差分覆盖率 ≥ 90%（R-20.9.1）
       thresholds: {
         global: {
           lines: 80,
@@ -39,7 +32,6 @@ export default defineConfig({
         },
       },
     },
-    // 模拟 Tauri API（IPC 层测试时替换）
     setupFiles: ['src/__tests__/setup.ts'],
   },
 });
