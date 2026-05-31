@@ -8,7 +8,6 @@ mod assets;
 mod commands;
 mod tauri_bindings;
 mod terminal;
-mod wsl_link;
 
 use ai::edit::AiEditState;
 use commands::WorkspaceWatcher;
@@ -27,22 +26,19 @@ use commands::{
     ai_get_suggestion_pool_cache, ai_inline_complete, ai_propose_patch, ai_save_config,
     ai_save_credentials, ai_test_provider, ai_test_provider_config, ai_web_fetch, ai_web_search,
     analyze_script, apply_git_stash, apply_window_stage, apply_workspace_replacement,
-    cancel_terminal_run, check_wsl_link_environment, checkout_git_branch, close_terminal_session,
+    cancel_terminal_run, checkout_git_branch, close_terminal_session,
     commit_git_index, create_git_branch, create_ssh_directory, create_workspace_path,
     delete_ssh_path, delete_workspace_path, detect_execution_environment, discard_git_paths,
     dispatch_script_to_terminal, download_ssh_file, drop_git_stash, ensure_terminal_session,
     format_script, get_git_diff_preview, get_git_file_baseline, get_git_pull_request_support,
-    get_git_repository_status, get_ssh_password, get_wsl_link_agent_artifact_status,
-    get_wsl_link_status, init_git_repository, install_wsl_link_agent, list_git_branches,
+    get_git_repository_status, get_ssh_password, init_git_repository, list_git_branches,
     list_git_commit_history, list_git_stashes, list_ssh_config_hosts, list_ssh_directory,
     list_workspace_entries, load_image_asset, load_script, preview_workspace_replacement,
-    probe_wsl_link_primary, read_ssh_file, rename_ssh_path, rename_workspace_path,
+    read_ssh_file, rename_ssh_path, rename_workspace_path,
     resize_terminal_session, save_git_stash, save_script, save_ssh_password, search_workspace,
     set_window_background, shutdown_all_terminal_sessions, stage_git_paths, lsp_start, lsp_stop, lsp_did_open, lsp_did_change, lsp_did_close, lsp_completion, lsp_hover,
-            start_workspace_watching,
-    start_wsl_link_agent, start_wsl_link_supervisor, stop_workspace_watching,
-    stop_wsl_link_supervisor, test_ssh_connection, unstage_git_paths, upload_ssh_file,
-    write_ssh_file, write_terminal_input, TerminalSessionState,
+    start_workspace_watching, stop_workspace_watching, test_ssh_connection, unstage_git_paths,
+    upload_ssh_file, write_ssh_file, write_terminal_input, TerminalSessionState,
 };
 use std::{
     sync::atomic::{AtomicBool, Ordering},
@@ -53,7 +49,6 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, WindowEvent,
 };
-use wsl_link::runtime::WslLinkRuntimeState;
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_ICON_ID: &str = "main-tray";
@@ -93,12 +88,12 @@ fn emit_startup_step(event: &str, app_started_at: Instant, step_started_at: Inst
 }
 
 macro_rules! timed_step {
-    ($event:expr, $app_started_at:expr, $body:block) => {{
+    ($event:expr, $app_started_at:expr, $body:block) => 
         let __step_started_at = std::time::Instant::now();
         let __result = $body;
         emit_startup_step($event, $app_started_at, __step_started_at);
         __result
-    }};
+    ;
 }
 
 // === 生命周期 ============================================================
@@ -236,7 +231,6 @@ fn main() {
         .manage(AiEditState::default())
         .manage(AppLifecycleState::default())
         .manage(TerminalSessionState::default())
-        .manage(WslLinkRuntimeState::default())
         .manage(WorkspaceWatcher::default())
         .manage(LspManager::new())
         .on_window_event(|window, event| {
@@ -296,14 +290,6 @@ fn main() {
             analyze_script,
             format_script,
             detect_execution_environment,
-            get_wsl_link_status,
-            check_wsl_link_environment,
-            get_wsl_link_agent_artifact_status,
-            install_wsl_link_agent,
-            start_wsl_link_agent,
-            start_wsl_link_supervisor,
-            stop_wsl_link_supervisor,
-            probe_wsl_link_primary,
             dispatch_script_to_terminal,
             list_workspace_entries,
             create_workspace_path,
