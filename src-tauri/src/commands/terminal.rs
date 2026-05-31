@@ -664,10 +664,6 @@ fn resolve_terminal_start_directory(path: Option<&str>) -> Result<Option<PathBuf
     Ok(None)
 }
 
-pub(crate) fn build_temp_file_suffix() -> Result<String, String> {
-    terminal_wsl::build_temp_file_suffix()
-}
-
 fn terminal_now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1300,7 +1296,7 @@ mod tests {
     fn dispatch_command_prefers_workspace_root_over_script_directory() {
         let temp_root = std::env::temp_dir().join(format!(
             "calamex-dispatch-workspace-{}",
-            build_temp_file_suffix().expect("suffix should build")
+            terminal_wsl::build_temp_file_suffix().expect("suffix should build")
         ));
         let script_dir = temp_root.join("scripts");
         fs::create_dir_all(&script_dir).expect("test workspace should be created");

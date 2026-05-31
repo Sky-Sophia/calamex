@@ -37,7 +37,7 @@ pub use ai::{
 pub use contracts::{
     AnalyzeScriptPayload, AnalyzeScriptRequest, DocumentEncoding, ExecutionEnvironment,
     ExecutionOption, ExecutorKind, FormatScriptPayload, FormatScriptRequest, ImageAssetPayload,
-    SaveScriptRequest, ScriptDiagnosticPayload, ScriptDiagnosticSeverity, ScriptFilePayload,
+    SaveScriptRequest, ScriptFilePayload,
     SshConfigHostPayload, SshConnectionTestPayload, SshConnectionTestRequest,
     SshDirectoryCreatePayload, SshDirectoryCreateRequest, SshDirectoryEntryPayload,
     SshDirectoryListPayload, SshDirectoryListRequest, SshFileDownloadPayload,
@@ -56,7 +56,7 @@ pub use git::{
     list_git_stashes, save_git_stash, stage_git_paths, unstage_git_paths,
 };
 pub use script_run::detect_execution_environment;
-pub(crate) use script_run::{create_temp_script, find_command_path, line_count};
+pub(crate) use script_run::{find_command_path, line_count};
 pub use search::{apply_workspace_replacement, preview_workspace_replacement, search_workspace};
 pub use shell_tools::{analyze_script, format_script};
 pub use ssh::{
@@ -64,7 +64,6 @@ pub use ssh::{
     list_ssh_config_hosts, list_ssh_directory, read_ssh_file, rename_ssh_path, save_ssh_password,
     test_ssh_connection, upload_ssh_file, write_ssh_file,
 };
-pub(crate) use terminal::{build_temp_file_suffix, to_wsl_path};
 pub use terminal::{
     cancel_terminal_run, close_terminal_session, dispatch_script_to_terminal,
     ensure_terminal_session, resize_terminal_session, shutdown_all_terminal_sessions,
@@ -84,7 +83,7 @@ pub use workspace_watcher::{
 };
 pub use lsp::{
     lsp_start, lsp_stop, lsp_did_open, lsp_did_change, lsp_did_close,
-    lsp_completion, lsp_hover, LspManager, LspDiagnostic, LspCompletionItem, LspHoverResult,
+    lsp_completion, lsp_hover, LspManager,
 };
 
 #[cfg(windows)]

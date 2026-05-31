@@ -14,7 +14,7 @@ use std::{
 };
 
 use portable_pty::{
-    native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize, PtySystem, SlavePty,
+    native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize,
 };
 use thiserror::Error;
 

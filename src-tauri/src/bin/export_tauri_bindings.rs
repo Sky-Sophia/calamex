@@ -33,7 +33,7 @@ pub use contracts::{
     WorkspacePathCreateRequest, WorkspacePathDeletePayload, WorkspacePathDeleteRequest,
     WorkspacePathKind, WorkspacePathRenamePayload, WorkspacePathRenameRequest,
 };
-pub(crate) use script_run::{create_temp_script, find_command_path, line_count};
+pub(crate) use script_run::{find_command_path, line_count};
 pub(crate) use workspace_fs::{decode_script_bytes, encode_script_content, resolve_workspace_root};
 
 pub(crate) fn build_temp_file_suffix() -> Result<String, String> {

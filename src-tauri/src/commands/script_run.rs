@@ -1,7 +1,7 @@
-use super::{DocumentEncoding, ExecutionEnvironment, ExecutionOption, ExecutorKind};
+use super::{ExecutionEnvironment, ExecutionOption, ExecutorKind};
 use std::{
-    env, fs,
-    path::{Path, PathBuf},
+    env,
+    path::PathBuf,
     sync::Mutex,
     time::{Duration, Instant},
 };
@@ -67,27 +67,6 @@ pub(crate) fn find_command_path(file_name: &str, extra_candidates: &[&str]) -> O
         .iter()
         .map(PathBuf::from)
         .find(|candidate| candidate.exists())
-}
-
-pub(crate) fn create_temp_script(
-    preferred_directory: &Path,
-    original_name: &str,
-    content: &str,
-    encoding: DocumentEncoding,
-) -> Result<PathBuf, String> {
-    let directory = preferred_directory.to_path_buf();
-    fs::create_dir_all(&directory).map_err(|error| format!("创建临时目录失败：{error}"))?;
-
-    let suffix = super::build_temp_file_suffix()?;
-    let stem = Path::new(original_name)
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("untitled");
-    let temp_path = directory.join(format!("{stem}-{suffix}.tmp.sh"));
-    let bytes = super::encode_script_content(content, &encoding)?;
-    fs::write(&temp_path, bytes).map_err(|error| format!("写入临时脚本失败：{error}"))?;
-    Ok(temp_path)
 }
 
 async fn collect_executor_candidates() -> Vec<ExecutorCandidate> {
