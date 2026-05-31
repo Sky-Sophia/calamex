@@ -1086,6 +1086,15 @@ impl SshConfigHostBuilder {
     }
 }
 
+/// From a `Host` line's pattern list, pick the first concrete alias,
+/// ignoring wildcard patterns (`*` / `?`) and negated (`!`) entries.
+fn concrete_host_alias(patterns: &str) -> Option<String> {
+    patterns
+        .split_whitespace()
+        .find(|p| !p.starts_with('!') && !p.contains('*') && !p.contains('?'))
+        .map(|p| p.to_string())
+}
+
 fn parse_ssh_config_hosts(content: &str) -> Vec<SshConfigHostPayload> {
     let mut hosts: Vec<SshConfigHostPayload> = Vec::new();
     let mut cur = SshConfigHostBuilder::new();
@@ -1101,7 +1110,7 @@ fn parse_ssh_config_hosts(content: &str) -> Vec<SshConfigHostPayload> {
         match keyword.to_lowercase().as_str() {
             "host" => {
                 cur.flush(&mut hosts);
-                cur.name = Some(value);
+                cur.name = concrete_host_alias(&value);
             }
             "hostname" => {
                 if !value.contains('*') {
@@ -1116,7 +1125,7 @@ fn parse_ssh_config_hosts(content: &str) -> Vec<SshConfigHostPayload> {
             }
             "identityfile" => {
                 let cleaned = value.trim_matches('"').trim_matches('\'');
-                cur.identity = Some(expand_tilde(cleaned));
+                cur.identity = Some(cleaned.to_string());
             }
             "proxyjump" | "proxycommand" => cur.has_proxyjump = true,
             _ => {}
