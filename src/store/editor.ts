@@ -743,12 +743,17 @@ export const useEditorStore = defineStore(
 
     // Actions: environment / logs / run
 
-    // TODO: setEnvironment 与 clearWorkspaceSession 对 selectedExecutor 的处理不一致——
-    // 前者无条件重置为 DEFAULT_EXECUTOR,后者不动。如果是在同一会话内 environment 刷新
-    // (执行器集合未变),应该保留用户当前选择;切工作区才重置。两边语义需要对齐。
+    // environment 刷新 (同一会话内执行器集合可能未变) 时,若用户当前选择的执行器仍然可用,
+    // 则保留其选择;否则回退到推荐执行器。切换工作区时的重置由 clearWorkspaceSession 负责,
+    // 两者对 selectedExecutor 的语义在此对齐。
     const setEnvironment = (payload: IExecutionEnvironment): void => {
       environment.value = payload;
-      selectedExecutor.value = DEFAULT_EXECUTOR;
+      const currentStillAvailable = payload.executors.some(
+        (option) => option.type === selectedExecutor.value && option.available,
+      );
+      if (!currentStillAvailable) {
+        selectedExecutor.value = payload.recommended;
+      }
     };
 
     const setCursorPosition = (line: number, column: number): void => {
@@ -837,8 +842,7 @@ export const useEditorStore = defineStore(
       pendingTerminalRunId.value = value;
     };
 
-    // TODO: 与 setEnvironment 对齐——如果决定 setEnvironment 不再无条件重置 executor,
-    // 这里需要补一行 selectedExecutor.value = DEFAULT_EXECUTOR。
+    // 切换工作区时重置执行器选择,与 setEnvironment 的会话内保留策略对齐。
     const clearWorkspaceSession = (): void => {
       clearDocuments();
       workspaceRootPath.value = null;
@@ -849,6 +853,7 @@ export const useEditorStore = defineStore(
       activeRunSummary.value = null;
       isRunning.value = false;
       pendingTerminalRunId.value = null;
+      selectedExecutor.value = DEFAULT_EXECUTOR;
       touchSessionSnapshot();
     };
 
