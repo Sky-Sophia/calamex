@@ -13,6 +13,10 @@ import type { StorageLike } from 'pinia-plugin-persistedstate';
  *   2. 同步 getItem 从 cache 返回;
  *   3. 同步 setItem 更新 cache + 防抖异步 set() 落盘。
  * hydrate 必须在 Pinia 首次读 getItem 之前完成(见 main.ts，与 session hydrate 并行 await)。
+ *
+ * 数据安全约束(关键):hydrate 读 idb 超时时**绝不能**用空白初始态覆盖磁盘上
+ * 尚未读出的历史。详见 hydrateAiConversationStorage / reconcileAfterHydrate /
+ * setItem 的 deferred-write 逻辑。
  */
 
 // ---------------------------------------------------------------------------
@@ -23,6 +27,12 @@ import type { StorageLike } from 'pinia-plugin-persistedstate';
 const AI_CONVERSATION_PERSIST_KEY = 'shell-ide.ai-conversation';
 /** 写入防抖：滚动/流式期间高频 setItem 合并为一次 idb 落盘。 */
 const SAVE_DEBOUNCE_MS = 300;
+/**
+ * 防抖最大等待:即使 setItem 持续高频触发(如长篇流式输出每帧都写),也必须
+ * 至少每 SAVE_MAX_WAIT_MS 落盘一次。否则 trailing-only 防抖会被持续活动
+ * "饿死",整段进行中的会话长时间不落盘,崩溃/退出即全部丢失。
+ */
+const SAVE_MAX_WAIT_MS = 1000;
 /** hydrate 读取 idb 的超时;超时则以空态启动，避免阻塞首屏。 */
 const HYDRATE_TIMEOUT_MS = 300;
 /** 专用 IndexedDB 库/表名，与其他持久化隔离。 */
@@ -43,7 +53,22 @@ export interface IAiConversationPersistStorage extends StorageLike {
 let idbStore: UseStore | null = null;
 let cache: string | null = null;
 let isReady = false;
+/**
+ * 真正的 idb 读取是否已 settle。
+ * - hydrate 命中/为空:settle 后置 true。
+ * - hydrate 超时:先返回 'timeout' 但保持 false,直到后台读取真正 settle
+ *   (reconcileAfterHydrate)才置 true。
+ * 在其为 false 期间,setItem 不直接落盘,而是把最新值暂存到 deferredWrite,
+ * 杜绝"超时空态覆盖磁盘历史"。
+ */
+let hydrationSettled = false;
+/** 超时占位期间用户写入的最新值;reconcile 时据此决定落盘还是恢复磁盘值。 */
+let deferredWrite: string | null = null;
+/** 是否发生过 removeItem(显式清理);若有则后台迁移/对账不得复活磁盘数据。 */
+let clearedDuringHydration = false;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
+/** 当前防抖批次首次入队的时间戳(ms);用于 SAVE_MAX_WAIT_MS 上限计算。 */
+let firstPendingAt: number | null = null;
 let persistQueue: Promise<void> = Promise.resolve();
 let flushListenersRegistered = false;
 
@@ -108,6 +133,9 @@ const removeLegacyLocalStorage = (): void => {
 /**
  * 从 idb 读取快照;若 idb 无记录则尝试从旧 localStorage 一次性迁移。
  * 迁移成功后写入 idb 并清除旧 localStorage key，避免重复迁移。
+ *
+ * 若在读取过程中已发生显式 removeItem(clearedDuringHydration),则不得把
+ * legacy 迁回 idb——否则会把刚被用户删除的数据复活。
  */
 const loadFromIdbWithMigration = async (): Promise<string | null> => {
   const store = getIdbStore();
@@ -117,6 +145,10 @@ const loadFromIdbWithMigration = async (): Promise<string | null> => {
   }
   const legacy = readLegacyLocalStorage();
   if (legacy !== null) {
+    if (clearedDuringHydration) {
+      removeLegacyLocalStorage();
+      return null;
+    }
     await set(AI_CONVERSATION_PERSIST_KEY, legacy, store);
     removeLegacyLocalStorage();
     return legacy;
@@ -177,20 +209,30 @@ const enqueuePersist = (operation: () => Promise<void>, errorEvent: string): voi
 };
 
 const schedulePersist = (value: string): void => {
+  const now = Date.now();
+  if (firstPendingAt === null) {
+    firstPendingAt = now;
+  }
+  // trailing 防抖 + maxWait 上限:连续高频写入时,delay 随距首次入队的时间
+  // 收敛到 0,保证最迟 SAVE_MAX_WAIT_MS 内必落盘一次。
+  const elapsed = now - firstPendingAt;
+  const delay = Math.max(0, Math.min(SAVE_DEBOUNCE_MS, SAVE_MAX_WAIT_MS - elapsed));
   clearSaveTimer();
   saveTimer = setTimeout(() => {
     saveTimer = null;
+    firstPendingAt = null;
     enqueuePersist(
       () => set(AI_CONVERSATION_PERSIST_KEY, value, getIdbStore()),
       'ai-conversation-save-failed',
     );
-  }, SAVE_DEBOUNCE_MS);
+  }, delay);
 };
 
 /** best-effort：页面隐藏/卸载时把未落盘的最新 cache 立即入队写入。 */
 const flushPendingPersist = (): void => {
   if (saveTimer === null || cache === null) return;
   clearSaveTimer();
+  firstPendingAt = null;
   const value = cache;
   enqueuePersist(
     () => set(AI_CONVERSATION_PERSIST_KEY, value, getIdbStore()),
@@ -217,28 +259,71 @@ const registerFlushListeners = (): void => {
 // ---------------------------------------------------------------------------
 
 /**
+ * 后台 idb 读取真正 settle 后的对账,仅由"第一个 settle 者"执行一次
+ * (hydrationSettled 守卫)。
+ *
+ * - 占位期间已 removeItem(clearedDuringHydration):保持已清空状态,不复活。
+ * - 占位期间用户已写入(deferredWrite 非空):用户值权威并落盘(此时覆盖旧值
+ *   是用户主动产生新内容,符合预期)。
+ * - 占位期间无写入:把磁盘真实值恢复进 cache(供后续 getItem),纯读取不落盘。
+ */
+const reconcileAfterHydrate = (loaded: string | null): void => {
+  if (hydrationSettled) {
+    return;
+  }
+  hydrationSettled = true;
+  if (clearedDuringHydration) {
+    return;
+  }
+  if (deferredWrite !== null) {
+    const value = deferredWrite;
+    deferredWrite = null;
+    cache = value;
+    if (typeof window !== 'undefined') {
+      schedulePersist(value);
+    }
+    return;
+  }
+  cache = loaded;
+};
+
+/**
  * 异步初始化：从 idb(或迁移自 localStorage) 加载快照到 cache，然后置 isReady。
  * 必须在 Pinia 读 getItem 之前 await 完成(见 main.ts)，否则首次读拿到 null
  * (会退化到 store 初始值)。
+ *
+ * 超时分支不再丢弃后台读取结果:loadPromise 仍在后台运行,settle 后由
+ * reconcileAfterHydrate 决定恢复磁盘数据还是落盘用户新值,从而避免
+ * "磁盘偏慢一次 → 历史被空态覆盖"的静默数据丢失。
  */
 export const hydrateAiConversationStorage =
   async (): Promise<TAiConversationHydrateStatus> => {
     if (typeof window === 'undefined') {
       isReady = true;
+      hydrationSettled = true;
       cache = null;
       return 'empty';
     }
     registerFlushListeners();
-    const result = await withTimeout(loadFromIdbWithMigration(), HYDRATE_TIMEOUT_MS);
+    const loadPromise = loadFromIdbWithMigration();
+    // 后台对账:无论是否在 timeout 窗口内返回,真正 settle 后都对账一次。
+    void loadPromise.then(reconcileAfterHydrate).catch((error) => {
+      hydrationSettled = true;
+      logError('ai-conversation-hydrate-failed', error);
+    });
+    const result = await withTimeout(loadPromise, HYDRATE_TIMEOUT_MS);
     isReady = true;
     if (result === TIMEOUT_SENTINEL) {
+      // 占位空态:getItem 暂时返回 null,但 setItem 会 defer,最终处置交给
+      // reconcileAfterHydrate,绝不在此用空态覆盖磁盘历史。
       cache = null;
       logWarn(
         'ai-conversation-hydrate-timeout',
-        `idb did not resolve within ${HYDRATE_TIMEOUT_MS}ms; starting with empty cache`,
+        `idb did not resolve within ${HYDRATE_TIMEOUT_MS}ms; deferring writes until settle`,
       );
       return 'timeout';
     }
+    // 命中:reconcileAfterHydrate 通常已先行设置 cache,这里再确保一次。
     cache = result;
     return result === null ? 'empty' : 'loaded';
   };
@@ -258,13 +343,24 @@ const aiConversationStorage: IAiConversationPersistStorage = {
     }
     cache = value;
     if (typeof window === 'undefined') return;
+    if (!hydrationSettled) {
+      // hydrate(超时)尚未真正 settle:暂存最新值,等 reconcileAfterHydrate
+      // 处置,避免用空白初始态覆盖磁盘上尚未读出的历史。
+      deferredWrite = value;
+      return;
+    }
     schedulePersist(value);
   },
 
   removeItem(key) {
     if (key !== AI_CONVERSATION_PERSIST_KEY) return;
     clearSaveTimer();
+    firstPendingAt = null;
     cache = null;
+    deferredWrite = null;
+    // 阻止后台迁移/对账把已删数据复活。
+    clearedDuringHydration = true;
+    hydrationSettled = true;
     if (typeof window === 'undefined') return;
     enqueuePersist(
       () => del(AI_CONVERSATION_PERSIST_KEY, getIdbStore()),
