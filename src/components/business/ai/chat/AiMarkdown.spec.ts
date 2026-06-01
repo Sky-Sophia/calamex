@@ -55,7 +55,7 @@ describe('AiMarkdown rendering', () => {
     expect(wrapper.text()).toContain('done');
   });
 
-  it('始终关闭平滑流式，按真实到达速度渲染，避免结束时一次性 flush', async () => {
+  it('保持平滑流式(auto)并让 max-live-nodes 不跳变，避免结束时一次性 flush', async () => {
     const wrapper = mount(AiMarkdown, {
       props: {
         messageId: 'm-smooth-stream',
@@ -67,11 +67,11 @@ describe('AiMarkdown rendering', () => {
     await nextTick();
 
     const streamingRenderer = wrapper.getComponent(MarkdownRender);
-    // 流式阶段：关闭平滑流式(smooth-streaming)的节奏缓冲，直接按 content 到达速度渲染；
-    // 通过 max-live-nodes=0 关闭虚拟化，并配合小批量参数做增量渲染；关闭与高频更新冲突的淡入动画。
-    expect(streamingRenderer.props('smoothStreaming')).toBe(false);
+    // 流式阶段：保持 smooth-streaming="auto"（backlog-aware 平滑分发），显示打字光标；
+    // max-live-nodes=0 启用增量渲染；关闭与高频更新冲突的淡入动画。
+    expect(streamingRenderer.props('smoothStreaming')).toBe('auto');
     expect(streamingRenderer.props('fade')).toBe(false);
-    expect(streamingRenderer.props('typewriter')).toBe(false);
+    expect(streamingRenderer.props('typewriter')).toBe(true);
     expect(streamingRenderer.props('maxLiveNodes')).toBe(0);
     expect(streamingRenderer.props('batchRendering')).toBe(true);
     expect(streamingRenderer.props('initialRenderBatchSize')).toBe(24);
@@ -85,11 +85,12 @@ describe('AiMarkdown rendering', () => {
     await nextTick();
 
     const finalRenderer = wrapper.getComponent(MarkdownRender);
-    // 完成后：依旧关闭平滑流式（内容已完整，无需再做节奏控制）；恢复虚拟化(max-live-nodes=320)以应对长文档。
-    expect(finalRenderer.props('smoothStreaming')).toBe(false);
+    // 完成后：smooth-streaming 仍为 "auto"、max-live-nodes 仍为 0（不跳变），
+    // 让收尾走 backlog 追平逻辑而不是一次性 flush；光标在完成后关闭。
+    expect(finalRenderer.props('smoothStreaming')).toBe('auto');
     expect(finalRenderer.props('fade')).toBe(false);
     expect(finalRenderer.props('typewriter')).toBe(false);
-    expect(finalRenderer.props('maxLiveNodes')).toBe(320);
+    expect(finalRenderer.props('maxLiveNodes')).toBe(0);
     expect(finalRenderer.props('batchRendering')).toBe(true);
     expect(finalRenderer.props('initialRenderBatchSize')).toBe(24);
     expect(finalRenderer.props('renderBatchSize')).toBe(16);
