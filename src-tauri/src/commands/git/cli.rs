@@ -60,30 +60,6 @@ pub(super) fn run_git_text(
     Ok(content)
 }
 
-pub(super) fn run_git_text_allow_exit_one(
-    repository_root: &Path,
-    args: &[&str],
-    operation_label: &str,
-) -> Result<Option<String>, String> {
-    let output = spawn_git(repository_root, args, operation_label)?;
-    match output.status.code() {
-        Some(0) => {
-            let (content, _encoding) = decode_script_bytes(&output.stdout)
-                .unwrap_or_else(|_| (String::from_utf8_lossy(&output.stdout).into_owned(), DocumentEncoding::Utf8));
-            Ok(Some(content))
-        }
-        Some(1) => Ok(None),
-        _ => {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            Err(if stderr.is_empty() {
-                format!("执行 {operation_label} 失败。")
-            } else {
-                format!("执行 {operation_label} 失败：{stderr}")
-            })
-        }
-    }
-}
-
 pub(super) fn run_git_ok(
     repository_root: &Path,
     args: &[&str],

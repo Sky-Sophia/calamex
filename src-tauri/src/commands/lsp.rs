@@ -670,80 +670,33 @@ fn resolve_shellcheck_executable() -> Option<PathBuf> {
     None
 }
 
+/// 解析 bash-language-server 的 CLI 入口 JS。
+/// 它是应用内置依赖，不存在「系统版本」回退：内置优先 → 开发期项目 node_modules。
 fn resolve_lsp_cli_js() -> Result<PathBuf, String> {
-    // 打包优先：安装目录内自带的 bash-language-server CLI（由启动钩子注入路径）。
-if let Ok(path) = std::env::var("XIAOJIANC_LSP_CLI_JS") {
-    let p = PathBuf::from(&path);
-    if p.is_file() {
-        return Ok(p);
+    // 1) 打包优先：安装目录内自带的 CLI（路径由启动钩子注入）。
+    if let Ok(path) = std::env::var("XIAOJIANC_LSP_CLI_JS") {
+        let p = PathBuf::from(&path);
+        if p.is_file() {
+            log::info!("使用内置 bash-language-server CLI: {}", p.display());
+            return Ok(p);
+        }
     }
-}
+
+    // 2) 开发模式：项目 node_modules（pnpm install 后）。
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().ok_or("无法定位项目根目录")?;
-
     let candidate = workspace_root
         .join("node_modules")
         .join("bash-language-server")
         .join("out")
         .join("cli.js");
     if candidate.is_file() {
-        log::info!("找到 bash-language-server CLI: {}", candidate.display());
+        log::info!("找到项目 bash-language-server CLI: {}", candidate.display());
         return Ok(candidate);
     }
 
-    if cfg!(windows) {
-        if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            let pnpm_global = PathBuf::from(&local)
-                .join("pnpm")
-                .join("global")
-                .join("5")
-                .join("node_modules")
-                .join("bash-language-server")
-                .join("out")
-                .join("cli.js");
-            if pnpm_global.is_file() {
-                return Ok(pnpm_global);
-            }
-        }
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            let npm_global = PathBuf::from(&appdata)
-                .join("npm")
-                .join("node_modules")
-                .join("bash-language-server")
-                .join("out")
-                .join("cli.js");
-            if npm_global.is_file() {
-                return Ok(npm_global);
-            }
-        }
-    } else {
-        if let Ok(home) = std::env::var("HOME") {
-            for prefix in &[".npm-global", ".local/share/pnpm/global/5"] {
-                let candidate = PathBuf::from(&home)
-                    .join(prefix)
-                    .join("node_modules")
-                    .join("bash-language-server")
-                    .join("out")
-                    .join("cli.js");
-                if candidate.is_file() {
-                    return Ok(candidate);
-                }
-            }
-        }
-        for prefix in &["/usr/local/lib", "/usr/lib"] {
-            let candidate = PathBuf::from(prefix)
-                .join("node_modules")
-                .join("bash-language-server")
-                .join("out")
-                .join("cli.js");
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
-        }
-    }
-
     Err(format!(
-        "未找到 bash-language-server CLI。请运行 pnpm install 或 npm i -g bash-language-server。\n查找路径: {}",
+        "未找到 bash-language-server CLI（内置与项目 node_modules 均不存在）。开发环境请运行 pnpm install。\n查找路径: {}",
         candidate.display()
     ))
 }

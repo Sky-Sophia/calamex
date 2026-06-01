@@ -1,6 +1,5 @@
 use super::*;
 use super::cli;
-use gix::bstr::ByteSlice;
 
 #[tauri::command]
 pub fn list_git_stashes(payload: GitRepositoryRootRequest) -> Result<GitStashListPayload, String> {
