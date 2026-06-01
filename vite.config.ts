@@ -21,6 +21,11 @@ export default defineConfig(({ command }) => ({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      // Cargo workspace 把编译产物放在仓库根目录的 target/（不是 src-tauri/target/）。
+      // Vite 不能监听这里：Windows 上被锁住的 calamex.exe 会触发 EBUSY 并使 dev server 崩溃。
+      ignored: ['**/target/**', '**/src-tauri/**'],
+    },
   },
   preview: {
     port: 1421,
