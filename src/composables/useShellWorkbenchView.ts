@@ -351,10 +351,12 @@ export const useShellWorkbenchView = (onReady: () => void) => {
 
   const applyPrimaryMode = (mode: TWorkbenchPrimaryMode): void => {
     if (mode === 'ai') {
+      // 性能优化：切换 AI/编辑模式时不要强制改写终端可见性。
+      // 终端是否可见属于“编辑模式布局状态”，强制写 false 会触发主界面分支切换
+      // (split/maximized) 导致编辑器区域重建，进而造成切换卡顿。
+      // AI 模式下编辑器区域本来就 v-show 隐藏，因此保留终端状态是安全的。
       isSidebarVisible.value = true;
-      isTerminalVisible.value = false;
       activePrimaryMode.value = 'ai';
-      workbench.editorStore.setWorkbenchSessionState({ isTerminalVisible: false });
       closeDiagnosticsPanel();
       return;
     }
