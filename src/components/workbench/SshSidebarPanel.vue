@@ -67,6 +67,7 @@ const MANUAL_CONNECTION_ID = 'manual';
 const DEFAULT_SSH_PORT = '22';
 const TERMINAL_OPEN_DELAY_MS = 120;
 const SSH_PASSWORD_SEND_DELAY_MS = 180;
+const SSH_TERMINAL_HOST_KEY_POLICY = 'accept-new';
 
 const SSH_CONTEXT_MENU_GROUPS: ILinearContextMenuGroup[] = [
   {
@@ -765,6 +766,7 @@ const buildSshCommand = (): string => {
   const usernameText = connectionForm.username.trim();
   const portText = connectionForm.port.trim() || DEFAULT_SSH_PORT;
   const parts = ['ssh', '-p', quoteShellArg(portText)];
+  parts.push('-o', `StrictHostKeyChecking=${SSH_TERMINAL_HOST_KEY_POLICY}`);
 
   if (connectionForm.authMode === 'key' && connectionForm.identityPath.trim()) {
     parts.push('-i', quoteShellArg(connectionForm.identityPath));
@@ -778,8 +780,6 @@ const buildSshCommand = (): string => {
       'PubkeyAuthentication=no',
       '-o',
       'NumberOfPasswordPrompts=1',
-      '-o',
-      'StrictHostKeyChecking=accept-new',
     );
   }
 
@@ -795,7 +795,7 @@ const openTerminalSessionBestEffort = async (): Promise<void> => {
     emit('open-terminal');
     await new Promise((resolve) => window.setTimeout(resolve, TERMINAL_OPEN_DELAY_MS));
     await terminalControls.sendCommand(sshCommandPreview.value);
-    if (connectionForm.authMode === 'password') {
+    if (connectionForm.authMode === 'password' && connectionForm.password) {
       await new Promise((resolve) => window.setTimeout(resolve, SSH_PASSWORD_SEND_DELAY_MS));
       await terminalControls.sendInput(`${connectionForm.password}\n`);
     }
@@ -909,6 +909,7 @@ const disconnectSshSession = (): void => {
   closeContextMenu();
   sshStore.clearConnectionState();
   resetForm();
+  sshStore.connectionForm.password = '';
   message.info('已断开 SSH 文件会话。');
 };
 
@@ -919,11 +920,19 @@ const handleSelectFile = (fileId: string): void => {
   const fileItem = sshFileItems.value.find((item) => item.id === fileId);
   if (fileItem?.isDirectory && !isRemoteDirectoryLoading.value) {
     void loadRemoteDirectory(fileItem.path);
+  }
+};
+
+const handleOpenFile = (fileId: string): void => {
+  const fileItem = sshFileItems.value.find((item) => item.id === fileId);
+  if (!fileItem) return;
+  if (fileItem.isDirectory) {
+    if (!isRemoteDirectoryLoading.value) {
+      void loadRemoteDirectory(fileItem.path);
+    }
     return;
   }
-  if (fileItem && !fileItem.isDirectory) {
-    void previewRemoteFile(fileItem);
-  }
+  void previewRemoteFile(fileItem);
 };
 
 const handleFileContextMenu = (event: MouseEvent, fileId: string): void => {
@@ -1080,310 +1089,4 @@ onBeforeUnmount(() => {
                 用户名
               </FieldLabel>
               <Input id="ssh-connect-username" v-model="username" type="text" placeholder="root" autocomplete="off"
-                class="ssh-connect-input" :aria-invalid="Boolean(connectionFieldErrors.username)" />
-              <FieldError v-if="connectionFieldErrors.username" :message="connectionFieldErrors.username" />
-            </Field>
-
-            <Field class="ssh-connect-field">
-              <FieldLabel for="ssh-connect-auth-mode" class="ssh-connect-label">
-                认证方式
-              </FieldLabel>
-              <Select :model-value="authMode" @update:model-value="handleAuthModeChange">
-                <SelectTrigger id="ssh-connect-auth-mode" aria-label="选择 SSH 认证方式" class="ssh-connect-select-trigger">
-                  <SelectValue placeholder="选择认证方式" />
-                </SelectTrigger>
-                <SelectContent
-                  class="ssh-connect-select-content data-[state=open]:animate-none data-[state=closed]:animate-none data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-100 data-[state=open]:zoom-in-100 data-[side=bottom]:slide-in-from-top-0 data-[side=left]:slide-in-from-right-0 data-[side=right]:slide-in-from-left-0 data-[side=top]:slide-in-from-bottom-0">
-                  <SelectItem v-for="option in SSH_AUTH_OPTIONS" :key="option.value" :value="option.value"
-                    class="ssh-connect-select-item">
-                    {{ option.label }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-
-            <Field v-if="authMode === 'key'" class="ssh-connect-field">
-              <FieldLabel for="ssh-connect-identity-path" class="ssh-connect-label">
-                私钥路径
-              </FieldLabel>
-              <Input id="ssh-connect-identity-path" v-model="identityPath" type="text" placeholder="~/.ssh/id_rsa"
-                autocomplete="off" class="ssh-connect-input"
-                :aria-invalid="Boolean(connectionFieldErrors.identityPath)" />
-              <FieldError v-if="connectionFieldErrors.identityPath" :message="connectionFieldErrors.identityPath" />
-            </Field>
-
-            <Field v-else class="ssh-connect-field">
-              <FieldLabel for="ssh-connect-password" class="ssh-connect-label">
-                登录密码
-              </FieldLabel>
-              <div class="ssh-password-input-wrap">
-                <Input id="ssh-connect-password" v-model="password" :type="passwordInputType" placeholder="输入 SSH 登录密码"
-                  autocomplete="current-password" class="ssh-connect-input ssh-connect-input--password"
-                  :aria-invalid="Boolean(connectionFieldErrors.password)" />
-                <button type="button" class="ssh-password-toggle" :aria-label="isPasswordVisible ? '隐藏密码' : '显示密码'"
-                  :title="isPasswordVisible ? '隐藏密码' : '显示密码'" @click="isPasswordVisible = !isPasswordVisible">
-                  <span v-if="isPasswordVisible" aria-hidden="true" class="icon-[lucide--eye]" />
-                  <span v-else aria-hidden="true" class="icon-[lucide--eye-off]" />
-                </button>
-              </div>
-              <FieldError v-if="connectionFieldErrors.password" :message="connectionFieldErrors.password" />
-            </Field>
-          </FieldGroup>
-        </FieldSet>
-
-        <div class="ssh-form-actions">
-          <Button type="submit" class="ssh-connect-action ssh-connect-action--submit" :disabled="isConnecting">
-            {{ isConnecting ? '连接中…' : '连接' }}
-          </Button>
-          <Button type="button" variant="outline" class="ssh-connect-action ssh-connect-action--cancel"
-            :disabled="isConnecting" @click="handleCancelConnect">
-            取消
-          </Button>
-        </div>
-
-        <div v-if="connectionStatusText || connectionErrorText" class="ssh-connect-feedback"
-          :class="{ 'is-error': Boolean(connectionErrorText) }" aria-live="polite">
-          {{ connectionErrorText || connectionStatusText }}
-        </div>
-      </form>
-
-      <section v-else-if="isDisconnected" class="ssh-empty-state ssh-empty-state--disconnected" aria-label="SSH 未连接状态">
-        <span class="icon-[lucide--server] ssh-empty-icon" aria-hidden="true" />
-
-        <div class="ssh-empty-copy">
-          <div class="ssh-empty-title ssh-empty-title--disconnected">尚未连接到远程主机</div>
-          <div class="ssh-empty-desc ssh-empty-desc--disconnected">
-            连接一台 SSH 服务器后，即可在此浏览文件、上传下载以及管理远程资源。
-          </div>
-        </div>
-
-        <div class="ssh-empty-actions ssh-empty-actions--disconnected">
-          <button type="button"
-            class="ssh-button ssh-button--primary ssh-button--stacked ssh-button--disconnected-primary"
-            @click="openConnectForm">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round" aria-hidden="true">
-              <path d="M5 12h14" />
-              <path d="M12 5l7 7-7 7" />
-            </svg>
-            新建连接
-          </button>
-        </div>
-
-        <section class="ssh-recent-section ssh-recent-section--disconnected" aria-label="最近使用 SSH 连接">
-          <div class="ssh-recent-title ssh-recent-title--disconnected">最近使用</div>
-
-          <div v-if="normalizedRecentConnections.length === 0" class="ssh-recent-empty">
-            暂无真实连接记录，可新建连接。
-          </div>
-
-          <button v-for="connection in normalizedRecentConnections" :key="connection.id" type="button"
-            class="ssh-recent-item ssh-recent-item--disconnected" @click="handleSelectRecentConnection(connection)">
-            <span class="ssh-recent-icon ssh-recent-icon--disconnected" aria-hidden="true">
-              <span class="icon-[lucide--clock-3]" />
-            </span>
-
-            <span class="ssh-recent-info">
-              <span class="ssh-recent-name ssh-recent-name--disconnected">
-                {{ connection.username }} @ {{ connection.host }}
-              </span>
-            </span>
-
-            <span class="ssh-recent-time ssh-recent-time--disconnected">
-              {{ connection.lastUsedLabel }}
-            </span>
-          </button>
-        </section>
-      </section>
-
-      <template v-else>
-        <div v-if="isExplorerActive" class="ssh-path-bar">
-          <Breadcrumb class="ssh-path-breadcrumb" aria-label="远端路径">
-            <BreadcrumbList class="ssh-path-list">
-              <template v-for="(item, index) in sshBreadcrumbItems" :key="item.id">
-                <BreadcrumbItem v-if="item.type === 'ellipsis'">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger as-child>
-                      <button type="button" class="ssh-path-ellipsis" :disabled="isRemoteDirectoryLoading"
-                        aria-label="展开中间路径">
-                        <BreadcrumbEllipsis class="ssh-path-ellipsis-icon" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" class="ssh-path-menu">
-                      <DropdownMenuItem v-for="segment in item.segments" :key="segment.id" class="ssh-path-menu-item"
-                        :disabled="isRemoteDirectoryLoading" @select="handlePathSegmentClick(segment)">
-                        {{ segment.label }}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </BreadcrumbItem>
-                <BreadcrumbItem v-else>
-                  <BreadcrumbPage v-if="item.path === currentRemotePath" class="ssh-path-segment is-current">
-                    {{ item.label }}
-                  </BreadcrumbPage>
-                  <BreadcrumbLink v-else as-child>
-                    <button type="button" class="ssh-path-segment" :disabled="isRemoteDirectoryLoading"
-                      @click="handlePathSegmentClick(item)">
-                      {{ item.label }}
-                    </button>
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator v-if="index < sshBreadcrumbItems.length - 1" class="ssh-path-separator" />
-              </template>
-            </BreadcrumbList>
-          </Breadcrumb>
-          <div class="ssh-path-actions">
-            <button type="button" class="ssh-path-action" aria-label="断开 SSH 连接" title="断开连接"
-              @click="disconnectSshSession">
-              <span aria-hidden="true" class="icon-[lucide--unplug]" />
-            </button>
-            <button type="button" class="ssh-path-action" :disabled="isRemoteDirectoryLoading" aria-label="刷新远端目录"
-              title="刷新远端目录" @click="refreshCurrentRemoteDirectory">
-              <span aria-hidden="true" class="icon-[lucide--refresh-cw]" />
-            </button>
-          </div>
-        </div>
-
-        <div v-if="isExplorerActive" class="ssh-file-list" role="list" aria-label="远端文件列表">
-          <div v-if="isRemoteDirectoryLoading" class="ssh-file-list-state" aria-live="polite">
-            正在读取远端目录…
-          </div>
-          <div v-else-if="sshFileItems.length === 0" class="ssh-file-list-state">
-            当前目录为空
-          </div>
-          <template v-else>
-            <button v-for="item in sshFileItems" :key="item.id" type="button" class="ssh-file-item" :class="{
-              'is-folder': item.kind === 'folder',
-              'is-selected': selectedFileId === item.id,
-            }" :aria-label="`${item.name}，${item.metaLabel}`" @click="handleSelectFile(item.id)"
-              @contextmenu.prevent="handleFileContextMenu($event, item.id)">
-              <span class="ssh-file-icon" :class="`is-${item.kind}`" aria-hidden="true">
-                <svg v-if="item.kind === 'folder'" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M2 6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6z" />
-                </svg>
-                <span v-else-if="item.kind === 'rust'">⚙</span>
-                <svg v-else-if="item.kind === 'lock'" width="13" height="13" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                </svg>
-                <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
-              </span>
-
-              <span class="ssh-file-name">{{ item.name }}</span>
-              <span class="ssh-file-meta">{{ item.metaLabel }}</span>
-            </button>
-          </template>
-        </div>
-
-        <div v-else-if="isTransferActive" class="ssh-transfer-panel" aria-label="传输任务列表">
-          <div v-if="transferItems.length === 0" class="ssh-transfer-empty">
-            暂无传输任务
-          </div>
-          <article v-for="item in transferItems" :key="item.id" class="ssh-transfer-item">
-            <div class="ssh-transfer-header">
-              <div class="ssh-transfer-name">
-                <span class="ssh-transfer-direction" :class="`is-${item.direction}`">
-                  {{ item.direction === 'upload' ? '↑ 上传' : '↓ 下载' }}
-                </span>
-                {{ item.name }}
-              </div>
-              <span class="ssh-transfer-meta">{{ item.sizeLabel }}</span>
-            </div>
-
-            <div class="ssh-progress-bar" aria-hidden="true">
-              <div class="ssh-progress-fill" :class="`is-${item.status}`" :style="{ width: `${item.progress}%` }" />
-            </div>
-
-            <div class="ssh-transfer-footer">
-              <span class="ssh-transfer-meta">{{ item.progressLabel }}</span>
-              <span class="ssh-transfer-meta"
-                :class="{ 'is-success': item.status === 'done', 'is-failed': item.status === 'failed' }">
-                {{ item.status === 'done' ? '完成' : item.status === 'failed' ? '失败' : '进行中' }}
-              </span>
-            </div>
-          </article>
-        </div>
-      </template>
-    </div>
-  </section>
-
-  <LinearContextMenu :open="isConnected && contextMenu.open" :x="contextMenu.x" :y="contextMenu.y"
-    :groups="SSH_CONTEXT_MENU_GROUPS" theme="dark" submenu-direction="right" @select="handleContextMenuSelect" />
-
-  <SshFilePreviewDialog v-if="previewFileItem" :file-item="previewFileItem" :payload="previewPayload"
-    :is-loading="isPreviewLoading" :is-saving="isPreviewSaving" @close="closePreviewDialog" @reload="reloadPreviewFile"
-    @download="downloadPreviewFile" @save="savePreviewFile" />
-
-  <Teleport to="body">
-    <div v-if="isCreateDirectoryDialogOpen" class="ssh-modal-backdrop" @click.self="closeCreateDirectoryDialog">
-      <form class="ssh-modal" @submit.prevent="confirmCreateDirectory">
-        <div class="ssh-modal-copy">
-          <h3>新建远端文件夹</h3>
-          <p>将在“{{ currentRemotePath }}”下创建文件夹。不会覆盖远端已有项目。</p>
-        </div>
-        <label class="ssh-modal-field">
-          <span>文件夹名称</span>
-          <input ref="createDirectoryInputRef" v-model="createDirectoryName" :disabled="isPathMutating"
-            autocomplete="off" />
-        </label>
-        <div class="ssh-modal-actions">
-          <button type="button" class="ssh-modal-button" :disabled="isPathMutating" @click="closeCreateDirectoryDialog">
-            取消
-          </button>
-          <button type="submit" class="ssh-modal-button is-primary"
-            :disabled="!canConfirmCreateDirectory || isPathMutating">
-            {{ isPathMutating ? '处理中…' : '创建' }}
-          </button>
-        </div>
-      </form>
-    </div>
-  </Teleport>
-
-  <Teleport to="body">
-    <div v-if="pendingRenameItem" class="ssh-modal-backdrop" @click.self="closeRenameDialog">
-      <form class="ssh-modal" @submit.prevent="confirmRenamePath">
-        <div class="ssh-modal-copy">
-          <h3>重命名远端项目</h3>
-          <p>为“{{ pendingRenameItem.name }}”输入新的名称。不会覆盖远端已有项目。</p>
-        </div>
-        <label class="ssh-modal-field">
-          <span>新名称</span>
-          <input ref="renameInputRef" v-model="renameInputValue" :disabled="isPathMutating" autocomplete="off" />
-        </label>
-        <div class="ssh-modal-actions">
-          <button type="button" class="ssh-modal-button" :disabled="isPathMutating" @click="closeRenameDialog">
-            取消
-          </button>
-          <button type="submit" class="ssh-modal-button is-primary" :disabled="!canConfirmRename || isPathMutating">
-            {{ isPathMutating ? '处理中…' : '重命名' }}
-          </button>
-        </div>
-      </form>
-    </div>
-  </Teleport>
-
-  <Teleport to="body">
-    <div v-if="pendingDeleteItem" class="ssh-modal-backdrop" @click.self="closeDeleteDialog">
-      <section class="ssh-modal is-danger" role="alertdialog" aria-modal="true">
-        <div class="ssh-modal-copy">
-          <h3>删除远端项目？</h3>
-          <p>将删除“{{ pendingDeleteItem.name }}”。此操作不可撤销，请确认这是你想要的操作。</p>
-        </div>
-        <div class="ssh-modal-actions">
-          <button type="button" class="ssh-modal-button" :disabled="isPathMutating" @click="closeDeleteDialog">
-            取消
-          </button>
-          <button type="button" class="ssh-modal-button is-danger" :disabled="isPathMutating"
-            @click="confirmDeletePath">
-            {{ isPathMutating ? '删除中…' : '删除' }}
-          </button>
-        </div>
-      </section>
-    </div>
-  </Teleport>
-</template>
+                class="ssh-connect-input" :aria-invalid="Boolean(connectionFieldErrors.username
