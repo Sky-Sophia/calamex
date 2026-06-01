@@ -92,17 +92,8 @@ const bootstrap = async (): Promise<void> => {
     setRuntimeError(MESSAGES.bootstrapErrorLabel, error);
     renderFatalBootstrapError(error);
 
-    markStartup('window-stage-main-start');
-    await import('./services/ipc/window.service')
-      .then(({ applyWindowStage }) => applyWindowStage({ stage: 'main' }))
-      .then(() => {
-        markStartup('window-stage-main-done');
-      })
-      .catch((stageError: unknown) => {
-        markStartup('window-stage-main-failed');
-        console.error('Application error window reveal failed', stageError);
-      });
-
+    // 窗口显示阶段由 App.vue 内部统一处理(监听 runtimeErrorState 与 workbench ready)，
+    // 避免在多处重复触发 applyWindowStage 导致竞态。
     reportStartupTimings();
   }
 };
