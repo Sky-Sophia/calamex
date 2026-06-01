@@ -14,10 +14,11 @@ use russh::{
 };
 use russh_sftp::{client::SftpSession, protocol::OpenFlags};
 use std::{
+    collections::HashMap,
     env, fs as std_fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, LazyLock, Mutex},
     time::Duration,
 };
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -38,6 +39,10 @@ const SFTP_PARTIAL_SUFFIX: &str = ".aster.partial";
 const SFTP_BACKUP_SUFFIX: &str = ".aster.backup";
 const SFTP_TRANSFER_CHUNK_BYTES: usize = 256 * 1024;
 const SFTP_PIPELINE_DEPTH: usize = 32;
+
+/// Structured error-code prefix surfaced to the UI when a known host presents a
+/// changed key. The full error/message is `ssh/host-key-changed::<fingerprint>`.
+const HOST_KEY_CHANGED_CODE: &str = "ssh/host-key-changed";
 
 // ---- optimized SSH algorithm preferences ----
 /// Prioritises fast, modern algorithms for minimal handshake latency and high throughput.
@@ -191,16 +196,73 @@ impl russh::client::Handler for SshClientHandler {
     }
 }
 
+// ---- host-key change handling ----
+//
+// When a *known* host presents a *different* key, `check_server_key` cannot
+// block on user input. Instead we stash the freshly presented key keyed by
+// (host, port) and reject the handshake. `connect_and_auth` then surfaces a
+// structured `ssh/host-key-changed::<fingerprint>` error so the UI can warn the
+// user and, on confirmation, call `trust_ssh_host_key` to record the new key.
+#[derive(Clone)]
+struct PendingHostKey {
+    key: russh::keys::PublicKey,
+    fingerprint: String,
+}
+
+static PENDING_HOST_KEYS: LazyLock<Mutex<HashMap<(String, u16), PendingHostKey>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn stash_pending_host_key(host: &str, port: u16, key: &russh::keys::PublicKey) {
+    let fingerprint = key.fingerprint(HashAlg::Sha256).to_string();
+    if let Ok(mut map) = PENDING_HOST_KEYS.lock() {
+        map.insert(
+            (host.to_string(), port),
+            PendingHostKey {
+                key: key.clone(),
+                fingerprint,
+            },
+        );
+    }
+}
+
+fn peek_pending_host_key(host: &str, port: u16) -> Option<PendingHostKey> {
+    PENDING_HOST_KEYS
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&(host.to_string(), port)).cloned())
+}
+
+fn take_pending_host_key(host: &str, port: u16) -> Option<PendingHostKey> {
+    PENDING_HOST_KEYS
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(&(host.to_string(), port)))
+}
+
+fn clear_pending_host_key(host: &str, port: u16) {
+    if let Ok(mut map) = PENDING_HOST_KEYS.lock() {
+        map.remove(&(host.to_string(), port));
+    }
+}
+
+/// If a changed host key is awaiting confirmation for this endpoint, build the
+/// structured error string the UI keys off of.
+fn pending_host_key_changed_error(host: &str, port: u16) -> Option<String> {
+    peek_pending_host_key(host, port)
+        .map(|pending| format!("{HOST_KEY_CHANGED_CODE}::{}", pending.fingerprint))
+}
+
 /// Trust-on-first-use host-key verification backed by the user's `known_hosts`.
 ///
 /// * Known host, key matches  → accept.
 /// * Unknown host             → record the key (TOFU), then accept.
-/// * Known host, key changed  → reject (possible MITM / key rotation).
+/// * Known host, key changed  → stash the new key + reject, so the caller can
+///   prompt the user and optionally trust the new key (replacing the old one).
 fn verify_known_host(host: &str, port: u16, key: &russh::keys::PublicKey) -> bool {
     match russh::keys::check_known_hosts(host, port, key) {
         Ok(true) => true,
         Ok(false) => {
-            match russh::keys::learn_known_hosts(host, port, key) {
+            match russh::keys::known_hosts::learn_known_hosts(host, port, key) {
                 Ok(()) => tracing::info!(
                     %host,
                     port,
@@ -216,15 +278,110 @@ fn verify_known_host(host: &str, port: u16, key: &russh::keys::PublicKey) -> boo
             true
         }
         Err(e) => {
-            tracing::error!(
-                %host,
-                port,
-                error = %e,
-                "ssh: server host key did not match known_hosts – refusing connection"
-            );
+            // A "key changed" error means the host is known but presented a
+            // different key (possible MITM, but often a legitimate rotation).
+            // Stash it so the UI can offer to trust the new key; any other error
+            // (e.g. an unreadable known_hosts file) is a hard failure.
+            let message = e.to_string();
+            if message.to_lowercase().contains("changed") {
+                tracing::warn!(
+                    %host,
+                    port,
+                    error = %message,
+                    "ssh: server host key changed – awaiting user confirmation"
+                );
+                stash_pending_host_key(host, port, key);
+            } else {
+                tracing::error!(
+                    %host,
+                    port,
+                    error = %message,
+                    "ssh: host key verification failed – refusing connection"
+                );
+            }
             false
         }
     }
+}
+
+// ---- known_hosts file maintenance ----
+fn known_hosts_file_path() -> Result<PathBuf, String> {
+    let home = env::var("USERPROFILE")
+        .or_else(|_| env::var("HOME"))
+        .map_err(|_| "无法定位用户主目录。".to_string())?;
+    Ok(PathBuf::from(home).join(".ssh").join("known_hosts"))
+}
+
+/// Drop every existing `known_hosts` entry for `(host, port)` and record the
+/// freshly presented key as the sole trusted key. Removal matches the host
+/// field textually (russh writes plain, non-hashed entries on TOFU), because
+/// russh's own line indices skip comment lines and are unreliable.
+fn replace_known_host_key(
+    host: &str,
+    port: u16,
+    key: &russh::keys::PublicKey,
+) -> Result<(), String> {
+    let path = known_hosts_file_path()?;
+    replace_known_host_key_in(&path, host, port, key)
+}
+
+fn replace_known_host_key_in(
+    path: &Path,
+    host: &str,
+    port: u16,
+    key: &russh::keys::PublicKey,
+) -> Result<(), String> {
+    if path.exists() {
+        let content =
+            std_fs::read_to_string(path).map_err(|e| format!("读取 known_hosts 失败：{e}"))?;
+        let mut kept = String::with_capacity(content.len());
+        for line in content.lines() {
+            if known_hosts_line_targets_host(line, host, port) {
+                continue; // drop the stale entry for this host
+            }
+            kept.push_str(line);
+            kept.push('\n');
+        }
+        std_fs::write(path, &kept).map_err(|e| format!("写入 known_hosts 失败：{e}"))?;
+    }
+    // Append the freshly presented key as trusted.
+    russh::keys::known_hosts::learn_known_hosts_path(host, port, key, path)
+        .map_err(|e| format!("写入 known_hosts 失败：{e}"))
+}
+
+/// Does a `known_hosts` line reference `(host, port)` via a plain (non-hashed)
+/// host pattern? Hashed entries (`|1|...`) are intentionally left untouched.
+fn known_hosts_line_targets_host(line: &str, host: &str, port: u16) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return false;
+    }
+    let mut tokens = trimmed.split_whitespace();
+    let Some(first) = tokens.next() else {
+        return false;
+    };
+    // Skip an optional @marker (e.g. @cert-authority / @revoked).
+    let hosts_field = if first.starts_with('@') {
+        match tokens.next() {
+            Some(field) => field,
+            None => return false,
+        }
+    } else {
+        first
+    };
+    if hosts_field.starts_with('|') {
+        // Hashed host – cannot be matched without the salt; leave it alone.
+        return false;
+    }
+    let ported = format!("[{host}]:{port}");
+    hosts_field.split(',').any(|pattern| {
+        let pattern = pattern.trim();
+        if port == DEFAULT_SSH_PORT {
+            pattern == host || pattern == ported
+        } else {
+            pattern == ported
+        }
+    })
 }
 
 // ---- SFTP connection wrapper ----
@@ -258,6 +415,10 @@ pub(crate) async fn connect_and_auth(
         ..Default::default()
     });
 
+    // Clear any stale, un-trusted host-key stash so a previously rejected
+    // attempt can't surface a false "key changed" error on this fresh connect.
+    clear_pending_host_key(&params.host, params.port);
+
     // `connect` resolves the host through tokio's async resolver and tries every
     // resolved address (IPv4/IPv6) in turn, so we hand it the host:port directly
     // instead of doing a blocking, single-address lookup ourselves.
@@ -265,13 +426,25 @@ pub(crate) async fn connect_and_auth(
         host: params.host.clone(),
         port: params.port,
     };
-    let mut handle = timeout(
+    let connect_result = timeout(
         Duration::from_secs(SSH_CONNECT_TIMEOUT_SECONDS),
         connect(config, (params.host.as_str(), params.port), handler),
     )
     .await
-    .map_err(|_| "SSH 连接超时。".to_string())?
-    .map_err(|e| format!("SSH 连接失败：{e}"))?;
+    .map_err(|_| "SSH 连接超时。".to_string())?;
+
+    let mut handle = match connect_result {
+        Ok(handle) => handle,
+        Err(e) => {
+            // If the handshake was aborted because the server's host key changed,
+            // surface a structured, machine-readable error so the UI can offer to
+            // trust the new key instead of failing outright.
+            if let Some(changed) = pending_host_key_changed_error(&params.host, params.port) {
+                return Err(changed);
+            }
+            return Err(format!("SSH 连接失败：{e}"));
+        }
+    };
 
     match params.auth_mode.as_str() {
         "password" => {
@@ -521,10 +694,18 @@ pub async fn test_ssh_connection(
                 message: "SSH 连接验证成功。".into(),
             })
         }
-        Ok(Err(error)) => Ok(failed(
-            &classify_ssh_error(&error),
-            &format_ssh_error_message(&error),
-        )),
+        Ok(Err(error)) => {
+            // Preserve the structured marker so the UI can offer to trust the
+            // changed key (the message carries the new fingerprint).
+            if error.starts_with(&format!("{HOST_KEY_CHANGED_CODE}::")) {
+                Ok(failed(HOST_KEY_CHANGED_CODE, &error))
+            } else {
+                Ok(failed(
+                    &classify_ssh_error(&error),
+                    &format_ssh_error_message(&error),
+                ))
+            }
+        }
         Err(_) => Ok(failed("ssh/timeout", "SSH 连接测试超时。")),
     }
 }
@@ -678,17 +859,9 @@ async fn download_file_inner(
         return Err(e);
     }
 
-<<<<<<< Updated upstream
     if let Some(expected) = expected_size {
         ensure_expected_transfer_size(written, expected, "下载远程文件")?;
     }
-=======
-    // Propagate reader errors.
-    read_handle
-        .await
-        .map_err(|e| format!("读取任务异常终止：{e}"))?
-        .map_err(|e| e.to_string())?;
->>>>>>> Stashed changes
 
     // Promote the fully-written `.partial` to its final name (blocking fs op).
     let partial_for_rename = partial.clone();
@@ -1138,6 +1311,35 @@ pub async fn create_ssh_directory(
     }
 }
 
+// ===== Host-key trust =====
+#[derive(serde::Serialize)]
+pub struct SshHostKeyTrustPayload {
+    pub trusted: bool,
+}
+
+/// Record the host key that was rejected as "changed" for `(host, port)` as the
+/// new trusted key, replacing the previous entry. Only meaningful right after a
+/// connection failed with `ssh/host-key-changed::…`.
+#[tauri::command]
+pub async fn trust_ssh_host_key(
+    host: String,
+    port: u16,
+) -> Result<SshHostKeyTrustPayload, String> {
+    let host = host.trim().to_string();
+    if host.is_empty() {
+        return Err("主机地址不能为空。".into());
+    }
+    let Some(pending) = take_pending_host_key(&host, port) else {
+        return Err("没有待确认的主机密钥变更，请重新发起连接。".into());
+    };
+    let key = pending.key;
+    // known_hosts edits hit the filesystem; keep them off the async reactor.
+    tokio::task::spawn_blocking(move || replace_known_host_key(&host, port, &key))
+        .await
+        .map_err(|e| format!("更新 known_hosts 任务异常终止：{e}"))??;
+    Ok(SshHostKeyTrustPayload { trusted: true })
+}
+
 // ===== SSH Password Management (keyring) =====
 #[tauri::command]
 pub async fn save_ssh_password(
@@ -1399,272 +1601,4 @@ fn truncate_at_utf8_boundary(mut raw: Vec<u8>) -> Vec<u8> {
 }
 
 fn decode_remote_preview_text(raw: Vec<u8>) -> Result<(String, String, String), String> {
-    let has_bom = raw.starts_with(&[0xef, 0xbb, 0xbf]);
-    let encoding = if has_bom { "utf-8-bom" } else { "utf-8" };
-    let decoded = if has_bom {
-        String::from_utf8(raw[3..].to_vec()).map_err(|e| format!("UTF-8 解码失败：{e}"))?
-    } else {
-        String::from_utf8(raw).map_err(|e| format!("UTF-8 解码失败：{e}"))?
-    };
-    let line_ending = detect_line_ending(decoded.as_bytes());
-    Ok((decoded, encoding.to_string(), line_ending.to_string()))
-}
-
-fn detect_line_ending(data: &[u8]) -> &'static str {
-    let mut has_crlf = false;
-    let mut has_lf = false;
-    let mut has_cr = false;
-    let mut i = 0;
-    while i < data.len() {
-        if data[i] == b'\r' {
-            if i + 1 < data.len() && data[i + 1] == b'\n' {
-                has_crlf = true;
-                i += 1;
-            } else {
-                has_cr = true;
-            }
-        } else if data[i] == b'\n' {
-            has_lf = true;
-        }
-        i += 1;
-    }
-    match (has_crlf, has_lf, has_cr) {
-        (true, false, false) => "crlf",
-        (false, true, false) => "lf",
-        (false, false, true) => "cr",
-        (true, true, _) | (true, _, true) | (_, true, true) => "mixed",
-        _ => "lf",
-    }
-}
-
-fn encode_remote_preview_text(
-    content: &str,
-    encoding: &str,
-    line_ending: &str,
-) -> Result<Vec<u8>, String> {
-    // Normalise to LF first so the second-stage replace can't double-expand.
-    let lf_only = content.replace("\r\n", "\n").replace('\r', "\n");
-    let normalized = match line_ending {
-        "crlf" => lf_only.replace('\n', "\r\n"),
-        "cr" => lf_only.replace('\n', "\r"),
-        _ => lf_only,
-    };
-    let mut bytes = normalized.into_bytes();
-    if encoding == "utf-8-bom" {
-        let mut bom = vec![0xef, 0xbb, 0xbf];
-        bom.append(&mut bytes);
-        Ok(bom)
-    } else {
-        Ok(bytes)
-    }
-}
-
-fn format_remote_permission_from_bits(bits: u32) -> String {
-    let kind = match bits & S_IFMT {
-        S_IFDIR  => 'd',
-        S_IFLNK  => 'l',
-        S_IFBLK  => 'b',
-        S_IFCHR  => 'c',
-        S_IFIFO  => 'p',
-        S_IFSOCK => 's',
-        S_IFREG  => '-',
-        // Some SFTP servers ship pure-mode bits (no file-type bits set).
-        _        => '-',
-    };
-    let mode = bits & 0o777;
-    let mut s = String::with_capacity(10);
-    s.push(kind);
-    s.push(if mode & 0o400 != 0 { 'r' } else { '-' });
-    s.push(if mode & 0o200 != 0 { 'w' } else { '-' });
-    s.push(if mode & 0o100 != 0 { 'x' } else { '-' });
-    s.push(if mode & 0o040 != 0 { 'r' } else { '-' });
-    s.push(if mode & 0o020 != 0 { 'w' } else { '-' });
-    s.push(if mode & 0o010 != 0 { 'x' } else { '-' });
-    s.push(if mode & 0o004 != 0 { 'r' } else { '-' });
-    s.push(if mode & 0o002 != 0 { 'w' } else { '-' });
-    s.push(if mode & 0o001 != 0 { 'x' } else { '-' });
-    s
-}
-
-// ===== Tests =====
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_ssh_config_hosts_extracts_hostname_user_port_and_key() {
-        let content = "Host dev-box\n  HostName 192.168.56.10\n  User ubuntu\n  Port 2202\n  IdentityFile ~/.ssh/dev key\n";
-        let hosts = parse_ssh_config_hosts(content);
-        assert_eq!(hosts.len(), 1);
-        assert_eq!(hosts[0].name, "dev-box");
-        assert_eq!(hosts[0].host, "192.168.56.10");
-        assert_eq!(hosts[0].username, "ubuntu");
-        assert_eq!(hosts[0].port, 2202);
-        assert_eq!(hosts[0].identity_path.as_deref(), Some("~/.ssh/dev key"));
-    }
-
-    #[test]
-    fn parse_ssh_config_hosts_uses_alias_when_proxy_jump_is_required() {
-        let content = "Host prod-app\n  HostName 10.0.12.31\n  User deploy\n  ProxyJump bastion\n  IdentityFile \"~/.ssh/prod # key\"\n";
-        let hosts = parse_ssh_config_hosts(content);
-        assert_eq!(hosts.len(), 1);
-        assert_eq!(hosts[0].name, "prod-app");
-        assert_eq!(hosts[0].host, "10.0.12.31");
-        assert_eq!(hosts[0].username, "deploy");
-        assert_eq!(hosts[0].identity_path.as_deref(), Some("~/.ssh/prod # key"));
-    }
-
-    #[test]
-    fn parse_ssh_config_hosts_resets_state_between_hosts() {
-        // Regression: ProxyJump on host A previously leaked HostName into host B.
-        let content = "Host a\n  HostName 10.0.0.1\n  ProxyJump bastion\nHost b\n  User root\n";
-        let hosts = parse_ssh_config_hosts(content);
-        assert_eq!(hosts.len(), 2);
-        assert_eq!(hosts[1].name, "b");
-        assert_eq!(hosts[1].host, "b"); // alias fallback, not "10.0.0.1"
-        assert_eq!(hosts[1].port, DEFAULT_SSH_PORT);
-    }
-
-    #[test]
-    fn parse_ssh_config_hosts_filters_wildcard_aliases() {
-        let content = "Host * !blocked concrete-host\n  User root\n";
-        let hosts = parse_ssh_config_hosts(content);
-        assert_eq!(hosts.len(), 1);
-        assert_eq!(hosts[0].name, "concrete-host");
-    }
-
-    #[test]
-    fn transfer_partial_paths_use_stable_suffix() {
-        assert_eq!(
-            remote_partial_path("/home/app/0.txt"),
-            "/home/app/0.txt.aster.partial"
-        );
-        assert_eq!(
-            local_partial_path(Path::new("0.txt")),
-            PathBuf::from("0.txt.aster.partial")
-        );
-    }
-
-    #[test]
-    fn ensure_expected_transfer_size_rejects_short_copy() {
-        assert!(ensure_expected_transfer_size(8, 8, "上传本地文件").is_ok());
-        assert!(ensure_expected_transfer_size(7, 8, "上传本地文件").is_err());
-    }
-
-    #[test]
-    fn preview_read_limit_handles_unknown_and_known_sizes() {
-        // Unknown size must read up to the full budget, NOT a single byte.
-        assert_eq!(preview_read_limit(None), SSH_FILE_PREVIEW_MAX_BYTES);
-        assert_eq!(preview_read_limit(Some(10)), 10);
-        assert_eq!(preview_read_limit(Some(0)), 1);
-        assert_eq!(
-            preview_read_limit(Some(SSH_FILE_PREVIEW_MAX_BYTES + 5)),
-            SSH_FILE_PREVIEW_MAX_BYTES
-        );
-    }
-
-    #[test]
-    fn io_error_connection_kinds_are_classified() {
-        use std::io::{Error, ErrorKind};
-        assert!(io_error_is_connection_level(&Error::from(ErrorKind::ConnectionReset)));
-        assert!(io_error_is_connection_level(&Error::from(ErrorKind::BrokenPipe)));
-        assert!(io_error_is_connection_level(&Error::from(ErrorKind::UnexpectedEof)));
-        assert!(io_error_is_connection_level(&Error::from(ErrorKind::TimedOut)));
-        assert!(!io_error_is_connection_level(&Error::from(ErrorKind::PermissionDenied)));
-        assert!(!io_error_is_connection_level(&Error::from(ErrorKind::NotFound)));
-    }
-
-    #[test]
-    fn russh_io_errors_are_treated_as_connection_level() {
-        // Construct via the `From<io::Error>` conversion so we don't depend on
-        // the exact russh error variant name.
-        let err = russh::Error::from(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
-        assert!(russh_error_is_connection_level(&err));
-    }
-
-    #[test]
-    fn ssh_password_account_trims_and_scopes_connection() {
-        assert_eq!(
-            ssh_password_account(" 192.168.1.10 ", 22, " root ").unwrap(),
-            "password:root@192.168.1.10:22"
-        );
-    }
-
-    #[test]
-    fn ssh_password_account_rejects_unsafe_identity() {
-        assert!(ssh_password_account("example.com", 22, "root@other").is_err());
-        assert!(ssh_password_account("example.com\nbad", 22, "root").is_err());
-        assert!(ssh_password_account("", 22, "root").is_err());
-    }
-
-    #[test]
-    fn validate_remote_mutation_names_rejects_path_control_names() {
-        assert!(validate_remote_mutation_name("release").is_ok());
-        // `..` 上跳穿越必须被拒绝（即便叶子名本身是干净的）。
-        assert!(validate_remote_mutation_name("../release").is_err());
-        assert!(validate_remote_mutation_name("bad\nname").is_err());
-        assert!(safe_remote_path("bad\rpath").is_err());
-    }
-
-    #[test]
-    fn detect_line_ending_distinguishes_lf_crlf_and_mixed() {
-        assert_eq!(detect_line_ending(b"alpha\nbeta\n"), "lf");
-        assert_eq!(detect_line_ending(b"alpha\r\nbeta\r\n"), "crlf");
-        assert_eq!(detect_line_ending(b"alpha\rbeta\r"), "cr");
-        assert_eq!(detect_line_ending(b"alpha\r\nbeta\n"), "mixed");
-        assert_eq!(detect_line_ending(b"alpha beta"), "lf");
-    }
-
-    #[test]
-    fn decode_and_encode_remote_preview_text_preserve_utf8_bom_and_line_endings() {
-        let (decoded, encoding, line_ending) =
-            decode_remote_preview_text(vec![0xef, 0xbb, 0xbf, b'a', b'\r', b'\n', b'b'])
-                .expect("preview text should decode");
-        assert_eq!(decoded, "a\r\nb");
-        assert_eq!(encoding, "utf-8-bom");
-        assert_eq!(line_ending, "crlf");
-        let encoded = encode_remote_preview_text("a\nb", &encoding, &line_ending)
-            .expect("preview text should encode");
-        assert_eq!(encoded, vec![0xef, 0xbb, 0xbf, b'a', b'\r', b'\n', b'b']);
-    }
-
-    #[test]
-    fn encode_does_not_double_expand_existing_crlf() {
-        // Regression: "a\r\nb" -> crlf should stay "a\r\nb", not "a\r\r\nb".
-        let out = encode_remote_preview_text("a\r\nb", "utf-8", "crlf").unwrap();
-        assert_eq!(out, b"a\r\nb");
-    }
-
-    #[test]
-    fn format_remote_permission_renders_posix_mode_bits() {
-        assert_eq!(format_remote_permission_from_bits(0o100755), "-rwxr-xr-x");
-        assert_eq!(format_remote_permission_from_bits(0o040755), "drwxr-xr-x");
-        assert_eq!(format_remote_permission_from_bits(0o120777), "lrwxrwxrwx");
-    }
-
-    #[test]
-    fn expand_tilde_resolves_home_directory() {
-        let expanded = expand_tilde("~/.ssh/id_rsa");
-        assert!(!expanded.starts_with('~'), "tilde should be expanded: {expanded}");
-    }
-
-    #[test]
-    fn safe_remote_path_normalizes_backslashes() {
-        assert_eq!(
-            safe_remote_path(r"\home\user\file").unwrap(),
-            "/home/user/file"
-        );
-    }
-
-    #[test]
-    fn truncate_at_utf8_boundary_backs_off_mid_codepoint() {
-        // "你" is 0xE4 0xBD 0xA0; truncated to 2 bytes is invalid → back off.
-        let v = vec![0xe4, 0xbd];
-        let out = truncate_at_utf8_boundary(v);
-        assert!(out.is_empty());
-
-        let v = vec![b'a', 0xe4, 0xbd];
-        let out = truncate_at_utf8_boundary(v);
-        assert_eq!(out, b"a");
-    }
-}
+    let
