@@ -55,7 +55,7 @@ describe('AiMarkdown rendering', () => {
     expect(wrapper.text()).toContain('done');
   });
 
-  it('流式阶段启用增量打字渲染，完成后关闭平滑流式直接展示完整内容', async () => {
+  it('始终关闭平滑流式，按真实到达速度渲染，避免结束时一次性 flush', async () => {
     const wrapper = mount(AiMarkdown, {
       props: {
         messageId: 'm-smooth-stream',
@@ -67,15 +67,17 @@ describe('AiMarkdown rendering', () => {
     await nextTick();
 
     const streamingRenderer = wrapper.getComponent(MarkdownRender);
-    // 流式阶段：开启平滑流式，并通过 max-live-nodes=0 启用增量打字渲染器，
-    // 关闭与高频更新冲突的淡入动画。
-    expect(streamingRenderer.props('smoothStreaming')).toBe(true);
+    // 流式阶段：关闭平滑流式(smooth-streaming)的节奏缓冲，直接按 content 到达速度渲染；
+    // 通过 max-live-nodes=0 关闭虚拟化，并配合小批量参数做增量渲染；关闭与高频更新冲突的淡入动画。
+    expect(streamingRenderer.props('smoothStreaming')).toBe(false);
     expect(streamingRenderer.props('fade')).toBe(false);
     expect(streamingRenderer.props('typewriter')).toBe(false);
     expect(streamingRenderer.props('maxLiveNodes')).toBe(0);
-    expect(streamingRenderer.props('initialRenderBatchSize')).toBe(64);
-    expect(streamingRenderer.props('renderBatchSize')).toBe(96);
-    expect(streamingRenderer.props('renderBatchDelay')).toBe(0);
+    expect(streamingRenderer.props('batchRendering')).toBe(true);
+    expect(streamingRenderer.props('initialRenderBatchSize')).toBe(24);
+    expect(streamingRenderer.props('renderBatchSize')).toBe(16);
+    expect(streamingRenderer.props('renderBatchDelay')).toBe(8);
+    expect(streamingRenderer.props('renderBatchBudgetMs')).toBe(4);
 
     await wrapper.setProps({
       streamStatus: 'completed',
@@ -83,15 +85,16 @@ describe('AiMarkdown rendering', () => {
     await nextTick();
 
     const finalRenderer = wrapper.getComponent(MarkdownRender);
-    // 完成后：关闭平滑流式，直接展示完整内容，避免结束时一次性 flush；
-    // 恢复虚拟化（max-live-nodes=320）以应对长文档。
+    // 完成后：依旧关闭平滑流式（内容已完整，无需再做节奏控制）；恢复虚拟化(max-live-nodes=320)以应对长文档。
     expect(finalRenderer.props('smoothStreaming')).toBe(false);
     expect(finalRenderer.props('fade')).toBe(false);
     expect(finalRenderer.props('typewriter')).toBe(false);
     expect(finalRenderer.props('maxLiveNodes')).toBe(320);
-    expect(finalRenderer.props('initialRenderBatchSize')).toBe(64);
-    expect(finalRenderer.props('renderBatchSize')).toBe(96);
-    expect(finalRenderer.props('renderBatchDelay')).toBe(0);
+    expect(finalRenderer.props('batchRendering')).toBe(true);
+    expect(finalRenderer.props('initialRenderBatchSize')).toBe(24);
+    expect(finalRenderer.props('renderBatchSize')).toBe(16);
+    expect(finalRenderer.props('renderBatchDelay')).toBe(8);
+    expect(finalRenderer.props('renderBatchBudgetMs')).toBe(4);
   });
 
   it('renders custom code blocks with copy actions and code content', async () => {

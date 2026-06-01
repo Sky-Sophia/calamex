@@ -65,11 +65,22 @@ const isFinal = computed(
   () => props.streamStatus !== 'streaming' && props.streamStatus !== 'waiting-confirmation',
 );
 
-// 流式阶段：把 max-live-nodes 设为 0，关闭虚拟化、启用 markstream 的增量打字渲染器，
-// 这样 smooth-streaming 才能按节奏逐步显示文本，并在结束时等待可见内容追平。
-// 完成后：关闭 smooth-streaming，直接展示完整内容（无需再做节奏控制）。
-// 这样可避免“先显示一点点、结束时再一次性全部弹出”的问题。
-const smoothStreaming = computed(() => !isFinal.value);
+// 始终关闭 markstream 的“平滑流式(smooth-streaming)”节奏缓冲。
+//
+// 后端已是真正的逐 token 增量流式（sidecar 的 consumeTextStream 每个文本 chunk
+// 都会发出增量 message_delta，Rust 逐帧转发，前端逐帧 append），因此 props.content
+// 本身就在按模型出字速度实时增长。
+//
+// smooth-streaming 会在 content 之上再叠加一层“按固定节奏揭示”的缓冲：GLM 等高速
+// 模型整段往往 1-2 秒内就全部到齐，揭示节奏追不上，于是流式时只显示“一点点”，等到
+// 流结束(final=true)时再把缓冲里尚未揭示的剩余文本一次性 flush 出来——也就是
+// 用户看到的“卡住、最后一次性全部弹出”。
+//
+// 关掉这层缓冲后，markstream 直接按 content 的真实到达速度渲染（raw chunk cadence）：
+// 没有缓冲就没有末尾冲刷，真正的流式观感也得以保留。
+const smoothStreaming = false;
+// 流式阶段关闭虚拟化(max-live-nodes=0)，配合下方 batch-rendering 的小批量参数做增量渲染；
+// 完成后恢复虚拟化(320)以应对长文档。
 const maxLiveNodes = computed(() => (isFinal.value ? 320 : 0));
 const rendererId = computed(() => `ai-message-${props.messageId}`);
 
@@ -101,11 +112,11 @@ onBeforeUnmount(() => {
       :smooth-streaming="smoothStreaming"
       :fade="false"
       :max-live-nodes="maxLiveNodes"
-      :live-node-buffer="80"
-      :initial-render-batch-size="64"
-      :render-batch-size="96"
-      :render-batch-delay="0"
-      :render-batch-budget-ms="8"
+      :batch-rendering="true"
+      :initial-render-batch-size="24"
+      :render-batch-size="16"
+      :render-batch-delay="8"
+      :render-batch-budget-ms="4"
       :show-tooltips="false"
       :typewriter="false"
     />
