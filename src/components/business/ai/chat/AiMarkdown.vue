@@ -65,23 +65,22 @@ const isFinal = computed(
   () => props.streamStatus !== 'streaming' && props.streamStatus !== 'waiting-confirmation',
 );
 
-// 始终关闭 markstream 的“平滑流式(smooth-streaming)”节奏缓冲。
+// 保留平滑流式（smooth-streaming），并修复它此前“先一点点、结束时一次性全弹”的真正冲突。
 //
-// 后端已是真正的逐 token 增量流式（sidecar 的 consumeTextStream 每个文本 chunk
-// 都会发出增量 message_delta，Rust 逐帧转发，前端逐帧 append），因此 props.content
-// 本身就在按模型出字速度实时增长。
-//
-// smooth-streaming 会在 content 之上再叠加一层“按固定节奏揭示”的缓冲：GLM 等高速
-// 模型整段往往 1-2 秒内就全部到齐，揭示节奏追不上，于是流式时只显示“一点点”，等到
-// 流结束(final=true)时再把缓冲里尚未揭示的剩余文本一次性 flush 出来——也就是
-// 用户看到的“卡住、最后一次性全部弹出”。
-//
-// 关掉这层缓冲后，markstream 直接按 content 的真实到达速度渲染（raw chunk cadence）：
-// 没有缓冲就没有末尾冲刷，真正的流式观感也得以保留。
-const smoothStreaming = false;
-// 流式阶段关闭虚拟化(max-live-nodes=0)，配合下方 batch-rendering 的小批量参数做增量渲染；
-// 完成后恢复虚拟化(320)以应对长文档。
-const maxLiveNodes = computed(() => (isFinal.value ? 320 : 0));
+// 关键：smooth-streaming 用 "auto"，且 max-live-nodes 始终为 0、不要在 final 时跳变。
+// 原因：
+//  - "auto" 是 backlog-aware 平滑流式：待显示文本堆积（GLM-flash 这类极快模型整段秒级到齐）时
+//    会自动加速追赶，并在 final=true 时“等可见内容追平后再收尾”，本不该出现末尾一次性 flush。
+//  - 但 "auto" 仅在 (typewriter 开启 或 max-live-nodes<=0) 时才真正启用平滑分发。之前的写法在流
+//    结束的瞬间把 max-live-nodes 由 0 跳到 320（同时把 smooth-streaming 由 true 切成 false），
+//    使平滑分发在收尾瞬间被关闭，于是缓冲里尚未显示的 backlog 被一次性渲染出来——这正是“全弹”的元凶。
+//  - 始终保持 "auto" + max-live-nodes=0，让收尾走 backlog 追平逻辑即可消除冲突；"auto" 受 mounted
+//    gate 保护，重新打开历史消息也不会重复打字动画。
+const smoothStreaming = 'auto' as const;
+// 仅流式阶段显示打字光标，与平滑流式配套。
+const typewriter = computed(() => !isFinal.value);
+// 始终关闭虚拟化(max-live-nodes=0)：既启用增量/批量渲染，也保证 final 收尾时平滑分发不被中断。
+const maxLiveNodes = 0;
 const rendererId = computed(() => `ai-message-${props.messageId}`);
 
 const stopCodeBlockMapping = watch(
@@ -118,7 +117,7 @@ onBeforeUnmount(() => {
       :render-batch-delay="8"
       :render-batch-budget-ms="4"
       :show-tooltips="false"
-      :typewriter="false"
+      :typewriter="typewriter"
     />
   </div>
 </template>
