@@ -168,7 +168,14 @@ const trimThreads = (
   const trimmedNonEmptyThreads = threads
     .filter((thread) => thread.messages.length > 0)
     .slice(-AI_CONVERSATION_HISTORY_LIMIT);
-  if (activeThread && activeThread.messages.length === 0) {
+  // 始终保住当前 active 线程: 无论它是空白新会话, 还是非空但因 slice 窗口
+  // (例如 hydrate 到超过 LIMIT 条的历史时)落在最近 N 个之外, 都不能被裁掉,
+  // 否则会静默丢失用户正在查看的会话并把 active 重置到最新线程。
+  // (空白-active 行为向后兼容: 空线程本就不在 non-empty 结果中, 同样被追加。)
+  if (
+    activeThread &&
+    !trimmedNonEmptyThreads.some((thread) => thread.id === activeThread.id)
+  ) {
     return [...trimmedNonEmptyThreads, activeThread];
   }
   return trimmedNonEmptyThreads;
