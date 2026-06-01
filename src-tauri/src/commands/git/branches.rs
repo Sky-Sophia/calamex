@@ -145,16 +145,16 @@ fn build_git_branch_payload_from_ref(
     let is_current = is_current_branch(repository, reference);
 
     let (ahead, behind, upstream_name) = if kind == "local" {
-    let upstream_name = resolve_branch_upstream(repository_root, shorthand);
-    let (ahead, behind) = if upstream_name.is_some() {
-        resolve_ahead_behind_cli(repository_root, shorthand)?
+        let upstream_name = resolve_branch_upstream(repository_root, shorthand);
+        let (ahead, behind) = if upstream_name.is_some() {
+            resolve_ahead_behind_cli(repository_root, shorthand)?
+        } else {
+            (0, 0)
+        };
+        (ahead, behind, upstream_name)
     } else {
-        (0, 0)
+        (0, 0, None)
     };
-    (ahead, behind, upstream_name)
-} else {
-    (0, 0, None)
-};
 
     let last_commit = repository
         .find_commit(target_id)
@@ -165,7 +165,7 @@ fn build_git_branch_payload_from_ref(
         name,
         shorthand: shorthand.to_string(),
         kind: kind.to_string(),
-        upstream_name: None,
+        upstream_name,
         is_current,
         is_head: is_current,
         ahead,
