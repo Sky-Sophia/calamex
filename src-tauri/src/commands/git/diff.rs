@@ -1,5 +1,4 @@
 use super::*;
-use super::cli;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GitDiffMode { Worktree, Staged }
