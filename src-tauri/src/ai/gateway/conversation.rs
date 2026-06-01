@@ -134,7 +134,8 @@ pub async fn chat_stream(
 
         let result = async {
             let _ = task_config;
-            let sidecar_response = agent_sidecar::model_chat(
+            let mut streamed_any = false;
+            let sidecar_response = agent_sidecar::model_chat_streaming(
                 app.clone(),
                 AgentSidecarChatRequest {
                     session_id: Some(task_stream_id.clone()),
@@ -153,26 +154,48 @@ pub async fn chat_stream(
                     model_config: None,
                     thread_id: payload.thread_id.clone(),
                 },
+                |event| {
+                    if let Some(delta) = agent_sidecar::answer_delta_text(event) {
+                        streamed_any = true;
+                        emit_stream_event(
+                            &app,
+                            AiChatStreamEventPayload {
+                                stream_id: task_stream_id.clone(),
+                                assistant_message_id: task_assistant_message_id.clone(),
+                                kind: "delta".to_string(),
+                                delta: Some(delta),
+                                message: None,
+                                model: Some(task_model.clone()),
+                                prompt_tokens,
+                                completion_tokens: None,
+                                total_tokens: prompt_tokens,
+                                usage: None,
+                            },
+                        );
+                    }
+                },
             )
             .await?;
 
-            let final_text = sidecar_events_result_text(&sidecar_response);
-            if !final_text.is_empty() {
-                emit_stream_event(
-                    &app,
-                    AiChatStreamEventPayload {
-                        stream_id: task_stream_id.clone(),
-                        assistant_message_id: task_assistant_message_id.clone(),
-                        kind: "delta".to_string(),
-                        delta: Some(final_text),
-                        message: None,
-                        model: Some(task_model.clone()),
-                        prompt_tokens,
-                        completion_tokens: None,
-                        total_tokens: prompt_tokens,
-                        usage: None,
-                    },
-                );
+            if !streamed_any {
+                let final_text = sidecar_events_result_text(&sidecar_response);
+                if !final_text.is_empty() {
+                    emit_stream_event(
+                        &app,
+                        AiChatStreamEventPayload {
+                            stream_id: task_stream_id.clone(),
+                            assistant_message_id: task_assistant_message_id.clone(),
+                            kind: "delta".to_string(),
+                            delta: Some(final_text),
+                            message: None,
+                            model: Some(task_model.clone()),
+                            prompt_tokens,
+                            completion_tokens: None,
+                            total_tokens: prompt_tokens,
+                            usage: None,
+                        },
+                    );
+                }
             }
 
             Ok::<_, String>((None, None))
