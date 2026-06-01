@@ -618,6 +618,33 @@ fn terminate_process(_pid: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// sidecar 运行日志文件路径（位于 agent-sidecar 根目录下）。
+/// App 启动 sidecar 时把 stdout/stderr 重定向到这里，便于排查
+/// sidecar 进程在流式过程中崩溃 / 抛未捕获异常的原因。
+fn sidecar_log_path(sidecar_root: &Path) -> PathBuf {
+    sidecar_root.join("agent-sidecar.log")
+}
+
+/// 打开（截断重建）sidecar 日志文件，返回供 stdout / stderr 复用的两个句柄。
+/// 任意一步失败都安全回退到 `Stdio::null()`，绝不阻断 sidecar 启动。
+fn open_sidecar_log_stdio(sidecar_root: &Path) -> (Stdio, Stdio) {
+    let log_path = sidecar_log_path(sidecar_root);
+
+    let Ok(stdout_file) = fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&log_path)
+    else {
+        return (Stdio::null(), Stdio::null());
+    };
+
+    match stdout_file.try_clone() {
+        Ok(stderr_file) => (Stdio::from(stdout_file), Stdio::from(stderr_file)),
+        Err(_) => (Stdio::null(), Stdio::null()),
+    }
+}
+
 fn spawn_default_sidecar() -> Result<(), String> {
     let sidecar_root = resolve_sidecar_root()?;
     let node = resolve_node_executable()?;
@@ -642,14 +669,16 @@ fn spawn_default_sidecar() -> Result<(), String> {
         ));
     }
 
+    let (sidecar_stdout, sidecar_stderr) = open_sidecar_log_stdio(&sidecar_root);
+
     let mut command = Command::new(node);
     command
         .arg(tsx_cli)
         .arg(server)
         .current_dir(&sidecar_root)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(sidecar_stdout)
+        .stderr(sidecar_stderr)
         .env("AGENT_SIDECAR_PORT", "39871");
 
     inject_sidecar_dotenv_key_if_present(&mut command, &sidecar_root, "TAVILY_API_KEY");
@@ -1212,7 +1241,7 @@ mod tests {
             .expect("complete line should decode");
 
         assert_eq!(lines, vec![line.trim_end_matches('\n').to_string()]);
-        assert!(!lines[0].contains('�'));
+        assert!(!lines[0].contains('\u{fffd}'));
         assert!(buffer.is_empty());
     }
 
