@@ -13,6 +13,7 @@ use specta::Type;
 // - 通过 Deref<Target = str> 与 AsRef<str>，调用方对原 `String` 字段的绝大多数
 //   只读用法（如 `&req.api_key` 当作 `&str`、`req.api_key.is_empty()`、
 //   `req.api_key.len()`、`req.api_key.to_string()`）保持源码级兼容。
+// - 析构时清零内部明文（best-effort），缩短密钥在内存中的留存时间。
 // ============================================================================
 #[derive(Clone, Default, Serialize, Deserialize, Type)]
 #[serde(transparent)]
@@ -25,12 +26,27 @@ impl SecretString {
     }
 
     /// 消费 `SecretString` 取回内部 `String`。
-    pub fn into_inner(self) -> String {
-        self.0
+    ///
+    /// 由于实现了 `Drop`，不能直接移出 `self.0`，改用 `mem::take` 取走内容
+    /// （留下的空串会在随后的析构里被清零，无副作用）。
+    pub fn into_inner(mut self) -> String {
+        std::mem::take(&mut self.0)
     }
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+/// 析构时尽力清零明文字节，避免密钥在释放后仍残留于堆内存。
+impl Drop for SecretString {
+    fn drop(&mut self) {
+        unsafe {
+            for b in self.0.as_bytes_mut() {
+                *b = 0;
+            }
+        }
+        self.0.clear();
     }
 }
 
@@ -72,8 +88,8 @@ impl From<&str> for SecretString {
 }
 
 impl From<SecretString> for String {
-    fn from(value: SecretString) -> Self {
-        value.0
+    fn from(mut value: SecretString) -> Self {
+        std::mem::take(&mut value.0)
     }
 }
 
@@ -336,6 +352,10 @@ pub struct WorkspacePathDeletePayload {
 // 出于"零破坏性"约束本版未抽 SshCredentials + #[serde(flatten)]，未来若决定
 // 重构，是 wire-compatible 的纯 Rust 内部改动。
 //
+// password 统一包裹为 `Option<SecretString>`：wire 层因 `#[serde(transparent)]`
+// 与裸字符串完全兼容，但 Debug 输出会被遮蔽，且析构时清零，避免明文随日志或
+// 内存转储泄漏。这些 *Request 均未派生 `Type`，故不影响前端类型生成。
+//
 // 注意：identity_path 在某些上下文下可能算敏感信息（包含本地用户名路径），
 // 当前保留 Debug；若要进一步收紧可换成 `SecretString` 或自定义 Debug。
 
@@ -348,7 +368,7 @@ pub struct SshConnectionTestRequest {
     /// 已知值："password" | "key" | "agent"。
     pub(crate) auth_mode: String,
     pub(crate) identity_path: Option<String>,
-    pub(crate) password: Option<String>,
+    pub(crate) password: Option<SecretString>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -397,7 +417,7 @@ pub struct SshDirectoryListRequest {
     pub(crate) username: String,
     pub(crate) auth_mode: String,
     pub(crate) identity_path: Option<String>,
-    pub(crate) password: Option<String>,
+    pub(crate) password: Option<SecretString>,
     pub(crate) path: String,
 }
 
@@ -426,7 +446,7 @@ pub struct SshFileDownloadRequest {
     pub(crate) username: String,
     pub(crate) auth_mode: String,
     pub(crate) identity_path: Option<String>,
-    pub(crate) password: Option<String>,
+    pub(crate) password: Option<SecretString>,
     pub(crate) remote_path: String,
     pub(crate) local_path: String,
 }
@@ -447,7 +467,7 @@ pub struct SshFileUploadRequest {
     pub(crate) username: String,
     pub(crate) auth_mode: String,
     pub(crate) identity_path: Option<String>,
-    pub(crate) password: Option<String>,
+    pub(crate) password: Option<SecretString>,
     pub(crate) local_path: String,
     pub(crate) remote_directory: String,
 }
@@ -468,7 +488,7 @@ pub struct SshPathDeleteRequest {
     pub(crate) username: String,
     pub(crate) auth_mode: String,
     pub(crate) identity_path: Option<String>,
-    pub(crate) password: Option<String>,
+    pub(crate) password: Option<SecretString>,
     pub(crate) remote_path: String,
 }
 
@@ -486,7 +506,7 @@ pub struct SshPathRenameRequest {
     pub(crate) username: String,
     pub(crate) auth_mode: String,
     pub(crate) identity_path: Option<String>,
-    pub(crate) password: Option<String>,
+    pub(crate) password: Option<SecretString>,
     pub(crate) remote_path: String,
     pub(crate) new_name: String,
 }
@@ -506,7 +526,7 @@ pub struct SshDirectoryCreateRequest {
     pub(crate) username: String,
     pub(crate) auth_mode: String,
     pub(crate) identity_path: Option<String>,
-    pub(crate) password: Option<String>,
+    pub(crate) password: Option<SecretString>,
     pub(crate) remote_directory: String,
 }
 
@@ -524,7 +544,7 @@ pub struct SshFileReadRequest {
     pub(crate) username: String,
     pub(crate) auth_mode: String,
     pub(crate) identity_path: Option<String>,
-    pub(crate) password: Option<String>,
+    pub(crate) password: Option<SecretString>,
     pub(crate) remote_path: String,
 }
 
@@ -550,7 +570,7 @@ pub struct SshFileWriteRequest {
     pub(crate) username: String,
     pub(crate) auth_mode: String,
     pub(crate) identity_path: Option<String>,
-    pub(crate) password: Option<String>,
+    pub(crate) password: Option<SecretString>,
     pub(crate) remote_path: String,
     pub(crate) content: String,
     pub(crate) encoding: String,
