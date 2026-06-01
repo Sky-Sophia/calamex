@@ -88,7 +88,19 @@ pub fn create_git_branch(
         assert_repository_is_clean_for_switch(&repository, "创建并切换分支")?;
     }
 
-    cli::run_git_ok(&repository_root, &["branch", branch_name], "创建分支")?;
+    // 通过 gix 直接创建分支引用，避免依赖系统安装的 git（免装目标）。
+    let head_target = repository
+        .head_id()
+        .map_err(|error| format!("读取 HEAD 失败：{error}"))?
+        .detach();
+    repository
+        .reference(
+            format!("refs/heads/{branch_name}"),
+            head_target,
+            gix::refs::transaction::PreviousValue::MustNotExist,
+            "branch: created from HEAD",
+        )
+        .map_err(|error| format!("创建分支失败：{branch_name}（{error}）"))?;
 
     if payload.checkout {
         cli::run_git_ok(&repository_root, &["checkout", branch_name], "切换分支")?;
