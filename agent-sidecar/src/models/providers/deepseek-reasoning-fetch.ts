@@ -32,7 +32,7 @@
 import { createParser, type EventSourceMessage, type EventSourceParser } from 'eventsource-parser';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { toNonEmptyString, toRecord } from '../../engines/utils.js';
-import { countJsonChars, countTextChars, estimateInputTokensByChars, stringifyForJson as stringifyForStats } from '../../text-metrics.js';
+import { countJsonChars, countTextChars, measureText, stringifyForJson as stringifyForStats } from '../../text-metrics.js';
 
 // -----------------------------------------------------------------------------
 // Types
@@ -402,6 +402,9 @@ const createRequestPayloadStats = (
   reasoningStripped: boolean,
 ): IDeepSeekRequestPayloadStats => {
   const bodyText = stringifyForStats(body);
+  // Single allocation-free pass yields both the code-point count and the
+  // token estimate for the (large) full body, instead of scanning it twice.
+  const bodyMeasure = measureText(bodyText);
   const messages = Array.isArray(body.messages) ? body.messages : [];
   let systemMessageCharCount = 0;
   let userMessageCharCount = 0;
@@ -429,8 +432,8 @@ const createRequestPayloadStats = (
       : {}),
     ...(typeof body.stream === 'boolean' ? { stream: body.stream } : {}),
     thinkingMode,
-    requestBodyCharCount: countTextChars(bodyText),
-    projectedInputTokens: estimateInputTokensByChars(bodyText),
+    requestBodyCharCount: bodyMeasure.charCount,
+    projectedInputTokens: bodyMeasure.tokenEstimate,
     messageCharCount: countJsonChars(body.messages),
     systemMessageCharCount,
     userMessageCharCount,
