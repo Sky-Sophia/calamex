@@ -46,7 +46,7 @@ export const AI_RUNTIME_TOOLS_MANIFEST = [
         "toolName": {
           "type": "string"
         },
-        "input": {
+        "arguments": {
           "type": "object"
         }
       },
