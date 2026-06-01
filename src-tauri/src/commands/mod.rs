@@ -62,7 +62,7 @@ pub use shell_tools::{analyze_script, format_script};
 pub use ssh::{
     create_ssh_directory, delete_ssh_path, download_ssh_file, get_ssh_password,
     list_ssh_config_hosts, list_ssh_directory, read_ssh_file, rename_ssh_path, save_ssh_password,
-    test_ssh_connection, upload_ssh_file, write_ssh_file,
+    test_ssh_connection, trust_ssh_host_key, upload_ssh_file, write_ssh_file,
 };
 pub use terminal::{
     cancel_terminal_run, close_terminal_session, dispatch_script_to_terminal,

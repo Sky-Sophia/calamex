@@ -37,8 +37,8 @@ use commands::{
     read_ssh_file, rename_ssh_path, rename_workspace_path,
     resize_terminal_session, save_git_stash, save_script, save_ssh_password, search_workspace,
     set_window_background, shutdown_all_terminal_sessions, stage_git_paths, lsp_start, lsp_stop, lsp_did_open, lsp_did_change, lsp_did_close, lsp_completion, lsp_hover,
-    start_workspace_watching, stop_workspace_watching, test_ssh_connection, unstage_git_paths,
-    upload_ssh_file, write_ssh_file, write_terminal_input, TerminalSessionState,
+    start_workspace_watching, stop_workspace_watching, test_ssh_connection, trust_ssh_host_key,
+    unstage_git_paths, upload_ssh_file, write_ssh_file, write_terminal_input, TerminalSessionState,
 };
 use std::{
     sync::atomic::{AtomicBool, Ordering},
@@ -206,7 +206,7 @@ fn disable_webview_default_context_menu<R: tauri::Runtime>(
 
 // === 随包资源 ============================================================
 
-/// 打包后把「随包资源」的绝对路径注入进程环境变量，供 sidecar / LSP / shfmt 复用。
+/// 打包后把「随包资源」的绝对路径注入进进程环境变量，供 sidecar / LSP / shfmt 复用。
 /// 这些解析器（agent_sidecar、commands::lsp、commands::shell_tools）都已支持相应的
 /// 环境变量覆盖，因此无需改动它们即可让生产环境优先使用安装目录内自带的运行时。
 /// 仅在对应文件 / 目录真实存在时设置（开发模式下资源目录不存在则整体跳过），
@@ -396,6 +396,7 @@ fn main() {
             agent_sidecar_restore_checkpoint,
             agent_sidecar_warmup,
             test_ssh_connection,
+            trust_ssh_host_key,
             save_ssh_password,
             get_ssh_password,
             list_ssh_config_hosts,
