@@ -1253,4 +1253,147 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-if=
+        <div v-if="isExplorerActive" class="ssh-file-list" role="list" aria-label="远端文件列表">
+          <div v-if="isRemoteDirectoryLoading" class="ssh-file-list-state" aria-live="polite">
+            正在读取远端目录…
+          </div>
+          <div v-else-if="sshFileItems.length === 0" class="ssh-file-list-state">
+            当前目录为空
+          </div>
+          <template v-else>
+            <button v-for="item in sshFileItems" :key="item.id" type="button" class="ssh-file-item" :class="{
+              'is-folder': item.kind === 'folder',
+              'is-selected': selectedFileId === item.id,
+            }" :aria-label="`${item.name}，${item.metaLabel}`" @click="handleSelectFile(item.id)"
+              @dblclick="handleOpenFile(item.id)"
+              @contextmenu.prevent="handleFileContextMenu($event, item.id)">
+              <span class="ssh-file-icon" :class="`is-${item.kind}`" aria-hidden="true">
+                <svg v-if="item.kind === 'folder'" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M2 6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6z" />
+                </svg>
+                <span v-else-if="item.kind === 'rust'">⚙</span>
+                <svg v-else-if="item.kind === 'lock'" width="13" height="13" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+              </span>
+
+              <span class="ssh-file-name"> item.name </span>
+              <span class="ssh-file-meta"> item.metaLabel </span>
+            </button>
+          </template>
+        </div>
+
+        <div v-else-if="isTransferActive" class="ssh-transfer-panel" aria-label="传输任务列表">
+          <div v-if="transferItems.length === 0" class="ssh-transfer-empty">
+            暂无传输任务
+          </div>
+          <article v-for="item in transferItems" :key="item.id" class="ssh-transfer-item">
+            <div class="ssh-transfer-header">
+              <div class="ssh-transfer-name">
+                <span class="ssh-transfer-direction" :class="`is-${item.direction}`">
+                   item.direction === 'upload' ? '↑ 上传' : '↓ 下载' 
+                </span>
+                 item.name 
+              </div>
+              <span class="ssh-transfer-meta"> item.sizeLabel </span>
+            </div>
+
+            <div class="ssh-progress-bar" aria-hidden="true">
+              <div class="ssh-progress-fill" :class="`is-${item.status}`" :style="{ width: `${item.progress}%` }" />
+            </div>
+
+            <div class="ssh-transfer-footer">
+              <span class="ssh-transfer-meta"> item.progressLabel </span>
+              <span class="ssh-transfer-meta"
+                :class="{ 'is-success': item.status === 'done', 'is-failed': item.status === 'failed' }">
+                 item.status === 'done' ? '完成' : item.status === 'failed' ? '失败' : '进行中' 
+              </span>
+            </div>
+          </article>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <LinearContextMenu :open="isConnected && contextMenu.open" :x="contextMenu.x" :y="contextMenu.y"
+    :groups="SSH_CONTEXT_MENU_GROUPS" theme="dark" submenu-direction="right" @select="handleContextMenuSelect" />
+
+  <SshFilePreviewDialog v-if="previewFileItem" :file-item="previewFileItem" :payload="previewPayload"
+    :is-loading="isPreviewLoading" :is-saving="isPreviewSaving" @close="closePreviewDialog" @reload="reloadPreviewFile"
+    @download="downloadPreviewFile" @save="savePreviewFile" />
+
+  <Teleport to="body">
+    <div v-if="isCreateDirectoryDialogOpen" class="ssh-modal-backdrop" @click.self="closeCreateDirectoryDialog">
+      <form class="ssh-modal" @submit.prevent="confirmCreateDirectory">
+        <div class="ssh-modal-copy">
+          <h3>新建远端文件夹</h3>
+          <p>将在“ currentRemotePath ”下创建文件夹。不会覆盖远端已有项目。</p>
+        </div>
+        <label class="ssh-modal-field">
+          <span>文件夹名称</span>
+          <input ref="createDirectoryInputRef" v-model="createDirectoryName" :disabled="isPathMutating"
+            autocomplete="off" />
+        </label>
+        <div class="ssh-modal-actions">
+          <button type="button" class="ssh-modal-button" :disabled="isPathMutating" @click="closeCreateDirectoryDialog">
+            取消
+          </button>
+          <button type="submit" class="ssh-modal-button is-primary"
+            :disabled="!canConfirmCreateDirectory || isPathMutating">
+             isPathMutating ? '处理中…' : '创建' 
+          </button>
+        </div>
+      </form>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div v-if="pendingRenameItem" class="ssh-modal-backdrop" @click.self="closeRenameDialog">
+      <form class="ssh-modal" @submit.prevent="confirmRenamePath">
+        <div class="ssh-modal-copy">
+          <h3>重命名远端项目</h3>
+          <p>为“ pendingRenameItem.name ”输入新的名称。不会覆盖远端已有项目。</p>
+        </div>
+        <label class="ssh-modal-field">
+          <span>新名称</span>
+          <input ref="renameInputRef" v-model="renameInputValue" :disabled="isPathMutating" autocomplete="off" />
+        </label>
+        <div class="ssh-modal-actions">
+          <button type="button" class="ssh-modal-button" :disabled="isPathMutating" @click="closeRenameDialog">
+            取消
+          </button>
+          <button type="submit" class="ssh-modal-button is-primary" :disabled="!canConfirmRename || isPathMutating">
+             isPathMutating ? '处理中…' : '重命名' 
+          </button>
+        </div>
+      </form>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div v-if="pendingDeleteItem" class="ssh-modal-backdrop" @click.self="closeDeleteDialog">
+      <section class="ssh-modal is-danger" role="alertdialog" aria-modal="true">
+        <div class="ssh-modal-copy">
+          <h3>删除远端项目？</h3>
+          <p>将删除“ pendingDeleteItem.name ”。此操作不可撤销，请确认这是你想要的操作。</p>
+        </div>
+        <div class="ssh-modal-actions">
+          <button type="button" class="ssh-modal-button" :disabled="isPathMutating" @click="closeDeleteDialog">
+            取消
+          </button>
+          <button type="button" class="ssh-modal-button is-danger" :disabled="isPathMutating"
+            @click="confirmDeletePath">
+             isPathMutating ? '删除中…' : '删除' 
+          </button>
+        </div>
+      </section>
+    </div>
+  </Teleport>
+</template>
