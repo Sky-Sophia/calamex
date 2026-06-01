@@ -910,7 +910,7 @@ fn handle_local_wsl_interactive_terminal_event(
         }
         LocalWslTerminalServerPayload::InteractiveError(payload) => {
             if let Some(message_session_id) = payload.session_id.as_ref() {
-                if message_session_id == &session_id {
+                if message_session_id == session_id {
                     emit_terminal_interactive_output(
                         app,
                         state,
