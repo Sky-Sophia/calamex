@@ -104,12 +104,16 @@ export const useAiStore = defineStore('ai', () => {
   /**
    * 把 store 重置为初始 state；用于退出登录 / 切换工作区等场景。
    * Pinia 的 setup store 不会自动提供 $reset,需手动归零。
+   *
+   * 注意:故意**不**重置 `configWriteSeq`。它是单调递增的写入序号,用于并发竞态
+   * 保护(last-initiated-wins)。一旦在此归零,reset 时仍在 await 的旧写入(seq=N)
+   * 会与 reset 后新发起的写入(从 1 重新计数)撞上相同序号,导致本应被丢弃的过期
+   * 响应被误判为"最新发起者"而落盘。保持单调递增可确保旧响应在 reset 后仍被丢弃。
    */
   const reset = (): void => {
     config.value = createDefaultAiConfigPayload();
     status.value = 'idle';
     errorMessage.value = null;
-    configWriteSeq = 0;
   };
 
   return {
