@@ -1789,4 +1789,180 @@ onBeforeUnmount(() => {
 }
 
 .ai-file-rollback-entry.is-reverted .ai-file-rollback-entry__button {
-  
+  color: color-mix(in srgb, var(--success) 68%, var(--text-tertiary));
+}
+
+.ai-composer-shell {
+  --ai-composer-surface: var(--panel-bg);
+  --ai-composer-fade-height: calc(var(--app-density-scale) * 3rem);
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  background: var(--ai-composer-surface);
+}
+
+.ai-composer-shell::before {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% - 1px);
+  left: 0;
+  height: var(--ai-composer-fade-height);
+  pointer-events: none;
+  background: linear-gradient(to top,
+      var(--ai-composer-surface) 0%,
+      color-mix(in srgb, var(--ai-composer-surface) 74%, transparent) 24%,
+      color-mix(in srgb, var(--ai-composer-surface) 34%, transparent) 58%,
+      color-mix(in srgb, var(--ai-composer-surface) 10%, transparent) 82%,
+      transparent 100%);
+  content: '';
+}
+
+.ai-composer-shell.has-plan {
+  background: transparent;
+}
+
+.ai-composer-shell :global(.ai-plan-mode-panel) {
+  border-top: 0;
+  background: transparent;
+  padding: 0 0 calc(var(--app-density-scale) * 0.125rem);
+}
+
+.ai-direct-tool-confirmation {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0 88px 0 12px;
+}
+
+.ai-composer-shell :global(.ai-composer) {
+  background: var(--ai-composer-surface);
+  padding: 0 10px 10px;
+}
+
+.ai-suggestion-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 6px;
+  padding: clamp(64px, 20vh, 200px) 16px 0;
+}
+
+.ai-suggestion-greeting {
+  margin: 0 0 18px;
+  color: var(--text-primary);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  text-align: center;
+}
+
+.ai-suggestion-row {
+  display: flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 10px;
+}
+
+.ai-suggestion-empty :deep(button) {
+  display: inline-flex;
+  min-width: 0;
+  max-width: min(100%, 360px);
+  min-height: 34px;
+  flex: 0 1 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0 !important;
+  border-radius: var(--radius-md) !important;
+  background-color: color-mix(in srgb, var(--surface-soft) 62%, transparent) !important;
+  color: var(--text-secondary) !important;
+  cursor: pointer;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  line-height: 18px;
+  padding: 7px 17px !important;
+  text-align: center;
+  box-shadow: none !important;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-easing-emphasized),
+    color var(--motion-duration-fast) var(--motion-easing-emphasized),
+    transform var(--motion-duration-fast) var(--motion-easing-emphasized);
+}
+
+.ai-suggestion-empty :deep(button:hover) {
+  background-color: color-mix(in srgb, var(--surface-soft) 100%, transparent) !important;
+  color: var(--text-primary) !important;
+}
+
+.ai-suggestion-empty :deep(button:active) {
+  transform: scale(0.985);
+}
+
+.ai-suggestion-empty :deep(button:focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--accent-strong) 44%, transparent);
+  outline-offset: 3px;
+}
+
+.ai-suggestion-empty :deep(button:disabled) {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.ai-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.ai-dialog {
+  display: grid;
+  inline-size: fit-content;
+  min-inline-size: min(380px, calc(100vw - 32px));
+  max-inline-size: min(460px, calc(100vw - 32px));
+  gap: 12px;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.ai-dialog-copy h3 {
+  margin: 0;
+  color: #000000;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ai-dialog-copy p {
+  margin: 4px 0 0;
+  color: #737373;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.ai-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.ai-button.is-ghost {
+  border: 1px solid #d4d4d4;
+  background: #ffffff;
+  color: #000000;
+}
+
+.ai-button.is-danger {
+  border: 0;
+  background: #ea1a24;
+  color: #ffffff;
+}
+</style>
