@@ -1,4 +1,4 @@
-﻿use serde::de::DeserializeOwned;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -260,6 +260,29 @@ fn emit_sidecar_stream_event(
     }
 }
 
+/// 从 sidecar UI 事件中提取“最终回答”阶段的增量文本。
+///
+/// 仅当事件为 `message_delta` 且 `phase` 为 `final` 或缺省时返回其 `text`；
+/// `stage` 阶段（过渡性内容）、空文本以及其它事件类型一律返回 `None`，
+/// 以便聊天网关只把真正属于回答的增量实时下发到 `ai:chat-stream`。
+pub fn answer_delta_text(event: &serde_json::Value) -> Option<String> {
+    if event.get("type").and_then(|value| value.as_str()) != Some("message_delta") {
+        return None;
+    }
+
+    if let Some(phase) = event.get("phase").and_then(|value| value.as_str()) {
+        if phase != "final" {
+            return None;
+        }
+    }
+
+    event
+        .get("text")
+        .and_then(|value| value.as_str())
+        .filter(|text| !text.is_empty())
+        .map(|text| text.to_string())
+}
+
 fn decode_sidecar_stream_line(
     line: &str,
     endpoint: &str,
@@ -306,13 +329,17 @@ fn has_non_whitespace_bytes(bytes: &[u8]) -> bool {
         .any(|byte| !matches!(*byte, b' ' | b'\t' | b'\r' | b'\n'))
 }
 
-fn consume_sidecar_stream_line(
+fn consume_sidecar_stream_line<F>(
     app: &AppHandle,
     session_id: &str,
     seq: &mut u64,
     line: &str,
     endpoint: &str,
-) -> Result<Option<AgentSidecarResponsePayload>, String> {
+    on_event: &mut F,
+) -> Result<Option<AgentSidecarResponsePayload>, String>
+where
+    F: FnMut(&serde_json::Value),
+{
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return Ok(None);
@@ -320,6 +347,7 @@ fn consume_sidecar_stream_line(
 
     match decode_sidecar_stream_line(trimmed, endpoint)? {
         AgentSidecarStreamFrame::Event { event } => {
+            on_event(&event);
             emit_sidecar_stream_event(app, session_id, *seq, event);
             *seq += 1;
             Ok(None)
@@ -331,15 +359,17 @@ fn consume_sidecar_stream_line(
     }
 }
 
-async fn post_json_streaming_events<TRequest>(
+async fn post_json_streaming_events_with_handler<TRequest, F>(
     app: &AppHandle,
     endpoint: &str,
     stream_endpoint: &str,
     payload: &TRequest,
     session_id: &str,
+    on_event: &mut F,
 ) -> Result<AgentSidecarResponsePayload, String>
 where
     TRequest: Serialize,
+    F: FnMut(&serde_json::Value),
 {
     let base_url = configured_base_url();
     ensure_default_sidecar_available(&base_url).await?;
@@ -372,9 +402,14 @@ where
         buffer.extend_from_slice(&chunk);
 
         for line in drain_complete_sidecar_stream_lines(&mut buffer, stream_endpoint)? {
-            if let Some(response) =
-                consume_sidecar_stream_line(app, session_id, &mut seq, &line, stream_endpoint)?
-            {
+            if let Some(response) = consume_sidecar_stream_line(
+                app,
+                session_id,
+                &mut seq,
+                &line,
+                stream_endpoint,
+                on_event,
+            )? {
                 final_response = Some(response);
             }
         }
@@ -383,9 +418,14 @@ where
     if has_non_whitespace_bytes(&buffer) {
         let line = decode_sidecar_stream_line_bytes(std::mem::take(&mut buffer), stream_endpoint)?;
 
-        if let Some(response) =
-            consume_sidecar_stream_line(app, session_id, &mut seq, &line, stream_endpoint)?
-        {
+        if let Some(response) = consume_sidecar_stream_line(
+            app,
+            session_id,
+            &mut seq,
+            &line,
+            stream_endpoint,
+            on_event,
+        )? {
             final_response = Some(response);
         }
     }
@@ -393,6 +433,28 @@ where
     final_response.ok_or_else(|| {
         format!("AGENT_SIDECAR_CONTRACT_ERROR: sidecar 流式响应缺少最终结果({stream_endpoint})")
     })
+}
+
+async fn post_json_streaming_events<TRequest>(
+    app: &AppHandle,
+    endpoint: &str,
+    stream_endpoint: &str,
+    payload: &TRequest,
+    session_id: &str,
+) -> Result<AgentSidecarResponsePayload, String>
+where
+    TRequest: Serialize,
+{
+    let mut noop = |_event: &serde_json::Value| {};
+    post_json_streaming_events_with_handler(
+        app,
+        endpoint,
+        stream_endpoint,
+        payload,
+        session_id,
+        &mut noop,
+    )
+    .await
 }
 
 fn is_default_local_sidecar_url(base_url: &str) -> bool {
@@ -1003,20 +1065,28 @@ pub async fn restore_checkpoint(
     .await
 }
 
-pub async fn model_chat(
+/// 流式聊天：在读取 sidecar NDJSON 事件流的同时，把每个 UI 事件交给
+/// `on_event` 回调（聊天网关据此把 `message_delta` 增量实时下发到
+/// `ai:chat-stream`），最终返回完整响应。除回调外，行为与既有流式路径一致。
+pub async fn model_chat_streaming<F>(
     app: AppHandle,
     mut payload: AgentSidecarChatRequest,
-) -> Result<AgentSidecarResponsePayload, String> {
+    mut on_event: F,
+) -> Result<AgentSidecarResponsePayload, String>
+where
+    F: FnMut(&serde_json::Value),
+{
     let session_id = ensure_request_session_id(&mut payload.session_id, "sidecar-model-chat");
     if payload.model_config.is_none() {
         payload.model_config = Some(current_sidecar_model_config()?);
     }
-    post_json_streaming_events(
+    post_json_streaming_events_with_handler(
         &app,
         "/model/chat",
         "/model/chat/stream",
         &payload,
         &session_id,
+        &mut on_event,
     )
     .await
 }
@@ -1052,11 +1122,11 @@ pub async fn web_fetch(payload: AiWebFetchInput) -> Result<AiWebFetchPayload, St
 #[cfg(test)]
 mod tests {
     use super::{
-        build_sidecar_url, classify_sidecar_health, drain_complete_sidecar_stream_lines,
-        has_non_whitespace_bytes, inject_sidecar_dotenv_key_if_present,
-        is_default_local_sidecar_url, model_provider_id, normalize_base_url,
-        parse_netstat_listening_pids, SidecarHealthProbePayload, SidecarHealthStatus,
-        DEFAULT_SIDECAR_URL,
+        answer_delta_text, build_sidecar_url, classify_sidecar_health,
+        drain_complete_sidecar_stream_lines, has_non_whitespace_bytes,
+        inject_sidecar_dotenv_key_if_present, is_default_local_sidecar_url, model_provider_id,
+        normalize_base_url, parse_netstat_listening_pids, SidecarHealthProbePayload,
+        SidecarHealthStatus, DEFAULT_SIDECAR_URL,
     };
     use std::fs;
     use std::process::Command;
@@ -1089,6 +1159,27 @@ mod tests {
         assert!(is_default_local_sidecar_url("http://localhost:39871/"));
         assert!(!is_default_local_sidecar_url("http://127.0.0.1:49999"));
         assert!(!is_default_local_sidecar_url("https://agent.example.com"));
+    }
+
+    #[test]
+    fn answer_delta_text_extracts_only_final_phase_message_deltas() {
+        let implicit_final = serde_json::json!({ "type": "message_delta", "text": "你好" });
+        assert_eq!(answer_delta_text(&implicit_final).as_deref(), Some("你好"));
+
+        let explicit_final =
+            serde_json::json!({ "type": "message_delta", "text": "世界", "phase": "final" });
+        assert_eq!(answer_delta_text(&explicit_final).as_deref(), Some("世界"));
+
+        let stage_event =
+            serde_json::json!({ "type": "message_delta", "text": "思考中", "phase": "stage" });
+        assert_eq!(answer_delta_text(&stage_event), None);
+
+        let empty_event = serde_json::json!({ "type": "message_delta", "text": "" });
+        assert_eq!(answer_delta_text(&empty_event), None);
+
+        let other_event =
+            serde_json::json!({ "type": "tool_start", "toolName": "x", "input": {} });
+        assert_eq!(answer_delta_text(&other_event), None);
     }
 
     #[test]
