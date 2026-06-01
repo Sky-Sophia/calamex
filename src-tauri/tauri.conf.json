@@ -41,7 +41,6 @@
       "nsis"
     ],
     "resources": [
-      "binaries/wsl-link/*",
       "resources-bundle/**/*"
     ],
     "publisher": "xiaojianc",
