@@ -446,13 +446,19 @@ const buildWindowsToolchainEnv = () => {
         ]);
         const cargoBinDirectory = cargoExecutable ? path.dirname(cargoExecutable) : '';
         const nodeBinDirectory = path.dirname(process.execPath);
-        env.PATH = joinEnvValues([
+
+        // 关键修复：先按大小写兼容方式取出原始 PATH，再删除所有大小写的旧键，
+        // 最后统一写回单一的 Path 键，避免 Windows 上 Path/PATH 重复键导致子进程丢失 PATH。
+        const existingPath = env.PATH ?? env.Path ?? '';
+        delete env.Path;
+        delete env.PATH;
+        env.Path = joinEnvValues([
             msvc.bin,
             existsSync(sdk.binVersioned) ? sdk.binVersioned : sdk.binFallback,
             existsSync(sdk.binFallback) ? sdk.binFallback : '',
             cargoBinDirectory,
             nodeBinDirectory,
-            env.PATH ?? '',
+            existingPath,
         ]);
         env.INCLUDE = joinEnvValues([
             msvc.include,
