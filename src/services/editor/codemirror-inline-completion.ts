@@ -12,6 +12,25 @@ import type { IAiInlineCompletionResult } from '@/types/ai';
 
 const INLINE_COMPLETION_CONTEXT_LIMIT = 8_000;
 const INLINE_COMPLETION_DELAY_MS = 450;
+const INLINE_COMPLETION_CONFIG_TTL_MS = 5_000;
+
+// 缓存 AI 配置，避免每次补全（每次按键去抖后）都发起一次 IPC。
+// 使用较短 TTL，使设置变更（如关闭行内补全）能在数秒内生效。
+let cachedConfigPromise: ReturnType<typeof aiService.getConfig> | null = null;
+let cachedConfigAt = 0;
+
+const getInlineCompletionConfig = (): ReturnType<typeof aiService.getConfig> => {
+  const now = Date.now();
+  if (!cachedConfigPromise || now - cachedConfigAt > INLINE_COMPLETION_CONFIG_TTL_MS) {
+    cachedConfigAt = now;
+    cachedConfigPromise = aiService.getConfig().catch((error: unknown) => {
+      // 获取失败不缓存，下次重新拉取。
+      cachedConfigPromise = null;
+      throw error;
+    });
+  }
+  return cachedConfigPromise;
+};
 
 interface IInlineCompletionState {
   from: number;
@@ -145,7 +164,7 @@ export const createCodeMirrorInlineCompletionController = (
     if (!view || options.getLanguage() !== 'shell') {
       return;
     }
-    const config = await aiService.getConfig();
+    const config = await getInlineCompletionConfig();
     if (nextRequestId !== requestId || !config.inlineCompletionEnabled) {
       return;
     }

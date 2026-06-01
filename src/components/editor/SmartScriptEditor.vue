@@ -107,11 +107,6 @@ const captureAnalysisSnapshot = (): TAnalysisSnapshot => ({
   content: props.modelValue ?? '',
 });
 
-const isShellFile = (path: string | null): boolean => {
-  if (!path) return false;
-  return /\\.(sh|bash|zsh)$/iu.test(path);
-};
-
 const runAnalysis = async (requestId: number): Promise<void> => {
   const snapshot = captureAnalysisSnapshot();
 

@@ -46,7 +46,9 @@ export const buildCodeMirrorSettingsExtensions = (
     drawSelection(),
     showLineNumbers ? lineNumbers() : [],
     showActiveLine ? highlightActiveLine() : [],
-    editorSettings.indentGuides ? highlightActiveLineGutter() : [],
+    // highlightActiveLineGutter 是“高亮当前行”在行号槽中的对应部分，应跟随 activeLine 设置，
+    // 而非与之语义无关的 indentGuides。当前依赖未提供缩进参考线扩展，indentGuides 暂未接线。
+    showActiveLine ? highlightActiveLineGutter() : [],
     showFoldGutter ? foldGutter() : [],
     enableAutoClosingPairs ? closeBrackets() : [],
   ];
