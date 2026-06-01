@@ -685,8 +685,8 @@ const handleStop = (): void => {
   color: var(--text-secondary);
   padding: 0 8px;
   box-shadow: none;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   line-height: 1;
   transform: translate(3px, 3px);
   transition:
@@ -746,7 +746,7 @@ const handleStop = (): void => {
 
   .ai-model-trigger {
     max-width: 136px;
-    font-size: 15px;
+    font-size: 14px;
   }
 }
 </style>
