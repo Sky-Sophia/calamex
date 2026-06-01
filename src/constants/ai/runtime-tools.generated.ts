@@ -229,6 +229,9 @@ export const AI_RUNTIME_TOOLS_MANIFEST = [
         toolName: {
           type: 'string',
         },
+        arguments: {
+          type: 'object',
+        },
         input: {
           type: 'object',
         },
