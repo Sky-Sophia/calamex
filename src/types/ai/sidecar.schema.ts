@@ -317,7 +317,7 @@ export const agentSidecarWarmupPayloadSchema = z.object({
   statusCode: z.number().int().positive().nullable(),
   durationMs: z.number().int().nonnegative(),
   skipped: z.boolean(),
-  reason: z.string().min(1).optional(),
+  reason: z.string().min(1).nullable().optional(),
 });
 
 /* ============================================================================
