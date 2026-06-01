@@ -182,14 +182,26 @@ fn is_current_branch(repository: &Repository, reference: &gix::Reference<'_>) ->
 }
 
 fn resolve_branch_upstream(repository_root: &Path, branch_name: &str) -> Option<String> {
-    let upstream_ref = [branch_name, "@{upstream}"].concat();
-    let output = cli::run_git_text_allow_exit_one(
-        repository_root,
-        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", &upstream_ref],
-        "读取上游分支",
-    ).ok().flatten()?;
-    let trimmed = output.trim();
-    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    // 通过 gix 读取分支上游配置（branch.<name>.remote / branch.<name>.merge），
+    // 拼出形如 "origin/main" 的上游短名，避免依赖系统安装的 git。
+    let repository = gix::open(repository_root).ok()?;
+    let config = repository.config_snapshot();
+
+    let remote = config.string(format!("branch.{branch_name}.remote").as_str())?;
+    let merge = config.string(format!("branch.{branch_name}.merge").as_str())?;
+
+    let remote = remote.to_str_lossy();
+    let remote = remote.trim();
+    let merge = merge.to_str_lossy();
+    let merge_branch = merge
+        .strip_prefix("refs/heads/")
+        .unwrap_or_else(|| merge.as_ref())
+        .trim();
+
+    if remote.is_empty() || merge_branch.is_empty() {
+        return None;
+    }
+    Some(format!("{remote}/{merge_branch}"))
 }
 
 fn resolve_ahead_behind_cli(
@@ -197,25 +209,42 @@ fn resolve_ahead_behind_cli(
     branch_name: &str,
 ) -> Result<(usize, usize), String> {
     // 比较「该分支」与「它自己的上游」，而不是当前 HEAD 的上游。
-    let upstream_ref = [branch_name, "@{upstream}"].concat();
-    let range = [branch_name, "...", &upstream_ref].concat();
-    let output = cli::run_git_text_allow_exit_one(
-        repository_root,
-        &["rev-list", "--count", "--left-right", &range],
-        "读取 ahead/behind",
-    );
+    // 通过 gix 的修订遍历计算 ahead/behind，等价于
+    // `git rev-list --count --left-right <branch>...<upstream>`，避免依赖系统安装的 git。
+    let repository = gix::open(repository_root)
+        .map_err(|error| format!("打开 Git 仓库失败：{error}"))?;
 
-    match output {
-        Ok(Some(output)) => {
-            let parts: Vec<&str> = output.trim().split('\t').collect();
-            if parts.len() >= 2 {
-                Ok((parts[0].parse::<usize>().unwrap_or(0), parts[1].parse::<usize>().unwrap_or(0)))
-            } else {
-                Ok((0, 0))
-            }
-        }
-        _ => Ok((0, 0)),
-    }
+    let local_id = match repository.rev_parse_single(branch_name) {
+        Ok(id) => id.detach(),
+        Err(_) => return Ok((0, 0)),
+    };
+
+    let upstream_name = match resolve_branch_upstream(repository_root, branch_name) {
+        Some(name) => name,
+        None => return Ok((0, 0)),
+    };
+    let upstream_id = match repository.rev_parse_single(upstream_name.as_str()) {
+        Ok(id) => id.detach(),
+        Err(_) => return Ok((0, 0)),
+    };
+
+    // ahead：本地分支可达、但上游不可达的提交数。
+    let ahead = repository
+        .rev_walk(Some(local_id))
+        .with_hidden(Some(upstream_id))
+        .selected(|_| true)
+        .map_err(|error| format!("计算领先提交数失败：{error}"))?
+        .count();
+
+    // behind：上游可达、但本地分支不可达的提交数。
+    let behind = repository
+        .rev_walk(Some(upstream_id))
+        .with_hidden(Some(local_id))
+        .selected(|_| true)
+        .map_err(|error| format!("计算落后提交数失败：{error}"))?
+        .count();
+
+    Ok((ahead, behind))
 }
 
 pub(super) fn assert_repository_is_clean_for_switch(
