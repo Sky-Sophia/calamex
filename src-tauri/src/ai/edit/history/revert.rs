@@ -426,7 +426,7 @@ pub fn revert_task(
 ///
 /// 所有公开命令都先过这一道。错误类别保持与原始实现一致，调用方决定使用
 /// `task_not_found` / `operation_not_found` / `snapshot_not_found` 中的哪一种。
-fn require_non_empty_param<'a, F>(value: &'a str, on_empty: F) -> Result<&'a str, String>
+fn require_non_empty_param<F>(value: &str, on_empty: F) -> Result<&str, String>
 where
     F: FnOnce() -> String,
 {
@@ -441,7 +441,7 @@ where
 fn require_non_empty_path<'a>(value: &'a str, message: &str) -> Result<&'a str, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        return Err(errors::restore_conflict(message.to_string()));
+        return Err(errors::restore_conflict(message));
     }
     Ok(trimmed)
 }

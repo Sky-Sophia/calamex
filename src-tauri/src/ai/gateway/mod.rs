@@ -456,7 +456,7 @@ fn normalize_runtime_config(mut config: AiRuntimeConfig) -> AiRuntimeConfig {
     config.selected_model = selected_model;
     config.base_url = base_url;
     config.narrator = normalize_model_endpoint_config(config.narrator)
-        .unwrap_or_else(AiModelEndpointRuntimeConfig::default);
+        .unwrap_or_default();
 
     config
 }
@@ -491,7 +491,7 @@ fn persist_config(config: &AiRuntimeConfig) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|error| {
             errors::error(
                 "AI_PROVIDER_UNAVAILABLE",
-                &format!("AI 配置目录创建失败：{error}"),
+                format!("AI 配置目录创建失败：{error}"),
             )
         })?;
     }
@@ -499,14 +499,14 @@ fn persist_config(config: &AiRuntimeConfig) -> Result<(), String> {
     let content = serde_json::to_string_pretty(config).map_err(|error| {
         errors::error(
             "AI_RESPONSE_INVALID",
-            &format!("AI 配置序列化失败：{error}"),
+            format!("AI 配置序列化失败：{error}"),
         )
     })?;
 
     fs::write(path, content).map_err(|error| {
         errors::error(
             "AI_PROVIDER_UNAVAILABLE",
-            &format!("AI 配置保存失败：{error}"),
+            format!("AI 配置保存失败：{error}"),
         )
     })
 }

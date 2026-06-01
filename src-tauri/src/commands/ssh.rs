@@ -678,9 +678,17 @@ async fn download_file_inner(
         return Err(e);
     }
 
+<<<<<<< Updated upstream
     if let Some(expected) = expected_size {
         ensure_expected_transfer_size(written, expected, "下载远程文件")?;
     }
+=======
+    // Propagate reader errors.
+    read_handle
+        .await
+        .map_err(|e| format!("读取任务异常终止：{e}"))?
+        .map_err(|e| e.to_string())?;
+>>>>>>> Stashed changes
 
     // Promote the fully-written `.partial` to its final name (blocking fs op).
     let partial_for_rename = partial.clone();
@@ -780,7 +788,7 @@ async fn upload_file_inner(
     read_handle
         .await
         .map_err(|e| format!("读取任务异常终止：{e}"))?
-        .map_err(|e| format!("{e}"))?;
+        .map_err(|e| e.to_string())?;
 
     file.shutdown()
         .await
@@ -1290,11 +1298,10 @@ fn parse_ssh_config_hosts(content: &str) -> Vec<SshConfigHostPayload> {
                 cur.flush(&mut hosts);
                 cur.name = concrete_host_alias(&value);
             }
-            "hostname" => {
-                if !value.contains('*') {
+            "hostname"
+                if !value.contains('*') => {
                     cur.host = value;
                 }
-            }
             "user" => cur.username = value,
             "port" => {
                 if let Ok(p) = value.parse::<u16>() {
@@ -1350,7 +1357,7 @@ fn validate_remote_mutation_name(path: &str) -> Result<(), String> {
     // 安全加固：先拒绝整条路径中的 `..` 上跳穿越——否则 file_name() 只取叶子时，
     // 形如 `../release` 的相对穿越会因叶子 "release" 干净而被误放行。
     if path
-        .split(|c| c == '/' || c == '\\')
+        .split(['/', '\\'])
         .any(|segment| segment.trim() == "..")
     {
         return Err(format!("远程路径名不合法：{path}"));

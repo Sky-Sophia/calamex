@@ -277,7 +277,7 @@ fn apply_retention_policy_with_policy(
     let stored_operations = edit_journal::list_operations(storage_root)?;
     let pin_records = pins::list_pin_records(storage_root)?;
     let pin_index = pins::build_pin_index(&pin_records);
-    let metadata_cutoff = snapshot_policy.now - jiff::SignedDuration::from_secs((OPERATION_METADATA_TTL_DAYS as i64) * 86400);
+    let metadata_cutoff = snapshot_policy.now - jiff::SignedDuration::from_secs(OPERATION_METADATA_TTL_DAYS * 86400);
     let retained_operations = stored_operations
         .iter()
         .filter(|operation| {
@@ -536,7 +536,7 @@ fn normalize_optional_string(value: String) -> Option<String> {
     }
 }
 
-fn normalize_optional_str<'a>(value: Option<&'a str>) -> Option<&'a str> {
+fn normalize_optional_str(value: Option<&str>) -> Option<&str> {
     value.and_then(|raw| {
         let trimmed = raw.trim();
         if trimmed.is_empty() {

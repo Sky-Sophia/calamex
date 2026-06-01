@@ -225,7 +225,7 @@ where
 fn create_sidecar_session_id(prefix: &str) -> String {
     format!(
         "{prefix}-{}",
-        jiff::Timestamp::now().as_nanosecond() as i128
+        { jiff::Timestamp::now().as_nanosecond() }
     )
 }
 

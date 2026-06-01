@@ -308,7 +308,7 @@ fn resolve_head_commit(repository: &Repository) -> Result<Option<gix::Commit<'_>
 
 fn build_git_commit_summary(commit: &gix::Commit<'_>) -> GitCommitSummaryPayload {
     let authored_at = jiff::Timestamp::from_second(
-        commit.time().unwrap_or_default().seconds as i64,
+        commit.time().unwrap_or_default().seconds,
     )
     .unwrap_or_else(|_| jiff::Timestamp::now())
     .to_string();

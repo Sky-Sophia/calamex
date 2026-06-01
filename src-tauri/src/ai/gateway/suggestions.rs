@@ -84,7 +84,7 @@ pub async fn generate_suggestion_pool(
     if suggestions.len() < MIN_SUGGESTION_POOL_SIZE {
         return Err(errors::error(
             "AI_RESPONSE_INVALID",
-            &format!(
+            format!(
                 "提示词池仅 {} 条,低于展示下限 {}。",
                 suggestions.len(),
                 MIN_SUGGESTION_POOL_SIZE
@@ -113,7 +113,7 @@ pub fn get_suggestion_pool_cache() -> Result<Option<AiSuggestionPoolPayload>, St
         Err(error) => {
             return Err(errors::error(
                 "AI_PROVIDER_UNAVAILABLE",
-                &format!("提示词池缓存读取失败:{error}"),
+                format!("提示词池缓存读取失败:{error}"),
             ));
         }
     };
@@ -267,7 +267,7 @@ fn persist_suggestion_pool_cache(payload: &AiSuggestionPoolPayload) -> Result<()
         fs::create_dir_all(parent).map_err(|error| {
             errors::error(
                 "AI_PROVIDER_UNAVAILABLE",
-                &format!("提示词池缓存目录创建失败:{error}"),
+                format!("提示词池缓存目录创建失败:{error}"),
             )
         })?;
     }
@@ -275,7 +275,7 @@ fn persist_suggestion_pool_cache(payload: &AiSuggestionPoolPayload) -> Result<()
     let content = serde_json::to_string_pretty(payload).map_err(|error| {
         errors::error(
             "AI_RESPONSE_INVALID",
-            &format!("提示词池缓存序列化失败:{error}"),
+            format!("提示词池缓存序列化失败:{error}"),
         )
     })?;
 
@@ -285,7 +285,7 @@ fn persist_suggestion_pool_cache(payload: &AiSuggestionPoolPayload) -> Result<()
     fs::write(&temp_path, content).map_err(|error| {
         errors::error(
             "AI_PROVIDER_UNAVAILABLE",
-            &format!("提示词池缓存写入失败:{error}"),
+            format!("提示词池缓存写入失败:{error}"),
         )
     })?;
 
@@ -293,7 +293,7 @@ fn persist_suggestion_pool_cache(payload: &AiSuggestionPoolPayload) -> Result<()
         fs::remove_file(&backup_path).map_err(|error| {
             errors::error(
                 "AI_PROVIDER_UNAVAILABLE",
-                &format!("提示词池旧缓存备份清理失败:{error}"),
+                format!("提示词池旧缓存备份清理失败:{error}"),
             )
         })?;
     }
@@ -303,7 +303,7 @@ fn persist_suggestion_pool_cache(payload: &AiSuggestionPoolPayload) -> Result<()
         fs::rename(&path, &backup_path).map_err(|error| {
             errors::error(
                 "AI_PROVIDER_UNAVAILABLE",
-                &format!("旧提示词池缓存备份失败:{error}"),
+                format!("旧提示词池缓存备份失败:{error}"),
             )
         })?;
     }
@@ -314,7 +314,7 @@ fn persist_suggestion_pool_cache(payload: &AiSuggestionPoolPayload) -> Result<()
                 fs::remove_file(&backup_path).map_err(|error| {
                     errors::error(
                         "AI_PROVIDER_UNAVAILABLE",
-                        &format!("旧提示词池缓存删除失败:{error}"),
+                        format!("旧提示词池缓存删除失败:{error}"),
                     )
                 })?;
             }
@@ -327,7 +327,7 @@ fn persist_suggestion_pool_cache(payload: &AiSuggestionPoolPayload) -> Result<()
             let _ = fs::remove_file(&temp_path);
             Err(errors::error(
                 "AI_PROVIDER_UNAVAILABLE",
-                &format!("提示词池缓存替换失败:{error}"),
+                format!("提示词池缓存替换失败:{error}"),
             ))
         }
     }
@@ -456,7 +456,7 @@ pub(super) fn normalize_suggestion_text(value: &str) -> Option<String> {
 fn strip_leading_list_marker(value: &str) -> &str {
     let mut text = value
         .trim()
-        .trim_start_matches(|item: char| matches!(item, '-' | '*' | '•' | '·'))
+        .trim_start_matches(['-', '*', '•', '·'])
         .trim_start();
 
     let mut digit_end = 0;

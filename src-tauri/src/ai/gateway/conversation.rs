@@ -631,7 +631,7 @@ pub(super) fn normalize_conversation_title(value: &str) -> String {
         .unwrap_or("")
         .trim();
     let mut title = first_line
-        .trim_start_matches(|item: char| item == '-' || item == '*' || item == '#')
+        .trim_start_matches(['-', '*', '#'])
         .trim()
         .to_string();
 

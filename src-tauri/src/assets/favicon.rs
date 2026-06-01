@@ -506,7 +506,7 @@ fn find_html_icon_href(html: &str) -> Option<String> {
                     if !href_trim.is_empty() {
                         let size = extract_html_attribute(tag, tag_lower, "sizes")
                             .and_then(|s| {
-                                s.split(|c: char| c == 'x' || c == 'X')
+                                s.split(['x', 'X'])
                                     .next()
                                     .map(|x| x.trim().to_string())
                             })

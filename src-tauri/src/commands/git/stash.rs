@@ -99,7 +99,7 @@ fn build_git_stash_details(
         .find_commit(oid)
         .ok()
         .and_then(|commit| commit.time().ok())
-        .and_then(|time| jiff::Timestamp::from_second(time.seconds as i64).ok())
+        .and_then(|time| jiff::Timestamp::from_second(time.seconds).ok())
         .unwrap_or_else(jiff::Timestamp::now)
         .to_string();
 
@@ -166,7 +166,7 @@ fn parse_git_stash_name(name: &str) -> (Option<String>, Option<String>) {
     let trimmed = name.trim();
     if let Some(rest) = trimmed.strip_prefix("WIP on ") {
         if let Some((branch_name, remainder)) = rest.split_once(':') {
-            let commit_short_id = remainder.trim().split_whitespace().next()
+            let commit_short_id = remainder.split_whitespace().next()
                 .filter(|value| is_short_git_commit_id(value)).map(str::to_string);
             return (Some(branch_name.trim().to_string()), commit_short_id);
         }
