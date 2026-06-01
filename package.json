@@ -118,16 +118,16 @@
     "@vue/test-utils": "^2.4.10",
     "@vue/tsconfig": "^0.9.1",
     "happy-dom": "^20.9.0",
-    "knip": "^6.14.2",
+    "knip": "^6.15.0",
     "lefthook": "^2.1.9",
     "rollup-plugin-visualizer": "^7.0.1",
     "shellcheck": "^4.1.0",
     "size-limit": "^12.1.0",
     "tailwindcss": "^4.3.0",
-    "tsx": "^4.22.3",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
-    "vite": "^8.0.14",
-    "vitest": "^4.1.7",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.8",
     "vue-tsc": "^3.3.3"
   }
 }
