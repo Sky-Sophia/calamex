@@ -194,6 +194,10 @@ const measureAiInlineCompletionInput = <T extends Record<string, unknown>>(
 ): IPayloadMetrics =>
   buildPayloadMetricsOmittingTextFields(value, ['prefix', 'suffix', 'recentEdits']);
 
+/** SSH 请求审计度量：仅统计字节数，但绝不把明文密码序列化进度量过程。 */
+const measureSshSecretInput = <T extends Record<string, unknown>>(value: T): IPayloadMetrics =>
+  buildPayloadMetricsOmittingTextFields(value, ['password']);
+
 const emitIpcLog = (record: IIpcLogRecord): void => {
   const serialized = JSON.stringify(record);
   if (record.outcome === 'error') {
@@ -853,14 +857,14 @@ const testSshConnectionIpc = definePayloadIpc(
   'test_ssh_connection',
   '测试 SSH 连接',
   tauriContracts.testSshConnection,
-  { idempotent: true, timeoutMs: 15_000, audit: 'sensitive' },
+  { idempotent: true, timeoutMs: 15_000, audit: 'sensitive', measureInput: measureSshSecretInput },
 );
 
 const saveSshPasswordIpc = definePayloadIpc(
   'save_ssh_password',
   '保存 SSH 密码',
   tauriContracts.saveSshPassword,
-  { audit: 'sensitive' },
+  { audit: 'sensitive', measureInput: measureSshSecretInput },
 );
 
 const getSshPasswordIpc = definePayloadIpc(
@@ -881,28 +885,28 @@ const listSshDirectoryIpc = definePayloadIpc(
   'list_ssh_directory',
   '读取 SSH 远端目录',
   tauriContracts.listSshDirectory,
-  { idempotent: true, timeoutMs: 15_000, audit: 'sensitive' },
+  { idempotent: true, timeoutMs: 15_000, audit: 'sensitive', measureInput: measureSshSecretInput },
 );
 
 const downloadSshFileIpc = definePayloadIpc(
   'download_ssh_file',
   '下载 SSH 远端文件',
   tauriContracts.downloadSshFile,
-  { audit: 'sensitive', timeoutMs: 60_000 },
+  { audit: 'sensitive', timeoutMs: 60_000, measureInput: measureSshSecretInput },
 );
 
 const uploadSshFileIpc = definePayloadIpc(
   'upload_ssh_file',
   '上传 SSH 远端文件',
   tauriContracts.uploadSshFile,
-  { audit: 'sensitive', timeoutMs: 60_000 },
+  { audit: 'sensitive', timeoutMs: 60_000, measureInput: measureSshSecretInput },
 );
 
 const readSshFileIpc = definePayloadIpc(
   'read_ssh_file',
   '读取 SSH 远端文件',
   tauriContracts.readSshFile,
-  { idempotent: true, audit: 'sensitive', timeoutMs: 60_000 },
+  { idempotent: true, audit: 'sensitive', timeoutMs: 60_000, measureInput: measureSshSecretInput },
 );
 
 const writeSshFileIpc = definePayloadIpc(
@@ -912,7 +916,7 @@ const writeSshFileIpc = definePayloadIpc(
   {
     audit: 'sensitive',
     timeoutMs: 60_000,
-    measureInput: (value) => buildPayloadMetricsOmittingTextFields(value, ['content']),
+    measureInput: (value) => buildPayloadMetricsOmittingTextFields(value, ['content', 'password']),
   },
 );
 
@@ -920,21 +924,21 @@ const deleteSshPathIpc = definePayloadIpc(
   'delete_ssh_path',
   '删除 SSH 远端路径',
   tauriContracts.deleteSshPath,
-  { audit: 'sensitive', timeoutMs: 30_000 },
+  { audit: 'sensitive', timeoutMs: 30_000, measureInput: measureSshSecretInput },
 );
 
 const renameSshPathIpc = definePayloadIpc(
   'rename_ssh_path',
   '重命名 SSH 远端路径',
   tauriContracts.renameSshPath,
-  { audit: 'sensitive', timeoutMs: 30_000 },
+  { audit: 'sensitive', timeoutMs: 30_000, measureInput: measureSshSecretInput },
 );
 
 const createSshDirectoryIpc = definePayloadIpc(
   'create_ssh_directory',
   '创建 SSH 远端目录',
   tauriContracts.createSshDirectory,
-  { audit: 'sensitive', timeoutMs: 30_000 },
+  { audit: 'sensitive', timeoutMs: 30_000, measureInput: measureSshSecretInput },
 );
 
 /**
@@ -1722,35 +1726,4 @@ export const tauriService: ITauriService & {
 
   aiAgentClassifyTask: aiAgentClassifyTaskIpc,
 
-  aiAgentSetNetworkPermission: aiAgentSetNetworkPermissionIpc,
-
-  aiWebSearch: aiWebSearchIpc,
-
-  aiWebFetch: aiWebFetchIpc,
-
-  aiProposePatch: aiProposePatchIpc,
-
-  aiApplyPatch: aiApplyPatchIpc,
-
-  aiEditGetAuthLevel: () => aiEditGetAuthLevelIpc(undefined),
-
-  aiEditSetAuthLevel: aiEditSetAuthLevelIpc,
-
-  aiEditListTimeline: aiEditListTimelineIpc,
-
-  aiEditCreateSnapshot: aiEditCreateSnapshotIpc,
-
-  aiEditSetPin: aiEditSetPinIpc,
-
-  aiEditGetDiff: aiEditGetDiffIpc,
-
-  aiEditRestoreSnapshot: aiEditRestoreSnapshotIpc,
-
-  aiEditUndoOperation: aiEditUndoOperationIpc,
-
-  aiEditRevertFile: aiEditRevertFileIpc,
-
-  aiEditRevertHunk: aiEditRevertHunkIpc,
-
-  aiEditRevertTask: aiEditRevertTaskIpc,
-};
+  a
