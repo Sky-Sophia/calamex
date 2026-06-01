@@ -575,7 +575,7 @@ export interface IAgentSidecarWarmupPayload {
   statusCode: number | null;
   durationMs: number;
   skipped: boolean;
-  reason?: string;
+  reason?: string | null;
 }
 
 export interface IAgentSidecarResponsePayload {
