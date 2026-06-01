@@ -346,21 +346,33 @@ fn build_git_file_baseline_payload(repository: &Repository, file_path: &Path) ->
 }
 
 pub(super) fn is_tracked_git_path(repository_root: &Path, relative_path: &Path) -> Result<bool, String> {
+    // 通过 gix 查询索引判断路径是否被 Git 跟踪（等价于 `git ls-files --error-unmatch`），避免依赖系统安装的 git。
+    let repository = gix::open(repository_root)
+        .map_err(|error| format!("打开 Git 仓库失败：{error}"))?;
+    let index = repository
+        .index_or_empty()
+        .map_err(|error| format!("读取 Git 索引失败：{error}"))?;
     let rp = path_to_forward_slashes(relative_path);
-    match cli::run_git_text_allow_exit_one(repository_root, &["ls-files", "--error-unmatch", &rp], "检查跟踪") {
-        Ok(Some(_)) => Ok(true),
-        _ => Ok(false),
-    }
+    let path = gix::bstr::BStr::new(rp.as_bytes());
+    Ok(index.entry_by_path(path).is_some())
 }
 
 pub(super) fn read_git_revision_text(repository_root: &Path, object_spec: &str) -> Result<Option<String>, String> {
-    match cli::run_git_text_allow_exit_one(repository_root, &["cat-file", "-p", object_spec], "读取对象") {
-        Ok(Some(content)) => {
-            decode_script_bytes(content.as_bytes())
-                .map(|(c, _)| Some(c))
-                .map_err(|_| "当前对象不是可直接比较的文本内容。".to_string())
-        }
-        _ => Ok(None),
+    // 通过 gix 解析修订规格（如 `HEAD:path`）并读取 blob 内容（等价于 `git cat-file -p <spec>`），避免依赖系统安装的 git。
+    let repository = gix::open(repository_root)
+        .map_err(|error| format!("打开 Git 仓库失败：{error}"))?;
+    let object_id = match repository.rev_parse_single(object_spec) {
+        Ok(id) => id,
+        Err(_) => return Ok(None),
+    };
+    let object = match repository.find_object(object_id) {
+        Ok(object) => object,
+        Err(_) => return Ok(None),
+    };
+    if object.kind != gix::objs::Kind::Blob {
+        return Ok(None);
     }
+    decode_script_bytes(&object.data)
+        .map(|(c, _)| Some(c))
+        .map_err(|_| "当前对象不是可直接比较的文本内容。".to_string())
 }
-
