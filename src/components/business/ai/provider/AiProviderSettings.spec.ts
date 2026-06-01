@@ -131,7 +131,7 @@ describe('AiProviderSettings', () => {
     expect(wrapper.find('[aria-label*="删除"]').exists()).toBe(false);
   });
 
-  it('保存厂商 API Key 时只提交厂商 ID 和 Key', async () => {
+  it('保存厂商设置时原子提交：只走 save 携带 API Key，不再单独 saveCredentials', async () => {
     const wrapper = mountSettings();
 
     await openAddForm(wrapper);
@@ -143,28 +143,46 @@ describe('AiProviderSettings', () => {
       'click',
     );
 
-    const event = wrapper.emitted('saveCredentials')?.[0];
-    expect(event?.[0]).toBe('sk-deepseek-test');
-    expect(event?.[1]).toBe('deepseek');
-    expect(event?.[2]).toBe('工作');
+    // 不再有独立的凭证写入事件，保存收敛为单一原子事件。
+    expect(wrapper.emitted('saveCredentials')).toBeUndefined();
 
-    getFeedback(event).onSuccess('DeepSeek API Key 已保存');
+    const event = wrapper.emitted('save')?.[0];
+    expect(event?.[1]).toBe('sk-deepseek-test');
+    expect(event?.[2]).toBe('narrator');
+    const emittedConfig = event?.[0] as IAiConfigPayload;
+    expect(emittedConfig.selectedModel).toBe('openai/gpt-5.5');
+    expect(emittedConfig.narrator.selectedModel).toBe('deepseek/deepseek-v4-pro');
+
+    getFeedback(event).onSuccess('DeepSeek 已连接');
     await nextTick();
-    expect(wrapper.text()).toContain('DeepSeek API Key 已保存');
+    expect(wrapper.text()).toContain('DeepSeek 已连接');
   });
 
-  it('测试主模型时按主模型厂商走真实连接事件', async () => {
+  it('测试与保存对齐：测试也走 narrator 小模型，不改动主模型配置', async () => {
     const wrapper = mountSettings();
 
     await openProviderForm(wrapper, 'OpenAI');
-    await findButtonByText(wrapper.findAll('button'), '测试').trigger('click');
 
-    const event = wrapper.emitted('testProvider')?.[0];
-    expect(event?.[2]).toBe('main');
-    expect(event?.[0]).toMatchObject({
-      providerType: 'mastra',
-      selectedModel: 'openai/gpt-5.5',
-    });
+    await findButtonByText(wrapper.findAll('button'), '测试').trigger('click');
+    const testEvent = wrapper.emitted('testProvider')?.[0];
+    expect(testEvent?.[2]).toBe('narrator');
+    const testConfig = testEvent?.[0] as IAiConfigPayload;
+    expect(testConfig.selectedModel).toBe('openai/gpt-5.5');
+
+    // 复位 actionState，以便继续触发保存
+    getFeedback(testEvent).onSuccess('ok');
+    await nextTick();
+
+    await findButtonByText(wrapper.get('.ai-credential-foot').findAll('button'), '保存').trigger(
+      'click',
+    );
+    const saveEvent = wrapper.emitted('save')?.[0];
+    expect(saveEvent?.[2]).toBe('narrator');
+    const saveConfig = saveEvent?.[0] as IAiConfigPayload;
+
+    // 关键：测试与保存使用同一角色与同一(小)模型
+    expect(testConfig.narrator.selectedModel).toBe(saveConfig.narrator.selectedModel);
+    expect(saveConfig.selectedModel).toBe('openai/gpt-5.5');
   });
 
   it('测试小模型不改动主模型配置', async () => {
