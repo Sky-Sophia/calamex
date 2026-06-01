@@ -418,6 +418,19 @@ export const createAgentSidecarServer = (
   options: { runtime?: IAgentSidecarRuntime } = {},
 ) => {
   const runtime = options.runtime ?? createConfiguredRuntime();
+
+  // /agent/chat, /agent/chat/stream, /model/chat and /model/chat/stream all
+  // share this exact handler; the streaming vs non-streaming difference is
+  // handled by the surrounding handlePost / handlePostStream wrapper.
+  const runChat = (
+    body: unknown,
+    options: IAgentRuntimeRunOptions,
+  ): Promise<IAgentRuntimeResponse> => {
+    const payload = agentSidecarChatRequestSchema.parse(body);
+    scheduleBackgroundWarmup(payload, 'request');
+    return runtime.chat(toAgentInput(payload, 'ask'), options);
+  };
+
   return createServer((request, response) => {
     const url = request.url ?? '/';
     const parsedUrl = new URL(url, 'http://127.0.0.1');
@@ -455,39 +468,13 @@ export const createAgentSidecarServer = (
       return;
     }
 
-    if (request.method === 'POST' && url === '/agent/chat') {
-      void handlePost(request, response, async (body, options) => {
-        const payload = agentSidecarChatRequestSchema.parse(body);
-        scheduleBackgroundWarmup(payload, 'request');
-        return runtime.chat(toAgentInput(payload, 'ask'), options);
-      });
+    if (request.method === 'POST' && (url === '/agent/chat' || url === '/model/chat')) {
+      void handlePost(request, response, runChat);
       return;
     }
 
-    if (request.method === 'POST' && url === '/agent/chat/stream') {
-      void handlePostStream(request, response, async (body, options) => {
-        const payload = agentSidecarChatRequestSchema.parse(body);
-        scheduleBackgroundWarmup(payload, 'request');
-        return runtime.chat(toAgentInput(payload, 'ask'), options);
-      });
-      return;
-    }
-
-    if (request.method === 'POST' && url === '/model/chat') {
-      void handlePost(request, response, async (body, options) => {
-        const payload = agentSidecarChatRequestSchema.parse(body);
-        scheduleBackgroundWarmup(payload, 'request');
-        return runtime.chat(toAgentInput(payload, 'ask'), options);
-      });
-      return;
-    }
-
-    if (request.method === 'POST' && url === '/model/chat/stream') {
-      void handlePostStream(request, response, async (body, options) => {
-        const payload = agentSidecarChatRequestSchema.parse(body);
-        scheduleBackgroundWarmup(payload, 'request');
-        return runtime.chat(toAgentInput(payload, 'ask'), options);
-      });
+    if (request.method === 'POST' && (url === '/agent/chat/stream' || url === '/model/chat/stream')) {
+      void handlePostStream(request, response, runChat);
       return;
     }
 
