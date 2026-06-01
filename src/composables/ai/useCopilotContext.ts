@@ -2,9 +2,15 @@
  * useCopilotContext — exposes editor state to the AI agent via CopilotKit's
  * `useCopilotReadable`. Replaces manual context building in useAiAssistant.
  * Each readable degrades to no-op when CopilotKitProvider is absent.
+ *
+ * ⚠️ @copilotkit/vue 的 useCopilotReadable 对 `options.value` 直接 JSON.stringify,
+ * **不** unref。因此不能直接传 computed(会把 ComputedRefImpl 交给库、撞环报
+ * "Converting circular structure to JSON"),也不能传裸 getter(stringify(fn)=undefined,
+ * 无数据且丢响应)。正确做法:用 reactive() 包裹 options,让 Vue 在 `.value`
+ * 访问时自动解包 computed —— 既得纯对象可序列化,watch 又能追踪依赖保持响应。
  */
 import { useCopilotReadable } from '@copilotkit/vue';
-import { computed, type Ref } from 'vue';
+import { computed, reactive, type Ref } from 'vue';
 import type {
   IActiveRunSummary,
   IAnalyzeScriptPayload,
@@ -43,7 +49,9 @@ const fmt = {
 
 const safeReadable = (desc: string, getValue: () => unknown): void => {
   try {
-    useCopilotReadable({ description: desc, value: computed(getValue) });
+    // reactive() 使 Vue 在访问 .value 时自动解包 computed → 库拿到纯值可序列化,
+    // 同时库内 watch(() => options.value) 仍追踪 computed 依赖,保持响应更新。
+    useCopilotReadable(reactive({ description: desc, value: computed(getValue) }));
   } catch {
     /* no-op */
   }
