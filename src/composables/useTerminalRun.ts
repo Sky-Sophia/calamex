@@ -150,10 +150,7 @@ export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) 
   };
 
   const getCurrentTerminalRunId = (): string | null =>
-    activeTerminalRunMeta?.runId ??
-    editorStore.pendingTerminalRunId ??
-    editorStore.activeRunSummary?.runId ??
-    null;
+    activeTerminalRunMeta?.runId ?? editorStore.currentRunId;
 
   const isIntegratedTerminalSession = (sessionId: string): boolean =>
     sessionId === DEFAULT_TERMINAL_SESSION_ID;

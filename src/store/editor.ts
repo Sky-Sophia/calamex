@@ -380,6 +380,15 @@ export const useEditorStore = defineStore(
         terminalOutputLength.value > 0,
     );
 
+    /**
+     * 当前运行的 runId:优先取 pending,其次取 activeRunSummary。
+     * 供运行编排(useTerminalRun)与终端控制(useIntegratedTerminal)共用,
+     * 避免两处各自拼接相同的 store 解析表达式。
+     */
+    const currentRunId = computed<string | null>(
+      () => pendingTerminalRunId.value ?? activeRunSummary.value?.runId ?? null,
+    );
+
     // Actions: view state & workbench
 
     const saveEditorViewState = (path: string, viewState: Record<string, unknown>): void => {
@@ -878,6 +887,7 @@ export const useEditorStore = defineStore(
       activeDiagnosticInfos,
       canOpenMoreTabs,
       hasRunArtifacts,
+      currentRunId,
       // queries
       getDocumentById,
       findDocumentByPath,

@@ -65,10 +65,8 @@ export const useIntegratedTerminalControls = () => {
   const editorStore = useEditorStore();
   const terminalFacade = useTerminalFacade();
   const { status, statusMessage } = registry.getStatusRefs(DEFAULT_TERMINAL_SESSION_ID);
-  const resolveActiveRunId = (): string | null =>
-    editorStore.pendingTerminalRunId ?? editorStore.activeRunSummary?.runId ?? null;
   const shouldFallbackToInteractiveInterrupt = (error: unknown): boolean =>
-    toErrorMessage(error, '').includes('\u4e0d\u652f\u6301\u5e26\u5916\u53d6\u6d88');
+    toErrorMessage(error, '').includes('不支持带外取消');
 
   return {
     status: readonly(status),
@@ -85,7 +83,7 @@ export const useIntegratedTerminalControls = () => {
       await registry.get(DEFAULT_TERMINAL_SESSION_ID)?.clearScreen();
     },
     interrupt: async (): Promise<void> => {
-      const runId = resolveActiveRunId();
+      const runId = editorStore.currentRunId;
       if (editorStore.isRunning && runId) {
         try {
           await terminalFacade.cancelRun(runId, 'graceful');
