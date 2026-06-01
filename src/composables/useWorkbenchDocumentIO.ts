@@ -155,7 +155,7 @@ export const useWorkbenchDocumentIO = ({
   };
 
   /**
-   * 共享的"打开一个 tab"骨架：
+   * 共享的\"打开一个 tab\"骨架：
    *   1. 已有同 path 文档 → 跳过配额检查
    *   2. 否则受 `ensureCanOpenNewTab` 闸门控制
    *   3. 调用具体的 store 打开方法（image / script）
@@ -258,7 +258,7 @@ export const useWorkbenchDocumentIO = ({
 
   const restoreActiveDocument = (activePath: string | null): void => {
     if (activePath) {
-      const activeDocument = editorStore.documents.find((item) => item.path === activePath);
+      const activeDocument = editorStore.findDocumentByPath(activePath);
       if (activeDocument) {
         editorStore.setActiveDocument(activeDocument.id);
         return;

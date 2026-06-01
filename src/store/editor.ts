@@ -271,12 +271,12 @@ export const useEditorStore = defineStore(
           kind: item.kind,
         }));
 
+      // 先取局部常量再判空,让 TS 在闭包内也能收窄掉 null,避免使用非空断言。
+      const activeTabPath = sessionSnapshot.value.activeTabPath;
       if (
-        sessionSnapshot.value.activeTabPath &&
+        activeTabPath &&
         !sessionSnapshot.value.openTabs.some(
-          (tab) =>
-            normalizeFileSystemPath(tab.path) ===
-            normalizeFileSystemPath(sessionSnapshot.value.activeTabPath!),
+          (tab) => normalizeFileSystemPath(tab.path) === normalizeFileSystemPath(activeTabPath),
         )
       ) {
         sessionSnapshot.value.activeTabPath = sessionSnapshot.value.openTabs[0]?.path ?? null;

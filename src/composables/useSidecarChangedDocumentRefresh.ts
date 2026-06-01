@@ -1,6 +1,7 @@
 import { tauriService } from '@/services/tauri';
 import { useEditorStore } from '@/store/editor';
 import type { IEditorDocument, IScriptFilePayload } from '@/types/editor';
+import { computeDocumentMetrics } from '@/utils/document-metrics';
 import { areFileSystemPathsEqual } from '@/utils/path';
 
 interface IRefreshSidecarChangedDocumentsRequest {
@@ -88,8 +89,11 @@ const applyScriptPayloadToDocument = (
   document.savedContent = payload.content;
   document.savedEncoding = payload.encoding;
   document.isDirty = false;
-  document.lineCount = payload.lineCount;
-  document.charCount = payload.charCount;
+  // 与 editorStore.applyDocumentPayload 对齐：用本地计数器重算行/字数，
+  // 避免直接信任 payload 计数与编辑器实际渲染不一致造成闪跳。
+  const { lineCount, charCount } = computeDocumentMetrics(payload.content);
+  document.lineCount = lineCount;
+  document.charCount = charCount;
 };
 
 export const useSidecarChangedDocumentRefresh = () => {
