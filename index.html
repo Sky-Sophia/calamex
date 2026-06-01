@@ -8,40 +8,29 @@
   <title>Calamex</title>
   <style>
     :root {
-      --startup-bg: #fafafa;
-      --startup-fg: #111827;
-      --startup-sidebar: #fafafa;
-      --startup-main: #ffffff;
-      --startup-border: #d1d9e0b3;
-      --startup-border-strong: #d1d9e0;
-      --startup-skeleton: #e5e8ec;
-      --startup-skeleton-strong: #cfd6de;
-      --startup-skeleton-soft: #f2f3f5;
-      --startup-selected: transparent;
-      --startup-accent: #5e6ad2;
-      --startup-radius: 12px;
-      --startup-top-offset: 40px;
-      --startup-sidebar-width: 288px;
-      --startup-composer-width: min(44vw, 600px);
-      --startup-font:
+      /* 真实浅色主题 token（取自 src/styles.css 的 .light 调色板） */
+      --s-app-bg: #fafafa;
+      --s-sidebar-bg: #fafafa;
+      --s-panel-bg: #ffffff;
+      --s-content-bg: #ffffff;
+      --s-divider: #d1d9e0b3;
+      --s-border-strong: #d1d9e0;
+      --s-text-primary: #1f2328;
+      --s-text-secondary: #59636e;
+      --s-text-tertiary: #818b98;
+      --s-surface-soft: #818b981f;
+      --s-surface-soft-strong: #d1d9e0b3;
+      --s-skeleton: #e6e9ed;
+      --s-send: #2783de;
+      --s-radius-card: 12px;
+      --s-radius-md: 8px;
+      --s-top: 40px;
+      --s-sidebar-w: 288px;
+      --s-font:
         'Inter', 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI',
         'Microsoft YaHei', sans-serif;
-    }
-
-    .light,
-    [data-theme='light'],
-    .dark,
-    [data-theme='dark'] {
-      --startup-bg: #fafafa;
-      --startup-fg: #111827;
-      --startup-sidebar: #fafafa;
-      --startup-main: #ffffff;
-      --startup-border: #d1d9e0b3;
-      --startup-border-strong: #d1d9e0;
-      --startup-skeleton: #e5e8ec;
-      --startup-skeleton-strong: #cfd6de;
-      --startup-skeleton-soft: #f2f3f5;
-      --startup-selected: transparent;
+      --s-mono:
+        'Berkeley Mono', 'JetBrains Mono', 'SFMono-Regular', 'Consolas', 'ui-monospace', monospace;
     }
 
     html,
@@ -51,9 +40,9 @@
       inset: 0;
       min-height: 100vh;
       margin: 0;
-      background-color: var(--startup-bg);
-      color: var(--startup-fg);
-      font-family: var(--startup-font);
+      background-color: var(--s-app-bg);
+      color: var(--s-text-primary);
+      font-family: var(--s-font);
     }
 
     body {
@@ -65,557 +54,528 @@
       inset: 0;
       display: flex;
       overflow: hidden;
-      border: 1px solid var(--startup-border);
-      background: var(--startup-bg);
-      color: var(--startup-fg);
+      background: var(--s-app-bg);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--s-divider) 46%, transparent);
+      color: var(--s-text-primary);
       pointer-events: none;
       user-select: none;
     }
 
-    .startup-sidebar {
+    /* ===================== 侧栏（WorkbenchDashboardSidebar 还原） ===================== */
+    .s-sidebar {
       display: flex;
-      width: var(--startup-sidebar-width);
-      min-width: var(--startup-sidebar-width);
+      width: var(--s-sidebar-w);
+      min-width: var(--s-sidebar-w);
       flex-direction: column;
       overflow: hidden;
-      background: var(--startup-sidebar);
+      background: var(--s-sidebar-bg);
     }
 
-    .startup-brand-row {
+    .s-brand {
       display: flex;
-      height: var(--startup-top-offset);
       align-items: center;
-      padding: 0 18px;
+      min-height: 28px;
+      padding: 8px 18px 2px;
     }
 
-    .startup-brand-mark {
+    .s-brand svg {
+      display: block;
+      width: 70px;
+      height: auto;
+    }
+
+    .s-toolbar-shell {
+      border-bottom: 1px solid var(--s-divider);
+      padding: 12px;
+    }
+
+    .s-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .s-pill {
       display: inline-flex;
-      width: 24px;
-      height: 24px;
       align-items: center;
       justify-content: center;
-      gap: 2px;
-    }
-
-    .startup-brand-mark span {
-      width: 3px;
-      height: 13px;
+      gap: 0;
+      min-width: 38px;
+      height: 28px;
       border-radius: 999px;
-      background: var(--startup-accent);
-      transform: rotate(18deg);
+      background: color-mix(in srgb, var(--s-divider) 8%, transparent);
+      padding: 0 10px;
     }
 
-    .startup-brand-mark span:nth-child(2) {
-      height: 10px;
-      opacity: .78;
+    .s-pill.is-active {
+      gap: 6px;
+      background: color-mix(in srgb, var(--s-divider) 34%, transparent);
     }
 
-    .startup-brand-mark span:nth-child(3) {
-      height: 7px;
-      opacity: .56;
+    .s-pill-ic {
+      width: 16px;
+      height: 16px;
+      border-radius: 5px;
+      background: var(--s-skeleton);
+      flex-shrink: 0;
     }
 
-    .startup-toolbar {
-      display: flex;
-      height: 52px;
-      align-items: center;
-      gap: 18px;
-      border-bottom: 1px solid var(--startup-border);
-      padding: 0 12px 0 16px;
-    }
-
-    .startup-toolbar-pill {
-      display: flex;
-      height: 34px;
-      min-width: 68px;
-      align-items: center;
-      gap: 7px;
-      border-radius: 999px;
-      background: var(--startup-skeleton-soft);
-      padding: 0 12px;
-    }
-
-    .startup-toolbar-icon,
-    .startup-action-icon,
-    .startup-header-icon {
-      width: 18px;
-      height: 18px;
-      border-radius: 6px;
-      background: var(--startup-skeleton);
-    }
-
-    .startup-toolbar-text {
-      width: 28px;
+    .s-pill-lb {
+      width: 26px;
       height: 11px;
       border-radius: 999px;
-      background: var(--startup-skeleton-strong);
+      background: var(--s-skeleton);
     }
 
-    .startup-action-icon {
-      border-radius: 999px;
-      background: var(--startup-skeleton-strong);
-      opacity: .82;
-    }
-
-    .startup-header-icon {
-      border-radius: 6px;
-      background: var(--startup-skeleton-strong);
-      opacity: .82;
-    }
-
-    .startup-tree {
+    .s-tree {
       display: flex;
       flex: 1;
       flex-direction: column;
-      gap: 9px;
-      padding: 15px 4px 0;
+      gap: 2px;
+      padding: 10px 4px;
     }
 
-    .startup-tree-row {
-      display: grid;
-      min-height: 26px;
+    .s-tree-row {
+      display: flex;
       align-items: center;
-      grid-template-columns: 14px 18px minmax(0, 1fr);
-      gap: 7px;
-      border-radius: 7px;
-      padding: 0 8px;
+      gap: 6px;
+      min-height: 26px;
+      border-radius: 6px;
+      padding: 4px 8px;
+      padding-left: calc(8px + var(--i, 0) * 16px);
     }
 
-    .startup-tree-row.is-nested {
-      margin-left: 24px;
+    .s-chevron {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+      position: relative;
     }
 
-    /* 选中高亮已去除（保留类名以便后续启用） */
-    .startup-tree-row.is-selected {
-      background: transparent;
-    }
-
-    .startup-chevron {
-      width: 6px;
-      height: 6px;
-      border-right: 1.5px solid var(--startup-skeleton-strong);
-      border-bottom: 1.5px solid var(--startup-skeleton-strong);
-      opacity: .7;
-      transform: rotate(-45deg);
-    }
-
-    .startup-tree-row.is-open .startup-chevron {
+    .s-chevron.has::before {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 4px;
+      width: 5px;
+      height: 5px;
+      border-right: 1.5px solid var(--s-text-tertiary);
+      border-bottom: 1.5px solid var(--s-text-tertiary);
       transform: rotate(45deg);
+      opacity: .7;
     }
 
-    .startup-folder,
-    .startup-file,
-    .startup-shell-file {
+    .s-ficon {
       width: 16px;
       height: 16px;
       border-radius: 4px;
-      background: #e7eaed;
-      opacity: 1;
+      background: var(--s-skeleton);
+      flex-shrink: 0;
     }
 
-    .startup-tree-line {
+    .s-tline {
       height: 10px;
       border-radius: 999px;
-      background: var(--startup-skeleton);
+      background: var(--s-skeleton);
     }
 
-    .startup-tree-row:nth-child(1) .startup-tree-line {
-      width: 56px;
-    }
-
-    .startup-tree-row:nth-child(2) .startup-tree-line {
-      width: 68px;
-    }
-
-    .startup-tree-row:nth-child(3) .startup-tree-line {
-      width: 118px;
-    }
-
-    .startup-tree-row:nth-child(4) .startup-tree-line {
-      width: 64px;
-    }
-
-    .startup-tree-row:nth-child(5) .startup-tree-line {
-      width: 76px;
-    }
-
-    .startup-tree-row:nth-child(6) .startup-tree-line {
-      width: 96px;
-    }
-
-    .startup-tree-row:nth-child(7) .startup-tree-line {
-      width: 112px;
-    }
-
-    .startup-tree-row:nth-child(8) .startup-tree-line {
-      width: 84px;
-    }
-
-    .startup-tree-row:nth-child(9) .startup-tree-line {
-      width: 104px;
-    }
-
-    .startup-main-region {
+    /* ===================== 右侧内容区 ===================== */
+    .s-content {
       position: relative;
       display: flex;
       min-width: 0;
       flex: 1;
       flex-direction: column;
-      padding-top: var(--startup-top-offset);
-      background: var(--startup-bg);
+      padding-top: var(--s-top);
+      background: var(--s-app-bg);
     }
 
-    .startup-window-controls {
+    .s-winctrls {
       position: absolute;
-      top: 0;
-      right: 0;
+      top: -1px;
+      right: -1px;
+      z-index: 5;
       display: flex;
-      height: var(--startup-top-offset);
+      height: calc(var(--s-top) + 1px);
       align-items: stretch;
     }
 
-    .startup-window-control {
-      position: relative;
-      width: 36px;
+    .s-winbtn {
+      display: inline-flex;
+      width: 48px;
       height: 100%;
+      align-items: center;
+      justify-content: center;
+      color: var(--s-text-primary);
     }
 
-    .startup-window-control::before,
-    .startup-window-control::after {
-      position: absolute;
-      content: '';
-      background: #1f2328;
-      opacity: .85;
+    .s-winbtn.is-close {
+      width: 49px;
+      margin-left: -1px;
     }
 
-    .startup-window-control.is-minimize::before {
-      top: 19px;
-      left: 13px;
-      width: 10px;
-      height: 1.5px;
-      border-radius: 999px;
+    .s-winbtn svg {
+      width: 14px;
+      height: 14px;
     }
 
-    .startup-window-control.is-maximize::before {
-      top: 15px;
-      left: 13px;
-      width: 10px;
-      height: 10px;
-      box-sizing: border-box;
-      border: 1.5px solid #1f2328;
-      border-radius: 2.5px;
-      background: transparent;
-    }
-
-    .startup-window-control.is-close::before,
-    .startup-window-control.is-close::after {
-      top: 19px;
-      left: 12px;
-      width: 12px;
-      height: 1.5px;
-      border-radius: 999px;
-      transform-origin: 50% 50%;
-    }
-
-    .startup-window-control.is-close::before {
-      transform: rotate(45deg);
-    }
-
-    .startup-window-control.is-close::after {
-      transform: rotate(-45deg);
-    }
-
-    .startup-main-card {
+    .s-card {
       position: relative;
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--s-divider);
+      border-radius: var(--s-radius-card);
+      background: var(--s-content-bg);
+    }
+
+    /* ===================== AI 形态（AiAssistantPanel 还原） ===================== */
+    .startup-ai {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+      background: var(--s-content-bg);
+    }
+
+    .startup-editor {
+      display: none;
+    }
+
+    :root[data-startup-mode='editor'] .startup-ai {
+      display: none;
+    }
+
+    :root[data-startup-mode='editor'] .startup-editor {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      flex-direction: column;
+      background: var(--s-content-bg);
+    }
+
+    .s-ai-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 52px;
+      padding: 12px 18px 10px;
+    }
+
+    .s-ai-mark {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .s-ai-mark-ic {
+      width: 22px;
+      height: 22px;
+      border-radius: 7px;
+      background: var(--s-skeleton);
+    }
+
+    .s-ai-mark-lb {
+      width: 88px;
+      height: 13px;
+      border-radius: 999px;
+      background: var(--s-skeleton);
+    }
+
+    .s-ai-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    }
+
+    .s-ai-iconbtn {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      place-items: center;
+      border-radius: 6px;
+      color: var(--s-text-tertiary);
+    }
+
+    .s-ai-iconbtn svg {
+      width: 15px;
+      height: 15px;
+    }
+
+    .s-ai-body {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px 10px;
+      padding: clamp(56px, 16vh, 160px) 16px 0;
+    }
+
+    .s-ai-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 8px 10px;
+      max-width: 640px;
+    }
+
+    .s-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 34px;
+      border-radius: var(--s-radius-md);
+      background: color-mix(in srgb, var(--s-surface-soft) 62%, transparent);
+      padding: 7px 17px;
+    }
+
+    .s-chip span {
+      display: block;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--s-skeleton);
+    }
+
+    .s-ai-composer {
+      align-self: stretch;
+      width: min(100%, 710px);
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 0 12px 28px;
+      box-sizing: border-box;
+    }
+
+    .s-prompt {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #efeeec;
+      border-radius: 18px;
+      background: var(--s-panel-bg);
+      box-shadow:
+        0 1px 2px color-mix(in srgb, var(--s-text-primary) 8%, transparent),
+        0 14px 30px color-mix(in srgb, var(--s-text-primary) 6%, transparent);
+      overflow: hidden;
+    }
+
+    .s-prompt-text {
+      min-height: 56px;
+      padding: 16px 20px 7px;
+      color: var(--s-text-tertiary);
+      font-size: 16px;
+      line-height: 20.4px;
+    }
+
+    .s-prompt-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 10px 10px 14px;
+    }
+
+    .s-ctrl {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      color: var(--s-text-secondary);
+    }
+
+    .s-ctrl svg {
+      width: 17px;
+      height: 17px;
+    }
+
+    .s-prompt-spacer {
+      flex: 1 1 auto;
+    }
+
+    .s-model {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 30px;
+      border-radius: 999px;
+      padding: 0 8px;
+      color: var(--s-text-secondary);
+    }
+
+    .s-model-ic {
+      width: 17px;
+      height: 17px;
+      border-radius: 5px;
+      background: var(--s-skeleton);
+    }
+
+    .s-model-lb {
+      width: 58px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--s-skeleton);
+    }
+
+    .s-send {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background: var(--s-send);
+      color: #ffffff;
+    }
+
+    .s-send svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    /* ===================== 编辑器形态（StartupWorkbenchShell 还原） ===================== */
+    .s-ed-tabbar {
+      display: flex;
+      min-height: 36px;
+      align-items: stretch;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--s-divider);
+      background: var(--s-panel-bg);
+    }
+
+    .s-ed-tabs {
+      display: flex;
+      min-width: 0;
       flex: 1;
       overflow: hidden;
-      border: 1px solid var(--startup-border);
-      border-right-width: 0;
-      border-bottom-width: 0;
-      border-radius: var(--startup-radius) 0 0 var(--startup-radius);
-      background: var(--startup-main);
     }
 
-    .startup-main-header {
-      display: flex;
-      height: 56px;
+    .s-ed-tab {
+      display: inline-flex;
+      width: 144px;
       align-items: center;
-      justify-content: space-between;
-      padding: 0 26px 0 24px;
+      gap: 7px;
+      border-right: 1px solid color-mix(in srgb, var(--s-divider) 72%, transparent);
+      padding: 0 12px;
     }
 
-    .startup-model {
-      display: flex;
-      align-items: center;
-      gap: 12px;
+    .s-ed-tab-ic {
+      width: 15px;
+      height: 15px;
+      border-radius: 4px;
+      background: var(--s-skeleton);
     }
 
-    .startup-model-name {
-      width: 156px;
-      height: 14px;
+    .s-ed-tab-tl {
+      width: 82px;
+      height: 10px;
       border-radius: 999px;
-      background: var(--startup-skeleton-strong);
+      background: var(--s-skeleton);
     }
 
-    .startup-header-actions {
+    .s-ed-actions {
       display: flex;
       align-items: center;
-      gap: 20px;
+      gap: 8px;
+      padding: 0 12px;
     }
 
-    .startup-center {
-      position: absolute;
-      top: 19%;
-      left: 50%;
-      display: flex;
-      width: min(62vw, 860px);
-      max-width: calc(100% - 96px);
-      flex-direction: column;
-      align-items: center;
-      transform: translateX(-50%);
+    .s-ed-dot {
+      width: 15px;
+      height: 15px;
+      border-radius: 5px;
+      background: var(--s-skeleton);
     }
 
-    .startup-title {
-      width: min(330px, 72%);
-      height: 34px;
-      border-radius: 999px;
-      background: var(--startup-skeleton-strong);
-      opacity: .9;
-    }
-
-    .startup-suggestions {
-      display: flex;
-      justify-content: center;
-      flex-wrap: wrap;
-      gap: 14px 16px;
-      margin-top: 34px;
-    }
-
-    .startup-chip {
-      height: 46px;
-      border-radius: 10px;
-      background: var(--startup-skeleton-soft);
-    }
-
-    .startup-chip:nth-child(1) {
-      width: 172px;
-    }
-
-    .startup-chip:nth-child(2) {
-      width: 196px;
-    }
-
-    .startup-chip:nth-child(3) {
-      width: 186px;
-    }
-
-    .startup-chip:nth-child(4) {
-      width: 216px;
-    }
-
-    .startup-chip:nth-child(5) {
-      width: 188px;
-    }
-
-    .startup-chip:nth-child(6) {
-      width: 220px;
-    }
-
-    .startup-chip:nth-child(7) {
-      width: 176px;
-    }
-
-    .startup-chip:nth-child(8) {
-      width: 206px;
-    }
-
-    .startup-chip:nth-child(9) {
-      width: 226px;
-    }
-
-    .startup-composer {
-      position: absolute;
-      left: 50%;
-      bottom: 16px;
-      display: flex;
-      width: var(--startup-composer-width);
-      min-width: 360px;
-      max-width: calc(100% - 96px);
-      height: 92px;
-      flex-direction: column;
-      justify-content: flex-end;
-      border: 1px solid var(--startup-border);
-      border-radius: 16px;
-      background: var(--startup-main);
-      padding: 14px 18px 12px;
-      transform: translateX(-50%);
-      box-shadow: 0 10px 30px -24px rgba(31, 35, 40, 0.28);
-    }
-
-    .startup-composer-footer {
-      display: flex;
-      align-items: center;
-      gap: 22px;
-    }
-
-    .startup-plus {
-      position: relative;
-      width: 18px;
-      height: 18px;
-    }
-
-    .startup-plus::before,
-    .startup-plus::after {
-      position: absolute;
-      content: '';
-      border-radius: 999px;
-      background: var(--startup-skeleton-strong);
-    }
-
-    .startup-plus::before {
-      top: 8px;
-      left: 2px;
-      width: 14px;
-      height: 2px;
-    }
-
-    .startup-plus::after {
-      top: 2px;
-      left: 8px;
-      width: 2px;
-      height: 14px;
-    }
-
-    .startup-agent {
-      width: 72px;
-      height: 14px;
-      border-radius: 999px;
-      background: var(--startup-skeleton);
-    }
-
-    .startup-composer-spacer {
+    .s-ed-editor {
+      display: grid;
       flex: 1;
+      min-height: 0;
+      grid-template-columns: 52px minmax(0, 1fr);
+      overflow: hidden;
+      background: var(--s-content-bg);
     }
 
-    /* 空心圆进一步缩小 */
-    .startup-submit-ghost {
-      width: 18px;
-      height: 18px;
-      border: 2px solid var(--startup-skeleton);
+    .s-ed-gutter {
+      display: grid;
+      align-content: start;
+      gap: 14px;
+      border-right: 1px solid color-mix(in srgb, var(--s-divider) 48%, transparent);
+      padding: 18px 12px 0 0;
+      color: color-mix(in srgb, var(--s-text-tertiary) 78%, transparent);
+      font-family: var(--s-mono);
+      font-size: 11px;
+      line-height: 1;
+      text-align: right;
+    }
+
+    .s-ed-code {
+      display: grid;
+      align-content: start;
+      gap: 15px;
+      padding: 18px 22px;
+    }
+
+    .s-ed-line {
+      height: 10px;
       border-radius: 999px;
+      background: var(--s-skeleton);
     }
 
-    .startup-submit {
-      width: 24px;
-      height: 24px;
-      border-radius: 999px;
-      background: #aee9df;
+    /* ===================== 骨架脉冲（对齐 Tailwind animate-pulse） ===================== */
+    .s-skel {
+      animation: s-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
 
-    .startup-skeleton {
-      animation: startup-pulse 1500ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
-    }
+    @keyframes s-pulse {
 
-    .startup-skeleton:nth-of-type(2n) {
-      animation-delay: 120ms;
-    }
+      0%,
+      100% {
+        opacity: 1;
+      }
 
-    .startup-skeleton:nth-of-type(3n) {
-      animation-delay: 240ms;
+      50% {
+        opacity: .5;
+      }
     }
 
     @media (max-width: 820px) {
-      :root {
-        --startup-sidebar-width: 0px;
-        --startup-composer-width: calc(100vw - 40px);
-      }
-
-      .startup-sidebar {
+      .s-sidebar {
         display: none;
       }
 
-      .startup-main-region {
-        padding-top: 18px;
-      }
-
-      .startup-window-controls {
+      .s-winctrls {
         display: none;
-      }
-
-      .startup-main-card {
-        border-radius: var(--startup-radius) var(--startup-radius) 0 0;
-      }
-
-      .startup-center {
-        top: 18%;
-        width: calc(100vw - 32px);
-        max-width: calc(100vw - 32px);
-      }
-
-      .startup-title {
-        width: 240px;
-        height: 28px;
-      }
-
-      .startup-chip {
-        height: 38px;
-      }
-
-      .startup-chip:nth-child(n + 6) {
-        display: none;
-      }
-
-      .startup-composer {
-        min-width: 0;
-        max-width: calc(100vw - 32px);
-        height: 84px;
       }
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .startup-skeleton {
+      .s-skel {
         animation: none;
-      }
-    }
-
-    @keyframes startup-pulse {
-
-      0%,
-      100% {
-        opacity: .58;
-      }
-
-      50% {
-        opacity: 1;
       }
     }
   </style>
   <script>
     (function () {
-      var markStartup = function (name) {
+      var mark = function (name) {
         try { performance.mark('calamex:startup:' + name); } catch (_) { }
       };
-      markStartup('index-theme-start');
+      mark('index-theme-start');
+      // 仅浅色，无深色模式。根据上次会话的主形态选择骨架（AI / 编辑器），默认 AI。
+      var mode = 'ai';
       try {
-        var saved = localStorage.getItem('ide.theme');
-        if (saved === 'dark' || saved === 'light') {
-          document.documentElement.dataset.theme = saved;
-          document.documentElement.classList.toggle('dark', saved === 'dark');
-          document.documentElement.classList.toggle('light', saved === 'light');
-          markStartup('index-theme-ready');
-          return;
+        var raw = localStorage.getItem('shell-ide.app');
+        if (raw) {
+          var parsed = JSON.parse(raw);
+          if (parsed && parsed.workbenchPrimaryMode === 'editor') {
+            mode = 'editor';
+          }
         }
-        var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        document.documentElement.dataset.theme = systemDark ? 'dark' : 'light';
-        document.documentElement.classList.toggle('dark', systemDark);
-        document.documentElement.classList.toggle('light', !systemDark);
-        markStartup('index-theme-ready');
-      } catch (_) {
-        document.documentElement.dataset.theme = 'dark';
-        document.documentElement.classList.add('dark');
-        document.documentElement.classList.remove('light');
-        markStartup('index-theme-ready');
-      }
+      } catch (_) { }
+      document.documentElement.dataset.startupMode = mode;
+      mark('index-theme-ready');
     })();
   </script>
 </head>
@@ -623,115 +583,118 @@
 <body>
   <div id="app">
     <section class="startup-shell" aria-hidden="true">
-      <aside class="startup-sidebar">
-        <div class="startup-brand-row">
-          <div class="startup-brand-mark">
-            <span></span><span></span><span></span>
-          </div>
+      <aside class="s-sidebar">
+        <div class="s-brand">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 163 40" fill="none">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M38.3487 0.937332C39.6391 -0.302594 41.6732 -0.308232 42.9703 0.895827L43.0932 1.01546L43.5126 1.45736C47.7614 6.0489 49.3446 11.3997 48.9385 16.6254C48.5265 21.9248 46.0924 26.9222 42.6967 30.8713C39.3031 34.8179 34.7723 37.9259 29.8748 39.2749C24.9157 40.6406 19.4919 40.2052 14.7838 36.866C10.7906 34.0336 9.27028 29.4562 9.167 25.0094C6.92619 23.9052 4.56842 22.5328 2.09457 20.8638L1.4409 20.4178L1.30165 20.3169C-0.102828 19.2389 -0.42396 17.2437 0.59965 15.779C1.62357 14.3143 3.61731 13.917 5.12456 14.848L5.26955 14.9424L5.86506 15.3493C7.34702 16.3491 8.76109 17.2159 10.1057 17.9641C10.9731 14.9059 12.4104 11.9696 14.3038 9.5492C17.1405 5.92322 21.3936 3.02347 26.604 3.45611C31.2972 3.84608 34.7649 6.27842 36.5548 9.71115C38.2879 13.0351 38.3136 17.0336 36.7989 20.4723C35.2546 23.9779 32.1196 26.8985 27.6098 28.1019C24.3643 28.9679 20.5622 28.9084 16.2722 27.7487V27.7503C14.5645 27.2885 12.7748 26.6507 10.9044 25.8224C10.4848 25.6366 10.1196 25.9205 10.9044 26.4132C13.1131 27.9882 16.2245 29.3084 17.1249 29.7515C17.5504 30.4431 18.0781 31.0104 18.6829 31.4394C21.4662 33.4135 24.7222 33.7752 28.0825 32.8497C31.5044 31.9072 34.9341 29.6346 37.5943 26.541C40.2524 23.4497 41.9662 19.7458 42.2486 16.1119C42.5151 12.683 41.5302 9.16045 38.5633 5.95943L38.2701 5.65099L38.153 5.52403C36.9855 4.19612 37.059 2.17717 38.3487 0.937332ZM26.0453 10.1002C23.8926 9.92141 21.6207 11.0599 19.602 13.6403C18.0646 15.6055 16.9013 18.159 16.3082 20.7865C20.533 22.2375 23.6815 22.2474 25.8692 21.6638C28.4018 20.988 29.9204 19.458 30.6513 17.7989C31.4116 16.0726 31.3337 14.1916 30.5964 12.7776C29.9159 11.4725 28.5459 10.308 26.0453 10.1002Z" fill="#00dc33" />
+          </svg>
         </div>
 
-        <div class="startup-toolbar">
-          <div class="startup-toolbar-pill startup-skeleton">
-            <span class="startup-toolbar-icon"></span>
-            <span class="startup-toolbar-text"></span>
-          </div>
-          <span class="startup-action-icon startup-skeleton"></span>
-          <span class="startup-action-icon startup-skeleton"></span>
-          <span class="startup-action-icon startup-skeleton"></span>
-          <span class="startup-action-icon startup-skeleton"></span>
+        <div class="s-toolbar-shell">
+          <nav class="s-toolbar">
+            <span class="s-pill is-active">
+              <span class="s-pill-ic"></span>
+              <span class="s-pill-lb"></span>
+            </span>
+            <span class="s-pill"><span class="s-pill-ic"></span></span>
+            <span class="s-pill"><span class="s-pill-ic"></span></span>
+            <span class="s-pill"><span class="s-pill-ic"></span></span>
+            <span class="s-pill"><span class="s-pill-ic"></span></span>
+          </nav>
         </div>
 
-        <div class="startup-tree">
-          <div class="startup-tree-row is-open">
-            <span class="startup-chevron"></span>
-            <span class="startup-folder"></span>
-            <span class="startup-tree-line startup-skeleton"></span>
-          </div>
-          <div class="startup-tree-row is-nested">
-            <span class="startup-chevron"></span>
-            <span class="startup-folder"></span>
-            <span class="startup-tree-line startup-skeleton"></span>
-          </div>
-          <div class="startup-tree-row is-nested">
-            <span class="startup-chevron"></span>
-            <span class="startup-folder"></span>
-            <span class="startup-tree-line startup-skeleton"></span>
-          </div>
-          <div class="startup-tree-row is-nested">
-            <span class="startup-chevron"></span>
-            <span class="startup-folder"></span>
-            <span class="startup-tree-line startup-skeleton"></span>
-          </div>
-          <div class="startup-tree-row is-nested">
-            <span></span>
-            <span class="startup-file"></span>
-            <span class="startup-tree-line startup-skeleton"></span>
-          </div>
-          <div class="startup-tree-row is-nested">
-            <span></span>
-            <span class="startup-file"></span>
-            <span class="startup-tree-line startup-skeleton"></span>
-          </div>
-          <div class="startup-tree-row is-nested">
-            <span></span>
-            <span class="startup-file"></span>
-            <span class="startup-tree-line startup-skeleton"></span>
-          </div>
-          <div class="startup-tree-row is-nested is-selected">
-            <span></span>
-            <span class="startup-file startup-shell-file"></span>
-            <span class="startup-tree-line startup-skeleton"></span>
-          </div>
-          <div class="startup-tree-row is-nested">
-            <span></span>
-            <span class="startup-file startup-shell-file"></span>
-            <span class="startup-tree-line startup-skeleton"></span>
-          </div>
+        <div class="s-tree">
+          <div class="s-tree-row" style="--i:0"><span class="s-chevron has"></span><span class="s-ficon"></span><span class="s-tline s-skel" style="width:84px"></span></div>
+          <div class="s-tree-row" style="--i:1"><span class="s-chevron has"></span><span class="s-ficon"></span><span class="s-tline s-skel" style="width:64px"></span></div>
+          <div class="s-tree-row" style="--i:2"><span class="s-chevron"></span><span class="s-ficon"></span><span class="s-tline s-skel" style="width:108px"></span></div>
+          <div class="s-tree-row" style="--i:2"><span class="s-chevron"></span><span class="s-ficon"></span><span class="s-tline s-skel" style="width:76px"></span></div>
+          <div class="s-tree-row" style="--i:1"><span class="s-chevron has"></span><span class="s-ficon"></span><span class="s-tline s-skel" style="width:96px"></span></div>
+          <div class="s-tree-row" style="--i:2"><span class="s-chevron"></span><span class="s-ficon"></span><span class="s-tline s-skel" style="width:120px"></span></div>
+          <div class="s-tree-row" style="--i:2"><span class="s-chevron"></span><span class="s-ficon"></span><span class="s-tline s-skel" style="width:68px"></span></div>
+          <div class="s-tree-row" style="--i:1"><span class="s-chevron"></span><span class="s-ficon"></span><span class="s-tline s-skel" style="width:112px"></span></div>
+          <div class="s-tree-row" style="--i:1"><span class="s-chevron"></span><span class="s-ficon"></span><span class="s-tline s-skel" style="width:88px"></span></div>
         </div>
       </aside>
 
-      <main class="startup-main-region">
-        <div class="startup-window-controls">
-          <span class="startup-window-control is-minimize"></span>
-          <span class="startup-window-control is-maximize"></span>
-          <span class="startup-window-control is-close"></span>
+      <main class="s-content">
+        <div class="s-winctrls">
+          <span class="s-winbtn is-minimize">
+            <svg viewBox="0 0 12 12" fill="none" stroke="#1f2328" stroke-width="1.45" stroke-linecap="round"><path d="M2.25 6h7.5" /></svg>
+          </span>
+          <span class="s-winbtn is-maximize">
+            <svg viewBox="0 0 12 12" fill="none" stroke="#1f2328" stroke-width="1.45"><rect x="3" y="2.5" width="7" height="7" rx="1.2" /></svg>
+          </span>
+          <span class="s-winbtn is-close">
+            <svg viewBox="0 0 12 12" fill="none" stroke="#1f2328" stroke-width="1.45" stroke-linecap="round"><path d="M3 3l6 6M9 3L3 9" /></svg>
+          </span>
         </div>
 
-        <section class="startup-main-card">
-          <header class="startup-main-header">
-            <div class="startup-model">
-              <span class="startup-model-name startup-skeleton"></span>
+        <section class="s-card">
+          <!-- AI 形态：还原 AiAssistantPanel（头部 + 居中建议 + 输入框） -->
+          <div class="startup-ai">
+            <header class="s-ai-header">
+              <div class="s-ai-mark">
+                <span class="s-ai-mark-ic s-skel"></span>
+                <span class="s-ai-mark-lb s-skel"></span>
+              </div>
+              <div class="s-ai-actions">
+                <span class="s-ai-iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="#818b98" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg></span>
+                <span class="s-ai-iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="#818b98" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-7" /><path d="M14 17H4" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" /></svg></span>
+                <span class="s-ai-iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="#818b98" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5" /><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" /><path d="M12 7v5l4 2" /></svg></span>
+              </div>
+            </header>
+            <div class="s-ai-body">
+              <div class="s-ai-row">
+                <span class="s-chip"><span style="width:96px"></span></span>
+                <span class="s-chip"><span style="width:128px"></span></span>
+                <span class="s-chip"><span style="width:74px"></span></span>
+              </div>
+              <div class="s-ai-row">
+                <span class="s-chip"><span style="width:112px"></span></span>
+                <span class="s-chip"><span style="width:88px"></span></span>
+              </div>
             </div>
-            <div class="startup-header-actions">
-              <span class="startup-header-icon startup-skeleton"></span>
-              <span class="startup-header-icon startup-skeleton"></span>
-              <span class="startup-header-icon startup-skeleton"></span>
-              <span class="startup-header-icon startup-skeleton"></span>
-            </div>
-          </header>
-
-          <div class="startup-center">
-            <div class="startup-title startup-skeleton"></div>
-            <div class="startup-suggestions">
-              <span class="startup-chip startup-skeleton"></span>
-              <span class="startup-chip startup-skeleton"></span>
-              <span class="startup-chip startup-skeleton"></span>
-              <span class="startup-chip startup-skeleton"></span>
-              <span class="startup-chip startup-skeleton"></span>
-              <span class="startup-chip startup-skeleton"></span>
-              <span class="startup-chip startup-skeleton"></span>
-              <span class="startup-chip startup-skeleton"></span>
-              <span class="startup-chip startup-skeleton"></span>
+            <div class="s-ai-composer">
+              <div class="s-prompt">
+                <div class="s-prompt-text">使用 AI 处理各种任务...</div>
+                <div class="s-prompt-bar">
+                  <span class="s-ctrl"><svg viewBox="0 0 24 24" fill="none" stroke="#59636e" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14" /></svg></span>
+                  <span class="s-ctrl"><svg viewBox="0 0 24 24" fill="none" stroke="#59636e" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18" /><circle cx="8" cy="6" r="2" fill="#fff" /><circle cx="16" cy="12" r="2" fill="#fff" /><circle cx="8" cy="18" r="2" fill="#fff" /></svg></span>
+                  <span class="s-prompt-spacer"></span>
+                  <span class="s-model"><span class="s-model-ic"></span><span class="s-model-lb"></span></span>
+                  <span class="s-ctrl"><svg viewBox="0 0 24 24" fill="none" stroke="#59636e" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></span>
+                  <span class="s-send"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg></span>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div class="startup-composer">
-            <div class="startup-composer-footer">
-              <span class="startup-plus"></span>
-              <span class="startup-agent startup-skeleton"></span>
-              <span class="startup-composer-spacer"></span>
-              <span class="startup-submit-ghost startup-skeleton"></span>
-              <span class="startup-submit"></span>
+          <!-- 编辑器形态：还原 StartupWorkbenchShell（标签栏 + 行号槽 + 代码行） -->
+          <div class="startup-editor">
+            <header class="s-ed-tabbar">
+              <div class="s-ed-tabs">
+                <div class="s-ed-tab"><span class="s-ed-tab-ic s-skel"></span><span class="s-ed-tab-tl s-skel"></span></div>
+                <div class="s-ed-tab"><span class="s-ed-tab-ic s-skel"></span><span class="s-ed-tab-tl s-skel"></span></div>
+                <div class="s-ed-tab"><span class="s-ed-tab-ic s-skel"></span><span class="s-ed-tab-tl s-skel"></span></div>
+              </div>
+              <div class="s-ed-actions">
+                <span class="s-ed-dot s-skel"></span>
+                <span class="s-ed-dot s-skel"></span>
+                <span class="s-ed-dot s-skel"></span>
+              </div>
+            </header>
+            <div class="s-ed-editor">
+              <div class="s-ed-gutter"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>
+              <div class="s-ed-code">
+                <span class="s-ed-line s-skel" style="width:62%"></span>
+                <span class="s-ed-line s-skel" style="width:46%"></span>
+                <span class="s-ed-line s-skel" style="width:72%"></span>
+                <span class="s-ed-line s-skel" style="width:38%"></span>
+                <span class="s-ed-line s-skel" style="width:66%"></span>
+                <span class="s-ed-line s-skel" style="width:54%"></span>
+                <span class="s-ed-line s-skel" style="width:78%"></span>
+                <span class="s-ed-line s-skel" style="width:42%"></span>
+              </div>
             </div>
           </div>
         </section>
