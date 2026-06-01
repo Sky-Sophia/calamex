@@ -124,7 +124,7 @@
       :value="inlineCreateDraft?.value ?? ''"
       :placeholder="inlineCreateDraft?.placeholder ?? ''"
       @input="onCreateInput"
-      @blur="emit('inline-create-confirm')"
+      @blur="emit('inline-create-blur')"
       @keydown.enter.prevent.stop="emit('inline-create-confirm')"
       @keydown.esc.prevent.stop="emit('inline-create-cancel')"
     />
@@ -162,6 +162,7 @@ const emit = defineEmits<{
   activate: [entry: IWorkspaceEntry];
   contextmenu: [payload: { event: MouseEvent; entry: IWorkspaceEntry }];
   'inline-create-input': [value: string];
+  'inline-create-blur': [];
   'inline-create-confirm': [];
   'inline-create-cancel': [];
   'inline-rename-input': [value: string];
