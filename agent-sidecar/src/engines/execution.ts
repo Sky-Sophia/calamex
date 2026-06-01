@@ -17,6 +17,9 @@ import type { TAgentPlanRecord } from './plan/plan-store.js';
 import type { IAgentRuntimeResponse, IAgentRuntimeRunOptions, TAgentRuntimeOutputEvent } from './contracts/runtime-contracts.js';
 import type { IAgentRuntimeInput } from './contracts/runtime-input.js';
 
+/** Agent 自主执行时允许的最大工具步数；无可用工具时固定为 1。 */
+const AGENT_EXECUTION_MAX_STEPS = 10;
+
 
 export class MastraRuntimeExecution extends MastraRuntimeValidation {
     async execute(
@@ -142,7 +145,7 @@ export class MastraRuntimeExecution extends MastraRuntimeValidation {
                 const stream = await executionHandle.agent.stream(
                     mastraMessages,
                     {
-                        maxSteps: hasAgentTools ? 10 : 1,
+                        maxSteps: hasAgentTools ? AGENT_EXECUTION_MAX_STEPS : 1,
                         toolChoice,
                         memory,
                         ...(options.context?.signal ? { abortSignal: options.context.signal } : {}),
@@ -177,7 +180,7 @@ export class MastraRuntimeExecution extends MastraRuntimeValidation {
                     workspaceEnabled: Boolean(workspace),
                     browserEnabled: Boolean(browser),
                     memoryEnabled: true,
-                    maxSteps: hasAgentTools ? 10 : 1,
+                    maxSteps: hasAgentTools ? AGENT_EXECUTION_MAX_STEPS : 1,
                     toolChoice,
                 })), options);
                 pushUiEvent(events, createCheckpointEvent({

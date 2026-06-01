@@ -11,7 +11,7 @@ import {
 } from '@mastra/mcp';
 import { withTimeout, withTimeoutFallback } from '../timeout.js';
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Types
 
 /**
@@ -69,7 +69,7 @@ export interface IMcpConfigOptions {
   serverNames?: readonly TMcpServerName[];
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Constants
 
 const SIDECAR_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
@@ -96,7 +96,7 @@ const MCP_DISCONNECT_TIMEOUT_MS = 5_000;
 /** 每个 MCP server 最多收集多少条 error 进 errors[]，超过丢弃。 */
 const MCP_RUNTIME_ERROR_LIMIT_PER_SERVER = 3;
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Helpers
 
 const trimToNull = (value: string | null | undefined): string | null => {
@@ -153,7 +153,7 @@ const normalizeAbsoluteExecutablePath = (value: string | null): string | null =>
 const resolveNpxCommand = (platform: NodeJS.Platform): string =>
   platform === 'win32' ? 'npx.cmd' : 'npx';
 
-const resolveWindowsUvxCommand = (
+const resolveUvxCommand = (
   env: Record<string, string | undefined>,
   platform: NodeJS.Platform,
 ): string | null => {
@@ -162,7 +162,8 @@ const resolveWindowsUvxCommand = (
     return configured;
   }
   if (platform !== 'win32') {
-    return null;
+    // 非 Windows：交由 PATH 解析（与 npx 处理方式一致）。
+    return 'uvx';
   }
   const candidates = [
     join(trimToNull(env.USERPROFILE) ?? '', '.local', 'bin', 'uvx.exe'),
@@ -181,7 +182,7 @@ const resolveWindowsUvxCommand = (
   return null;
 };
 
-const resolveWindowsGitExecutable = (
+const resolveGitExecutable = (
   env: Record<string, string | undefined>,
   platform: NodeJS.Platform,
 ): string | null => {
@@ -190,7 +191,8 @@ const resolveWindowsGitExecutable = (
     return configured;
   }
   if (platform !== 'win32') {
-    return null;
+    // 非 Windows：交由 PATH 解析 git。
+    return 'git';
   }
   const programFiles = trimToNull(env.ProgramFiles) ?? 'C:\\Program Files';
   const programFilesX86 = trimToNull(env['ProgramFiles(x86)']) ?? 'C:\\Program Files (x86)';
@@ -339,7 +341,7 @@ const createMastraMcpServers = (
   return result;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────────────────────────
 // Public surface
 
 export const loadMcpServerConfigs = (
@@ -354,9 +356,9 @@ export const loadMcpServerConfigs = (
     ? new Set(options.serverNames)
     : null;
 
-  const uvxCommand = resolveWindowsUvxCommand(env, platform);
+  const uvxCommand = resolveUvxCommand(env, platform);
   const npxCommand = resolveNpxCommand(platform);
-  const gitExecutable = resolveWindowsGitExecutable(env, platform);
+  const gitExecutable = resolveGitExecutable(env, platform);
   const memoryFilePath = resolve(trimToNull(env.AGENT_MCP_MEMORY_FILE_PATH) ?? DEFAULT_MEMORY_FILE_PATH);
   const githubMcpPat = trimToNull(env.GITHUB_MCP_PAT);
   const githubMcpUrl = trimToNull(env.GITHUB_MCP_URL) ?? DEFAULT_GITHUB_MCP_URL;
@@ -376,9 +378,9 @@ export const loadMcpServerConfigs = (
       cwd: workspaceRoot,
     });
   } else if (!gitExecutable) {
-    errors.push('未找到 Windows git.exe 绝对路径，已跳过 Git MCP。请设置 AGENT_MCP_GIT_EXECUTABLE_PATH。');
+    errors.push('未找到 git 可执行文件，已跳过 Git MCP。请设置 AGENT_MCP_GIT_EXECUTABLE_PATH。');
   } else {
-    errors.push('未找到 Windows uvx.exe 绝对路径，已跳过 Git MCP。请设置 AGENT_MCP_UVX_PATH。');
+    errors.push('未找到 uvx 可执行文件，已跳过 Git MCP。请设置 AGENT_MCP_UVX_PATH。');
   }
 
   if (shouldLoadServer(requestedServers, 'probe')) {
@@ -474,7 +476,7 @@ export const loadMcpServerConfigs = (
       ['--working-directory', workspaceRoot],
       workspaceRoot,
       errors,
-      '未找到 Windows uvx.exe 绝对路径，已跳过 hooks-mcp。请设置 AGENT_MCP_UVX_PATH。',
+      '未找到 uvx 可执行文件，已跳过 hooks-mcp。请设置 AGENT_MCP_UVX_PATH。',
     );
     if (hooksMcp) {
       configs.push(hooksMcp);
@@ -491,7 +493,7 @@ export const loadMcpServerConfigs = (
       [],
       workspaceRoot,
       errors,
-      '未找到 Windows uvx.exe 绝对路径，已跳过 sqlite-mcp。请设置 AGENT_MCP_UVX_PATH。',
+      '未找到 uvx 可执行文件，已跳过 sqlite-mcp。请设置 AGENT_MCP_UVX_PATH。',
       {
         SQLITE_DB_PATH: resolve(sqliteDbPath),
         SQLITE_READ_ONLY: trimToNull(env.SQLITE_READ_ONLY) ?? 'true',

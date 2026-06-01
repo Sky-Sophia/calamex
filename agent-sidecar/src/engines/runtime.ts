@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { MastraRuntime } from './rollback.js';
 import type {
     IAgentRuntimeResponse,
@@ -30,8 +31,23 @@ export type TAgentRuntimeName = (typeof SUPPORTED_AGENT_RUNTIMES)[number];
 
 export const DEFAULT_AGENT_RUNTIME: TAgentRuntimeName = 'mastra';
 
-// TODO: replace with a build-time injected version (e.g. from package.json).
-export const SIDECAR_VERSION = '0.1.0';
+/**
+ * Sidecar 版本号。优先从 package.json 读取，保证与发布版本一致；
+ * 读取失败时回退到占位值，不影响启动。
+ */
+const resolveSidecarVersion = (): string => {
+    try {
+        const requireFromHere = createRequire(import.meta.url);
+        const pkg = requireFromHere('../../package.json') as { version?: unknown };
+        return typeof pkg.version === 'string' && pkg.version.trim().length > 0
+            ? pkg.version
+            : '0.0.0-unknown';
+    } catch {
+        return '0.0.0-unknown';
+    }
+};
+
+export const SIDECAR_VERSION = resolveSidecarVersion();
 
 // -----------------------------------------------------------------------------
 // Runtime contract
