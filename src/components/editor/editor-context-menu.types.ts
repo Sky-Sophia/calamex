@@ -22,7 +22,6 @@ export type TEditorContextMenuIcon = Extract<
   | 'terminal'
   | 'play'
   | 'sparkles'
-  | 'command'
 >;
 
 export type TEditorContextMenuAction =

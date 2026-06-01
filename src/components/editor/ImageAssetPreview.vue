@@ -6,13 +6,13 @@
           图片预览
         </p>
         <p class="mt-1 truncate text-[13px] font-medium text-(--text-primary)">
-          {{ props.name }}
+           props.name 
         </p>
       </div>
       <div class="flex items-center gap-2 text-[11px] text-(--text-quaternary)">
-        <span v-if="assetMeta">{{ assetMeta.mimeType }}</span>
-        <span v-if="assetMeta">{{ formatBytes(assetMeta.byteSize) }}</span>
-        <span v-if="imageSizeLabel">{{ imageSizeLabel }}</span>
+        <span v-if="assetMeta"> assetMeta.mimeType </span>
+        <span v-if="assetMeta"> formatBytes(assetMeta.byteSize) </span>
+        <span v-if="imageSizeLabel"> imageSizeLabel </span>
       </div>
     </div>
 
@@ -73,7 +73,12 @@ const imageSizeLabel = computed(() => {
   return `${imageNaturalWidth.value} × ${imageNaturalHeight.value}`;
 });
 
+// 自增请求序号：path 快速切换时多个加载会并发，只有最后一次请求的结果允许落地，
+// 丢弃乱序返回的过期响应，避免在新路径下显示旧图片。
+let loadToken = 0;
+
 const loadImageAsset = async (): Promise<void> => {
+  const token = ++loadToken;
   isLoading.value = true;
   errorMessage.value = '';
   assetMeta.value = null;
@@ -81,11 +86,20 @@ const loadImageAsset = async (): Promise<void> => {
   imageNaturalHeight.value = 0;
 
   try {
-    assetMeta.value = await tauriService.loadImageAsset(props.path);
+    const payload = await tauriService.loadImageAsset(props.path);
+    if (token !== loadToken) {
+      return;
+    }
+    assetMeta.value = payload;
   } catch (error) {
+    if (token !== loadToken) {
+      return;
+    }
     errorMessage.value = toErrorMessage(error, '读取图片资源失败。');
   } finally {
-    isLoading.value = false;
+    if (token === loadToken) {
+      isLoading.value = false;
+    }
   }
 };
 
