@@ -1,5 +1,4 @@
 use super::*;
-use super::cli;
 use crate::commands::workspace_fs::workspace_name;
 use gix::bstr::ByteSlice;
 
@@ -176,18 +175,51 @@ pub fn commit_git_index(payload: GitCommitRequest) -> Result<GitCommitResultPayl
     let repository_root = resolve_repository_root(&repository)?;
     let pathspecs = resolve_pathspecs(&repository_root, &payload.paths)?;
     let message = payload.message.trim();
-    if message.is_empty() { return Err("Git 提交说明不能为空。".into()); }
-    let mut arg_list = vec!["commit", "-m", message];
-    if !pathspecs.is_empty() {
-        arg_list.push("--");
-        let ps_refs: Vec<&str> = pathspecs.iter().map(|s| s.as_str()).collect();
-        arg_list.extend_from_slice(&ps_refs);
+    if message.is_empty() {
+        return Err("Git 提交说明不能为空。".into());
     }
-    cli::run_git_ok(&repository_root, &arg_list, "提交")?;
+
+    // 读取索引；存在未解决的合并冲突（stage != 0）时拒绝提交。
+    let index = repository
+        .open_index()
+        .map_err(|error| format!("读取 Git 索引失败：{error}"))?;
+    if index.entries().iter().any(|entry| entry.stage_raw() != 0) {
+        return Err("存在未解决的合并冲突，无法提交。".into());
+    }
+
+    // 依据是否给定 pathspec 构建提交树：
+    // - 无 pathspec：提交整个索引（等价 `git commit`）。
+    // - 有 pathspec：以 HEAD 树为基底，仅应用匹配路径的暂存改动（等价 `git commit -- <pathspec>`）。
+    let tree_id = if pathspecs.is_empty() {
+        build_tree_from_full_index(&repository, &index)?
+    } else {
+        build_tree_from_selected_index_paths(&repository, &index, &pathspecs)?
+    };
+
+    // 空提交保护：生成的树与 HEAD 树一致时说明没有可提交的改动。
+    let head_tree_id = repository.head_tree().ok().map(|tree| tree.id().detach());
+    if head_tree_id == Some(tree_id) {
+        return Err("没有可提交的改动。".into());
+    }
+
+    let parents: Vec<gix::ObjectId> = resolve_head_commit(&repository)?
+        .as_ref()
+        .map(|commit| commit.id().detach())
+        .into_iter()
+        .collect();
+
+    // 使用配置中的提交者身份创建提交，并更新 HEAD 所指分支与 reflog（等价 `git commit`）。
+    let new_commit_id = repository
+        .commit("HEAD", message, tree_id, parents)
+        .map_err(|error| format!("创建提交失败：{error}"))?
+        .detach();
+
     let repository = open_repository_from_root(&payload.repository_root_path)?;
-    let commit_id = resolve_head_commit(&repository).ok().flatten().map(|commit| commit.id().to_string());
     let status = build_git_repository_status_payload(&repository)?;
-    Ok(GitCommitResultPayload { status, commit_id })
+    Ok(GitCommitResultPayload {
+        status,
+        commit_id: Some(new_commit_id.to_string()),
+    })
 }
 
 #[tauri::command]
@@ -526,7 +558,7 @@ pub(super) fn read_git_revision_text(repository_root: &Path, object_spec: &str) 
 }
 
 // ---------------------------------------------------------------------------
-// 基于 gix 的索引 / 工作区写操作辅助函数（供 stage / unstage / discard 使用）。
+// 基于 gix 的索引 / 工作区写操作辅助函数（供 stage / unstage / discard / commit 使用）。
 // ---------------------------------------------------------------------------
 
 /// 判断 pathspec 是否匹配候选相对路径：精确相等或作为目录前缀。
@@ -651,4 +683,93 @@ fn recreate_symlink(target_path: &Path, link_target: &str) -> Result<(), String>
     let _ = fs::remove_file(target_path);
     fs::write(target_path, link_target.as_bytes())
         .map_err(|error| format!("写入符号链接占位失败：{error}"))
+}
+
+/// 将整个索引内容构建为一棵树，返回树对象 ID（等价 `git write-tree`）。
+fn build_tree_from_full_index(
+    repository: &Repository,
+    index: &gix::index::File,
+) -> Result<gix::ObjectId, String> {
+    let empty_tree = repository.empty_tree();
+    let mut editor = gix::object::tree::Editor::new(&empty_tree)
+        .map_err(|error| format!("创建树编辑器失败：{error}"))?;
+    for entry in index.entries() {
+        let path = entry.path(index).to_str_lossy().into_owned();
+        editor
+            .upsert(path.as_str(), tree_entry_kind_from_index_mode(entry.mode), entry.id)
+            .map_err(|error| format!("写入树条目失败：{error}"))?;
+    }
+    editor
+        .write()
+        .map(|id| id.detach())
+        .map_err(|error| format!("写入树失败：{error}"))
+}
+
+/// 以 HEAD 树为基底，仅应用匹配 pathspec 的暂存改动，构建提交树（等价 `git commit -- <pathspec>` 的提交内容）。
+fn build_tree_from_selected_index_paths(
+    repository: &Repository,
+    index: &gix::index::File,
+    pathspecs: &[String],
+) -> Result<gix::ObjectId, String> {
+    let base_tree = repository.head_tree().ok();
+    let empty_tree = repository.empty_tree();
+    let mut editor = gix::object::tree::Editor::new(base_tree.as_ref().unwrap_or(&empty_tree))
+        .map_err(|error| format!("创建树编辑器失败：{error}"))?;
+
+    // 索引中的全部路径，用于匹配 pathspec（含目录前缀）。
+    let index_paths: Vec<String> = index
+        .entries()
+        .iter()
+        .map(|entry| entry.path(index).to_str_lossy().into_owned())
+        .collect();
+
+    let mut targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for path in &index_paths {
+        if pathspecs.iter().any(|pathspec| pathspec_matches(pathspec, path)) {
+            targets.insert(path.clone());
+        }
+    }
+    // 精确给出的 pathspec 即使索引中已不存在（已暂存删除）也需处理。
+    for pathspec in pathspecs {
+        let covered = index_paths
+            .iter()
+            .any(|path| path == pathspec || path.starts_with(&format!("{pathspec}/")));
+        if !covered {
+            targets.insert(pathspec.clone());
+        }
+    }
+
+    for rel in &targets {
+        let path = gix::bstr::BStr::new(rel.as_bytes());
+        match index.entry_by_path(path) {
+            Some(entry) => {
+                editor
+                    .upsert(rel.as_str(), tree_entry_kind_from_index_mode(entry.mode), entry.id)
+                    .map_err(|error| format!("写入树条目失败：{error}"))?;
+            }
+            None => {
+                editor
+                    .remove(rel.as_str())
+                    .map_err(|error| format!("移除树条目失败：{error}"))?;
+            }
+        }
+    }
+
+    editor
+        .write()
+        .map(|id| id.detach())
+        .map_err(|error| format!("写入树失败：{error}"))
+}
+
+/// 将索引条目的文件模式映射为树条目类型。
+fn tree_entry_kind_from_index_mode(mode: gix::index::entry::Mode) -> gix::object::tree::EntryKind {
+    use gix::index::entry::Mode;
+    use gix::object::tree::EntryKind;
+    if mode == Mode::SYMLINK {
+        EntryKind::Link
+    } else if mode == Mode::FILE_EXECUTABLE {
+        EntryKind::BlobExecutable
+    } else {
+        EntryKind::Blob
+    }
 }
