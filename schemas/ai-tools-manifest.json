@@ -184,7 +184,7 @@
         "properties": {
           "serverName": { "type": "string" },
           "toolName": { "type": "string" },
-          "input": { "type": "object" }
+          "arguments": { "type": "object" }
         },
         "additionalProperties": false
       },
