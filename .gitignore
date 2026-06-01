@@ -17,6 +17,10 @@ agent-sidecar/.agent-sidecar/
 *.pdb
 *.tsbuildinfo
 
+# vite 配置的编译产物（源文件为 vite.config.ts）
+/vite.config.js
+/vite.config.d.ts
+
 # 测试与性能报告产物
 test-results/
 playwright-report/
