@@ -138,6 +138,21 @@ fn detect_shellcheck_dialect(
     "bash"
 }
 
+/// 候选「随包资源」根目录：打包后用于定位安装目录内自带的运行时 / 二进制。
+/// 解析策略统一为「随包优先 → 系统兜底」。开发模式 (`tauri dev`) 下这些目录
+/// 通常不存在，候选会被 is_file() 过滤掉，因此对开发流程无副作用。
+fn bundled_resource_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(exe) = env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            roots.push(dir.join("resources-bundle"));
+            roots.push(dir.join("resources").join("resources-bundle"));
+            roots.push(dir.to_path_buf());
+        }
+    }
+    roots
+}
+
 fn resolve_shfmt_candidate() -> Option<ShfmtCandidate> {
     if let Some(configured_path) = env::var_os("SHFMT_BIN") {
         let executable = PathBuf::from(configured_path);
@@ -150,6 +165,18 @@ fn resolve_shfmt_candidate() -> Option<ShfmtCandidate> {
     }
 
     let shfmt_command = if cfg!(windows) { "shfmt.exe" } else { "shfmt" };
+
+    // 打包优先：安装目录内自带的 shfmt。
+    for root in bundled_resource_roots() {
+        let bundled = root.join(shfmt_command);
+        if bundled.is_file() {
+            return Some(ShfmtCandidate {
+                executable: bundled,
+                use_wsl: false,
+            });
+        }
+    }
+
     if let Some(system_binary) = super::find_command_path(shfmt_command, &[]) {
         return Some(ShfmtCandidate {
             executable: system_binary,
