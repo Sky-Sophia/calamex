@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // 防抖窗口上限 + 一点余量，确保定时器已触发。
 const SAVE_WAIT_MS = 350;
+// hydrate 超时窗口(300ms) + 余量。
+const HYDRATE_TIMEOUT_WAIT_MS = 350;
 
 const { idbMock } = vi.hoisted(() => {
   const map = new Map<string, string>();
@@ -114,5 +116,66 @@ describe('ai-conversation idb 持久化 storage', () => {
     expect(storage.getItem(KEY)).toBeNull();
     await vi.advanceTimersByTimeAsync(0);
     expect(idbMock.del).toHaveBeenCalledWith(KEY, expect.anything());
+  });
+
+  it('hydrate 超时占位期的 setItem 不落盘,settle 后以用户新值落盘', async () => {
+    let resolveGet: (value: string | undefined) => void = () => {};
+    idbMock.get.mockImplementationOnce(
+      () =>
+        new Promise<string | undefined>((resolve) => {
+          resolveGet = resolve;
+        }),
+    );
+    const mod = await loadModule();
+    const storage = mod.getAiConversationPersistStorage();
+
+    const hydratePromise = mod.hydrateAiConversationStorage();
+    await vi.advanceTimersByTimeAsync(HYDRATE_TIMEOUT_WAIT_MS);
+    expect(await hydratePromise).toBe('timeout');
+
+    // 占位期写入:仅进 cache,不落盘
+    storage.setItem(KEY, '{"fresh":true}');
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS);
+    expect(idbMock.set).not.toHaveBeenCalled();
+
+    // 磁盘历史此刻才返回 → 对账:用户新值权威,落盘
+    resolveGet('{"history":true}');
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS);
+    expect(idbMock.set).toHaveBeenCalledWith(KEY, '{"fresh":true}', expect.anything());
+  });
+
+  it('hydrate 超时且占位期无写入时,settle 后恢复磁盘历史且不落盘', async () => {
+    let resolveGet: (value: string | undefined) => void = () => {};
+    idbMock.get.mockImplementationOnce(
+      () =>
+        new Promise<string | undefined>((resolve) => {
+          resolveGet = resolve;
+        }),
+    );
+    const mod = await loadModule();
+    const storage = mod.getAiConversationPersistStorage();
+
+    const hydratePromise = mod.hydrateAiConversationStorage();
+    await vi.advanceTimersByTimeAsync(HYDRATE_TIMEOUT_WAIT_MS);
+    expect(await hydratePromise).toBe('timeout');
+    expect(storage.getItem(KEY)).toBeNull();
+
+    resolveGet('{"history":true}');
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS);
+    expect(storage.getItem(KEY)).toBe('{"history":true}');
+    expect(idbMock.set).not.toHaveBeenCalled();
+  });
+
+  it('连续高频 setItem 不会被防抖无限推迟(maxWait 上限内必落盘一次)', async () => {
+    const mod = await loadModule();
+    await mod.hydrateAiConversationStorage();
+    const storage = mod.getAiConversationPersistStorage();
+
+    for (let i = 0; i < 10; i += 1) {
+      storage.setItem(KEY, `{"v":${i}}`);
+      await vi.advanceTimersByTimeAsync(200);
+    }
+
+    expect(idbMock.set).toHaveBeenCalled();
   });
 });
