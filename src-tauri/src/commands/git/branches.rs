@@ -204,7 +204,7 @@ fn resolve_branch_upstream(repository_root: &Path, branch_name: &str) -> Option<
     Some(format!("{remote}/{merge_branch}"))
 }
 
-fn resolve_ahead_behind_cli(
+pub(super) fn resolve_ahead_behind_cli(
     repository_root: &Path,
     branch_name: &str,
 ) -> Result<(usize, usize), String> {
