@@ -371,7 +371,7 @@ const handleStop = (): void => {
                   <button type="button" class="ai-network-switch" :class="{ 'is-on': networkPermissionEnabled }"
                     :aria-pressed="networkPermissionEnabled" tabindex="-1">
                     <span class="ai-network-switch__thumb" aria-hidden="true"></span>
-                    <span class="sr-only"> networkPermissionLabel </span>
+                    <span class="sr-only" v-text="networkPermissionLabel"></span>
                   </button>
                 </DropdownMenuItem>
                 <DropdownMenuItem class="ai-settings-menu-item" @select.prevent="handleOpenInformationSources">
@@ -387,7 +387,7 @@ const handleStop = (): void => {
                   @pointerleave="isModeSubmenuOpen = false" @select.prevent>
                   <span class="icon-[lucide--route] ai-settings-menu-icon" />
                   <span class="ai-settings-menu-label">模式</span>
-                  <span class="ai-settings-menu-value"> activeModeOption.label </span>
+                  <span class="ai-settings-menu-value" v-text="activeModeOption.label"></span>
                   <span class="icon-[lucide--chevron-right] ai-settings-menu-chevron" />
                   <div v-if="isModeSubmenuOpen" class="ai-mode-submenu" @pointerenter="isModeSubmenuOpen = true"
                     @pointerleave="isModeSubmenuOpen = false">
@@ -398,8 +398,8 @@ const handleStop = (): void => {
                       <span v-else-if="option.key === 'plan'" class="icon-[lucide--workflow] ai-mode-submenu-icon" />
                       <span v-else class="icon-[lucide--sliders-horizontal] ai-mode-submenu-icon" />
                       <span class="ai-mode-submenu-copy">
-                        <span class="ai-mode-submenu-label"> option.label </span>
-                        <span class="ai-mode-submenu-description"> option.description </span>
+                        <span class="ai-mode-submenu-label" v-text="option.label"></span>
+                        <span class="ai-mode-submenu-description" v-text="option.description"></span>
                       </span>
                       <span v-if="activeMode === option.key" class="icon-[lucide--check] ai-mode-submenu-check" />
                     </button>
@@ -417,19 +417,19 @@ const handleStop = (): void => {
           <Select :model-value="selectedModel" :disabled="modelSelectDisabled" @update:model-value="handleModelChange">
             <SelectTrigger aria-label="选择模型" class="ai-model-trigger">
               <AiProviderIcon class="ai-model-trigger__icon" :platform-id="selectedPlatformId" decorative />
-              <span class="ai-model-trigger__label"> selectedModelLabel </span>
+              <span class="ai-model-trigger__label" v-text="selectedModelLabel"></span>
             </SelectTrigger>
             <SelectContent side="top" align="end" :side-offset="8" class="ai-model-content">
               <template v-for="(section, sectionIndex) in modelSections" :key="section.key">
                 <SelectLabel class="ai-model-section-label">
-                  <span> section.label </span>
-                  <span class="ai-model-beta"> section.badge </span>
+                  <span v-text="section.label"></span>
+                  <span class="ai-model-beta" v-text="section.badge"></span>
                 </SelectLabel>
                 <SelectGroup>
                   <SelectItem v-for="model in section.models" :key="model.id" class="ai-model-item" :value="model.id">
                     <AiProviderIcon class="ai-model-item__icon" :platform-id="getModelPlatformId(model.id)"
                       decorative />
-                    <span class="ai-model-item__label"> model.label </span>
+                    <span class="ai-model-item__label" v-text="model.label"></span>
                   </SelectItem>
                 </SelectGroup>
                 <SelectSeparator v-if="sectionIndex < modelSections.length - 1" class="ai-model-separator" />
