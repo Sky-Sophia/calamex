@@ -25,3 +25,5 @@ agent-sidecar/.agent-sidecar/
 test-results/
 playwright-report/
 *.report.html
+
+src-tauri/resources-bundle/

@@ -671,6 +671,13 @@ fn resolve_shellcheck_executable() -> Option<PathBuf> {
 }
 
 fn resolve_lsp_cli_js() -> Result<PathBuf, String> {
+    // 打包优先：安装目录内自带的 bash-language-server CLI（由启动钩子注入路径）。
+if let Ok(path) = std::env::var("XIAOJIANC_LSP_CLI_JS") {
+    let p = PathBuf::from(&path);
+    if p.is_file() {
+        return Ok(p);
+    }
+}
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().ok_or("无法定位项目根目录")?;
 
