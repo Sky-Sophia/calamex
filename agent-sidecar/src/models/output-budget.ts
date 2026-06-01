@@ -305,16 +305,20 @@ export const compactModelOutput = (
   const resolved = resolveOptions(options);
   const compacted = compactValue(value, resolved, 0, new WeakSet<object>());
   const serialized = stringifyCompactValue(compacted);
-  const serializedCharCount = countModelOutputChars(serialized, resolved.locale);
-  if (serializedCharCount <= resolved.maxTotalChars) {
+  // Grapheme segmentation is the expensive step; do it exactly once.
+  // truncateModelOutputText measures (originalCharCount) and clips in a single
+  // pass, so there's no need for a separate countModelOutputChars scan over the
+  // serialized output before deciding whether it is over budget.
+  const truncation = truncateModelOutputText(serialized, resolved.maxTotalChars, {
+    locale: resolved.locale,
+  });
+  if (!truncation.truncated) {
     return { truncated: false, value: compacted };
   }
   return {
     truncated: true,
-    serializedCharCount,
-    preview: truncateModelOutputText(serialized, resolved.maxTotalChars, {
-      locale: resolved.locale,
-    }).text,
+    serializedCharCount: truncation.originalCharCount,
+    preview: truncation.text,
   };
 };
 
