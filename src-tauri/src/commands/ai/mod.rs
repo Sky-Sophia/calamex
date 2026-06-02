@@ -13,7 +13,7 @@ pub use edit::{
     ai_propose_patch,
 };
 pub use gateway::{
-    ai_cancel, ai_chat_stream, ai_clear_credentials, ai_code_action, ai_connect_provider,
+    ai_cancel, ai_chat_stream, ai_clear_credentials, ai_connect_provider,
     ai_generate_conversation_title, ai_generate_suggestion_pool, ai_get_config,
     ai_get_suggestion_pool_cache, ai_inline_complete, ai_save_config, ai_save_credentials,
     ai_test_provider, ai_test_provider_config,

@@ -6,11 +6,11 @@ use super::security::redaction::redact_text;
 use super::stream as stream_manager;
 use crate::ai::agent::planner::AgentPlanner;
 use crate::commands::contracts::{
-    AiAgentClassifyTaskPayload, AiAgentClassifyTaskRequest, AiChatRequest, AiCodeActionPayload,
-    AiCodeActionRequest, AiConfigPayload, AiContextReferencePayload, AiConversationTitlePayload,
-    AiConversationTitleRequest, AiCredentialStatusPayload, AiInlineCompletionRangePayload,
-    AiInlineCompletionRequest, AiInlineCompletionResult, AiModelEndpointConfigPayload,
-    AiSuggestionPoolPayload, AiSuggestionPoolRequest,
+    AiAgentClassifyTaskPayload, AiAgentClassifyTaskRequest, AiChatRequest, AiConfigPayload,
+    AiContextReferencePayload, AiConversationTitlePayload, AiConversationTitleRequest,
+    AiCredentialStatusPayload, AiInlineCompletionRangePayload, AiInlineCompletionRequest,
+    AiInlineCompletionResult, AiModelEndpointConfigPayload, AiSuggestionPoolPayload,
+    AiSuggestionPoolRequest,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -34,7 +34,7 @@ mod tests;
 pub use config::{clear_credentials, get_config, save_config, save_credentials};
 pub use connection::{connect_provider, test_provider, test_provider_config};
 pub use conversation::{
-    chat_stream, classify_task, code_action, generate_conversation_title, inline_complete,
+    chat_stream, classify_task, generate_conversation_title, inline_complete,
 };
 pub use suggestions::{generate_suggestion_pool, get_suggestion_pool_cache};
 

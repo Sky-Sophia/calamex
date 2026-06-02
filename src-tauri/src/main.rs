@@ -18,7 +18,7 @@ use commands::{
     agent_sidecar_plan_reject, agent_sidecar_plan_replan, agent_sidecar_plan_validate,
     agent_sidecar_resolve_approval, agent_sidecar_restart, agent_sidecar_restore_checkpoint,
     agent_sidecar_warmup, ai_agent_classify_task, ai_agent_set_network_permission, ai_apply_patch,
-    ai_cancel, ai_chat_stream, ai_clear_credentials, ai_code_action, ai_connect_provider,
+    ai_cancel, ai_chat_stream, ai_clear_credentials, ai_connect_provider,
     ai_edit_create_snapshot, ai_edit_get_auth_level, ai_edit_get_diff, ai_edit_list_timeline,
     ai_edit_restore_snapshot, ai_edit_revert_file, ai_edit_revert_hunk, ai_edit_revert_task,
     ai_edit_set_auth_level, ai_edit_set_pin, ai_edit_undo_operation,
@@ -206,10 +206,10 @@ fn disable_webview_default_context_menu<R: tauri::Runtime>(
 
 // === 随包资源 ============================================================
 
-/// 打包后把「随包资源」的绝对路径注入进进程环境变量，供 sidecar / LSP / shfmt 复用。
-/// 这些解析器（agent_sidecar、commands::lsp、commands::shell_tools）都已支持相应的
-/// 环境变量覆盖，因此无需改动它们即可让生产环境优先使用安装目录内自带的运行时。
-/// 仅在对应文件 / 目录真实存在时设置（开发模式下资源目录不存在则整体跳过），
+/// 打包后把「随包资源」的绝对路径注入进进程环境变量,供 sidecar / LSP / shfmt 复用。
+/// 这些解析器(agent_sidecar、commands::lsp、commands::shell_tools)都已支持相应的
+/// 环境变量覆盖,因此无需改动它们即可让生产环境优先使用安装目录内自带的运行时。
+/// 仅在对应文件 / 目录真实存在时设置(开发模式下资源目录不存在则整体跳过),
 /// 且不覆盖用户已显式设置的同名环境变量。
 fn prime_bundled_resource_env<R: tauri::Runtime>(app: &tauri::App<R>) {
     let Ok(resource_dir) = app.path().resource_dir() else {
@@ -268,7 +268,7 @@ fn main() {
     let app_started_at = Instant::now();
     emit_startup_event("tauri.main.start", app_started_at);
 
-    // specta 绑定 builder 在 debug / release 都需要构造（用于 mount_events）；
+    // specta 绑定 builder 在 debug / release 都需要构造(用于 mount_events);
     // 仅在 debug 模式 export TS 文件
     let specta_bindings = tauri_bindings::builder();
 
@@ -311,10 +311,10 @@ fn main() {
             let setup_started_at = Instant::now();
             emit_startup_event("tauri.setup.start", app_started_at);
 
-            // 打包环境：把随包运行时/二进制路径注入环境变量（须在任何 sidecar / LSP 解析前完成）。
+            // 打包环境:把随包运行时/二进制路径注入环境变量(须在任何 sidecar / LSP 解析前完成)。
             prime_bundled_resource_env(app);
 
-            // 挂载 specta 强类型事件；让前端 events.workspaceFsEvent.listen(...) 拿到 typed payload
+            // 挂载 specta 强类型事件;让前端 events.workspaceFsEvent.listen(...) 拿到 typed payload
             specta_bindings.mount_events(app);
 
             timed_step!("tauri.setup.terminal-events-attached", app_started_at, {
@@ -421,7 +421,6 @@ fn main() {
             ai_chat_stream,
             ai_cancel,
             ai_inline_complete,
-            ai_code_action,
             ai_agent_classify_task,
             ai_agent_set_network_permission,
             ai_web_search,

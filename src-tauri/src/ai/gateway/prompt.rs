@@ -15,26 +15,6 @@ pub(super) fn build_inline_prompt(payload: &AiInlineCompletionRequest) -> String
     )
 }
 
-pub(super) fn build_code_action_prompt(payload: &AiCodeActionRequest) -> String {
-    let file_path = payload.file_path.as_deref().unwrap_or("未保存文件");
-
-    let diagnostics = if payload.diagnostics.is_empty() {
-        "无".to_string()
-    } else {
-        payload.diagnostics.join("\n")
-    };
-
-    format!(
-        "你是 IDE AI。请执行代码动作：{}。\n规则：不要直接声称已修改文件；如需修改，只描述建议并等待 patch 预览确认。\n文件：{}\n语言：{}\n诊断：\n{}\n选区：\n```{}\n{}\n```",
-        payload.kind,
-        file_path,
-        payload.language,
-        sanitize_fenced_text(&diagnostics),
-        payload.language,
-        sanitize_fenced_text(&payload.selection)
-    )
-}
-
 pub(super) fn clip_title_source(value: &str) -> String {
     value.trim().chars().take(MAX_TITLE_SOURCE_CHARS).collect()
 }

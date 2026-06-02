@@ -9,7 +9,7 @@ use specta::Type;
 // ----------------------------------------------------------------------------
 // 用于在结构体中包裹敏感字符串（如 API Key），保证：
 // - 在 JSON 上仍序列化/反序列化为普通字符串（serde transparent）；
-// - {:?} / Debug 输出永远是 "***"，不会随 tracing/println 泄漏；
+// - {:?} / Debug 输出永远是 "***"，不会随 tracing/println 泄露；
 // - 通过 Deref<Target = str> 与 AsRef<str>，调用方对原 `String` 字段的绝大多数
 //   只读用法（如 `&req.api_key` 当作 `&str`、`req.api_key.is_empty()`、
 //   `req.api_key.len()`、`req.api_key.to_string()`）保持源码级兼容。
@@ -354,7 +354,7 @@ pub struct WorkspacePathDeletePayload {
 //
 // password 统一包裹为 `Option<SecretString>`：wire 层因 `#[serde(transparent)]`
 // 与裸字符串完全兼容，但 Debug 输出会被遮蔽，且析构时清零，避免明文随日志或
-// 内存转储泄漏。这些 *Request 均未派生 `Type`，故不影响前端类型生成。
+// 内存转储泄露。这些 *Request 均未派生 `Type`，故不影响前端类型生成。
 //
 // 注意：identity_path 在某些上下文下可能算敏感信息（包含本地用户名路径），
 // 当前保留 Debug；若要进一步收紧可换成 `SecretString` 或自定义 Debug。
@@ -816,19 +816,8 @@ pub struct AiInlineCompletionResult {
 }
 
 // ============================================================================
-// AI – code action / patch
+// AI – patch
 // ============================================================================
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiCodeActionRequest {
-    /// 已知值："explain" | "fix" | "refactor" | "test" | …。
-    pub(crate) kind: String,
-    pub(crate) file_path: Option<String>,
-    pub(crate) language: String,
-    pub(crate) selection: String,
-    pub(crate) diagnostics: Vec<String>,
-}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -863,15 +852,6 @@ pub struct AiPatchFilePayload {
 pub struct AiPatchSetPayload {
     pub(crate) summary: String,
     pub(crate) files: Vec<AiPatchFilePayload>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiCodeActionPayload {
-    pub(crate) explanation: String,
-    pub(crate) suggested_patch: Option<AiPatchSetPayload>,
-    pub(crate) test_suggestion: Option<String>,
-    pub(crate) follow_up_questions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -2,12 +2,11 @@ use crate::ai::audit::{self, AiAuditEventKind};
 use crate::ai::gateway;
 use crate::ai::stream as stream_manager;
 use crate::commands::contracts::{
-    AiCancelRequest, AiChatRequest, AiChatStreamPayload, AiCodeActionPayload, AiCodeActionRequest,
-    AiConfigPayload, AiConversationTitlePayload, AiConversationTitleRequest,
-    AiInlineCompletionRangePayload, AiInlineCompletionRequest, AiInlineCompletionResult,
-    AiProviderConnectionPayload, AiProviderConnectionRequest, AiProviderTestPayload,
-    AiSaveConfigRequest, AiSaveCredentialsRequest, AiSuggestionPoolPayload,
-    AiSuggestionPoolRequest,
+    AiCancelRequest, AiChatRequest, AiChatStreamPayload, AiConfigPayload,
+    AiConversationTitlePayload, AiConversationTitleRequest, AiInlineCompletionRangePayload,
+    AiInlineCompletionRequest, AiInlineCompletionResult, AiProviderConnectionPayload,
+    AiProviderConnectionRequest, AiProviderTestPayload, AiSaveConfigRequest,
+    AiSaveCredentialsRequest, AiSuggestionPoolPayload, AiSuggestionPoolRequest,
 };
 use tauri::AppHandle;
 
@@ -174,9 +173,4 @@ pub async fn ai_inline_complete(
         },
         confidence: result.confidence,
     })
-}
-
-#[tauri::command]
-pub async fn ai_code_action(payload: AiCodeActionRequest) -> Result<AiCodeActionPayload, String> {
-    gateway::code_action(payload).await
 }
