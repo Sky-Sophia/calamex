@@ -15,6 +15,17 @@ export const resolveCodeMirrorIndentUnit = (editorSettings: IEditorSettings): st
   return editorSettings.indentation === 'tabs' ? '\t' : ' '.repeat(tabSize);
 };
 
+/** 折叠槽的展开/折叠标记：用简洁的 chevron，展开时旋转 90°，保持克制现代。 */
+const buildFoldMarker = (open: boolean): HTMLElement => {
+  const marker = document.createElement('span');
+  marker.className = 'cm-fold-marker';
+  marker.setAttribute('aria-hidden', 'true');
+  marker.innerHTML =
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+  marker.style.transform = open ? 'rotate(90deg)' : 'none';
+  return marker;
+};
+
 export interface ICodeMirrorSettingsOptions {
   activeLine?: boolean;
   autoClosingPairs?: boolean;
@@ -49,7 +60,7 @@ export const buildCodeMirrorSettingsExtensions = (
     showActiveLine ? highlightActiveLineGutter() : [],
     // 缩进参考线：在每级缩进处渲染竖线；highlightActiveBlock 让光标所在作用域的竖线高亮。
     editorSettings.indentGuides ? indentationMarkers({ highlightActiveBlock: true }) : [],
-    showFoldGutter ? foldGutter() : [],
+    showFoldGutter ? foldGutter({ markerDOM: buildFoldMarker }) : [],
     enableAutoClosingPairs ? closeBrackets() : [],
   ];
 };
