@@ -8,7 +8,7 @@
 ## 格式
 
 ```
-| ID | 描述 | 负责人 | 截止迭代 | ADR/规则 | 状态 |
+| ID | 描述 | 责任人 | 截止迭代 | ADR/规则 | 状态 |
 ```
 
 ---
@@ -17,7 +17,7 @@
 
 > 行数类债务（R-20.1.\* / R-20.5.\* / R-20.6.\*）以 `scripts/baselines/file-size.json` 为机器校验真相源：`scripts/check-file-size.ts` 已改为全量扫描 `src/`、`src-tauri/src/`，超限且无豁免的文件会直接使 `pnpm guard` 失败。新增或变更豁免后请同步本表。
 
-| ID      | 描述                                                                                                                    | 负责人    | 截止迭代   | 规则                                      | 状态        |
+| ID      | 描述                                                                                                                    | 责任人    | 截止迭代   | 规则                                      | 状态        |
 | ------- | ----------------------------------------------------------------------------------------------------------------------- | --------- | ---------- | ----------------------------------------- | ----------- |
 | TD-0001 | `useWorkbench.ts` 行数超 R-20.1.3 限(≤400)                                                                              | xiaojianc | 2026-06-30 | R-20.1.3                                  | 🔴 豁免期内 |
 | TD-0002 | `ShellWorkbenchView.vue` `<script setup>` 超 R-20.1.4 限(≤120)                                                          | xiaojianc | 2026-06-30 | R-20.1.4                                  | 🔴 豁免期内 |
@@ -33,7 +33,6 @@
 | TD-0012 | 欢迎页浅色主题版本待美术交付；当前仅实现深色欢迎页                                                                      | xiaojianc | 2026-09-30 | ADR-20260423-welcome-smil-svg             | 🟡 已登记   |
 | TD-0014 | `commands/search.rs` (~65KB) 超 R-20.5.\*(≤800)，灯下黑补登，待按 query/match/replace 子域拆分                          | xiaojianc | 2026-12-31 | R-20.5.\*                                 | 🔴 豁免期内 |
 | TD-0015 | `commands/ssh.rs` (~63KB) 超 R-20.5.\*(≤800)，灯下黑补登，待按连接/传输/凭证拆分                                        | xiaojianc | 2026-12-31 | R-20.5.\*                                 | 🔴 豁免期内 |
-| TD-0016 | `commands/contracts.rs` (~52KB) IPC 契约耦合中心，灯下黑补登，拆分进行中（contracts/ 子模块按域分离）                  | xiaojianc | 2026-12-31 | R-20.5.\* / ADR-0007                      | 🟠 拆分中   |
 | TD-0017 | `commands/lsp.rs` (~44KB) 超 R-20.5.\*(≤800)，灯下黑补登，待按生命周期/能力拆分                                         | xiaojianc | 2026-12-31 | R-20.5.\*                                 | 🔴 豁免期内 |
 | TD-0018 | `services/tauri.ts` (~48KB) 前端 ACL facade 巨石，灯下黑补登，待按域 re-export 拆分                                     | xiaojianc | 2026-12-31 | R-20.1.\* / ADR-0007                      | 🔴 豁免期内 |
 | TD-0019 | `store/editor.ts` (~32KB) 超 R-20.1.\*(≤400)，灯下黑补登，待按 state/actions 拆分                                       | xiaojianc | 2026-12-31 | R-20.1.\*                                 | 🔴 豁免期内 |
@@ -44,6 +43,7 @@
 
 ## 已关闭条目
 
-| ID      | 描述                                                                                              | 负责人    | 截止迭代   | 规则                                      | 状态      |
+| ID      | 描述                                                                                              | 责任人    | 截止迭代   | 规则                                      | 状态      |
 | ------- | ------------------------------------------------------------------------------------------------- | --------- | ---------- | ----------------------------------------- | --------- |
 | TD-0013 | AED retention / prune 已落地，`ai.edit.pruned` 审计事件会在自动清理超出窗口的本地历史时触发       | xiaojianc | 2026-07-31 | ADR-20260428-agent-auto-edit-and-rollback / R-14.5.* | ✅ 已关闭 |
+| TD-0016 | `commands/contracts.rs` (~52KB) IPC 契约耦合中心已按域拆为 `commands/contracts/`（secret/script/workspace/ssh/ai_chat/ai_config/ai_edit/ai_agent/agent_sidecar + mod re-export），公共路径 `commands::contracts::*` 与 specta 输出不变 | xiaojianc | 2026-06-02 | R-20.5.\* / ADR-0007                      | ✅ 已关闭 |
