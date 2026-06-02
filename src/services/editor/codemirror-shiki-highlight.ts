@@ -312,13 +312,13 @@ export const shikiEditorChromeTheme = EditorView.theme(
     // 固定 4px 正圆：flex-shrink:0 锁死三点尺寸恒等，偶数边长+整数 gap 避免亚像素发虚。
     '.cm-fold-pill-dot': {
       flexShrink: 0,
-      width: '4px',
-      height: '4px',
+      width: '3px',
+      height: '3px',
       borderRadius: '50%',
-      backgroundColor: '#6e7781',
+      backgroundColor: '#a8b1b9', // 由 #6e7781 调淡
     },
     '.cm-fold-pill:hover .cm-fold-pill-dot': {
-      backgroundColor: '#24292f',
+      backgroundColor: '#8c949c', // hover 也相应调淡
     },
   },
   { dark: false },
