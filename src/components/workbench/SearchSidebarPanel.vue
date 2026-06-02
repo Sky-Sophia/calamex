@@ -36,7 +36,7 @@
       <button v-for="chip in scopeChips" :key="chip.key" type="button" class="search-panel-chip"
         :class="{ 'is-active': activeScope === chip.key }" :aria-pressed="activeScope === chip.key"
         @click="activeScope = chip.key">
-        <span> {{chip.label}} </span>
+        <span> {{ chip.label }} </span>
         <span class="search-panel-chip-count">{{ chip.count }}</span>
       </button>
     </div>
@@ -161,11 +161,6 @@
 
       <div v-else-if="matcherError" class="search-panel-empty-state">
         <InlineError title="正则表达式无效" :message="matcherError" severity="warning" />
-      </div>
-
-      <div v-else-if="!hasSearchQuery" class="search-panel-empty-state">
-        <p class="search-panel-empty-title">搜索工作区</p>
-        <p class="search-panel-empty-text">输入关键字，按文件名、符号或内容快速定位匹配项。</p>
       </div>
 
       <div v-else-if="hasSearchQuery && activeResults.length === 0" class="search-panel-empty-state">
