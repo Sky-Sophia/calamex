@@ -166,16 +166,86 @@ describe('ai-conversation idb 持久化 storage', () => {
     expect(idbMock.set).not.toHaveBeenCalled();
   });
 
-  it('连续高频 setItem 不会被防抖无限推迟(maxWait 上限内必落盘一次)', async () => {
+  it('hydrate 超时占位期 store 回写的空白初始态不得覆盖磁盘历史', async () => {
+    let resolveGet: (value: string | undefined) => void = () => {};
+    idbMock.get.mockImplementationOnce(
+      () =>
+        new Promise<string | undefined>((resolve) => {
+          resolveGet = resolve;
+        }),
+    );
     const mod = await loadModule();
-    await mod.hydrateAiConversationStorage();
     const storage = mod.getAiConversationPersistStorage();
 
-    for (let i = 0; i < 10; i += 1) {
-      storage.setItem(KEY, `{"v":${i}}`);
-      await vi.advanceTimersByTimeAsync(200);
-    }
+    const hydratePromise = mod.hydrateAiConversationStorage();
+    await vi.advanceTimersByTimeAsync(HYDRATE_TIMEOUT_WAIT_MS);
+    expect(await hydratePromise).toBe('timeout');
 
-    expect(idbMock.set).toHaveBeenCalled();
+    // 模拟 pinia 超时占位期同步 hydrate:getItem 返回 null,afterHydrate 随即
+    // 把 store 归一化为空白初始态并回写一次。
+    expect(storage.getItem(KEY)).toBeNull();
+    storage.setItem(KEY, '{"activeThreadId":"t","threads":[]}');
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS);
+    expect(idbMock.set).not.toHaveBeenCalled();
+
+    // 磁盘历史此刻才读出:必须恢复,且不得被空白初始态覆盖。
+    resolveGet('{"history":true}');
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS);
+    expect(idbMock.set).not.toHaveBeenCalled();
+    expect(storage.getItem(KEY)).toBe('{"history":true}');
+  });
+
+  it('hydrate 超时:空白回写被忽略,但其后用户真实输入仍落盘', async () => {
+    let resolveGet: (value: string | undefined) => void = () => {};
+    idbMock.get.mockImplementationOnce(
+      () =>
+        new Promise<string | undefined>((resolve) => {
+          resolveGet = resolve;
+        }),
+    );
+    const mod = await loadModule();
+    const storage = mod.getAiConversationPersistStorage();
+
+    const hydratePromise = mod.hydrateAiConversationStorage();
+    await vi.advanceTimersByTimeAsync(HYDRATE_TIMEOUT_WAIT_MS);
+    expect(await hydratePromise).toBe('timeout');
+
+    expect(storage.getItem(KEY)).toBeNull();
+    storage.setItem(KEY, '{"activeThreadId":"t","threads":[]}'); // 回声:丢弃
+    storage.setItem(KEY, '{"fresh":true}'); // 用户真实输入
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS);
+    expect(idbMock.set).not.toHaveBeenCalled(); // 尚未 settle，仍在 defer
+
+    resolveGet('{"history":true}');
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS);
+    expect(idbMock.set).toHaveBeenCalledWith(KEY, '{"fresh":true}', expect.anything());
+  });
+
+  it('hydrate 超时:settle 之后才到达的空白回写仍被忽略', async () => {
+    let resolveGet: (value: string | undefined) => void = () => {};
+    idbMock.get.mockImplementationOnce(
+      () =>
+        new Promise<string | undefined>((resolve) => {
+          resolveGet = resolve;
+        }),
+    );
+    const mod = await loadModule();
+    const storage = mod.getAiConversationPersistStorage();
+
+    const hydratePromise = mod.hydrateAiConversationStorage();
+    await vi.advanceTimersByTimeAsync(HYDRATE_TIMEOUT_WAIT_MS);
+    expect(await hydratePromise).toBe('timeout');
+    expect(storage.getItem(KEY)).toBeNull();
+
+    // settle 先发生:磁盘历史恢复。
+    resolveGet('{"history":true}');
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS);
+    expect(storage.getItem(KEY)).toBe('{"history":true}');
+
+    // 之后才到达的空白回写:必须丢弃,不得覆盖已恢复的历史。
+    storage.setItem(KEY, '{"activeThreadId":"t","threads":[]}');
+    await vi.advanceTimersByTimeAsync(SAVE_WAIT_MS);
+    expect(idbMock.set).not.toHaveBeenCalled();
+    expect(storage.getItem(KEY)).toBe('{"history":true}');
   });
 });
