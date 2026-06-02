@@ -83,9 +83,457 @@
             "expiresAt": "2026-12-31"
         },
         {
-            "path": "src/styles.css",
-            "rule": "max-lines-css-1500",
-            "reason": "灯下黑补登：~115KB 单文件 CSS，待按 @layer/组件样式模块化",
+            "path": "src/components/ai-elements/conversation/Conversation.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 181 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/ai-elements/image/ImageAttachmentPreviewGrid.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 326 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/business/ai/chat/AiChatThread.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 121 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/business/ai/chat/AiMessageItem.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 353 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/business/ai/chat/AiPromptInput.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 434 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/business/ai/edit/AiChangedFilesSummary.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 149 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/business/ai/edit/patch-summary.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 406 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/business/ai/plan/AiPlanModePanel.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 138 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/business/ai/plan/runtime-timeline/preview.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 509 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/business/ai/plan/runtime-timeline/timeline.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 457 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/business/ai/plan/runtime-timeline/tool-presenters.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 467 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/business/ai/provider/AiProviderSettings.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 384 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/business/ai/shell/AiAssistantPanel.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 1215 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/common/AppDialogHost.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 148 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/common/LinearContextMenu.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 126 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/editor/CodeMirrorScriptEditor.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 946 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/editor/GitDiffViewer.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 163 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/editor/SmartScriptEditor.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 236 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/workbench/AppSidebar.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 1042 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/workbench/run-sidebar/RunSidebarTemplatesSection.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 283 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/workbench/run-sidebar/templateCatalog.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 437 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/workbench/SearchSidebarPanel.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 1126 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/workbench/SourceControlPanel.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 1206 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/workbench/SshFilePreviewDialog.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 702 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/workbench/SshSidebarPanel.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 1033 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/components/workbench/WorkspaceTreeNode.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 358 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/composables/ai/sidecar-events.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 1653 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/composables/ai/useAiAgentRun.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 922 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/composables/ai/useAiAssistant.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 3994 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/composables/useBrowserContextMenu.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 798 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/composables/useShellWorkbenchView.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 789 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/composables/useTerminalRun.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 580 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/composables/useWorkbenchDocumentIO.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 417 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/constants/shell/command-catalog.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 2134 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/copilotkit/event-adapter.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 414 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/layouts/AppShellLayout.vue",
+            "rule": "max-script-setup-120",
+            "reason": "存量超限：登记时 174 行(script setup) > 120，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/services/editor/codemirror-language.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 505 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/services/editor/lsp-bridge.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 921 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/services/terminal/facade.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 474 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/store/aiConversation.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 571 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/store/app.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 444 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/store/git.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 585 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/store/plugins/debouncedPersistStorage.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 518 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/store/terminal.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 401 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/terminal/session.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 1928 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/types/ai/schema.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 480 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/types/ai/sidecar.schema.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 433 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/types/ai/sidecar.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 592 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/types/tauri/index.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 406 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/utils/app-tooltip.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 525 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/utils/shell-completion.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 1228 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/utils/structured-run-report.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 895 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src/utils/text-preview.ts",
+            "rule": "max-lines-400",
+            "reason": "存量超限：登记时 735 行 > 400，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src-tauri/src/agent_sidecar/mod.rs",
+            "rule": "max-lines-800",
+            "reason": "存量超限：登记时 1516 行 > 800，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src-tauri/src/ai/edit/history/revert.rs",
+            "rule": "max-lines-800",
+            "reason": "存量超限：登记时 1662 行 > 800，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src-tauri/src/ai/edit/history/snapshot.rs",
+            "rule": "max-lines-800",
+            "reason": "存量超限：登记时 996 行 > 800，待按 R-20.x 拆分还债",
+            "owner": "@xiaojianc",
+            "adrRef": "ADR-0003",
+            "expiresAt": "2026-12-31"
+        },
+        {
+            "path": "src-tauri/src/assets/favicon.rs",
+            "rule": "max-lines-800",
+            "reason": "存量超限：登记时 802 行 > 800，待按 R-20.x 拆分还债",
             "owner": "@xiaojianc",
             "adrRef": "ADR-0003",
             "expiresAt": "2026-12-31"
