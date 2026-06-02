@@ -1105,7 +1105,7 @@ onBeforeUnmount(() => {
                   class="ssh-connect-select-content data-[state=open]:animate-none data-[state=closed]:animate-none data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-100 data-[state=open]:zoom-in-100 data-[side=bottom]:slide-in-from-top-0 data-[side=left]:slide-in-from-right-0 data-[side=right]:slide-in-from-left-0 data-[side=top]:slide-in-from-bottom-0">
                   <SelectItem v-for="option in SSH_AUTH_OPTIONS" :key="option.value" :value="option.value"
                     class="ssh-connect-select-item">
-                     option.label 
+                    {{ option.label }}
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -1142,7 +1142,7 @@ onBeforeUnmount(() => {
 
         <div class="ssh-form-actions">
           <Button type="submit" class="ssh-connect-action ssh-connect-action--submit" :disabled="isConnecting">
-             isConnecting ? '连接中…' : '连接' 
+            {{ isConnecting ? '连接中…' : '连接' }}
           </Button>
           <Button type="button" variant="outline" class="ssh-connect-action ssh-connect-action--cancel"
             :disabled="isConnecting" @click="handleCancelConnect">
@@ -1152,7 +1152,7 @@ onBeforeUnmount(() => {
 
         <div v-if="connectionStatusText || connectionErrorText" class="ssh-connect-feedback"
           :class="{ 'is-error': Boolean(connectionErrorText) }" aria-live="polite">
-           connectionErrorText || connectionStatusText 
+          {{ connectionErrorText || connectionStatusText }}
         </div>
       </form>
 
@@ -1194,12 +1194,12 @@ onBeforeUnmount(() => {
 
             <span class="ssh-recent-info">
               <span class="ssh-recent-name ssh-recent-name--disconnected">
-                 connection.username  @  connection.host 
+                {{ connection.username }} @ {{ connection.host }}
               </span>
             </span>
 
             <span class="ssh-recent-time ssh-recent-time--disconnected">
-               connection.lastUsedLabel 
+              {{ connection.lastUsedLabel }}
             </span>
           </button>
         </section>
@@ -1221,19 +1221,19 @@ onBeforeUnmount(() => {
                     <DropdownMenuContent align="start" class="ssh-path-menu">
                       <DropdownMenuItem v-for="segment in item.segments" :key="segment.id" class="ssh-path-menu-item"
                         :disabled="isRemoteDirectoryLoading" @select="handlePathSegmentClick(segment)">
-                         segment.label 
+                        {{ segment.label }}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </BreadcrumbItem>
                 <BreadcrumbItem v-else>
                   <BreadcrumbPage v-if="item.path === currentRemotePath" class="ssh-path-segment is-current">
-                     item.label 
+                    {{ item.label }}
                   </BreadcrumbPage>
                   <BreadcrumbLink v-else as-child>
                     <button type="button" class="ssh-path-segment" :disabled="isRemoteDirectoryLoading"
                       @click="handlePathSegmentClick(item)">
-                       item.label 
+                      {{ item.label }}
                     </button>
                   </BreadcrumbLink>
                 </BreadcrumbItem>
@@ -1265,8 +1265,7 @@ onBeforeUnmount(() => {
               'is-folder': item.kind === 'folder',
               'is-selected': selectedFileId === item.id,
             }" :aria-label="`${item.name}，${item.metaLabel}`" @click="handleSelectFile(item.id)"
-              @dblclick="handleOpenFile(item.id)"
-              @contextmenu.prevent="handleFileContextMenu($event, item.id)">
+              @dblclick="handleOpenFile(item.id)" @contextmenu.prevent="handleFileContextMenu($event, item.id)">
               <span class="ssh-file-icon" :class="`is-${item.kind}`" aria-hidden="true">
                 <svg v-if="item.kind === 'folder'" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M2 6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6z" />
@@ -1284,8 +1283,8 @@ onBeforeUnmount(() => {
                 </svg>
               </span>
 
-              <span class="ssh-file-name"> item.name </span>
-              <span class="ssh-file-meta"> item.metaLabel </span>
+              <span class="ssh-file-name"> {{ item.name }} </span>
+              <span class="ssh-file-meta">{{ item.metaLabel }}</span>
             </button>
           </template>
         </div>
@@ -1298,11 +1297,11 @@ onBeforeUnmount(() => {
             <div class="ssh-transfer-header">
               <div class="ssh-transfer-name">
                 <span class="ssh-transfer-direction" :class="`is-${item.direction}`">
-                   item.direction === 'upload' ? '↑ 上传' : '↓ 下载' 
+                  {{ item.direction === 'upload' ? '↑ 上传' : '↓ 下载' }}
                 </span>
-                 item.name 
+                {{ item.name }}
               </div>
-              <span class="ssh-transfer-meta"> item.sizeLabel </span>
+              <span class="ssh-transfer-meta">{{ item.sizeLabel }}</span>
             </div>
 
             <div class="ssh-progress-bar" aria-hidden="true">
@@ -1310,10 +1309,10 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="ssh-transfer-footer">
-              <span class="ssh-transfer-meta"> item.progressLabel </span>
+              <span class="ssh-transfer-meta">{{ item.progressLabel }}</span>
               <span class="ssh-transfer-meta"
                 :class="{ 'is-success': item.status === 'done', 'is-failed': item.status === 'failed' }">
-                 item.status === 'done' ? '完成' : item.status === 'failed' ? '失败' : '进行中' 
+                {{ item.status === 'done' ? '完成' : item.status === 'failed' ? '失败' : '进行中' }}
               </span>
             </div>
           </article>
@@ -1334,7 +1333,7 @@ onBeforeUnmount(() => {
       <form class="ssh-modal" @submit.prevent="confirmCreateDirectory">
         <div class="ssh-modal-copy">
           <h3>新建远端文件夹</h3>
-          <p>将在“ currentRemotePath ”下创建文件夹。不会覆盖远端已有项目。</p>
+          <p>将在“{{ currentRemotePath }}”下创建文件夹。不会覆盖远端已有项目。</p>
         </div>
         <label class="ssh-modal-field">
           <span>文件夹名称</span>
@@ -1347,7 +1346,7 @@ onBeforeUnmount(() => {
           </button>
           <button type="submit" class="ssh-modal-button is-primary"
             :disabled="!canConfirmCreateDirectory || isPathMutating">
-             isPathMutating ? '处理中…' : '创建' 
+            {{ isPathMutating ? '处理中…' : '创建' }}
           </button>
         </div>
       </form>
@@ -1359,7 +1358,7 @@ onBeforeUnmount(() => {
       <form class="ssh-modal" @submit.prevent="confirmRenamePath">
         <div class="ssh-modal-copy">
           <h3>重命名远端项目</h3>
-          <p>为“ pendingRenameItem.name ”输入新的名称。不会覆盖远端已有项目。</p>
+          <p>为“{{ pendingRenameItem.name }}”输入新的名称。不会覆盖远端已有项目。</p>
         </div>
         <label class="ssh-modal-field">
           <span>新名称</span>
@@ -1370,7 +1369,7 @@ onBeforeUnmount(() => {
             取消
           </button>
           <button type="submit" class="ssh-modal-button is-primary" :disabled="!canConfirmRename || isPathMutating">
-             isPathMutating ? '处理中…' : '重命名' 
+            {{ isPathMutating ? '处理中…' : '重命名' }}
           </button>
         </div>
       </form>
@@ -1382,7 +1381,7 @@ onBeforeUnmount(() => {
       <section class="ssh-modal is-danger" role="alertdialog" aria-modal="true">
         <div class="ssh-modal-copy">
           <h3>删除远端项目？</h3>
-          <p>将删除“ pendingDeleteItem.name ”。此操作不可撤销，请确认这是你想要的操作。</p>
+          <p>将删除“{{ pendingDeleteItem.name }}”。此操作不可撤销，请确认这是你想要的操作。</p>
         </div>
         <div class="ssh-modal-actions">
           <button type="button" class="ssh-modal-button" :disabled="isPathMutating" @click="closeDeleteDialog">
@@ -1390,7 +1389,7 @@ onBeforeUnmount(() => {
           </button>
           <button type="button" class="ssh-modal-button is-danger" :disabled="isPathMutating"
             @click="confirmDeletePath">
-             isPathMutating ? '删除中…' : '删除' 
+            {{ isPathMutating ? '删除中…' : '删除' }}
           </button>
         </div>
       </section>

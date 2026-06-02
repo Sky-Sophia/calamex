@@ -26,7 +26,7 @@
 
         <button type="button" class="search-panel-apply-btn" :disabled="!canApplyReplacement" aria-label="全部替换"
           title="全部替换" @click.stop="handleReplacementAction">
-          <span v-if="replaceRunning" class="icon-[lucide--loader-circle] search-panel-spin" aria-hidden="true"  />
+          <span v-if="replaceRunning" class="icon-[lucide--loader-circle] search-panel-spin" aria-hidden="true" />
           <span v-else aria-hidden="true" class="icon-[lucide--check]" />
         </button>
       </div>
@@ -36,7 +36,7 @@
       <button v-for="chip in scopeChips" :key="chip.key" type="button" class="search-panel-chip"
         :class="{ 'is-active': activeScope === chip.key }" :aria-pressed="activeScope === chip.key"
         @click="activeScope = chip.key">
-        <span> chip.label </span>
+        <span> {{chip.label}} </span>
         <span class="search-panel-chip-count">{{ chip.count }}</span>
       </button>
     </div>
@@ -84,7 +84,7 @@
     <div class="search-panel-results" role="listbox">
       <div v-if="replacementPreviewOpen" class="search-replace-inline">
         <div v-if="replaceRunning && !replacementPreview" class="search-replace-inline-empty">
-          <span class="icon-[lucide--loader-circle] search-panel-spin" aria-hidden="true"  />
+          <span class="icon-[lucide--loader-circle] search-panel-spin" aria-hidden="true" />
           <span>正在生成替换预览…</span>
         </div>
 
@@ -98,7 +98,8 @@
             <header class="search-replace-inline-file-header">
               <button type="button" class="search-replace-inline-file-open"
                 :aria-expanded="!isReplacementFileCollapsed(file.path)" @click="toggleReplacementFile(file.path)">
-                <span class="search-replace-inline-chevron" aria-hidden="true">{{ isReplacementFileCollapsed(file.path) ? '▸' : '▾' }}</span>
+                <span class="search-replace-inline-chevron" aria-hidden="true">{{ isReplacementFileCollapsed(file.path)
+                  ? '▸' : '▾' }}</span>
                 <span class="search-replace-inline-file-icon" aria-hidden="true">
                   <ExplorerEntryIcon kind="file" :path="file.path" />
                 </span>
@@ -124,8 +125,8 @@
                 <span class="search-replace-inline-line-actions">
                   <button type="button" class="search-replace-inline-icon-btn" :disabled="replacementApplying"
                     aria-label="替换此处" title="替换此处" @click.stop="replaceReplacementLine(file, line)">
-                    <span v-if="replacementApplyingLineId === line.id" class="icon-[lucide--loader-circle] search-panel-spin"
-                      aria-hidden="true"  />
+                    <span v-if="replacementApplyingLineId === line.id"
+                      class="icon-[lucide--loader-circle] search-panel-spin" aria-hidden="true" />
                     <span v-else aria-hidden="true" class="icon-[lucide--replace]" />
                   </button>
                   <button type="button" class="search-replace-inline-icon-btn" :disabled="replacementApplying"
@@ -177,7 +178,8 @@
           <header class="search-panel-result-group-header">
             <button type="button" class="search-panel-result-group-open"
               :aria-expanded="!isSearchResultGroupCollapsed(group.path)" @click="toggleSearchResultGroup(group.path)">
-              <span class="search-panel-result-group-chevron" aria-hidden="true">{{ isSearchResultGroupCollapsed(group.path) ? '▸' : '▾' }}</span>
+              <span class="search-panel-result-group-chevron" aria-hidden="true">{{
+                isSearchResultGroupCollapsed(group.path) ? '▸' : '▾' }}</span>
               <span class="search-panel-result-group-icon" aria-hidden="true">
                 <ExplorerEntryIcon kind="file" :path="group.path" />
               </span>
