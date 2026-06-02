@@ -246,6 +246,8 @@ export const shikiEditorChromeTheme = EditorView.theme(
     },
     '.cm-scroller': {
       fontFamily: EDITOR_FONT_FAMILY,
+      fontSize: '15px',
+      lineHeight: '1.7',
     },
     '.cm-content': {
       fontFamily: EDITOR_FONT_FAMILY,
@@ -267,6 +269,41 @@ export const shikiEditorChromeTheme = EditorView.theme(
     },
     '.cm-activeLineGutter': {
       backgroundColor: 'rgba(0, 0, 0, 0.06)',
+    },
+    // 折叠槽：低饱和 chevron，hover 才加深，保持克制。
+    '.cm-foldGutter .cm-gutterElement': {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '16px',
+      padding: '0',
+      color: '#c4c9cf',
+      cursor: 'pointer',
+    },
+    '.cm-foldGutter .cm-gutterElement:hover': {
+      color: '#57606a',
+    },
+    '.cm-fold-marker': {
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      transition: 'transform 150ms ease',
+    },
+    // 折叠后的占位标记：淡灰药丸，去掉默认刺眼边框，hover 才加深。
+    '.cm-foldPlaceholder': {
+      margin: '0 4px',
+      padding: '0 7px',
+      backgroundColor: 'rgba(175, 184, 193, 0.2)',
+      border: 'none',
+      borderRadius: '6px',
+      color: '#6e7781',
+      fontFamily: EDITOR_FONT_FAMILY,
+      fontSize: '0.85em',
+      cursor: 'pointer',
+    },
+    '.cm-foldPlaceholder:hover': {
+      backgroundColor: 'rgba(175, 184, 193, 0.34)',
+      color: '#24292f',
     },
   },
   { dark: false },
