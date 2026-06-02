@@ -293,8 +293,9 @@ fn checkout_to_target(
         .rev_parse_single(target_name)
         .map_err(|error| format!("解析切换目标失败：{target_name}（{error}）"))?
         .detach();
+    // peel 到 tree 的修订语法需要字面花括号 "^{tree}"，用字符串拼接构造。
     let target_tree_id = repository
-        .rev_parse_single(format!("{target_name}^tree").as_str())
+        .rev_parse_single([target_name, "^{tree}"].concat().as_str())
         .map_err(|error| format!("解析目标树失败：{target_name}（{error}）"))?
         .detach();
 

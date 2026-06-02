@@ -7,7 +7,7 @@ pub fn list_git_stashes(payload: GitRepositoryRootRequest) -> Result<GitStashLis
     let repository = open_repository_from_root(&payload.repository_root_path)?;
 
     // 直接读取贮藏栈的 reflog（.git/logs/refs/stash），避免依赖系统安装的 git。
-    // 该文件按追加顺序记录（最旧在前），stash@{0} 为最新，因此倒序枚举。
+    // 该文件按追加顺序记录（最旧在前），stash@索引 0 为最新，因此倒序枚举。
     let reflog_path = repository.git_dir().join("logs").join("refs").join("stash");
     if !reflog_path.exists() {
         return Ok(GitStashListPayload { entries: Vec::new() });
@@ -68,7 +68,8 @@ pub fn apply_git_stash(payload: GitStashApplyRequest) -> Result<GitRepositorySta
     let label = if payload.pop { "应用并移除贮藏" } else { "应用贮藏" };
     super::branches::assert_repository_is_clean_for_switch(&repository, label)?;
 
-    let stash_ref = format!("stash@{{{}}}", payload.stash_index);
+    // stash@{N}：用字符串拼接构造字面花括号。
+    let stash_ref = ["stash@{", &payload.stash_index.to_string(), "}"].concat();
     let args = if payload.pop { vec!["stash", "pop", &stash_ref] } else { vec!["stash", "apply", &stash_ref] };
     cli::run_git_ok(&repository_root, &args, label)?;
 
@@ -79,7 +80,8 @@ pub fn apply_git_stash(payload: GitStashApplyRequest) -> Result<GitRepositorySta
 pub fn drop_git_stash(payload: GitStashDropRequest) -> Result<GitRepositoryStatusPayload, String> {
     let repository = open_repository_from_root(&payload.repository_root_path)?;
     let repository_root = resolve_repository_root(&repository)?;
-    let stash_ref = format!("stash@{{{}}}", payload.stash_index);
+    // stash@{N}：用字符串拼接构造字面花括号。
+    let stash_ref = ["stash@{", &payload.stash_index.to_string(), "}"].concat();
     cli::run_git_ok(&repository_root, &["stash", "drop", &stash_ref], "删除贮藏")?;
     super::status::build_git_repository_status_payload(&repository)
 }
@@ -94,7 +96,8 @@ fn build_git_stash_entry_payload(
     let (branch_name, commit_short_id) = parse_git_stash_name(summary);
     Ok(GitStashEntryPayload {
         index,
-        stash_id: format!("stash@{index}"),
+        // stash@{N}：用字符串拼接构造字面花括号。
+        stash_id: ["stash@{", &index.to_string(), "}"].concat(),
         summary: summary.to_string(),
         branch_name,
         commit_short_id: commit_short_id.or_else(|| Some(short_commit_id(oid))),
@@ -125,16 +128,17 @@ fn build_git_stash_details(
         .to_string();
 
     let stash = oid.to_string();
+    // peel 到 tree 的修订语法需要字面花括号 "^{tree}"，用字符串拼接构造。
     let worktree_tree_id = repository
-        .rev_parse_single(format!("{stash}^tree").as_str())
+        .rev_parse_single([stash.as_str(), "^{tree}"].concat().as_str())
         .map_err(|error| format!("解析贮藏树失败：{error}"))?
         .detach();
     let base_tree_id = repository
-        .rev_parse_single(format!("{stash}^1^tree").as_str())
+        .rev_parse_single([stash.as_str(), "^1^{tree}"].concat().as_str())
         .ok()
         .map(|id| id.detach());
     let untracked_tree_id = repository
-        .rev_parse_single(format!("{stash}^3^tree").as_str())
+        .rev_parse_single([stash.as_str(), "^3^{tree}"].concat().as_str())
         .ok()
         .map(|id| id.detach());
 
