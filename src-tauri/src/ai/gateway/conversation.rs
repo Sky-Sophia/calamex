@@ -2,8 +2,8 @@ use super::*;
 use crate::agent_sidecar;
 use crate::commands::contracts::{AgentSidecarChatRequest, AgentSidecarMessagePayload};
 use super::prompt::{
-    build_code_action_prompt, build_context_block, build_conversation_title_prompt,
-    build_identity_system_message, build_inline_prompt, clip_title_source,
+    build_context_block, build_conversation_title_prompt, build_identity_system_message,
+    build_inline_prompt, clip_title_source,
 };
 
 fn to_sidecar_message_payloads(
@@ -331,54 +331,6 @@ pub async fn inline_complete(
             end_offset: payload.cursor_offset,
         },
         confidence: "medium".to_string(),
-    })
-}
-
-pub async fn code_action(payload: AiCodeActionRequest) -> Result<AiCodeActionPayload, String> {
-    let trimmed_selection = payload.selection.trim();
-
-    if trimmed_selection.is_empty() {
-        return Ok(AiCodeActionPayload {
-            explanation: "当前没有选区，请先选择需要处理的代码。".to_string(),
-            suggested_patch: None,
-            test_suggestion: None,
-            follow_up_questions: vec!["请选择代码后重新执行 AI Action。".to_string()],
-        });
-    }
-
-    let prompt = build_code_action_prompt(&payload);
-    let redacted_prompt = redact_text(&prompt);
-
-    if redacted_prompt.blocked {
-        audit::emit(AiAuditEventKind::SecretDetected);
-    }
-
-    let request = AiProviderChatRequest::new(vec![AiProviderMessage {
-        role: "user".to_string(),
-        content: redacted_prompt.text,
-    }]);
-
-    let response = agent_sidecar::model_chat_once(AgentSidecarChatRequest {
-        session_id: None,
-        mode: Some("ask".to_string()),
-        goal: Some("执行代码动作".to_string()),
-        messages: to_sidecar_message_payloads(request.messages),
-        workspace_root_path: None,
-        context: Vec::new(),
-        model_config: None,
-        thread_id: None,
-    })
-    .await?;
-
-    Ok(AiCodeActionPayload {
-        explanation: sidecar_events_result_text(&response),
-        suggested_patch: None,
-        test_suggestion: if payload.kind == "generate_tests" {
-            Some("建议基于返回内容在测试目录新增用例；应用前请先走 patch 预览。".to_string())
-        } else {
-            None
-        },
-        follow_up_questions: Vec::new(),
     })
 }
 
