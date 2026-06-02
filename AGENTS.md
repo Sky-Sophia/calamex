@@ -1,6 +1,6 @@
 # AGENTS.md
 
-本文是 Calamex 的质量基线。任何人/AI 改代码，都要达到这里的标准才能提交。
+本文是 Calamex 的质量基线。要达到这里的标准才能提交。
 
 ## 一、先想后做
 - 明确需求与验收标准再动手；有歧义**先停下问**，不猜。
@@ -30,3 +30,142 @@
 - 单分支 `main`（trunk-based），squash 合入；Conventional Commits（lefthook + commitlint 强制）。
 - 关键决策沉淀为 ADR（`docs/adr/`）；已 accepted 的 ADR 不就地重写。
 - 冲突优先级：**安全 > 类型安全 > 可测性 > 可维护性 > 性能 > 风格**；缺数据先停下确认，不猜测。
+
+
+\---
+
+name: karpathy-guidelines
+
+description: Behavioral guidelines to reduce common LLM coding mistakes: think before coding, simplicity first, surgical changes, goal-driven execution
+
+\---
+
+
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+
+
+\*\*Tradeoff:\*\* These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+
+
+\## 1. Think Before Coding
+
+
+
+\*\*Don't assume. Don't hide confusion. Surface tradeoffs.\*\*
+
+
+
+Before implementing:
+
+\- State your assumptions explicitly. If uncertain, ask.
+
+\- If multiple interpretations exist, present them - don't pick silently.
+
+\- If a simpler approach exists, say so. Push back when warranted.
+
+\- If something is unclear, stop. Name what's confusing. Ask.
+
+
+
+\## 2. Simplicity First
+
+
+
+\*\*Minimum code that solves the problem. Nothing speculative.\*\*
+
+
+
+\- No features beyond what was asked.
+
+\- No abstractions for single-use code.
+
+\- No "flexibility" or "configurability" that wasn't requested.
+
+\- No error handling for impossible scenarios.
+
+\- If you write 200 lines and it could be 50, rewrite it.
+
+
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+
+
+\## 3. Surgical Changes
+
+
+
+\*\*Touch only what you must. Clean up only your own mess.\*\*
+
+
+
+When editing existing code:
+
+\- Don't "improve" adjacent code, comments, or formatting.
+
+\- Don't refactor things that aren't broken.
+
+\- Match existing style, even if you'd do it differently.
+
+\- If you notice unrelated dead code, mention it - don't delete it.
+
+
+
+When your changes create orphans:
+
+\- Remove imports/variables/functions that YOUR changes made unused.
+
+\- Don't remove pre-existing dead code unless asked.
+
+
+
+The test: Every changed line should trace directly to the user's request.
+
+
+
+\## 4. Goal-Driven Execution
+
+
+
+\*\*Define success criteria. Loop until verified.\*\*
+
+
+
+Transform tasks into verifiable goals:
+
+\- "Add validation" → "Write tests for invalid inputs, then make them pass"
+
+\- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+
+\- "Refactor X" → "Ensure tests pass before and after"
+
+
+
+For multi-step tasks, state a brief plan:
+
+```
+
+1\. \[Step] → verify: \[check]
+
+2\. \[Step] → verify: \[check]
+
+3\. \[Step] → verify: \[check]
+
+```
+
+
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+
+
+\---
+
+
+
+\*\*These guidelines are working if:\*\* fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+
