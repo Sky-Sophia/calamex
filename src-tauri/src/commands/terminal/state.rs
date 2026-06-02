@@ -83,10 +83,7 @@ fn lock_terminal_snapshots(
         .map_err(|_| "终端快照状态已损坏。".to_string())
 }
 
-pub(super) fn get_terminal_snapshot(
-    state: &TerminalSessionState,
-    session_id: &str,
-) -> Result<String, String> {
+pub(super) fn get_terminal_snapshot(state: &TerminalSessionState, session_id: &str) -> Result<String, String> {
     let snapshots = lock_terminal_snapshots(state)?;
     Ok(snapshots.get(session_id).cloned().unwrap_or_default())
 }
@@ -101,10 +98,7 @@ pub(super) fn set_terminal_snapshot(
     Ok(())
 }
 
-pub(super) fn remove_terminal_snapshot(
-    state: &TerminalSessionState,
-    session_id: &str,
-) -> Result<(), String> {
+pub(super) fn remove_terminal_snapshot(state: &TerminalSessionState, session_id: &str) -> Result<(), String> {
     let mut snapshots = lock_terminal_snapshots(state)?;
     snapshots.remove(session_id);
     Ok(())
@@ -137,10 +131,7 @@ pub(super) fn remove_terminal_interactive_visual_state(
     Ok(())
 }
 
-pub(super) fn mark_terminal_resize_repaint_suppression(
-    state: &TerminalSessionState,
-    session_id: &str,
-) {
+pub(super) fn mark_terminal_resize_repaint_suppression(state: &TerminalSessionState, session_id: &str) {
     let Ok(mut visual_states) = state.interactive_visual.lock() else {
         return;
     };
@@ -313,4 +304,48 @@ pub(super) fn should_skip_snapshot_for_interactive_resize_repaint(
         return false;
     };
     if Instant::now() > suppress_until {
-        visual_state.resize_
+        visual_state.resize_repaint_suppress_until = None;
+        return false;
+    }
+    is_likely_interactive_resize_repaint_frame(chunk)
+}
+
+pub(super) fn should_recreate_terminal_session(session: &TerminalSession) -> bool {
+    let cwd = session.working_directory.trim();
+    cwd.is_empty()
+        || cwd.contains('\\')
+        || cwd.contains(':')
+        || (!cwd.starts_with('/') && cwd != "~")
+}
+
+pub(super) fn terminate_terminal_session(session: &TerminalSession) -> Result<(), String> {
+    session.handle.close().map_err(|error| error.to_string())
+}
+
+pub(super) fn resolve_terminal_start_directory(path: Option<&str>) -> Result<Option<PathBuf>, String> {
+    if let Some(path) = path {
+        let directory = PathBuf::from(path)
+            .canonicalize()
+            .map_err(|error| format!("读取终端工作目录失败：{error}"))?;
+        if !directory.is_dir() {
+            return Err("终端工作目录不是有效目录。".into());
+        }
+        return Ok(Some(directory));
+    }
+    Ok(None)
+}
+
+pub(super) fn remove_interactive_terminal_after_exit(state: &TerminalSessionState, session_id: &str) {
+    if let Ok(mut sessions) = state.sessions.lock() {
+        sessions.remove(session_id);
+    }
+    if let Ok(mut snapshots) = state.snapshots.lock() {
+        snapshots.remove(session_id);
+    }
+    if let Ok(mut visual_states) = state.interactive_visual.lock() {
+        visual_states.remove(session_id);
+    }
+    if let Ok(mut pending) = state.pending_switch_input.lock() {
+        pending.remove(session_id);
+    }
+}
