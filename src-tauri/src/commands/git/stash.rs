@@ -79,11 +79,65 @@ pub fn apply_git_stash(payload: GitStashApplyRequest) -> Result<GitRepositorySta
 #[tauri::command]
 pub fn drop_git_stash(payload: GitStashDropRequest) -> Result<GitRepositoryStatusPayload, String> {
     let repository = open_repository_from_root(&payload.repository_root_path)?;
-    let repository_root = resolve_repository_root(&repository)?;
-    // stash@{N}：用字符串拼接构造字面花括号。
-    let stash_ref = ["stash@{", &payload.stash_index.to_string(), "}"].concat();
-    cli::run_git_ok(&repository_root, &["stash", "drop", &stash_ref], "删除贮藏")?;
+    drop_stash_by_index(&repository, payload.stash_index)?;
     super::status::build_git_repository_status_payload(&repository)
+}
+
+/// 删除贮藏栈中第 `target_index` 条（stash@{N}，0 = 最新）。
+/// 直接改写 .git/logs/refs/stash（reflog）与 .git/refs/stash，避免依赖系统安装的 git。
+fn drop_stash_by_index(repository: &Repository, target_index: usize) -> Result<(), String> {
+    let git_dir = repository.git_dir();
+    let reflog_path = git_dir.join("logs").join("refs").join("stash");
+    let content = fs::read_to_string(&reflog_path).map_err(|_| "指定的贮藏不存在。".to_string())?;
+
+    let mut lines: Vec<String> = content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(str::to_string)
+        .collect();
+
+    // reflog 按追加顺序记录（最旧在前），stash@{0} 为最新（最后一行）。
+    if target_index >= lines.len() {
+        return Err("指定的贮藏不存在。".into());
+    }
+    let remove_position = lines.len() - 1 - target_index;
+    let removed_line = lines.remove(remove_position);
+
+    // 维持 reflog 链：被删行的后继行（现位于 remove_position）的 old-oid
+    // 应承接被删行的 old-oid，保证 line[i].old == line[i-1].new。
+    if remove_position < lines.len() {
+        let removed_old = removed_line.split(' ').next().unwrap_or("");
+        if !removed_old.is_empty() {
+            let successor = lines[remove_position].clone();
+            if let Some((_, rest)) = successor.split_once(' ') {
+                lines[remove_position] = [removed_old, " ", rest].concat();
+            }
+        }
+    }
+
+    let stash_ref_path = git_dir.join("refs").join("stash");
+    if lines.is_empty() {
+        // 贮藏栈清空：移除 ref 与 reflog。
+        let _ = fs::remove_file(&stash_ref_path);
+        let _ = fs::remove_file(&reflog_path);
+        return Ok(());
+    }
+
+    // refs/stash 指向最新一条（最后一行）的 new-oid。
+    let newest = lines.last().unwrap();
+    let new_oid = newest
+        .split('\t')
+        .next()
+        .and_then(|meta| meta.split(' ').nth(1))
+        .ok_or_else(|| "贮藏 reflog 格式异常。".to_string())?;
+    fs::write(&stash_ref_path, [new_oid, "\n"].concat())
+        .map_err(|error| format!("写入 refs/stash 失败：{error}"))?;
+
+    let mut rebuilt = lines.join("\n");
+    rebuilt.push('\n');
+    fs::write(&reflog_path, rebuilt)
+        .map_err(|error| format!("写入贮藏 reflog 失败：{error}"))?;
+    Ok(())
 }
 
 fn build_git_stash_entry_payload(
