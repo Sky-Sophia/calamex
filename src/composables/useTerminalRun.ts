@@ -68,7 +68,7 @@ export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) 
   const terminalFacade = useTerminalFacade();
   const terminalEventBus = getTerminalEventBus();
 
-  let bufferedTerminalOutput = '';
+  let bufferedTerminalOutputChunks: string[] = [];
   let bufferedTerminalOutputTimerId: number | null = null;
   let terminalRunFallbackTimerId: number | null = null;
   let isDisposed = false;
@@ -101,22 +101,23 @@ export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) 
   const flushBufferedTerminalOutput = (): void => {
     clearBufferedTerminalOutputTimer();
 
-    if (!bufferedTerminalOutput) {
+    if (bufferedTerminalOutputChunks.length === 0) {
       return;
     }
+
+    const output = bufferedTerminalOutputChunks.join('');
+    bufferedTerminalOutputChunks = [];
 
     if (isDisposed) {
-      bufferedTerminalOutput = '';
       return;
     }
 
-    editorStore.appendTerminalOutput(bufferedTerminalOutput);
-    bufferedTerminalOutput = '';
+    editorStore.appendTerminalOutput(output);
   };
 
   const resetBufferedTerminalOutput = (): void => {
     clearBufferedTerminalOutputTimer();
-    bufferedTerminalOutput = '';
+    bufferedTerminalOutputChunks = [];
   };
 
   const clearActiveTerminalRunState = (): void => {
@@ -537,7 +538,7 @@ export const useTerminalRun = ({ canRun, editorStore }: TUseTerminalRunOptions) 
       return;
     }
 
-    bufferedTerminalOutput += payload.data;
+    bufferedTerminalOutputChunks.push(payload.data);
     if (bufferedTerminalOutputTimerId !== null) {
       return;
     }
