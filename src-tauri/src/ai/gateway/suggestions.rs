@@ -54,7 +54,7 @@ pub async fn generate_suggestion_pool(
         .as_deref()
         .unwrap_or(DEFAULT_NARRATOR_MODEL);
     let request = AiProviderChatRequest::new(vec![
-        conversation::build_identity_system_message(model),
+        prompt::build_identity_system_message(model),
         AiProviderMessage::system(build_suggestion_pool_system_prompt(count)),
         AiProviderMessage::user(build_suggestion_pool_user_prompt(&locale, &topics, count)),
     ]);
