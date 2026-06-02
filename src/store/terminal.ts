@@ -1,4 +1,4 @@
-﻿import { defineStore } from 'pinia';
+import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import type {
   ITerminalBufferDiagnostic,
@@ -260,6 +260,16 @@ export const useTerminalRuntimeStore = defineStore('terminal-runtime', () => {
     markEvent('terminal:run-completed');
   };
 
+  const markRunDispatchFailed = (runId: string): void => {
+    if (activeRun.value?.runId === runId) {
+      activeRun.value = null;
+    }
+    diagnostics.value.lastRunId = runId;
+    diagnostics.value.lastExitCode = null;
+    diagnostics.value.lastCompletedAt = null;
+    markEvent('terminal:run-dispatch-failed');
+  };
+
   const applyStateChanged = (payload: ITerminalStateChangedPayload): void => {
     state.value = payload.to;
     if (payload.to === 'idle_interactive') {
@@ -375,6 +385,7 @@ export const useTerminalRuntimeStore = defineStore('terminal-runtime', () => {
     updateActiveRun,
     markSwitchingToIdle,
     markRunCompleted,
+    markRunDispatchFailed,
     applyStateChanged,
     recordTerminalData,
     recordVisualWrite,

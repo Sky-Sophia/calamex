@@ -246,14 +246,18 @@ where
     }
 
     let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows: request.rows.max(1),
-            cols: request.cols.max(2),
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|error| LocalWslPtyError::Open(error.to_string()))?;
+    let pair = match pty_system.openpty(PtySize {
+        rows: request.rows.max(1),
+        cols: request.cols.max(2),
+        pixel_width: 0,
+        pixel_height: 0,
+    }) {
+        Ok(pair) => pair,
+        Err(error) => {
+            cleanup_wsl_paths(&cleanup_paths);
+            return Err(LocalWslPtyError::Open(error.to_string()));
+        }
+    };
 
     let mut command = CommandBuilder::new("wsl.exe");
     command.arg("--cd");
@@ -263,32 +267,49 @@ where
     command.arg(&execution_path);
     command.env("WSL_UTF8", "1");
 
-    let child = pair
-        .slave
-        .spawn_command(command)
-        .map_err(|error| LocalWslPtyError::Open(error.to_string()))?;
+    let child = match pair.slave.spawn_command(command) {
+        Ok(child) => child,
+        Err(error) => {
+            cleanup_wsl_paths(&cleanup_paths);
+            return Err(LocalWslPtyError::Open(error.to_string()));
+        }
+    };
     drop(pair.slave);
 
-    let reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|error| LocalWslPtyError::Open(error.to_string()))?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|error| LocalWslPtyError::Open(error.to_string()))?;
+    let reader = match pair.master.try_clone_reader() {
+        Ok(reader) => reader,
+        Err(error) => {
+            let mut killer = child.clone_killer();
+            let _ = killer.kill();
+            cleanup_wsl_paths(&cleanup_paths);
+            return Err(LocalWslPtyError::Open(error.to_string()));
+        }
+    };
+    let writer = match pair.master.take_writer() {
+        Ok(writer) => writer,
+        Err(error) => {
+            let mut killer = child.clone_killer();
+            let _ = killer.kill();
+            cleanup_wsl_paths(&cleanup_paths);
+            return Err(LocalWslPtyError::Open(error.to_string()));
+        }
+    };
     let killer = child.clone_killer();
     let pid = child.process_id().unwrap_or_default();
 
     spawn_run_reader(
         run_id.clone(),
         pid,
-        cleanup_paths,
+        cleanup_paths.clone(),
         reader,
         child,
         pair.master,
         on_event,
-    )?;
+    )
+    .map_err(|error| {
+        cleanup_wsl_paths(&cleanup_paths);
+        error
+    })?;
 
     Ok(LocalWslRunHandle {
         run_id,
