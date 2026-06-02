@@ -18,7 +18,13 @@ pub fn list_git_branches(
         .map_err(|error| format!("读取 Git 分支列表失败：{error}"))?;
 
     for reference in references {
-        let reference = reference.map_err(|error| format!("读取 Git 分支失败：{error}"))?;
+        // 跳过无法实例化的无效引用：例如被误放进 .git/refs 下的杂项文件
+        // （如脚本文件 refs/untitled.sh）。单个坏引用不应导致整个分支列表读取
+        // 失败，这与 `git branch` 自身遇到无效松散引用时的容错行为一致。
+        let reference = match reference {
+            Ok(reference) => reference,
+            Err(_) => continue,
+        };
         let name = reference.name();
         let (category, shorthand) = match name.category_and_short_name() {
             Some((cat, short)) => (cat, short.to_string()),
