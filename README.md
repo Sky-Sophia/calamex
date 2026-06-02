@@ -54,7 +54,7 @@
 
 **桌面 / 后端**
 - Tauri 2.x（`tray-icon`、dialog、store 插件）
-- Rust（edition 2021），按域拆分的命令模块（terminal / lsp / git / ssh / search / workspace / ai / shell_tools / script_run / agent_sidecar / window 等）
+- Rust（edition 2021），按域拆分的命令模块（terminal / lsp / git / ssh / search / workspace / ai / shell_tools / script_run / agent_sidecar / window / contracts 等）
 - IPC 类型由 `tauri-specta` 自动生成，前后端契约强类型对齐
 - 异步运行时 Tokio
 
@@ -80,15 +80,16 @@
 └───────────────┬───────────────────────────────┘
                 │  仅调用
 ┌───────────────▼───────────────────────────────┐
-│        composables / store / services          │
-│   (Pinia 域 store、façade、类型安全 IPC 封装)    │
+│   composables / store / services / router       │
+│  (Pinia 域 store、façade、类型安全 IPC、CopilotKit) │
 └───────────────┬───────────────────────────────┘
                 │  tauri-specta 生成的强类型 IPC
 ┌───────────────▼───────────────────────────────┐
 │                  Rust 后端                      │
-│  commands: terminal · lsp · git · ssh ·         │
-│  search · workspace · ai · shell_tools ·        │
-│  script_run · agent_sidecar · window            │
+│  commands: terminal · lsp · git · ssh(+pool) ·  │
+│  search · workspace_fs · workspace_watcher ·    │
+│  ai · shell_tools · script_run · agent_sidecar ·│
+│  window(+stage) · contracts                     │
 └───────────────┬───────────────────────────────┘
                 │  PTY / WSL 调用
 ┌───────────────▼───────────────────────────────┐
@@ -96,6 +97,8 @@
 │          (脚本与 shell 工具链在此运行)            │
 └─────────────────────────────────────────────────┘
 ```
+
+> AI Agent 能力由独立的 Node 边车 `agent-sidecar/` 承载，Rust 侧经 `commands/agent_sidecar` 桥接其生命周期与 HTTP / 流式接口。
 
 **约束要点**
 - 组件 **不** 直接 `fetch` / `invoke` / 读写存储；I/O 唯一出口为 `services/`。
@@ -107,28 +110,61 @@
 
 ```text
 .
-├── src/                     # 前端（Vue 3 + TS）
-│   ├── components/          # UI 组件
-│   ├── composables/         # 组合式逻辑
-│   ├── store/               # Pinia 域 store
-│   ├── services/            # IPC / shell / terminal / session 等服务（反腐层）
-│   ├── views/               # 页面视图（如 ShellWorkbenchView）
-│   ├── terminal/            # 终端前端集成
-│   ├── themes/              # 主题派生
-│   ├── bindings/ generated/ # tauri-specta 生成的类型绑定
-│   └── main.ts              # 应用入口
-├── src-tauri/               # 桌面 / Rust 后端
-│   ├── src/commands/        # 按域拆分的 Tauri 命令
-│   ├── src/terminal/        # PTY / 终端后端
-│   ├── src/ai/              # AI 集成
-│   ├── src/agent_sidecar/   # AI 边车的宿主侧桥接
-│   ├── src/bin/             # 辅助二进制（如导出 IPC 绑定）
-│   ├── capabilities/        # Tauri 能力清单（最小授权）
-│   └── tauri.conf.json      # Tauri 配置
-├── agent-sidecar/           # 基于 Mastra 的 AI Agent 边车（Node）
-├── e2e/                     # Playwright 端到端测试
-├── docs/                    # 架构、ADR、可观测性、性能预算等文档
-└── scripts/                 # 构建与开发辅助脚本
+├── src/                      # 前端（Vue 3 + TS）
+│   ├── components/           # UI 组件（含 Shadcn / reka-ui）
+│   ├── composables/          # 组合式逻辑
+│   ├── copilotkit/           # CopilotKit / AG-UI 集成
+│   ├── store/                # Pinia 域 store
+│   ├── services/             # IPC / shell / terminal / session 等服务（反腐层）
+│   ├── views/                # 页面视图（如 ShellWorkbenchView）
+│   ├── layouts/              # 布局组件
+│   ├── router/               # Vue Router 路由
+│   ├── terminal/             # 终端前端集成（xterm.js）
+│   ├── themes/               # 主题派生
+│   ├── styles/               # 全局样式（Tailwind）
+│   ├── constants/            # 常量定义
+│   ├── lib/                  # 通用库 / 封装
+│   ├── utils/                # 工具函数
+│   ├── types/                # 前端类型定义
+│   ├── bindings/             # tauri-specta 生成的类型绑定
+│   ├── generated/            # 其他生成产物（如 shell 命令目录）
+│   ├── __tests__/            # 前端单元测试
+│   ├── App.vue               # 根组件
+│   └── main.ts               # 应用入口
+├── src-tauri/                # 桌面 / Rust 后端
+│   ├── src/
+│   │   ├── commands/         # 按域拆分的 Tauri 命令
+│   │   ├── terminal/         # PTY / 终端后端
+│   │   ├── ai/               # AI 集成（async-openai 等）
+│   │   ├── agent_sidecar/    # AI 边车的宿主侧桥接
+│   │   ├── assets/           # 后端内置资源
+│   │   ├── bin/              # 辅助二进制（如导出 IPC 绑定）
+│   │   ├── main.rs           # 应用入口
+│   │   └── tauri_bindings.rs # tauri-specta 绑定导出
+│   ├── capabilities/         # Tauri 能力清单（最小授权）
+│   ├── gen/                  # Tauri 生成产物
+│   ├── icons/                # 应用图标
+│   ├── resources-bundle/     # 打包随附资源
+│   ├── build.rs              # 构建脚本
+│   └── tauri.conf.json       # Tauri 配置
+├── agent-sidecar/            # 基于 Mastra 的 AI Agent 边车（Node）
+│   ├── src/
+│   │   ├── engines/          # 智能体 / 编排引擎
+│   │   ├── tools/            # MCP 工具（顺序思考、Context7、Tavily 等）
+│   │   ├── models/           # 模型接入（OpenAI 兼容）
+│   │   ├── http/             # HTTP 服务
+│   │   ├── streaming/        # 流式响应
+│   │   ├── schemas/          # 数据校验 schema
+│   │   ├── web/              # Web 相关能力
+│   │   ├── types/            # 类型定义
+│   │   └── server.ts         # 边车服务入口
+│   └── MATURITY.md           # 成熟度 / 推进状态说明
+├── e2e/                      # Playwright 端到端测试
+├── scripts/                  # 构建与开发辅助脚本
+├── schemas/                  # JSON Schema 等
+├── resources/                # 应用资源
+├── assets/                   # 仓库静态资源
+└── vendor/                   # 第三方内置依赖
 ```
 
 ## 运行环境要求
