@@ -66,6 +66,15 @@ let hydrationSettled = false;
 let deferredWrite: string | null = null;
 /** 是否发生过 removeItem(显式清理);若有则后台迁移/对账不得复活磁盘数据。 */
 let clearedDuringHydration = false;
+/**
+ * hydrate 超时占位期 getItem 返回 null 后,pinia-plugin-persistedstate 会让 store
+ * 以默认 state([createThread()] 这一空白线程,且能通过 schema 校验)初始化,并在
+ * afterHydrate 归一化赋值时触发一次 $subscribe → setItem,把这份"空白初始态"回写。
+ * 这一次回写并非用户真实输入:若把它当作 deferredWrite 落盘,reconcileAfterHydrate
+ * 会用空白态覆盖磁盘上尚未读出的历史,正是"对话记录莫名其妙被清空"的根因。
+ * 用此标记识别并丢弃紧随其后的那一次回写。
+ */
+let hydrationEchoPending = false;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 /** 当前防抖批次首次入队的时间戳(ms);用于 SAVE_MAX_WAIT_MS 上限计算。 */
 let firstPendingAt: number | null = null;
@@ -333,12 +342,27 @@ const aiConversationStorage: IAiConversationPersistStorage = {
     if (!isReady || key !== AI_CONVERSATION_PERSIST_KEY) {
       return null;
     }
+    if (cache === null && !hydrationSettled) {
+      // 超时占位期返回 null:store 将以默认值初始化并随即回写一次空白初始态。
+      // 标记下一次 setItem 为 hydrate 回声,需丢弃以免覆盖磁盘历史。
+      hydrationEchoPending = true;
+    }
     return cache;
   },
 
   setItem(key, value) {
+    if (key !== AI_CONVERSATION_PERSIST_KEY) {
+      return;
+    }
+    if (hydrationEchoPending) {
+      // hydrate 超时占位期 store 以默认值初始化后回写的空白初始态:既非用户真实
+      // 输入,也绝不能据此落盘或 defer(否则会覆盖磁盘上尚未读出的历史)。仅消费一次
+      // 标记并丢弃本次写入,cache 与磁盘均不动,真实历史交由 reconcileAfterHydrate 恢复。
+      hydrationEchoPending = false;
+      return;
+    }
     // 与 cache 相同则跳过，避免无变更的重复 idb 写入。
-    if (key !== AI_CONVERSATION_PERSIST_KEY || value === cache) {
+    if (value === cache) {
       return;
     }
     cache = value;
@@ -358,6 +382,8 @@ const aiConversationStorage: IAiConversationPersistStorage = {
     firstPendingAt = null;
     cache = null;
     deferredWrite = null;
+    // 显式清理后,占位期回声标记不再适用,清掉以免误吞后续写入。
+    hydrationEchoPending = false;
     // 阻止后台迁移/对账把已删数据复活。
     clearedDuringHydration = true;
     hydrationSettled = true;
