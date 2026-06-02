@@ -25,6 +25,7 @@ use tauri::{AppHandle, Emitter, Manager};
 mod config;
 mod connection;
 mod conversation;
+mod prompt;
 mod suggestions;
 
 #[cfg(test)]
