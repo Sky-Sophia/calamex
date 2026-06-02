@@ -22,10 +22,8 @@ import {
 
 const DEFAULT_TERMINAL_COLS = 120;
 const DEFAULT_TERMINAL_ROWS = 28;
-const SWITCHING_INPUT_BUFFER_MS = 200;
-
-/** 模块级共享,避免每次 writeInput 都重建 (高频键盘输入路径)。 */
-const sharedInputDecoder = new TextDecoder();
+const SWITCHING_INPUT_FLUSH_RETRY_MS = 50;
+const SWITCHING_INPUT_BUFFER_MAX_BYTES = 64 * 1024;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,9 +76,11 @@ export const useTerminalFacade = (options: ITerminalFacadeOptions = {}): ITermin
 
   const terminalDataHandlers = new Set<TTerminalDataHandler>();
   const switchingInputBuffer: Uint8Array[] = [];
+  const inputDecodersBySession = new Map<string, TextDecoder>();
 
   let eventBridgeStarted = false;
   let inputBufferTimerId: number | null = null;
+  let switchingInputBufferBytes = 0;
 
   let terminalDataUnlisten: TTerminalUnsubscribe | null = null;
   let runChunkUnlisten: TTerminalUnsubscribe | null = null;
@@ -141,6 +141,20 @@ export const useTerminalFacade = (options: ITerminalFacadeOptions = {}): ITermin
     pendingRunStartedPayloads.delete(payload.runId);
   };
 
+  const getInputDecoder = (sessionId: string): TextDecoder => {
+    const existing = inputDecodersBySession.get(sessionId);
+    if (existing) {
+      return existing;
+    }
+    const decoder = new TextDecoder();
+    inputDecodersBySession.set(sessionId, decoder);
+    return decoder;
+  };
+
+  const clearInputDecoder = (sessionId: string): void => {
+    inputDecodersBySession.delete(sessionId);
+  };
+
   const clearInputBufferTimer = (): void => {
     if (inputBufferTimerId === null) {
       return;
@@ -149,25 +163,58 @@ export const useTerminalFacade = (options: ITerminalFacadeOptions = {}): ITermin
     inputBufferTimerId = null;
   };
 
-  const flushSwitchingInputBuffer = async (): Promise<void> => {
-    clearInputBufferTimer();
-    const targetSessionId = routeInput(state.value, activeRun.value);
-    if (!targetSessionId) {
-      switchingInputBuffer.length = 0;
-      console.warn('[terminal-facade] switching 状态超过缓冲窗口,已丢弃输入。');
-      return;
-    }
-    const queued = switchingInputBuffer.splice(0);
-    for (const item of queued) {
-      await writeInput(targetSessionId, item);
-    }
-  };
-
   const scheduleSwitchingInputFlush = (): void => {
     clearInputBufferTimer();
     inputBufferTimerId = window.setTimeout(() => {
       void flushSwitchingInputBuffer();
-    }, SWITCHING_INPUT_BUFFER_MS);
+    }, SWITCHING_INPUT_FLUSH_RETRY_MS);
+  };
+
+  const flushSwitchingInputBuffer = async (): Promise<void> => {
+    clearInputBufferTimer();
+    if (switchingInputBuffer.length === 0) {
+      switchingInputBufferBytes = 0;
+      return;
+    }
+    const targetSessionId = routeInput(state.value, activeRun.value);
+    if (!targetSessionId) {
+      scheduleSwitchingInputFlush();
+      return;
+    }
+
+    const queued = switchingInputBuffer.splice(0);
+    switchingInputBufferBytes = 0;
+    for (let index = 0; index < queued.length; index += 1) {
+      const item = queued[index];
+      try {
+        await writeInput(targetSessionId, item);
+      } catch (error) {
+        const remaining = queued.slice(index);
+        switchingInputBuffer.unshift(...remaining);
+        switchingInputBufferBytes += remaining.reduce((total, chunk) => total + chunk.byteLength, 0);
+        scheduleSwitchingInputFlush();
+        throw error;
+      }
+    }
+  };
+
+  const queueSwitchingInput = (data: Uint8Array): boolean => {
+    if (data.byteLength === 0) {
+      return true;
+    }
+    const nextSize = switchingInputBufferBytes + data.byteLength;
+    if (nextSize > SWITCHING_INPUT_BUFFER_MAX_BYTES) {
+      console.error('[terminal-facade] switching 输入缓冲超过上限,已拒绝新的输入。', {
+        currentBytes: switchingInputBufferBytes,
+        incomingBytes: data.byteLength,
+        maxBytes: SWITCHING_INPUT_BUFFER_MAX_BYTES,
+      });
+      return false;
+    }
+    switchingInputBuffer.push(data.slice());
+    switchingInputBufferBytes = nextSize;
+    scheduleSwitchingInputFlush();
+    return true;
   };
 
   /** 单条 handler 抛错隔离,防止一个订阅者把所有人一起拉下水。 */
@@ -215,6 +262,7 @@ export const useTerminalFacade = (options: ITerminalFacadeOptions = {}): ITermin
         runtimeStore.markRunCompleted(payload.runId, payload.exitCode, payload.finishedAt);
         pendingRunHandles.delete(payload.runId);
         pendingRunStartedPayloads.delete(payload.runId);
+        clearInputDecoder(payload.sessionId);
       });
     }
     if (!interactiveReadyUnlisten) {
@@ -227,6 +275,7 @@ export const useTerminalFacade = (options: ITerminalFacadeOptions = {}): ITermin
         if (payload.sessionId === interactiveSessionId) {
           runtimeStore.markInteractiveExited();
         }
+        clearInputDecoder(payload.sessionId);
       });
     }
     if (!stateChangedUnlisten) {
@@ -306,11 +355,9 @@ export const useTerminalFacade = (options: ITerminalFacadeOptions = {}): ITermin
 
       return handle;
     } catch (error) {
-      // dispatch IPC 失败:run 从未真正 started。这里 markRunCompleted
-      // 的语义是"清掉 UI 中的 pending 态"。如果 runtimeStore 把它视作
-      // 一次"完成的 run"并记入历史,该改成专用的 markRunDispatchFailed。
-      // 当前保持原行为。
-      runtimeStore.markRunCompleted(spec.runId, null, new Date().toISOString());
+      // dispatch IPC 失败表示 run 从未真正启动；使用专用状态标记避免把它
+      // 误记成一次已完成运行。
+      runtimeStore.markRunDispatchFailed(spec.runId);
       pendingRunHandles.delete(spec.runId);
       pendingRunStartedPayloads.delete(spec.runId);
       throw error;
@@ -325,7 +372,7 @@ export const useTerminalFacade = (options: ITerminalFacadeOptions = {}): ITermin
   const writeInput = async (sessionId: string, data: Uint8Array): Promise<void> => {
     await tauri.writeTerminalInput({
       sessionId,
-      data: sharedInputDecoder.decode(data),
+      data: getInputDecoder(sessionId).decode(data, { stream: true }),
     });
   };
 
@@ -350,9 +397,11 @@ export const useTerminalFacade = (options: ITerminalFacadeOptions = {}): ITermin
       return;
     }
     if (state.value === 'switching_to_run' || state.value === 'switching_to_idle') {
-      runtimeStore.recordInputRoute('buffered', data);
-      switchingInputBuffer.push(data);
-      scheduleSwitchingInputFlush();
+      if (queueSwitchingInput(data)) {
+        runtimeStore.recordInputRoute('buffered', data);
+      } else {
+        runtimeStore.recordInputRoute('dropped', data);
+      }
       return;
     }
     runtimeStore.recordInputRoute('dropped', data);
@@ -383,6 +432,8 @@ export const useTerminalFacade = (options: ITerminalFacadeOptions = {}): ITermin
   const dispose = (): void => {
     clearInputBufferTimer();
     switchingInputBuffer.length = 0;
+    switchingInputBufferBytes = 0;
+    inputDecodersBySession.clear();
     terminalDataHandlers.clear();
     terminalDataUnlisten?.();
     runChunkUnlisten?.();
