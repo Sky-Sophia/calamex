@@ -15,6 +15,8 @@
 
 ## 活跃条目
 
+> 行数类债务（R-20.1.\* / R-20.5.\* / R-20.6.\*）以 `scripts/baselines/file-size.json` 为机器校验真相源：`scripts/check-file-size.ts` 已改为全量扫描 `src/`、`src-tauri/src/`，超限且无豁免的文件会直接使 `pnpm guard` 失败。新增或变更豁免后请同步本表。
+
 | ID      | 描述                                                                                                                    | 负责人    | 截止迭代   | 规则                                      | 状态        |
 | ------- | ----------------------------------------------------------------------------------------------------------------------- | --------- | ---------- | ----------------------------------------- | ----------- |
 | TD-0001 | `useWorkbench.ts` 行数超 R-20.1.3 限(≤400)                                                                              | xiaojianc | 2026-06-30 | R-20.1.3                                  | 🔴 豁免期内 |
@@ -29,6 +31,14 @@
 | TD-0010 | 最大化 / 全屏态下无边框窗口 hit test 仍沿用系统默认路径，尚未覆盖 `HTMAXBUTTON`、Snap Layout 提示与边缘吸附等特例       | xiaojianc | 2026-07-31 | R-T.4.3 / R-17.3.5                        | 🟡 已登记   |
 | TD-0011 | SMIL 弃用跟踪。若 Chrome / WebView2 公布下线路线图，需启动欢迎页 Lottie / WAAPI 迁移评估                                | xiaojianc | 2027-01-01 | ADR-20260423-welcome-smil-svg / RISK-W-01 | 🟡 已登记   |
 | TD-0012 | 欢迎页浅色主题版本待美术交付；当前仅实现深色欢迎页                                                                      | xiaojianc | 2026-09-30 | ADR-20260423-welcome-smil-svg             | 🟡 已登记   |
+| TD-0014 | `commands/search.rs` (~65KB) 超 R-20.5.\*(≤800)，灯下黑补登，待按 query/match/replace 子域拆分                          | xiaojianc | 2026-12-31 | R-20.5.\*                                 | 🔴 豁免期内 |
+| TD-0015 | `commands/ssh.rs` (~63KB) 超 R-20.5.\*(≤800)，灯下黑补登，待按连接/传输/凭证拆分                                        | xiaojianc | 2026-12-31 | R-20.5.\*                                 | 🔴 豁免期内 |
+| TD-0016 | `commands/contracts.rs` (~52KB) IPC 契约耦合中心，灯下黑补登，拆分进行中（contracts/ 子模块按域分离）                  | xiaojianc | 2026-12-31 | R-20.5.\* / ADR-0007                      | 🟠 拆分中   |
+| TD-0017 | `commands/lsp.rs` (~44KB) 超 R-20.5.\*(≤800)，灯下黑补登，待按生命周期/能力拆分                                         | xiaojianc | 2026-12-31 | R-20.5.\*                                 | 🔴 豁免期内 |
+| TD-0018 | `services/tauri.ts` (~48KB) 前端 ACL facade 巨石，灯下黑补登，待按域 re-export 拆分                                     | xiaojianc | 2026-12-31 | R-20.1.\* / ADR-0007                      | 🔴 豁免期内 |
+| TD-0019 | `store/editor.ts` (~32KB) 超 R-20.1.\*(≤400)，灯下黑补登，待按 state/actions 拆分                                       | xiaojianc | 2026-12-31 | R-20.1.\*                                 | 🔴 豁免期内 |
+| TD-0020 | `store/aiAgent.ts` (~27KB) 超 R-20.1.\*(≤400)，灯下黑补登，待按会话/计划/执行拆分                                       | xiaojianc | 2026-12-31 | R-20.1.\*                                 | 🔴 豁免期内 |
+| TD-0021 | `styles.css` (~115KB) 单文件 CSS 几乎无模块化，灯下黑补登，待按 @layer/组件样式拆分                                     | xiaojianc | 2026-12-31 | R-20.1.\*                                 | 🔴 豁免期内 |
 
 ---
 
