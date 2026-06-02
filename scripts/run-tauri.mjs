@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -505,8 +505,88 @@ const buildWindowsToolchainEnv = () => {
     };
 };
 
+const sidecarDir = path.join(rootDir, 'agent-sidecar');
+const bundledNodeExeName = process.platform === 'win32' ? 'node.exe' : 'node';
+const bundledNodePath = path.join(rootDir, 'src-tauri', 'resources-bundle', 'node', bundledNodeExeName);
+
+const resolveSidecarTsc = () => [
+    path.join(sidecarDir, 'node_modules', 'typescript', 'bin', 'tsc'),
+    path.join(rootDir, 'node_modules', 'typescript', 'bin', 'tsc'),
+].find((candidate) => existsSync(candidate)) ?? null;
+
+// dev 下预编译 agent-sidecar -> dist/server.js，运行时直接 node dist/server.js，
+// 不再依赖 tsx（tsx 在 Node 26 下解析入口会塌成盘符 D: 而崩溃）。
+const ensureSidecarBuilt = () => {
+    if (mode !== 'dev' || !existsSync(sidecarDir)) {
+        return;
+    }
+
+    const tscScript = resolveSidecarTsc();
+    if (!tscScript) {
+        console.warn('[run-tauri] 未找到 agent-sidecar 的 TypeScript，跳过 sidecar 预编译；请先执行 pnpm install。');
+        return;
+    }
+
+    console.log('[run-tauri] 预编译 agent-sidecar -> dist/server.js ...');
+    const result = spawnSync(process.execPath, [tscScript, '-p', 'tsconfig.build.json'], {
+        cwd: sidecarDir,
+        stdio: 'inherit',
+        shell: false,
+    });
+
+    if (result.error) {
+        console.warn(`[run-tauri] sidecar 预编译失败：${result.error.message}`);
+    }
+
+    if (!existsSync(path.join(sidecarDir, 'dist', 'server.js'))) {
+        console.warn('[run-tauri] 预编译后仍未生成 dist/server.js，sidecar 可能回退到 tsx。');
+    }
+};
+
+// 把执行本脚本的 Node 复制进 resources-bundle/node 作为开发态“内置 Node”。
+const ensureBundledNode = () => {
+    if (existsSync(bundledNodePath)) {
+        return bundledNodePath;
+    }
+
+    try {
+        mkdirSync(path.dirname(bundledNodePath), { recursive: true });
+        copyFileSync(process.execPath, bundledNodePath);
+        console.log(`[run-tauri] 已暂存内置 Node 运行时 -> ${bundledNodePath}`);
+        return bundledNodePath;
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[run-tauri] 暂存内置 Node 失败，sidecar 可能回退到系统 Node：${message}`);
+        return null;
+    }
+};
+
+// 通过环境变量强制 app 用内置 Node + 仓库内 agent-sidecar，不覆盖用户已设变量。
+const withBundledSidecarRuntime = (baseEnv) => {
+    if (mode !== 'dev') {
+        return baseEnv;
+    }
+
+    const env = { ...baseEnv };
+    if (!env.XIAOJIANC_AGENT_SIDECAR_ROOT && existsSync(sidecarDir)) {
+        env.XIAOJIANC_AGENT_SIDECAR_ROOT = sidecarDir;
+    }
+
+    if (!env.XIAOJIANC_NODE_EXE) {
+        const bundledNode = ensureBundledNode();
+        if (bundledNode) {
+            env.XIAOJIANC_NODE_EXE = bundledNode;
+        }
+    }
+
+    return env;
+};
+
 const runTauri = (env) => {
     cleanupWindowsStaleDevProcesses();
+    ensureSidecarBuilt();
+
+    const runtimeEnv = withBundledSidecarRuntime(env);
 
     const cliScriptPath = path.join(
         rootDir,
@@ -523,7 +603,7 @@ const runTauri = (env) => {
 
     const result = spawnSync(process.execPath, [cliScriptPath, mode, ...extraArgs], {
         cwd: rootDir,
-        env,
+        env: runtimeEnv,
         stdio: 'inherit',
         shell: false,
     });
