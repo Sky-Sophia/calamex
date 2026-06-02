@@ -1,13 +1,4 @@
-import {
-  ensureShikiLanguage,
-  isShikiLanguageLoaded,
-  resolveShikiLanguageId,
-  SHIKI_BACKGROUND,
-  SHIKI_FOREGROUND,
-  tokenizeWithShikiSync,
-  type IShikiThemedToken,
-} from '@/services/editor/shiki-highlighter';
-import { RangeSetBuilder, StateEffect, StateField, type Extension } from '@codemirror/state';
+import { type Extension, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
 import {
   Decoration,
   type DecorationSet,
@@ -15,6 +6,15 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from '@codemirror/view';
+import {
+  ensureShikiLanguage,
+  type IShikiThemedToken,
+  isShikiLanguageLoaded,
+  resolveShikiLanguageId,
+  SHIKI_BACKGROUND,
+  SHIKI_FOREGROUND,
+  tokenizeWithShikiSync,
+} from '@/services/editor/shiki-highlighter';
 
 /** 编辑器与代码渲染统一使用的等宽字体，按要求以 Consolas 为首选。 */
 export const EDITOR_FONT_FAMILY =
@@ -153,9 +153,7 @@ const shikiHighlightPlugin = ViewPlugin.fromClass(
         update.startState.field(shikiLanguageField, false) !==
         update.state.field(shikiLanguageField, false);
       const recomputeRequested = update.transactions.some((tr) =>
-        tr.effects.some(
-          (effect) => effect.is(shikiReadyEffect) || effect.is(shikiRecomputeEffect),
-        ),
+        tr.effects.some((effect) => effect.is(shikiReadyEffect) || effect.is(shikiRecomputeEffect)),
       );
 
       const action = resolveShikiHighlightUpdateAction({
@@ -256,7 +254,7 @@ export const shikiEditorChromeTheme = EditorView.theme(
     '.cm-cursor, .cm-dropCursor': {
       borderLeftColor: '#24292e',
     },
-    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
+    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ': {
       backgroundColor: '#add6ff80',
     },
     '.cm-gutters': {
