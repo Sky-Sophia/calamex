@@ -59,14 +59,6 @@
             "expiresAt": "2026-12-31"
         },
         {
-            "path": "src-tauri/src/commands/contracts.rs",
-            "rule": "max-lines-800",
-            "reason": "灯下黑补登：~52KB IPC 契约耦合中心，拆分进行中（contracts/ 子模块按域分离）",
-            "owner": "@xiaojianc",
-            "adrRef": "ADR-0007",
-            "expiresAt": "2026-12-31"
-        },
-        {
             "path": "src-tauri/src/commands/lsp.rs",
             "rule": "max-lines-800",
             "reason": "灯下黑补登：~44KB LSP 命令集中，待按生命周期/能力拆分",
