@@ -1,7 +1,5 @@
-use super::conversation::{
-    build_conversation_title_prompt, build_identity_system_prompt, normalize_conversation_title,
-    with_identity_system_message,
-};
+use super::conversation::{normalize_conversation_title, with_identity_system_message};
+use super::prompt::{build_conversation_title_prompt, build_identity_system_prompt};
 use super::suggestions::{normalize_suggestion_text, parse_suggestion_pool_response};
 use super::{
     default_base_url, default_model, is_endpoint_ready, model_service_platform,
