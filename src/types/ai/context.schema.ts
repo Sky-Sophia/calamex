@@ -37,6 +37,34 @@ export const aiImageAttachmentPreviewSchema = z.object({
   mimeType: z.string().min(1),
 });
 
+const IMAGE_ATTACHMENT_MODEL_PART_MARKER = 'AI_SDK_IMAGE_PART_JSON:';
+
+const withImageAttachmentModelPart = <TReference extends { contentPreview: string; kind: string; attachmentPreview?: z.infer<typeof aiImageAttachmentPreviewSchema> }>(
+  reference: TReference,
+): TReference => {
+  const preview = reference.attachmentPreview;
+
+  if (reference.kind !== 'image-attachment' || !preview?.src.trim()) {
+    return reference;
+  }
+
+  if (reference.contentPreview.includes(IMAGE_ATTACHMENT_MODEL_PART_MARKER)) {
+    return reference;
+  }
+
+  return {
+    ...reference,
+    contentPreview: [
+      reference.contentPreview,
+      `${IMAGE_ATTACHMENT_MODEL_PART_MARKER}${JSON.stringify({
+        type: 'image',
+        image: preview.src,
+        mediaType: preview.mimeType,
+      })}`,
+    ].join('\n'),
+  };
+};
+
 /**
  * 上下文引用。
  *
@@ -46,14 +74,19 @@ export const aiImageAttachmentPreviewSchema = z.object({
  * - `attachmentPreview`:**约定**仅在 `kind === 'image-attachment'` 时设置。
  *   schema 没有强制 discriminated union(避免对现有 wire 协议做 breaking 改造);
  *   消费方应自行 narrow 后再访问该字段。
+ * - 图片附件在 IPC 入参校验阶段会额外把预览源编码成 AI SDK 官方 ImagePart
+ *   carrier 行。Rust 目前只持久化 `contentPreview`;Node sidecar 再从该 carrier
+ *   还原为官方 `{ type:'image', image, mediaType }` message part。
  */
-export const aiContextReferenceSchema = z.object({
-  id: z.string().min(1),
-  kind: aiContextKindSchema,
-  label: z.string().min(1),
-  path: z.string().min(1).nullable(),
-  range: aiContextRangeSchema.nullable(),
-  contentPreview: z.string(),
-  redacted: z.boolean(),
-  attachmentPreview: aiImageAttachmentPreviewSchema.optional(),
-});
+export const aiContextReferenceSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: aiContextKindSchema,
+    label: z.string().min(1),
+    path: z.string().min(1).nullable(),
+    range: aiContextRangeSchema.nullable(),
+    contentPreview: z.string(),
+    redacted: z.boolean(),
+    attachmentPreview: aiImageAttachmentPreviewSchema.optional(),
+  })
+  .transform(withImageAttachmentModelPart);
