@@ -1,5 +1,4 @@
 use super::*;
-use super::cli;
 use gix::bstr::ByteSlice;
 
 #[tauri::command]
@@ -51,13 +50,85 @@ pub fn save_git_stash(payload: GitStashSaveRequest) -> Result<GitRepositoryStatu
         return Err("存在冲突文件，解决冲突后再执行贮藏。".into());
     }
 
-    let mut args = vec!["stash", "push"];
-    if payload.include_untracked { args.push("--include-untracked"); }
-    if let Some(ref message) = payload.message {
-        let msg = message.trim();
-        if !msg.is_empty() { args.push("--message"); args.push(msg); }
+    // 贮藏需要基线提交（HEAD）；空仓库无法贮藏。
+    let base_commit = resolve_head_commit(&repository)?
+        .ok_or_else(|| "当前分支尚无提交，无法贮藏。".to_string())?;
+    let base_oid = base_commit.id().detach();
+    let base_short = short_commit_id(base_oid);
+    let base_subject = base_commit
+        .message()
+        .ok()
+        .map(|message| message.summary().to_str_lossy().into_owned())
+        .unwrap_or_default();
+    let base_subject = base_subject.trim();
+    let branch_label = status
+        .head_short_name
+        .clone()
+        .unwrap_or_else(|| "(no branch)".to_string());
+
+    let signature = stash_commit_signature(&repository)?;
+    let index = repository
+        .open_index()
+        .map_err(|error| format!("读取 Git 索引失败：{error}"))?;
+
+    // 父提交 2：索引快照（已暂存内容的树）。
+    let index_tree_id = build_index_tree(&repository, &index)?;
+    let index_commit_message = format!("index on {branch_label}: {base_short} {base_subject}");
+    let index_commit = write_stash_commit(
+        &repository,
+        index_tree_id,
+        vec![base_oid],
+        index_commit_message.trim(),
+        &signature,
+    )?;
+    let mut parents = vec![base_oid, index_commit];
+
+    // 父提交 3：未跟踪文件快照（仅 --include-untracked 且确有未跟踪文件时）。
+    if payload.include_untracked {
+        if let Some(untracked_tree_id) =
+            build_untracked_tree(&repository, &repository_root, &status.files)?
+        {
+            let untracked_message =
+                format!("untracked files on {branch_label}: {base_short} {base_subject}");
+            let untracked_commit = write_stash_commit(
+                &repository,
+                untracked_tree_id,
+                Vec::new(),
+                untracked_message.trim(),
+                &signature,
+            )?;
+            parents.push(untracked_commit);
+        }
     }
-    cli::run_git_ok(&repository_root, &args, "保存贮藏")?;
+
+    // 贮藏 WIP 提交：树为跟踪文件的工作区状态（索引树叠加未暂存改动）。
+    let worktree_tree_id =
+        build_worktree_tree(&repository, &repository_root, index_tree_id, &status.files)?;
+    let wip_message = match payload
+        .message
+        .as_ref()
+        .map(|message| message.trim())
+        .filter(|message| !message.is_empty())
+    {
+        Some(custom) => format!("On {branch_label}: {custom}"),
+        None => format!("WIP on {branch_label}: {base_short} {base_subject}"),
+    };
+    let wip_message = wip_message.trim();
+    let wip_commit =
+        write_stash_commit(&repository, worktree_tree_id, parents, wip_message, &signature)?;
+
+    // 更新 refs/stash 与其 reflog（追加一条贮藏记录）。
+    push_stash_reference(&repository, wip_commit, &signature, wip_message)?;
+
+    // 重置工作区与索引回 HEAD，清理已被贮藏的改动。
+    reset_worktree_and_index_to_head(
+        &repository,
+        &repository_root,
+        &status.files,
+        payload.include_untracked,
+    )?;
+
+    let repository = open_repository_from_root(&payload.repository_root_path)?;
     super::status::build_git_repository_status_payload(&repository)
 }
 
@@ -66,68 +137,11 @@ pub fn apply_git_stash(payload: GitStashApplyRequest) -> Result<GitRepositorySta
     let repository = open_repository_from_root(&payload.repository_root_path)?;
     let repository_root = resolve_repository_root(&repository)?;
     let label = if payload.pop { "应用并移除贮藏" } else { "应用贮藏" };
+    // 要求工作区干净：此时工作区内容等同 HEAD 树，便于安全地做三方应用。
     super::branches::assert_repository_is_clean_for_switch(&repository, label)?;
 
-    // stash@{N}：用字符串拼接构造字面花括号。
-    let stash_ref = ["stash@{", &payload.stash_index.to_string(), "}"].concat();
-    let args = if payload.pop { vec!["stash", "pop", &stash_ref] } else { vec!["stash", "apply", &stash_ref] };
-    cli::run_git_ok(&repository_root, &args, label)?;
-
-    super::status::build_git_repository_status_payload(&repository)
-}
-
-#[tauri::command]
-pub fn drop_git_stash(payload: GitStashDropRequest) -> Result<GitRepositoryStatusPayload, String> {
-    let repository = open_repository_from_root(&payload.repository_root_path)?;
-    let repository_root = resolve_repository_root(&repository)?;
-    // stash@{N}：用字符串拼接构造字面花括号。
-    let stash_ref = ["stash@{", &payload.stash_index.to_string(), "}"].concat();
-    cli::run_git_ok(&repository_root, &["stash", "drop", &stash_ref], "删除贮藏")?;
-    super::status::build_git_repository_status_payload(&repository)
-}
-
-fn build_git_stash_entry_payload(
-    repository: &Repository,
-    index: usize,
-    summary: &str,
-    oid: gix::ObjectId,
-) -> Result<GitStashEntryPayload, String> {
-    let details = build_git_stash_details(repository, oid)?;
-    let (branch_name, commit_short_id) = parse_git_stash_name(summary);
-    Ok(GitStashEntryPayload {
-        index,
-        // stash@{N}：用字符串拼接构造字面花括号。
-        stash_id: ["stash@{", &index.to_string(), "}"].concat(),
-        summary: summary.to_string(),
-        branch_name,
-        commit_short_id: commit_short_id.or_else(|| Some(short_commit_id(oid))),
-        created_at: details.created_at,
-        file_count: details.file_count,
-        additions: details.additions,
-        deletions: details.deletions,
-        files: details.files,
-    })
-}
-
-/// 通过 gix 解析贮藏提交的差异，构建明细（增删行数 + 文件列表），避免依赖系统安装的 git。
-///
-/// 贮藏提交 W 的父结构：parent1 = 贮藏时的基线提交、parent2 = 索引快照、
-/// parent3 = 未跟踪文件快照（仅 --include-untracked 时存在）。明细等价于
-/// `git stash show --include-untracked`：基线树 → 工作区树 的跟踪改动，
-/// 外加未跟踪树中的全部文件（视为新增）。
-fn build_git_stash_details(
-    repository: &Repository,
-    oid: gix::ObjectId,
-) -> Result<GitStashDetails, String> {
-    let created_at = repository
-        .find_commit(oid)
-        .ok()
-        .and_then(|commit| commit.time().ok())
-        .and_then(|time| jiff::Timestamp::from_second(time.seconds).ok())
-        .unwrap_or_else(jiff::Timestamp::now)
-        .to_string();
-
-    let stash = oid.to_string();
+    let stash_oid = resolve_stash_oid_by_index(&repository, payload.stash_index)?;
+    let stash = stash_oid.to_string();
     // peel 到 tree 的修订语法需要字面花括号 "^{tree}"，用字符串拼接构造。
     let worktree_tree_id = repository
         .rev_parse_single([stash.as_str(), "^{tree}"].concat().as_str())
@@ -135,146 +149,97 @@ fn build_git_stash_details(
         .detach();
     let base_tree_id = repository
         .rev_parse_single([stash.as_str(), "^1^{tree}"].concat().as_str())
-        .ok()
-        .map(|id| id.detach());
+        .map_err(|error| format!("解析贮藏基线树失败：{error}"))?
+        .detach();
     let untracked_tree_id = repository
         .rev_parse_single([stash.as_str(), "^3^{tree}"].concat().as_str())
         .ok()
         .map(|id| id.detach());
 
-    let mut files = Vec::new();
-    // 跟踪改动：基线树 → 工作区树。
-    if let Some(base_id) = base_tree_id {
-        collect_stash_tree_changes(repository, base_id, worktree_tree_id, &mut files)?;
-    }
-    // 未跟踪文件：空树 → 未跟踪树（全部视为新增）。
-    if let Some(untracked_id) = untracked_tree_id {
-        let empty_tree_id = repository.empty_tree().id().detach();
-        collect_stash_tree_changes(repository, empty_tree_id, untracked_id, &mut files)?;
-    }
+    let head_tree = repository
+        .head_tree()
+        .map_err(|error| format!("读取 HEAD 树失败：{error}"))?;
 
-    let file_count = files.len();
-    let additions = files.iter().fold(0u32, |acc, file| acc.saturating_add(file.additions));
-    let deletions = files.iter().fold(0u32, |acc, file| acc.saturating_add(file.deletions));
-
-    Ok(GitStashDetails { created_at, file_count, additions, deletions, files })
-}
-
-/// 计算两棵树之间的文件级差异，逐个文件统计增删行数后追加到 `files`。
-fn collect_stash_tree_changes(
-    repository: &Repository,
-    old_tree_id: gix::ObjectId,
-    new_tree_id: gix::ObjectId,
-    files: &mut Vec<GitStashFilePayload>,
-) -> Result<(), String> {
-    let old_tree = repository
-        .find_tree(old_tree_id)
+    let base_tree = repository
+        .find_tree(base_tree_id)
         .map_err(|error| format!("读取贮藏基线树失败：{error}"))?;
     let new_tree = repository
-        .find_tree(new_tree_id)
-        .map_err(|error| format!("读取贮藏目标树失败：{error}"))?;
+        .find_tree(worktree_tree_id)
+        .map_err(|error| format!("读取贮藏树失败：{error}"))?;
     let changes = repository
-        .diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)
+        .diff_tree_to_tree(Some(&base_tree), Some(&new_tree), None)
         .map_err(|error| format!("计算贮藏差异失败：{error}"))?;
+
+    // 应用计划：对每个跟踪文件做 base/HEAD/贮藏 三方判断，冲突则记录、整体中止。
+    enum PlannedChange {
+        Upsert(String, gix::ObjectId, gix::index::entry::Mode),
+        Delete(String),
+    }
+    let mut planned: Vec<PlannedChange> = Vec::new();
+    let mut conflicts: Vec<String> = Vec::new();
 
     use gix::diff::tree_with_rewrites::Change;
     for change in changes {
-        let (location, previous_location, old_id, new_id, base_status, entry_mode) = match change {
-            Change::Addition { location, id, entry_mode, .. } => {
-                (location, None, None, Some(id), "added", entry_mode)
-            }
-            Change::Deletion { location, id, entry_mode, .. } => {
-                (location, None, Some(id), None, "deleted", entry_mode)
-            }
+        let (location, base_id, stash_id, entry_mode) = match change {
+            Change::Addition { location, id, entry_mode, .. } => (location, None, Some(id), entry_mode),
+            Change::Deletion { location, id, entry_mode, .. } => (location, Some(id), None, entry_mode),
             Change::Modification { location, previous_id, id, entry_mode, .. } => {
-                (location, None, Some(previous_id), Some(id), "modified", entry_mode)
+                (location, Some(previous_id), Some(id), entry_mode)
             }
-            Change::Rewrite { source_location, location, source_id, id, entry_mode, .. } => {
-                (location, Some(source_location), Some(source_id), Some(id), "renamed", entry_mode)
+            Change::Rewrite { location, source_id, id, entry_mode, .. } => {
+                (location, Some(source_id), Some(id), entry_mode)
             }
         };
-
-        // 目录 / 子模块项不计入文件改动。
         if entry_mode.is_tree() || entry_mode.is_commit() {
             continue;
         }
-
-        let old_bytes = old_id.and_then(|id| stash_blob_bytes(repository, id));
-        let new_bytes = new_id.and_then(|id| stash_blob_bytes(repository, id));
-        let (additions, deletions, is_binary) =
-            count_blob_line_changes(old_bytes.as_deref(), new_bytes.as_deref());
-        let status = if is_binary { "binary" } else { base_status }.to_string();
-
-        let path_string = location.to_str_lossy().into_owned();
-        let relative_path = Path::new(&path_string);
-        let file_name = relative_path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .map(str::to_string)
-            .unwrap_or_else(|| path_string.clone());
-        let previous_relative_path = previous_location.map(|source| {
-            let source = source.to_str_lossy().into_owned();
-            path_to_forward_slashes(Path::new(&source))
-        });
-
-        files.push(GitStashFilePayload {
-            relative_path: path_to_forward_slashes(relative_path),
-            file_name,
-            previous_relative_path,
-            status,
-            additions,
-            deletions,
-        });
-    }
-    Ok(())
-}
-
-/// 读取 blob 对象的原始字节；对象缺失时返回 None。
-fn stash_blob_bytes(repository: &Repository, object_id: gix::ObjectId) -> Option<Vec<u8>> {
-    repository.find_object(object_id).ok().map(|object| object.data.clone())
-}
-
-/// 统计两段 blob 内容之间的增删行数；任一侧含 NUL 字节则视为二进制（返回 0/0 + true）。
-fn count_blob_line_changes(old: Option<&[u8]>, new: Option<&[u8]>) -> (u32, u32, bool) {
-    let is_binary = old.map_or(false, |bytes| bytes.contains(&0))
-        || new.map_or(false, |bytes| bytes.contains(&0));
-    if is_binary {
-        return (0, 0, true);
-    }
-    let old_text = old.map(|bytes| String::from_utf8_lossy(bytes).into_owned()).unwrap_or_default();
-    let new_text = new.map(|bytes| String::from_utf8_lossy(bytes).into_owned()).unwrap_or_default();
-    let diff = similar::TextDiff::from_lines(&old_text, &new_text);
-    let mut additions = 0u32;
-    let mut deletions = 0u32;
-    for change in diff.iter_all_changes() {
-        match change.tag() {
-            similar::ChangeTag::Insert => additions = additions.saturating_add(1),
-            similar::ChangeTag::Delete => deletions = deletions.saturating_add(1),
-            similar::ChangeTag::Equal => {}
+        let relative_path = location.to_str_lossy().into_owned();
+        // 工作区已干净 → 当前内容等同 HEAD 树中的版本。
+        let head_id = {
+            let mut tree = head_tree.clone();
+            tree.peel_to_entry_by_path(Path::new(&relative_path))
+                .ok()
+                .flatten()
+                .map(|entry| entry.id().detach())
+        };
+        if head_id == base_id {
+            // 该文件自贮藏以来未变，可干净应用贮藏版本。
+            match stash_id {
+                Some(id) => {
+                    let mode = if entry_mode.is_link() {
+                        gix::index::entry::Mode::SYMLINK
+                    } else if entry_mode.is_executable() {
+                        gix::index::entry::Mode::FILE_EXECUTABLE
+                    } else {
+                        gix::index::entry::Mode::FILE
+                    };
+                    planned.push(PlannedChange::Upsert(relative_path, id, mode));
+                }
+                None => planned.push(PlannedChange::Delete(relative_path)),
+            }
+        } else if head_id == stash_id {
+            // 当前已是贮藏后的内容，无需重复应用。
+        } else {
+            conflicts.push(relative_path);
         }
     }
-    (additions, deletions, false)
-}
 
-struct GitStashDetails { created_at: String, file_count: usize, additions: u32, deletions: u32, files: Vec<GitStashFilePayload> }
-
-fn parse_git_stash_name(name: &str) -> (Option<String>, Option<String>) {
-    let trimmed = name.trim();
-    if let Some(rest) = trimmed.strip_prefix("WIP on ") {
-        if let Some((branch_name, remainder)) = rest.split_once(':') {
-            let commit_short_id = remainder.split_whitespace().next()
-                .filter(|value| is_short_git_commit_id(value)).map(str::to_string);
-            return (Some(branch_name.trim().to_string()), commit_short_id);
-        }
-    }
-    if let Some(rest) = trimmed.strip_prefix("On ") {
-        if let Some((branch_name, _)) = rest.split_once(':') {
-            return (Some(branch_name.trim().to_string()), None);
-        }
-    }
-    (None, None)
-}
-
-fn is_short_git_commit_id(value: &str) -> bool {
-    (7..=40).contains(&value.len()) && value.chars().all(|c| c.is_ascii_hexdigit())
-}
+    // 未跟踪文件：空树 → 未跟踪树的新增；工作区已存在同名文件则视为冲突。
+    let mut untracked_plan: Vec<(String, gix::ObjectId, gix::index::entry::Mode)> = Vec::new();
+    if let Some(untracked_id) = untracked_tree_id {
+        let empty_tree = repository.empty_tree();
+        let untracked_tree = repository
+            .find_tree(untracked_id)
+            .map_err(|error| format!("读取贮藏未跟踪树失败：{error}"))?;
+        let untracked_changes = repository
+            .diff_tree_to_tree(Some(&empty_tree), Some(&untracked_tree), None)
+            .map_err(|error| format!("计算贮藏未跟踪差异失败：{error}"))?;
+        for change in untracked_changes {
+            if let Change::Addition { location, id, entry_mode, .. } = change {
+                if entry_mode.is_tree() || entry_mode.is_commit() {
+                    continue;
+                }
+                let relative_path = location.to_str_lossy().into_owned();
+                let absolute_path = repository_root.join(Path::new(&relative_path));
+                if path_exists_in_worktree(&absolute_path) {
+                    conflicts.push(
