@@ -390,3 +390,101 @@ pub async fn test_ssh_connection(
     payload: SshConnectionTestRequest,
 ) -> Result<SshConnectionTestPayload, String> {
     let params = SshConnectionParams::from_test_request(&payload);
+
+    if params.host.is_empty() {
+        return Ok(failed("ssh/invalid-host", "请填写主机地址。"));
+    }
+    if params.username.is_empty() {
+        return Ok(failed("ssh/invalid-username", "请填写用户名。"));
+    }
+    if let Err(message) = validate_ssh_endpoint(&params.host, &params.username) {
+        return Ok(failed("ssh/invalid-target", &message));
+    }
+    if params.auth_mode != "key" && params.auth_mode != "password" {
+        return Ok(failed("ssh/invalid-auth-mode", "不支持的 SSH 认证方式。"));
+    }
+    if params.auth_mode == "password"
+        && params
+            .password
+            .as_deref()
+            .map(str::is_empty)
+            .unwrap_or(true)
+    {
+        return Ok(failed("ssh/password-missing", "请填写 SSH 登录密码。"));
+    }
+
+    match timeout(SSH_TEST_TIMEOUT, open_authenticated_sftp(&params)).await {
+        Ok(Ok(conn)) => {
+            let _ = conn.close().await;
+            Ok(SshConnectionTestPayload {
+                ok: true,
+                code: "ssh/ok".into(),
+                message: "SSH 连接验证成功。".into(),
+            })
+        }
+        Ok(Err(error)) => {
+            if error.starts_with(&format!("{HOST_KEY_CHANGED_CODE}::")) {
+                Ok(failed(HOST_KEY_CHANGED_CODE, &error))
+            } else {
+                Ok(failed(
+                    &classify_ssh_error(&error),
+                    &format_ssh_error_message(&error),
+                ))
+            }
+        }
+        Err(_) => Ok(failed("ssh/timeout", "SSH 连接测试超时。")),
+    }
+}
+
+// ===== Host-key trust =====
+#[derive(serde::Serialize)]
+pub struct SshHostKeyTrustPayload {
+    pub trusted: bool,
+}
+
+#[tauri::command]
+pub async fn trust_ssh_host_key(
+    host: String,
+    port: u16,
+) -> Result<SshHostKeyTrustPayload, String> {
+    let host = host.trim().to_string();
+    if host.is_empty() {
+        return Err("主机地址不能为空。".into());
+    }
+    let Some(pending) = take_pending_host_key(&host, port) else {
+        return Err("没有待确认的主机密钥变更，请重新发起连接。".into());
+    };
+    let key = pending.key;
+    tokio::task::spawn_blocking(move || replace_known_host_key(&host, port, &key))
+        .await
+        .map_err(|e| format!("更新 known_hosts 任务异常终止：{e}"))??;
+    Ok(SshHostKeyTrustPayload { trusted: true })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn io_error_connection_kinds_are_classified() {
+        use std::io::{Error, ErrorKind};
+        assert!(io_error_is_connection_level(&Error::from(ErrorKind::ConnectionReset)));
+        assert!(io_error_is_connection_level(&Error::from(ErrorKind::BrokenPipe)));
+        assert!(io_error_is_connection_level(&Error::from(ErrorKind::UnexpectedEof)));
+        assert!(io_error_is_connection_level(&Error::from(ErrorKind::TimedOut)));
+        assert!(!io_error_is_connection_level(&Error::from(ErrorKind::PermissionDenied)));
+        assert!(!io_error_is_connection_level(&Error::from(ErrorKind::NotFound)));
+    }
+
+    #[test]
+    fn russh_io_errors_are_treated_as_connection_level() {
+        let err = russh::Error::from(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
+        assert!(russh_error_is_connection_level(&err));
+    }
+
+    #[test]
+    fn expand_tilde_resolves_home_directory() {
+        let expanded = expand_tilde("~/.ssh/id_rsa");
+        assert!(!expanded.starts_with('~'), "tilde should be expanded: {expanded}");
+    }
+}
