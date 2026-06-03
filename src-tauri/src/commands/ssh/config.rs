@@ -7,6 +7,7 @@ use std::{env, fs as std_fs, path::PathBuf};
 const SSH_CONFIG_IMPORTED_LABEL: &str = "SSH config";
 
 #[tauri::command]
+#[specta::specta]
 pub async fn list_ssh_config_hosts() -> Result<Vec<SshConfigHostPayload>, String> {
     let Some(config_path) = default_ssh_config_path() else {
         return Ok(Vec::new());

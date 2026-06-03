@@ -12,6 +12,9 @@
 //! - `config`：解析 ~/.ssh/config 主机列表命令
 //!
 //! 对外命令名经由下方 `pub use` 重新导出，`commands/mod.rs` 的注册路径保持不变。
+//! 持有 `#[tauri::command] + #[specta::specta]` 命令的子模块（connection/credentials/
+//! config/transfer）声明为 `pub(crate)`，以便 `tauri_bindings.rs` 用模块限定路径
+//! （如 `ssh::transfer::read_ssh_file`）解析 tauri-specta 配套宏。
 
 use super::{
     SshConnectionTestRequest, SshDirectoryCreateRequest, SshDirectoryListRequest,
@@ -19,11 +22,11 @@ use super::{
     SshPathDeleteRequest, SshPathRenameRequest,
 };
 
-mod config;
-mod connection;
-mod credentials;
+pub(crate) mod config;
+pub(crate) mod connection;
+pub(crate) mod credentials;
 mod hostkey;
-mod transfer;
+pub(crate) mod transfer;
 mod util;
 
 pub use config::list_ssh_config_hosts;
