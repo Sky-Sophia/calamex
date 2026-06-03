@@ -17,6 +17,19 @@ fn resolve_node_executable() -> Result<PathBuf, String> {
         }
     }
 
+    // 打包优先：安装包内自带的 Node（随包自发现，与 agent_sidecar 解析策略一致，
+    // 不再依赖启动期向进程环境注入 XIAOJIANC_NODE_EXE）。
+    for root in crate::commands::shell_tools::bundled_resource_roots() {
+        let node_dir = root.join("node");
+        for name in ["node.exe", "node"] {
+            let bundled = node_dir.join(name);
+            if bundled.is_file() {
+                log::info!("使用随包 node: {}", bundled.display());
+                return Ok(bundled);
+            }
+        }
+    }
+
     let exe_name = if cfg!(windows) { "node.exe" } else { "node" };
 
     let mut candidates: Vec<PathBuf> = Vec::new();
@@ -69,10 +82,11 @@ fn resolve_node_executable() -> Result<PathBuf, String> {
 /// initializationOptions,只从环境变量 SHELLCHECK_PATH 或 workspace/configuration 读。
 /// 本函数解析出绝对路径,调用方将其作为子进程环境变量 SHELLCHECK_PATH 传入。
 /// 查找优先级:
-///   1. 环境变量 XIAOJIANC_SHELLCHECK_EXE
-///   2. 项目 node_modules 里 shellcheck npm 包自带的二进制(最常见)
-///   3. 常见系统安装位置(scoop/winget/choco/Homebrew 等)
-///   4. 兑底 PATH
+///   1. 环境变量 XIAOJIANC_SHELLCHECK_EXE（用户覆盖）
+///   2. 安装目录内随包自带的 shellcheck（打包优先）
+///   3. 项目 node_modules 里 shellcheck npm 包自带的二进制(开发最常见)
+///   4. 常见系统安装位置(scoop/winget/choco/Homebrew 等)
+///   5. 兑底 PATH
 ///
 /// 找不到时返回 None，调用方退回裸名 "shellcheck"（至少保持旧行为）。
 pub(crate) fn resolve_shellcheck_executable() -> Option<PathBuf> {
@@ -84,6 +98,16 @@ pub(crate) fn resolve_shellcheck_executable() -> Option<PathBuf> {
     }
 
     let exe_name = if cfg!(windows) { "shellcheck.exe" } else { "shellcheck" };
+
+    // 打包优先：安装目录内随包自带的 shellcheck（随包自发现，与 shfmt/sidecar 策略一致，
+    // 不再依赖启动期向进程环境注入 XIAOJIANC_SHELLCHECK_EXE）。
+    for root in crate::commands::shell_tools::bundled_resource_roots() {
+        let bundled = root.join(exe_name);
+        if bundled.is_file() {
+            log::info!("使用随包 shellcheck: {}", bundled.display());
+            return Some(bundled);
+        }
+    }
 
     // 最优先:项目 node_modules 里 shellcheck npm 包自带的二进制。
     // 该包(shellcheck@4.x)把真实二进制放在 <pkg>/bin/shellcheck(.exe)。
@@ -159,7 +183,7 @@ pub(crate) fn resolve_shellcheck_executable() -> Option<PathBuf> {
 /// 解析 bash-language-server 的 CLI 入口 JS。
 /// 它是应用内置依赖，不存在「系统版本」回退：内置优先 → 开发期项目 node_modules。
 fn resolve_lsp_cli_js() -> Result<PathBuf, String> {
-    // 1) 打包优先：安装目录内自带的 CLI（路径由启动钩子注入）。
+    // 1) 用户覆盖：显式指定的 CLI 入口（环境变量优先级最高）。
     if let Ok(path) = std::env::var("XIAOJIANC_LSP_CLI_JS") {
         let p = PathBuf::from(&path);
         if p.is_file() {
@@ -168,7 +192,21 @@ fn resolve_lsp_cli_js() -> Result<PathBuf, String> {
         }
     }
 
-    // 2) 开发模式：项目 node_modules（pnpm install 后）。
+    // 2) 打包优先：安装目录内自带的 CLI（随包自发现，不再依赖启动期注入环境变量）。
+    for root in crate::commands::shell_tools::bundled_resource_roots() {
+        let bundled = root
+            .join("lsp")
+            .join("node_modules")
+            .join("bash-language-server")
+            .join("out")
+            .join("cli.js");
+        if bundled.is_file() {
+            log::info!("使用随包 bash-language-server CLI: {}", bundled.display());
+            return Ok(bundled);
+        }
+    }
+
+    // 3) 开发模式：项目 node_modules（pnpm install 后）。
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().ok_or("无法定位项目根目录")?;
     let candidate = workspace_root
