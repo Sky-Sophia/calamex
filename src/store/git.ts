@@ -367,6 +367,8 @@ export const useGitStore = defineStore('git', () => {
       const payload = await tauriService.commitGitIndex({
         repositoryRootPath: requireRepositoryRootPath(),
         message,
+        // 空 paths 表示提交整个暂存区,保持既有提交行为。
+        paths: [],
       });
       applyStatus(payload.status);
       clearBaselineCache();
@@ -397,7 +399,7 @@ export const useGitStore = defineStore('git', () => {
       const payload = await tauriService.listGitCommitHistory({
         repositoryRootPath: requireRepositoryRootPath(),
         offset: nextOffset ?? 0,
-        limit: options?.limit,
+        limit: options?.limit ?? null,
       });
       if (requestId !== commitHistoryRequestId) {
         return commitHistory.value;
