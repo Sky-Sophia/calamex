@@ -141,7 +141,10 @@ fn detect_shellcheck_dialect(
 /// 候选「随包资源」根目录：打包后用于定位安装目录内自带的运行时 / 二进制。
 /// 解析策略统一为「随包优先 → 系统兜底」。开发模式 (`tauri dev`) 下这些目录
 /// 通常不存在，候选会被 is_file() 过滤掉，因此对开发流程无副作用。
-fn bundled_resource_roots() -> Vec<PathBuf> {
+///
+/// 同时供 agent_sidecar 复用以定位随包的 agent-sidecar 与 Node 运行时，
+/// 确保打包侧 (prepare-bundle-resources.ts) 与运行时侧的产物布局契约一致。
+pub(crate) fn bundled_resource_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(exe) = env::current_exe() {
         if let Some(dir) = exe.parent() {
@@ -221,23 +224,21 @@ async fn run_shfmt(
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // 超时分支会随 future 一并 drop 掉 child；开启 kill_on_drop 确保 shfmt
-        // 子进程被回收，不残留孤儿进程。
-        .kill_on_drop(true);
+        .stderr(Stdio::piped());
 
     let mut child = command
         .spawn()
         .map_err(|error| format!("启动 shfmt 失败：{error}"))?;
 
-    // 并发写入 stdin：大脚本下 shfmt 的格式化输出可能先写满 stdout 管道缓冲而阻塞，
-    // 若此时仍在串行写 stdin 便会双向死锁。将写入放入独立任务，与读取输出并发。
     if let Some(mut stdin) = child.stdin.take() {
-        let input = content.as_bytes().to_vec();
-        tokio::spawn(async move {
-            let _ = stdin.write_all(&input).await;
-            let _ = stdin.shutdown().await;
-        });
+        stdin
+            .write_all(content.as_bytes())
+            .await
+            .map_err(|error| format!("写入 shfmt 输入失败：{error}"))?;
+        stdin
+            .shutdown()
+            .await
+            .map_err(|error| format!("关闭 shfmt 输入失败：{error}"))?;
     }
 
     let output = match timeout(SHFMT_TIMEOUT, child.wait_with_output()).await {

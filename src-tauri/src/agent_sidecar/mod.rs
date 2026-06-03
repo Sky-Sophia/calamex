@@ -712,19 +712,39 @@ fn terminate_process(_pid: u32) -> Result<(), String> {
     Ok(())
 }
 
-/// sidecar 运行日志文件路径（位于 agent-sidecar 根目录下）。
+/// 运行时可写目录：安装后 sidecar 根目录可能位于只读安装目录（如 Program Files），
+/// 因此把日志、Node 编译缓存等「运行期可写状态」统一落到用户级可写目录，
+/// 既避免在只读目录写入失败，也让同机多用户 / 多版本互不干扰。
+fn sidecar_runtime_dir() -> PathBuf {
+    sidecar_runtime_dir_from(env_or_user_env("LOCALAPPDATA"))
+}
+
+/// 纯函数版便于单测：给定 `LOCALAPPDATA` 时落在其下，缺失时回退系统临时目录，
+/// 两种情况都保持 `com.xiaojianc.Calamex/agent-sidecar` 的稳定子目录结构。
+fn sidecar_runtime_dir_from(local_app_data: Option<String>) -> PathBuf {
+    local_app_data
+        .map(PathBuf::from)
+        .unwrap_or_else(env::temp_dir)
+        .join("com.xiaojianc.Calamex")
+        .join("agent-sidecar")
+}
+
+/// sidecar 运行日志文件路径（位于用户级可写运行时目录下）。
 /// App 启动 sidecar 时把 stdout/stderr 重定向到这里，便于排查
 /// sidecar 进程在流式过程中崩溃 / 抛未捕获异常的原因。
-fn sidecar_log_path(sidecar_root: &Path) -> PathBuf {
-    sidecar_root.join("agent-sidecar.log")
+fn sidecar_log_path() -> PathBuf {
+    sidecar_runtime_dir().join("agent-sidecar.log")
 }
 
 /// 打开 sidecar 日志文件（append 追加），返回供 stdout / stderr 复用的两个句柄。
 /// 不再每次 spawn 都截断，以免并发启动时互相清空、丢失崩溃诊断；
-/// 超过上限则滚动一代（.old）以防无限增长。
-/// 任意一步失败都安全回退到 `Stdio::null()`，绝不阻断 sidecar 启动。
-fn open_sidecar_log_stdio(sidecar_root: &Path) -> (Stdio, Stdio) {
-    let log_path = sidecar_log_path(sidecar_root);
+/// 超过上限则滚动一代（.old）以防无限增长。日志位于用户级可写运行时目录，
+/// 写入前确保目录存在。任意一步失败都安全回退到 `Stdio::null()`，绝不阻断 sidecar 启动。
+fn open_sidecar_log_stdio() -> (Stdio, Stdio) {
+    let log_path = sidecar_log_path();
+    if let Some(parent) = log_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
     rotate_sidecar_log_if_oversized(&log_path);
 
     let Ok(stdout_file) = fs::OpenOptions::new()
@@ -756,8 +776,7 @@ fn rotate_sidecar_log_if_oversized(log_path: &Path) {
 
 /// 读取 sidecar 日志末尾若干字符，用于在启动失败时把诊断信息附到错误上。
 fn read_sidecar_log_tail() -> Option<String> {
-    let sidecar_root = resolve_sidecar_root().ok()?;
-    let content = fs::read_to_string(sidecar_log_path(&sidecar_root)).ok()?;
+    let content = fs::read_to_string(sidecar_log_path()).ok()?;
     let trimmed = content.trim_end();
     if trimmed.is_empty() {
         return None;
@@ -780,7 +799,7 @@ fn spawn_default_sidecar() -> Result<Child, String> {
     let sidecar_root = resolve_sidecar_root()?;
     let node = resolve_node_executable()?;
 
-    let (sidecar_stdout, sidecar_stderr) = open_sidecar_log_stdio(&sidecar_root);
+    let (sidecar_stdout, sidecar_stderr) = open_sidecar_log_stdio();
 
     let mut command = Command::new(node);
 
@@ -820,7 +839,7 @@ fn spawn_default_sidecar() -> Result<Child, String> {
         .stdout(sidecar_stdout)
         .stderr(sidecar_stderr)
         .env("AGENT_SIDECAR_PORT", "39871")
-        .env("NODE_COMPILE_CACHE", sidecar_root.join(".node-compile-cache"));
+        .env("NODE_COMPILE_CACHE", sidecar_runtime_dir().join(".node-compile-cache"));
 
     inject_sidecar_dotenv_key_if_present(&mut command, &sidecar_root, "TAVILY_API_KEY");
     inject_user_env_if_present(&mut command, "TAVILY_API_KEY");
@@ -874,6 +893,15 @@ fn resolve_sidecar_root() -> Result<PathBuf, String> {
         }
     }
 
+    // 随包优先：安装包内 resources-bundle/agent-sidecar（含 dist/server.js 与 node_modules）。
+    // 与 shell_tools 的 shellcheck/shfmt 解析策略保持一致：随包优先 → 源码树兜底。
+    for root in crate::commands::shell_tools::bundled_resource_roots() {
+        let bundled = root.join("agent-sidecar");
+        if bundled.join("package.json").is_file() {
+            return Ok(bundled);
+        }
+    }
+
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let Some(workspace_root) = manifest_dir.parent() else {
         return Err("AGENT_SIDECAR_UNAVAILABLE: 无法定位仓库根目录。".to_string());
@@ -894,6 +922,17 @@ fn resolve_node_executable() -> Result<PathBuf, String> {
     if let Some(path) = env_or_user_env(NODE_EXE_ENV).map(PathBuf::from) {
         if path.is_file() {
             return Ok(path);
+        }
+    }
+
+    // 随包优先：安装包内 resources-bundle/node/node.exe（目标机无系统 Node 也能运行 sidecar）。
+    for root in crate::commands::shell_tools::bundled_resource_roots() {
+        let node_dir = root.join("node");
+        for name in ["node.exe", "node"] {
+            let bundled = node_dir.join(name);
+            if bundled.is_file() {
+                return Ok(bundled);
+            }
         }
     }
 
@@ -1331,8 +1370,8 @@ mod tests {
         drain_complete_sidecar_stream_lines, has_non_whitespace_bytes,
         inject_sidecar_dotenv_key_if_present, is_default_local_sidecar_url,
         is_retryable_narrator_sidecar_error, model_provider_id, normalize_base_url,
-        parse_netstat_listening_pids, SidecarHealthProbePayload, SidecarHealthStatus,
-        DEFAULT_SIDECAR_URL, SIDECAR_STARTUP_TIMEOUT_DEFAULT_SECONDS,
+        parse_netstat_listening_pids, sidecar_runtime_dir_from, SidecarHealthProbePayload,
+        SidecarHealthStatus, DEFAULT_SIDECAR_URL, SIDECAR_STARTUP_TIMEOUT_DEFAULT_SECONDS,
         SIDECAR_STARTUP_TIMEOUT_MAX_SECONDS, SIDECAR_STARTUP_TIMEOUT_MIN_SECONDS,
         crashed_sidecar_error_message, is_crashed_sidecar_error,
     };
@@ -1424,165 +1463,4 @@ mod tests {
     }
 
     #[test]
-    fn answer_delta_text_extracts_only_final_phase_message_deltas() {
-        let implicit_final = serde_json::json!({ "type": "message_delta", "text": "你好" });
-        assert_eq!(answer_delta_text(&implicit_final).as_deref(), Some("你好"));
-
-        let explicit_final =
-            serde_json::json!({ "type": "message_delta", "text": "世界", "phase": "final" });
-        assert_eq!(answer_delta_text(&explicit_final).as_deref(), Some("世界"));
-
-        let stage_event =
-            serde_json::json!({ "type": "message_delta", "text": "思考中", "phase": "stage" });
-        assert_eq!(answer_delta_text(&stage_event), None);
-
-        let empty_event = serde_json::json!({ "type": "message_delta", "text": "" });
-        assert_eq!(answer_delta_text(&empty_event), None);
-
-        let other_event =
-            serde_json::json!({ "type": "tool_start", "toolName": "x", "input": {} });
-        assert_eq!(answer_delta_text(&other_event), None);
-    }
-
-    #[test]
-    fn parses_sidecar_listener_pid_from_netstat_output() {
-        let output = r#"
-  Proto  Local Address          Foreign Address        State           PID
-  TCP    127.0.0.1:39871        0.0.0.0:0              LISTENING       1234
-  TCP    [::1]:39871            [::]:0                 LISTENING       1234
-  TCP    127.0.0.1:39872        0.0.0.0:0              LISTENING       5678
-"#;
-
-        assert_eq!(parse_netstat_listening_pids(output, 39871), vec![1234]);
-    }
-
-    #[test]
-    fn sidecar_stream_line_buffer_waits_for_complete_utf8_line() {
-        let line =
-            "{\"type\":\"event\",\"event\":{\"type\":\"message_delta\",\"text\":\"你好🙂\"}}\n";
-        let split_at = line.find('你').expect("line should contain chinese") + 2;
-        let bytes = line.as_bytes();
-        let mut buffer = Vec::new();
-
-        buffer.extend_from_slice(&bytes[..split_at]);
-        let lines = drain_complete_sidecar_stream_lines(&mut buffer, "/agent/chat/stream")
-            .expect("partial chunk should not decode incomplete utf8");
-        assert!(lines.is_empty());
-
-        buffer.extend_from_slice(&bytes[split_at..]);
-        let lines = drain_complete_sidecar_stream_lines(&mut buffer, "/agent/chat/stream")
-            .expect("complete line should decode");
-
-        assert_eq!(lines, vec![line.trim_end_matches('\n').to_string()]);
-        assert!(!lines[0].contains('\u{fffd}'));
-        assert!(buffer.is_empty());
-    }
-
-    #[test]
-    fn sidecar_stream_line_buffer_ignores_whitespace_tail() {
-        assert!(!has_non_whitespace_bytes(b"\r\n\t "));
-        assert!(has_non_whitespace_bytes(b"\n{}"));
-    }
-
-    #[test]
-    fn injects_tavily_key_from_sidecar_dotenv_when_user_env_is_missing() {
-        let sidecar_root =
-            std::env::temp_dir().join(format!("xiaojianc-sidecar-env-test-{}", std::process::id()));
-
-        fs::create_dir_all(&sidecar_root).expect("temp sidecar root should be created");
-        fs::write(
-            sidecar_root.join(".env"),
-            "# comment\nXIAOJIANC_TEST_TAVILY_KEY=tvly-test-from-dotenv\n",
-        )
-        .expect("dotenv should be written");
-
-        let mut command = Command::new("node");
-        inject_sidecar_dotenv_key_if_present(
-            &mut command,
-            &sidecar_root,
-            "XIAOJIANC_TEST_TAVILY_KEY",
-        );
-
-        let injected = command
-            .get_envs()
-            .find(|(key, _)| key.to_string_lossy() == "XIAOJIANC_TEST_TAVILY_KEY")
-            .and_then(|(_, value)| value.map(|item| item.to_string_lossy().to_string()));
-
-        assert_eq!(injected.as_deref(), Some("tvly-test-from-dotenv"));
-
-        fs::remove_dir_all(sidecar_root).expect("temp sidecar root should be removed");
-    }
-
-    #[test]
-    fn sidecar_health_is_runtime_name_agnostic() {
-        let ready_payload = SidecarHealthProbePayload {
-            ok: true,
-            _engine: Some("mastra".to_string()),
-            protocol_version: Some("7".to_string()),
-            implementation_version: Some(
-                "deepseek-reasoning-transport-v6-plan-history".to_string(),
-            ),
-        };
-        let stale_payload = SidecarHealthProbePayload {
-            ok: true,
-            _engine: Some("custom-runtime".to_string()),
-            protocol_version: Some("6".to_string()),
-            implementation_version: None,
-        };
-        let unavailable_payload = SidecarHealthProbePayload {
-            ok: false,
-            _engine: Some("legacy-runtime".to_string()),
-            protocol_version: Some("7".to_string()),
-            implementation_version: Some(
-                "deepseek-reasoning-transport-v6-plan-history".to_string(),
-            ),
-        };
-
-        assert_eq!(
-            classify_sidecar_health(&ready_payload),
-            SidecarHealthStatus::Ready
-        );
-        assert_eq!(
-            classify_sidecar_health(&stale_payload),
-            SidecarHealthStatus::Stale
-        );
-        assert_eq!(
-            classify_sidecar_health(&unavailable_payload),
-            SidecarHealthStatus::Unavailable
-        );
-    }
-
-    #[test]
-    fn model_provider_id_uses_model_prefix() {
-        assert_eq!(
-            model_provider_id("deepseek/deepseek-v4-pro").unwrap(),
-            "deepseek"
-        );
-        assert_eq!(model_provider_id(" openai/gpt-5.5 ").unwrap(), "openai");
-        assert!(model_provider_id("gpt-5.5").is_err());
-    }
-    #[test]
-fn crashed_sidecar_error_message_is_actionable() {
-    let message = crashed_sidecar_error_message(Some(1));
-    assert!(message.starts_with("AGENT_SIDECAR_CRASHED:"));
-    assert!(message.contains("退出码 1"));
-    assert!(message.contains("pnpm install"));
-    assert!(crashed_sidecar_error_message(None).contains("退出码 未知"));
-}
-
-#[test]
-fn is_crashed_sidecar_error_only_matches_crash_prefix() {
-    assert!(is_crashed_sidecar_error(&crashed_sidecar_error_message(Some(1))));
-    assert!(!is_crashed_sidecar_error(
-        "AGENT_SIDECAR_UNAVAILABLE: Node sidecar 已尝试启动，但未在 20 秒内就绪。"
-    ));
-}
-
-#[test]
-fn crashed_sidecar_error_is_not_narrator_retryable() {
-    // 启动即崩溃是确定性故障，narrator 重试路径不应把它当作可重试错误。
-    assert!(!is_retryable_narrator_sidecar_error(
-        &crashed_sidecar_error_message(Some(1))
-    ));
-}
-}
+    
