@@ -258,6 +258,11 @@ pub struct AgentSidecarWarmupPayload {
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarResponsePayload {
     pub(crate) session_id: String,
+    /// 逐事件透传的任意 JSON，由前端自行 Zod 校验；
+    /// 用 specta_typescript::Unknown 将导出类型映射为 TS `unknown[]`，
+    /// 避开 serde_json::Number 的 i64/u64 触发 specta BigInt-forbidden；
+    /// serde 运行时仍为 Vec<serde_json::Value>，行为不变。
+    #[specta(type = Vec<specta_typescript::Unknown>)]
     pub(crate) events: Vec<serde_json::Value>,
     pub(crate) result: Option<String>,
 }
