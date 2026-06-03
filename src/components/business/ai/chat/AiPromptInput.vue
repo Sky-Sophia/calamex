@@ -927,10 +927,11 @@ const handleStop = (): void => {
   border-radius: 999px;
   background: var(--ai-menu-border);
   padding: 0;
+  transition: background-color 150ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .ai-network-switch.is-on {
-  background: var(--accent-strong);
+  background: #2783de;
 }
 
 .ai-network-switch__thumb {
@@ -940,7 +941,7 @@ const handleStop = (): void => {
   width: 16px;
   height: 16px;
   border-radius: 999px;
-  background: var(--ai-menu-bg);
+  background: #ffffff;
   box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 16%, transparent);
   transition: transform 150ms cubic-bezier(0.23, 1, 0.32, 1);
 }
