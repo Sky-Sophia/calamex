@@ -536,17 +536,30 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     ];
   };
 
-  const updateAgentExecutionMessage = (
-    messageId: string,
-    content: string,
-    toolCalls: IAiChatMessage['toolCalls'] = [],
-    streamStatus?: NonNullable<IAiChatMessage['stream']>['status'],
-    activityText?: string,
-    runtimeEvents?: NonNullable<IAiChatMessage['stream']>['runtimeEvents'],
-    finalAnswerStarted?: boolean,
-    streamTokenSnapshot?: TSidecarStreamTokenSnapshot,
-    patchState?: IAgentExecutionMessagePatchState,
-  ): void => {
+  interface IUpdateAgentExecutionMessageInput {
+    messageId: string;
+    content: string;
+    toolCalls?: IAiChatMessage['toolCalls'];
+    streamStatus?: NonNullable<IAiChatMessage['stream']>['status'];
+    activityText?: string;
+    runtimeEvents?: NonNullable<IAiChatMessage['stream']>['runtimeEvents'];
+    finalAnswerStarted?: boolean;
+    streamTokenSnapshot?: TSidecarStreamTokenSnapshot;
+    patchState?: IAgentExecutionMessagePatchState;
+  }
+
+  const updateAgentExecutionMessage = (input: IUpdateAgentExecutionMessageInput): void => {
+    const {
+      messageId,
+      content,
+      toolCalls = [],
+      streamStatus,
+      activityText,
+      runtimeEvents,
+      finalAnswerStarted,
+      streamTokenSnapshot,
+      patchState,
+    } = input;
     replaceMessageById(messageId, (message) => {
       const nextActivityText = activityText ?? message.stream?.activityText;
       const nextRuntimeEvents = mergeRuntimeEvents(message.stream?.runtimeEvents, runtimeEvents);
@@ -632,16 +645,16 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       return;
     }
 
-    updateAgentExecutionMessage(
-      state.messageId,
-      sidecarAnswerStream.content.value,
-      state.toolCalls,
-      resolveSidecarAnswerDisplayStatus(state),
-      state.activityText,
-      state.runtimeEvents,
-      state.finalAnswerStarted,
-      state.streamTokenSnapshot,
-    );
+    updateAgentExecutionMessage({
+      messageId: state.messageId,
+      content: sidecarAnswerStream.content.value,
+      toolCalls: state.toolCalls,
+      streamStatus: resolveSidecarAnswerDisplayStatus(state),
+      activityText: state.activityText,
+      runtimeEvents: state.runtimeEvents,
+      finalAnswerStarted: state.finalAnswerStarted,
+      streamTokenSnapshot: state.streamTokenSnapshot,
+    });
     commitDisplayMessagesToStore(state.threadId);
     state.runtimeEvents = undefined;
 
@@ -1061,17 +1074,17 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       return content;
     })();
 
-    updateAgentExecutionMessage(
-      assistantMessageId,
-      displayContent,
-      toolProjection.toolCalls,
-      resolveSidecarAnswerDisplayStatus(streamMetadata),
-      toolProjection.activityText,
-      runtimeEvents,
-      finalAnswerStarted,
-      streamMetadata.streamTokenSnapshot,
-      livePatchState,
-    );
+    updateAgentExecutionMessage({
+      messageId: assistantMessageId,
+      content: displayContent,
+      toolCalls: toolProjection.toolCalls,
+      streamStatus: resolveSidecarAnswerDisplayStatus(streamMetadata),
+      activityText: toolProjection.activityText,
+      runtimeEvents: runtimeEvents,
+      finalAnswerStarted: finalAnswerStarted,
+      streamTokenSnapshot: streamMetadata.streamTokenSnapshot,
+      patchState: livePatchState,
+    });
     commitDisplayMessagesToStore(threadId);
   };
 
@@ -1288,17 +1301,19 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       }
     }
 
-    updateAgentExecutionMessage(
-      ctx.assistantMessageId,
-      displayContent,
-      toolProjection.toolCalls,
-      projection.errorMessage ? 'completed' : resolveSidecarAnswerDisplayStatus(streamMetadata),
-      toolProjection.activityText,
-      streamMetadata.runtimeEvents,
-      streamMetadata.finalAnswerStarted,
-      streamMetadata.streamTokenSnapshot,
-      patchState,
-    );
+    updateAgentExecutionMessage({
+      messageId: ctx.assistantMessageId,
+      content: displayContent,
+      toolCalls: toolProjection.toolCalls,
+      streamStatus: projection.errorMessage
+        ? 'completed'
+        : resolveSidecarAnswerDisplayStatus(streamMetadata),
+      activityText: toolProjection.activityText,
+      runtimeEvents: streamMetadata.runtimeEvents,
+      finalAnswerStarted: streamMetadata.finalAnswerStarted,
+      streamTokenSnapshot: streamMetadata.streamTokenSnapshot,
+      patchState: patchState,
+    });
 
     await refreshChangedDocumentsAfterSidecarRun(
       [...projection.changedFilePaths, ...sidecarAppliedPaths],
@@ -1416,12 +1431,12 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
 
       if (!wasAborted) {
         const message = toErrorMessage(error, MSG_CALL_FAILED);
-        updateAgentExecutionMessage(
-          assistantMessageId,
-          `Agent 执行失败：${message}`,
-          [],
-          'completed',
-        );
+        updateAgentExecutionMessage({
+          messageId: assistantMessageId,
+          content: `Agent 执行失败：${message}`,
+          toolCalls: [],
+          streamStatus: 'completed',
+        });
         errorMessage.value = message;
       }
     } finally {
@@ -1501,12 +1516,12 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     } catch (error) {
       const message = toErrorMessage(error, '处理 Agent 工具确认失败。');
       disposeSidecarAnswerStream(session.assistantMessageId);
-      updateAgentExecutionMessage(
-        session.assistantMessageId,
-        `Agent 执行失败：${message}`,
-        [],
-        'completed',
-      );
+      updateAgentExecutionMessage({
+        messageId: session.assistantMessageId,
+        content: `Agent 执行失败：${message}`,
+        toolCalls: [],
+        streamStatus: 'completed',
+      });
       errorMessage.value = message;
     } finally {
       liveEventBuffer.dispose();
@@ -2442,12 +2457,12 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     }
 
     if (activeAgentMessageId.value) {
-      updateAgentExecutionMessage(
-        activeAgentMessageId.value,
-        'Agent 执行已取消。',
-        [],
-        'cancelled',
-      );
+      updateAgentExecutionMessage({
+        messageId: activeAgentMessageId.value,
+        content: 'Agent 执行已取消。',
+        toolCalls: [],
+        streamStatus: 'cancelled',
+      });
       activeAgentMessageId.value = null;
     }
 
