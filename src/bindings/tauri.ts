@@ -76,6 +76,54 @@ export const commands = {
 	deleteSshPath: (payload: SshPathDeleteRequest) => __TAURI_INVOKE<SshPathDeletePayload>("delete_ssh_path", { payload }),
 	renameSshPath: (payload: SshPathRenameRequest) => __TAURI_INVOKE<SshPathRenamePayload>("rename_ssh_path", { payload }),
 	createSshDirectory: (payload: SshDirectoryCreateRequest) => __TAURI_INVOKE<SshDirectoryCreatePayload>("create_ssh_directory", { payload }),
+	agentSidecarHealth: () => __TAURI_INVOKE<AgentSidecarHealthPayload>("agent_sidecar_health"),
+	agentSidecarRestart: () => __TAURI_INVOKE<AgentSidecarHealthPayload>("agent_sidecar_restart"),
+	agentSidecarWarmup: () => __TAURI_INVOKE<AgentSidecarWarmupPayload>("agent_sidecar_warmup"),
+	agentSidecarChat: (payload: AgentSidecarChatRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_chat", { payload }),
+	agentSidecarPlan: (payload: AgentSidecarPlanRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_plan", { payload }),
+	agentSidecarPlanApprove: (payload: AgentSidecarPlanApproveRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_plan_approve", { payload }),
+	agentSidecarPlanQuery: (payload: AgentSidecarPlanQueryRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_plan_query", { payload }),
+	agentSidecarPlanReject: (payload: AgentSidecarPlanRejectRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_plan_reject", { payload }),
+	agentSidecarPlanFinish: (payload: AgentSidecarPlanFinishRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_plan_finish", { payload }),
+	agentSidecarPlanValidate: (payload: AgentSidecarPlanValidateRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_plan_validate", { payload }),
+	agentSidecarPlanReplan: (payload: AgentSidecarPlanReplanRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_plan_replan", { payload }),
+	agentSidecarExecute: (payload: AgentSidecarExecuteRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_execute", { payload }),
+	agentSidecarResolveApproval: (payload: AgentSidecarApprovalResolveRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_resolve_approval", { payload }),
+	agentSidecarRestoreCheckpoint: (payload: AgentSidecarCheckpointRestoreRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_restore_checkpoint", { payload }),
+	aiGetConfig: () => __TAURI_INVOKE<AiConfigPayload>("ai_get_config"),
+	aiSaveConfig: (payload: AiSaveConfigRequest) => __TAURI_INVOKE<AiConfigPayload>("ai_save_config", { payload }),
+	aiSaveCredentials: (payload: AiSaveCredentialsRequest) => __TAURI_INVOKE<AiConfigPayload>("ai_save_credentials", { payload }),
+	aiTestProviderConfig: (payload: AiProviderConnectionRequest) => __TAURI_INVOKE<AiProviderTestPayload>("ai_test_provider_config", { payload }),
+	aiConnectProvider: (payload: AiProviderConnectionRequest) => __TAURI_INVOKE<AiProviderConnectionPayload>("ai_connect_provider", { payload }),
+	aiClearCredentials: () => __TAURI_INVOKE<null>("ai_clear_credentials"),
+	aiTestProvider: () => __TAURI_INVOKE<AiProviderTestPayload>("ai_test_provider"),
+	aiGenerateConversationTitle: (payload: AiConversationTitleRequest) => __TAURI_INVOKE<AiConversationTitlePayload>("ai_generate_conversation_title", { payload }),
+	aiGetSuggestionPoolCache: () => __TAURI_INVOKE<{
+	suggestions: string[],
+	model: string,
+	generatedAt: string,
+} | null>("ai_get_suggestion_pool_cache"),
+	aiGenerateSuggestionPool: (payload: AiSuggestionPoolRequest) => __TAURI_INVOKE<AiSuggestionPoolPayload>("ai_generate_suggestion_pool", { payload }),
+	aiChatStream: (payload: AiChatRequest) => __TAURI_INVOKE<AiChatStreamPayload>("ai_chat_stream", { payload }),
+	aiCancel: (payload: AiCancelRequest) => __TAURI_INVOKE<null>("ai_cancel", { payload }),
+	aiInlineComplete: (payload: AiInlineCompletionRequest) => __TAURI_INVOKE<AiInlineCompletionResult>("ai_inline_complete", { payload }),
+	aiAgentClassifyTask: (payload: AiAgentClassifyTaskRequest) => __TAURI_INVOKE<AiAgentClassifyTaskPayload>("ai_agent_classify_task", { payload }),
+	aiAgentSetNetworkPermission: (payload: AiAgentSetNetworkPermissionRequest) => __TAURI_INVOKE<AiAgentNetworkPermissionPayload>("ai_agent_set_network_permission", { payload }),
+	aiWebSearch: (payload: AiWebSearchInput) => __TAURI_INVOKE<AiWebSearchPayload>("ai_web_search", { payload }),
+	aiWebFetch: (payload: AiWebFetchInput) => __TAURI_INVOKE<AiWebFetchPayload>("ai_web_fetch", { payload }),
+	aiProposePatch: (payload: AiProposePatchRequest) => __TAURI_INVOKE<AiProposePatchPayload>("ai_propose_patch", { payload }),
+	aiApplyPatch: (payload: AiApplyPatchRequest) => __TAURI_INVOKE<AiApplyPatchPayload>("ai_apply_patch", { payload }),
+	aiEditGetAuthLevel: () => __TAURI_INVOKE<AiEditAuthStatePayload>("ai_edit_get_auth_level"),
+	aiEditSetAuthLevel: (payload: AiEditSetAuthLevelRequest) => __TAURI_INVOKE<AiEditAuthStatePayload>("ai_edit_set_auth_level", { payload }),
+	aiEditListTimeline: (payload: AiEditListTimelineRequest) => __TAURI_INVOKE<AiEditListTimelinePayload>("ai_edit_list_timeline", { payload }),
+	aiEditSetPin: (payload: AiEditSetPinRequest) => __TAURI_INVOKE<AiEditSetPinPayload>("ai_edit_set_pin", { payload }),
+	aiEditGetDiff: (payload: AiEditGetDiffRequest) => __TAURI_INVOKE<AiEditGetDiffPayload>("ai_edit_get_diff", { payload }),
+	aiEditCreateSnapshot: (payload: AiEditCreateSnapshotRequest) => __TAURI_INVOKE<AiEditCreateSnapshotPayload>("ai_edit_create_snapshot", { payload }),
+	aiEditRestoreSnapshot: (payload: AiEditRestoreSnapshotRequest) => __TAURI_INVOKE<AiEditRestoreSnapshotPayload>("ai_edit_restore_snapshot", { payload }),
+	aiEditUndoOperation: (payload: AiEditUndoOperationRequest) => __TAURI_INVOKE<AiEditUndoOperationPayload>("ai_edit_undo_operation", { payload }),
+	aiEditRevertFile: (payload: AiEditRevertFileRequest) => __TAURI_INVOKE<AiEditRevertFilePayload>("ai_edit_revert_file", { payload }),
+	aiEditRevertHunk: (payload: AiEditRevertHunkRequest) => __TAURI_INVOKE<AiEditRevertHunkPayload>("ai_edit_revert_hunk", { payload }),
+	aiEditRevertTask: (payload: AiEditRevertTaskRequest) => __TAURI_INVOKE<AiEditRevertTaskPayload>("ai_edit_revert_task", { payload }),
 };
 
 /** Events */
@@ -84,6 +132,768 @@ export const events = {
 };
 
 /* Types */
+export type AgentSidecarApprovalResolveRequest = AgentSidecarApprovalResolveRequest_Serialize | AgentSidecarApprovalResolveRequest_Deserialize;
+
+export type AgentSidecarApprovalResolveRequest_Deserialize = {
+	sessionId: string | null,
+	requestId: string,
+	decision: string,
+	goal: string | null,
+	messages?: AgentSidecarMessagePayload[],
+	workspaceRootPath: string | null,
+	context?: AiContextReferencePayload[],
+	modelConfig: AgentSidecarModelConfigPayload_Deserialize | null,
+	threadId: string | null,
+	planId: string | null,
+	planVersion: number | null,
+	planStepId: string | null,
+};
+
+export type AgentSidecarApprovalResolveRequest_Serialize = {
+	sessionId?: string | null,
+	requestId: string,
+	decision: string,
+	goal?: string | null,
+	messages: AgentSidecarMessagePayload[],
+	workspaceRootPath?: string | null,
+	context: AiContextReferencePayload[],
+	modelConfig?: AgentSidecarModelConfigPayload_Serialize | null,
+	threadId?: string | null,
+	planId?: string | null,
+	planVersion?: number | null,
+	planStepId?: string | null,
+};
+
+export type AgentSidecarChatRequest = AgentSidecarChatRequest_Serialize | AgentSidecarChatRequest_Deserialize;
+
+export type AgentSidecarChatRequest_Deserialize = {
+	sessionId: string | null,
+	mode: string | null,
+	goal: string | null,
+	messages: AgentSidecarMessagePayload[],
+	workspaceRootPath: string | null,
+	context?: AiContextReferencePayload[],
+	modelConfig: AgentSidecarModelConfigPayload_Deserialize | null,
+	threadId: string | null,
+};
+
+export type AgentSidecarChatRequest_Serialize = {
+	sessionId?: string | null,
+	mode?: string | null,
+	goal?: string | null,
+	messages: AgentSidecarMessagePayload[],
+	workspaceRootPath?: string | null,
+	context: AiContextReferencePayload[],
+	modelConfig?: AgentSidecarModelConfigPayload_Serialize | null,
+	threadId?: string | null,
+};
+
+export type AgentSidecarCheckpointRestoreRequest = AgentSidecarCheckpointRestoreRequest_Serialize | AgentSidecarCheckpointRestoreRequest_Deserialize;
+
+export type AgentSidecarCheckpointRestoreRequest_Deserialize = {
+	sessionId: string | null,
+	runId: string,
+	snapshotId: string | null,
+	step: AgentSidecarRollbackStepPath | null,
+	modelConfig: AgentSidecarModelConfigPayload_Deserialize | null,
+};
+
+export type AgentSidecarCheckpointRestoreRequest_Serialize = {
+	sessionId?: string | null,
+	runId: string,
+	snapshotId?: string | null,
+	step?: AgentSidecarRollbackStepPath | null,
+	modelConfig?: AgentSidecarModelConfigPayload_Serialize | null,
+};
+
+export type AgentSidecarExecuteRequest = AgentSidecarExecuteRequest_Serialize | AgentSidecarExecuteRequest_Deserialize;
+
+export type AgentSidecarExecuteRequest_Deserialize = {
+	sessionId: string | null,
+	goal: string,
+	messages: AgentSidecarMessagePayload[],
+	workspaceRootPath: string | null,
+	context?: AiContextReferencePayload[],
+	modelConfig: AgentSidecarModelConfigPayload_Deserialize | null,
+	planId: string,
+	planVersion: number,
+	planStepId: string,
+};
+
+export type AgentSidecarExecuteRequest_Serialize = {
+	sessionId?: string | null,
+	goal: string,
+	messages: AgentSidecarMessagePayload[],
+	workspaceRootPath?: string | null,
+	context: AiContextReferencePayload[],
+	modelConfig?: AgentSidecarModelConfigPayload_Serialize | null,
+	planId: string,
+	planVersion: number,
+	planStepId: string,
+};
+
+export type AgentSidecarHealthPayload = {
+	ok: boolean,
+	status: string,
+	engine: string,
+	version: string | null,
+	protocolVersion: string | null,
+	implementationVersion: string | null,
+	mcp: AgentSidecarMcpHealthPayload,
+};
+
+export type AgentSidecarMcpHealthPayload = {
+	configuredServers: number,
+	serverNames: string[],
+	errors: string[],
+};
+
+export type AgentSidecarMessagePayload = {
+	role: string,
+	content: string,
+};
+
+export type AgentSidecarModelConfigPayload = AgentSidecarModelConfigPayload_Serialize | AgentSidecarModelConfigPayload_Deserialize;
+
+export type AgentSidecarModelConfigPayload_Deserialize = {
+	modelId: string,
+	apiKey: SecretString,
+	baseUrl: string | null,
+};
+
+export type AgentSidecarModelConfigPayload_Serialize = {
+	modelId: string,
+	apiKey: SecretString,
+	baseUrl?: string | null,
+};
+
+export type AgentSidecarPlanApproveRequest = AgentSidecarPlanApproveRequest_Serialize | AgentSidecarPlanApproveRequest_Deserialize;
+
+export type AgentSidecarPlanApproveRequest_Deserialize = {
+	sessionId: string | null,
+	planId: string,
+	version: number,
+};
+
+export type AgentSidecarPlanApproveRequest_Serialize = {
+	sessionId?: string | null,
+	planId: string,
+	version: number,
+};
+
+export type AgentSidecarPlanFinishRequest = AgentSidecarPlanFinishRequest_Serialize | AgentSidecarPlanFinishRequest_Deserialize;
+
+export type AgentSidecarPlanFinishRequest_Deserialize = {
+	sessionId: string | null,
+	planId: string,
+	version: number,
+	status: string,
+	errorMessage: string | null,
+};
+
+export type AgentSidecarPlanFinishRequest_Serialize = {
+	sessionId?: string | null,
+	planId: string,
+	version: number,
+	status: string,
+	errorMessage?: string | null,
+};
+
+export type AgentSidecarPlanQueryRequest = AgentSidecarPlanQueryRequest_Serialize | AgentSidecarPlanQueryRequest_Deserialize;
+
+export type AgentSidecarPlanQueryRequest_Deserialize = {
+	sessionId: string | null,
+	planId: string,
+	version: number | null,
+};
+
+export type AgentSidecarPlanQueryRequest_Serialize = {
+	sessionId?: string | null,
+	planId: string,
+	version?: number | null,
+};
+
+export type AgentSidecarPlanRejectRequest = AgentSidecarPlanRejectRequest_Serialize | AgentSidecarPlanRejectRequest_Deserialize;
+
+export type AgentSidecarPlanRejectRequest_Deserialize = {
+	sessionId: string | null,
+	planId: string,
+	version: number,
+	reason: string | null,
+};
+
+export type AgentSidecarPlanRejectRequest_Serialize = {
+	sessionId?: string | null,
+	planId: string,
+	version: number,
+	reason?: string | null,
+};
+
+export type AgentSidecarPlanReplanRequest = AgentSidecarPlanReplanRequest_Serialize | AgentSidecarPlanReplanRequest_Deserialize;
+
+export type AgentSidecarPlanReplanRequest_Deserialize = {
+	sessionId: string | null,
+	goal: string,
+	messages: AgentSidecarMessagePayload[],
+	workspaceRootPath: string | null,
+	context?: AiContextReferencePayload[],
+	modelConfig: AgentSidecarModelConfigPayload_Deserialize | null,
+	planId: string,
+	planVersion: number,
+};
+
+export type AgentSidecarPlanReplanRequest_Serialize = {
+	sessionId?: string | null,
+	goal: string,
+	messages: AgentSidecarMessagePayload[],
+	workspaceRootPath?: string | null,
+	context: AiContextReferencePayload[],
+	modelConfig?: AgentSidecarModelConfigPayload_Serialize | null,
+	planId: string,
+	planVersion: number,
+};
+
+export type AgentSidecarPlanRequest = AgentSidecarPlanRequest_Serialize | AgentSidecarPlanRequest_Deserialize;
+
+export type AgentSidecarPlanRequest_Deserialize = {
+	sessionId: string | null,
+	goal: string,
+	messages: AgentSidecarMessagePayload[],
+	workspaceRootPath: string | null,
+	context?: AiContextReferencePayload[],
+	modelConfig: AgentSidecarModelConfigPayload_Deserialize | null,
+	threadId: string | null,
+	planId: string | null,
+};
+
+export type AgentSidecarPlanRequest_Serialize = {
+	sessionId?: string | null,
+	goal: string,
+	messages: AgentSidecarMessagePayload[],
+	workspaceRootPath?: string | null,
+	context: AiContextReferencePayload[],
+	modelConfig?: AgentSidecarModelConfigPayload_Serialize | null,
+	threadId?: string | null,
+	planId?: string | null,
+};
+
+export type AgentSidecarPlanValidateRequest = AgentSidecarPlanValidateRequest_Serialize | AgentSidecarPlanValidateRequest_Deserialize;
+
+export type AgentSidecarPlanValidateRequest_Deserialize = {
+	sessionId: string | null,
+	goal: string | null,
+	messages: AgentSidecarMessagePayload[],
+	workspaceRootPath: string | null,
+	context?: AiContextReferencePayload[],
+	modelConfig: AgentSidecarModelConfigPayload_Deserialize | null,
+	planId: string,
+	planVersion: number,
+};
+
+export type AgentSidecarPlanValidateRequest_Serialize = {
+	sessionId?: string | null,
+	goal?: string | null,
+	messages: AgentSidecarMessagePayload[],
+	workspaceRootPath?: string | null,
+	context: AiContextReferencePayload[],
+	modelConfig?: AgentSidecarModelConfigPayload_Serialize | null,
+	planId: string,
+	planVersion: number,
+};
+
+export type AgentSidecarResponsePayload = {
+	sessionId: string,
+	/**
+	 *  逐事件透传的任意 JSON，由前端自行 Zod 校验；
+	 *  用 specta_typescript::Unknown 将导出类型映射为 TS `unknown[]`，
+	 *  避开 serde_json::Number 的 i64/u64 触发 specta BigInt-forbidden；
+	 *  serde 运行时仍为 Vec<serde_json::Value>，行为不变。
+	 */
+	events: unknown[],
+	result: string | null,
+};
+
+export type AgentSidecarRollbackStepPath = string | string[];
+
+export type AgentSidecarWarmupPayload = {
+	ok: boolean,
+	providerId: string | null,
+	origin: string | null,
+	statusCode: number | null,
+	durationMs: number,
+	skipped: boolean,
+	reason: string | null,
+};
+
+export type AiAgentClassifyTaskPayload = {
+	classification: string,
+	shouldEnterPlanMode: boolean,
+	reason: string,
+};
+
+export type AiAgentClassifyTaskRequest = {
+	goal: string,
+	context: AiContextReferencePayload[],
+};
+
+export type AiAgentNetworkPermissionPayload = {
+	permission: string,
+};
+
+export type AiAgentSetNetworkPermissionRequest = {
+	permission: string,
+};
+
+export type AiApplyPatchFilePayload = {
+	path: string,
+	byteSize: number,
+};
+
+export type AiApplyPatchMetadataRequest = {
+	taskId: string | null,
+	turnId: string | null,
+	reason: string | null,
+	toolCallId: string | null,
+	confirmedByUser: boolean | null,
+	agentRunId: string | null,
+	agentStepId: string | null,
+	workspaceRootPath: string | null,
+};
+
+export type AiApplyPatchPayload = {
+	appliedFiles: AiApplyPatchFilePayload[],
+};
+
+export type AiApplyPatchRequest = {
+	patch: AiPatchSetPayload,
+	metadata: AiApplyPatchMetadataRequest | null,
+};
+
+export type AiCancelRequest = {
+	streamId: string,
+};
+
+export type AiChatMessagePayload = {
+	/**  已知值："user" | "assistant" | "system" | "tool"。 */
+	role: string,
+	content: string,
+	id: string,
+	createdAt: string,
+	references: AiContextReferencePayload[],
+};
+
+export type AiChatRequest = {
+	threadId: string | null,
+	messages: AiChatMessagePayload[],
+	references: AiContextReferencePayload[],
+};
+
+export type AiChatStreamPayload = {
+	streamId: string,
+	assistantMessageId: string,
+	providerType: string,
+	model: string,
+};
+
+export type AiConfigPayload = {
+	providerType: string,
+	selectedModel: string | null,
+	baseUrl: string | null,
+	isBaseUrlConfigured: boolean,
+	hasCredentials: boolean,
+	isConfigured: boolean,
+	inlineCompletionEnabled: boolean,
+	chatEnabled: boolean,
+	agentEnabled: boolean,
+	narrator: AiModelEndpointConfigPayload,
+	credentials: AiCredentialStatusPayload[],
+};
+
+export type AiContextRangePayload = {
+	startLine: number,
+	endLine: number,
+};
+
+export type AiContextReferencePayload = {
+	id: string,
+	/**  引用种类，已知值："file" | "selection" | "symbol" | "diagnostic" | …。 */
+	kind: string,
+	label: string,
+	path: string | null,
+	range: AiContextRangePayload | null,
+	contentPreview: string,
+	redacted: boolean,
+};
+
+export type AiConversationTitlePayload = {
+	title: string,
+	model: string,
+};
+
+export type AiConversationTitleRequest = {
+	userMessage: string,
+	assistantMessage: string,
+};
+
+export type AiCredentialStatusPayload = {
+	providerId: string,
+	hasCredentials: boolean,
+	alias: string,
+	keyPreview: string,
+};
+
+export type AiEditAuthStatePayload = {
+	/**  已知值："manual" | "per_task" | "session"。 */
+	level: string,
+	taskId: string | null,
+	updatedAt: string,
+};
+
+export type AiEditCreateSnapshotPayload = {
+	snapshot: AiSnapshotPayload,
+};
+
+export type AiEditCreateSnapshotRequest = {
+	fileRefs: string[],
+	label: string | null,
+	taskId: string | null,
+};
+
+export type AiEditDiffHunkPayload = {
+	hunkIndex: number,
+	oldStart: number,
+	oldLines: number,
+	newStart: number,
+	newLines: number,
+	lines: string[],
+};
+
+export type AiEditGetDiffPayload = {
+	taskId: string,
+	path: string,
+	operationId: string,
+	kind: string,
+	additions: number,
+	deletions: number,
+	hunks: AiEditDiffHunkPayload[],
+};
+
+export type AiEditGetDiffRequest = {
+	taskId: string,
+	path: string,
+};
+
+export type AiEditListTimelinePayload = {
+	entries: AiEditTimelineEntryPayload[],
+};
+
+export type AiEditListTimelineRequest = {
+	taskId: string | null,
+	limit: number | null,
+};
+
+export type AiEditOperationPayload = {
+	id: string,
+	taskId: string,
+	turnId: string,
+	/**  已知值："modify"。 */
+	kind: string,
+	path: string,
+	newPath: string | null,
+	sourceSnapshotId: string | null,
+	beforeHash: string | null,
+	afterHash: string | null,
+	bytesBefore: number | null,
+	bytesAfter: number | null,
+	appliedAt: string,
+	reason: string,
+	toolCallId: string | null,
+	diffText: string | null,
+	pinned: boolean,
+};
+
+export type AiEditRestoreSnapshotPayload = {
+	snapshotId: string,
+	restoredFiles: string[],
+	preRevertSnapshot: AiSnapshotPayload,
+	restoredSnapshot: AiSnapshotPayload,
+};
+
+export type AiEditRestoreSnapshotRequest = {
+	snapshotId: string,
+};
+
+export type AiEditRevertFilePayload = {
+	taskId: string,
+	path: string,
+	operationId: string,
+	restoredFiles: string[],
+	preRevertSnapshot: AiSnapshotPayload,
+	restoredSnapshot: AiSnapshotPayload,
+};
+
+export type AiEditRevertFileRequest = {
+	taskId: string,
+	path: string,
+};
+
+export type AiEditRevertHunkPayload = {
+	taskId: string,
+	path: string,
+	operationId: string,
+	hunkIndex: number,
+	restoredFiles: string[],
+	preRevertSnapshot: AiSnapshotPayload,
+	restoredSnapshot: AiSnapshotPayload,
+};
+
+export type AiEditRevertHunkRequest = {
+	taskId: string,
+	path: string,
+	hunkIndex: number,
+};
+
+export type AiEditRevertTaskPayload = {
+	taskId: string,
+	revertedOperationIds: string[],
+	restoredFiles: string[],
+	preRevertSnapshots: AiSnapshotPayload[],
+	restoredSnapshots: AiSnapshotPayload[],
+};
+
+export type AiEditRevertTaskRequest = {
+	taskId: string,
+};
+
+export type AiEditSetAuthLevelRequest = {
+	/**  已知值："manual" | "per_task" | "session"。 */
+	level: string,
+	taskId: string | null,
+};
+
+export type AiEditSetPinPayload = {
+	targetType: string,
+	targetId: string,
+	pinned: boolean,
+	pinnedAt: string | null,
+};
+
+export type AiEditSetPinRequest = {
+	/**  已知值："operation" | "snapshot" | "task"。 */
+	targetType: string,
+	targetId: string,
+	pinned: boolean,
+};
+
+/**
+ *  与前端 `aiEditTimelineEntrySchema` 一一对齐的判别联合，
+ *  形如 `{ "type": "snapshot" | "operation", "data": { … } }`。
+ */
+export type AiEditTimelineEntryPayload = { type: "snapshot"; data: AiSnapshotPayload } | { type: "operation"; data: AiEditOperationPayload };
+
+export type AiEditUndoOperationPayload = {
+	operationId: string,
+	restoredFiles: string[],
+	preRevertSnapshot: AiSnapshotPayload,
+	restoredSnapshot: AiSnapshotPayload,
+};
+
+export type AiEditUndoOperationRequest = {
+	operationId: string,
+};
+
+export type AiInlineCompletionRangePayload = {
+	startOffset: number,
+	endOffset: number,
+};
+
+export type AiInlineCompletionRequest = {
+	filePath: string,
+	language: string,
+	cursorOffset: number,
+	prefix: string,
+	suffix: string,
+	recentEdits: string[] | null,
+};
+
+export type AiInlineCompletionResult = {
+	insertText: string,
+	range: AiInlineCompletionRangePayload,
+	/**  置信度等级，已知值："low" | "medium" | "high"。 */
+	confidence: string,
+};
+
+export type AiModelEndpointConfigPayload = {
+	providerType: string,
+	selectedModel: string | null,
+	baseUrl: string | null,
+	isBaseUrlConfigured: boolean,
+	hasCredentials: boolean,
+	isConfigured: boolean,
+};
+
+export type AiPatchFilePayload = {
+	path: string,
+	originalHash: string,
+	/**
+	 *  生成 patch 时源文件的 mtime（Unix epoch 毫秒）。
+	 *  旧调用可为空；AED 写盘链路会在真正落盘前用运行时读取的 baseline 再做 OCC。
+	 */
+	originalModifiedAtMs?: number | null,
+	hunks: AiPatchHunkPayload[],
+};
+
+export type AiPatchHunkPayload = {
+	oldStart: number,
+	oldLines: number,
+	newStart: number,
+	newLines: number,
+	/**
+	 *  统一 diff hunk 的原始行序列。每行首字符约定为：
+	 *  - `' '`（空格）：上下文行
+	 *  - `'+'`：新增行
+	 *  - `'-'`：删除行
+	 *  - `"\\ No newline at end of file"`：标准 unified diff 无末尾换行标记
+	 * 
+	 *  普通行内不含末尾换行符；应用端按 unified diff 语义补齐。
+	 */
+	lines: string[],
+};
+
+export type AiPatchSetPayload = {
+	summary: string,
+	files: AiPatchFilePayload[],
+};
+
+export type AiProposePatchPayload = {
+	patch: AiPatchSetPayload,
+};
+
+export type AiProposePatchRequest = {
+	path: string,
+	originalContent: string,
+	updatedContent: string,
+	summary: string,
+};
+
+export type AiProviderConnectionPayload = {
+	config: AiConfigPayload,
+	test: AiProviderTestPayload,
+};
+
+/**
+ *  用于“测试连接 / 开始连接”的草稿配置。
+ * 
+ *  `api_key` 允许为空：为空时后端只会尝试读取当前 Provider 已保存的凭证；
+ *  若也不存在已保存凭证，连接测试必须失败，不能伪造成功。
+ */
+export type AiProviderConnectionRequest = {
+	role?: string | null,
+	providerId?: string | null,
+	providerType: string,
+	selectedModel: string | null,
+	baseUrl: string | null,
+	inlineCompletionEnabled: boolean,
+	chatEnabled: boolean,
+	agentEnabled: boolean,
+	apiKey: SecretString | null,
+};
+
+export type AiProviderTestPayload = {
+	ok: boolean,
+	/**  已知值："ok" | "unauthorized" | "rate-limited" | "network" | …。 */
+	code: string,
+	message: string,
+};
+
+export type AiSaveConfigRequest = {
+	role?: string | null,
+	providerType: string,
+	selectedModel: string | null,
+	baseUrl: string | null,
+	inlineCompletionEnabled: boolean,
+	chatEnabled: boolean,
+	agentEnabled: boolean,
+};
+
+/**
+ *  ⚠️ `api_key` 已包装在 `SecretString` 中，Debug 输出会被遮蔽为 `***`。
+ *  调用方读取明文请使用 `request.api_key.expose()` 显式取出。
+ */
+export type AiSaveCredentialsRequest = {
+	providerId: string,
+	alias?: string | null,
+	apiKey: SecretString,
+};
+
+export type AiSnapshotPayload = {
+	id: string,
+	/**
+	 *  已知值："task-start" | "turn-start" | "pre-tool" | "manual"
+	 *  | "pre-revert" | "revert"。
+	 */
+	scope: string,
+	taskId: string,
+	createdAt: string,
+	label: string,
+	fileRefs: string[],
+	storageKey: string,
+	sizeBytes: number,
+	contentAvailable: boolean,
+	pinned: boolean,
+};
+
+export type AiSuggestionPoolPayload = {
+	suggestions: string[],
+	model: string,
+	generatedAt: string,
+};
+
+export type AiSuggestionPoolRequest = {
+	count: number,
+	locale: string,
+	topics: string[],
+};
+
+export type AiWebFetchInput = {
+	url: string,
+	reason: string,
+	maxBytes: number,
+};
+
+export type AiWebFetchPayload = {
+	source: AiWebFetchResultPayload,
+};
+
+export type AiWebFetchResultPayload = {
+	url: string,
+	title: string,
+	textRef: string,
+	excerpt: string,
+	bytes: number,
+	fetchedAt: string,
+	truncated: boolean,
+};
+
+export type AiWebSearchInput = {
+	query: string,
+	intent: string,
+	maxResults: number,
+	recency: string | null,
+};
+
+export type AiWebSearchPayload = {
+	results: AiWebSearchResultPayload[],
+};
+
+export type AiWebSearchResultPayload = {
+	title: string,
+	url: string,
+	snippet: string,
+	sourceType: string,
+	fetchedAt: string,
+};
+
 export type AnalyzeScriptPayload = {
 	available: boolean,
 	message: string | null,
