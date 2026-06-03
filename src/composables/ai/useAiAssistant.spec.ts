@@ -2290,18 +2290,8 @@ describe('useAiAssistant streaming integration', () => {
     runNextQueuedFrame();
     await Promise.resolve();
 
-    expect(queuedFrames.size).toBe(1);
-    expect(assistant.messages.value[1]?.content).not.toBe(expectedLiveText);
-
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      if (assistant.messages.value[1]?.content === expectedLiveText || queuedFrames.size === 0) {
-        break;
-      }
-
-      runNextQueuedFrame();
-      await Promise.resolve();
-    }
-
+    // 合帧刷新：两个 message_delta 已被合并进同一帧；落帧后内容一次性追平到最新文本，
+    // 不再依赖 useAiStream 的二次逐帧节流（逐帧揭示已下沉到渲染层 markstream-vue）。
     expect(queuedFrames.size).toBe(0);
     expect(assistant.messages.value[1]?.content).toBe(expectedLiveText);
     expect(assistant.messages.value[1]?.toolCalls?.[0]).toMatchObject({

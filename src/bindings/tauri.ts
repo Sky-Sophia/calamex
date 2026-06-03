@@ -46,6 +46,23 @@ export const commands = {
 	closeTerminalSession: (payload: CloseTerminalSessionRequest) => __TAURI_INVOKE<null>("close_terminal_session", { payload }),
 	dispatchScriptToTerminal: (payload: DispatchTerminalScriptRequest) => __TAURI_INVOKE<DispatchTerminalScriptPayload>("dispatch_script_to_terminal", { payload }),
 	cancelTerminalRun: (payload: CancelTerminalRunRequest) => __TAURI_INVOKE<null>("cancel_terminal_run", { payload }),
+	listGitBranches: (payload: GitRepositoryRootRequest) => __TAURI_INVOKE<GitBranchListPayload>("list_git_branches", { payload }),
+	checkoutGitBranch: (payload: GitBranchCheckoutRequest) => __TAURI_INVOKE<GitRepositoryStatusPayload>("checkout_git_branch", { payload }),
+	createGitBranch: (payload: GitBranchCreateRequest) => __TAURI_INVOKE<GitRepositoryStatusPayload>("create_git_branch", { payload }),
+	getGitDiffPreview: (payload: GitDiffPreviewRequest) => __TAURI_INVOKE<GitDiffPreviewPayload>("get_git_diff_preview", { payload }),
+	listGitCommitHistory: (payload: GitCommitHistoryRequest) => __TAURI_INVOKE<GitCommitHistoryPayload>("list_git_commit_history", { payload }),
+	getGitPullRequestSupport: (payload: GitRepositoryRootRequest) => __TAURI_INVOKE<GitPullRequestSupportPayload>("get_git_pull_request_support", { payload }),
+	listGitStashes: (payload: GitRepositoryRootRequest) => __TAURI_INVOKE<GitStashListPayload>("list_git_stashes", { payload }),
+	saveGitStash: (payload: GitStashSaveRequest) => __TAURI_INVOKE<GitRepositoryStatusPayload>("save_git_stash", { payload }),
+	applyGitStash: (payload: GitStashApplyRequest) => __TAURI_INVOKE<GitRepositoryStatusPayload>("apply_git_stash", { payload }),
+	dropGitStash: (payload: GitStashDropRequest) => __TAURI_INVOKE<GitRepositoryStatusPayload>("drop_git_stash", { payload }),
+	getGitRepositoryStatus: (workspaceRootPath: string | null) => __TAURI_INVOKE<GitRepositoryStatusPayload>("get_git_repository_status", { workspaceRootPath }),
+	initGitRepository: (workspaceRootPath: string | null) => __TAURI_INVOKE<GitRepositoryStatusPayload>("init_git_repository", { workspaceRootPath }),
+	getGitFileBaseline: (path: string) => __TAURI_INVOKE<GitFileBaselinePayload>("get_git_file_baseline", { path }),
+	stageGitPaths: (payload: GitPathOperationRequest) => __TAURI_INVOKE<GitRepositoryStatusPayload>("stage_git_paths", { payload }),
+	unstageGitPaths: (payload: GitPathOperationRequest) => __TAURI_INVOKE<GitRepositoryStatusPayload>("unstage_git_paths", { payload }),
+	commitGitIndex: (payload: GitCommitRequest) => __TAURI_INVOKE<GitCommitResultPayload>("commit_git_index", { payload }),
+	discardGitPaths: (payload: GitPathOperationRequest) => __TAURI_INVOKE<GitRepositoryStatusPayload>("discard_git_paths", { payload }),
 };
 
 /** Events */
@@ -142,6 +159,186 @@ export type FsChange = {
 
 /**  文件系统变更类型 */
 export type FsChangeKind = "created" | "modified" | "removed" | "renamed";
+
+export type GitBranchCheckoutRequest = {
+	repositoryRootPath: string,
+	branchName: string,
+};
+
+export type GitBranchCreateRequest = {
+	repositoryRootPath: string,
+	branchName: string,
+	checkout: boolean,
+};
+
+export type GitBranchListPayload = {
+	branches: GitBranchPayload[],
+};
+
+export type GitBranchPayload = {
+	name: string,
+	shorthand: string,
+	kind: string,
+	upstreamName: string | null,
+	isCurrent: boolean,
+	isHead: boolean,
+	ahead: number,
+	behind: number,
+	lastCommit: GitCommitSummaryPayload | null,
+};
+
+export type GitCommitHistoryPayload = {
+	entries: GitCommitSummaryPayload[],
+	hasMore: boolean,
+	nextOffset: number | null,
+};
+
+export type GitCommitHistoryRequest = {
+	repositoryRootPath: string,
+	offset: number | null,
+	limit: number | null,
+};
+
+export type GitCommitRequest = {
+	repositoryRootPath: string,
+	message: string,
+	paths: string[],
+};
+
+export type GitCommitResultPayload = {
+	status: GitRepositoryStatusPayload,
+	commitId: string | null,
+};
+
+export type GitCommitSummaryPayload = {
+	id: string,
+	shortId: string,
+	summary: string,
+	authorName: string,
+	authoredAt: string,
+};
+
+export type GitDiffPreviewPayload = {
+	id: string,
+	repositoryRootPath: string,
+	path: string,
+	relativePath: string,
+	title: string,
+	mode: string,
+	originalContent: string,
+	modifiedContent: string,
+	isEmpty: boolean,
+};
+
+export type GitDiffPreviewRequest = {
+	repositoryRootPath: string,
+	path: string,
+	mode: string,
+};
+
+export type GitFileBaselinePayload = {
+	available: boolean,
+	message: string | null,
+	repositoryRootPath: string | null,
+	filePath: string,
+	relativePath: string | null,
+	isTracked: boolean,
+	content: string | null,
+};
+
+export type GitFileStatusPayload = {
+	path: string,
+	relativePath: string,
+	fileName: string,
+	previousPath: string | null,
+	previousRelativePath: string | null,
+	indexStatus: string | null,
+	worktreeStatus: string | null,
+	isConflicted: boolean,
+	isUntracked: boolean,
+};
+
+export type GitPathOperationRequest = {
+	repositoryRootPath: string,
+	paths: string[],
+};
+
+export type GitPullRequestSupportPayload = {
+	available: boolean,
+	remoteName: string | null,
+	provider: string,
+	repositoryUrl: string | null,
+	pullRequestsUrl: string | null,
+	createPullRequestUrl: string | null,
+};
+
+export type GitRepositoryRootRequest = {
+	repositoryRootPath: string,
+};
+
+export type GitRepositoryStatusPayload = {
+	available: boolean,
+	message: string | null,
+	repositoryRootPath: string | null,
+	repositoryName: string | null,
+	gitDirPath: string | null,
+	headBranchName: string | null,
+	headShortName: string | null,
+	headShortOid: string | null,
+	isDetached: boolean,
+	isClean: boolean,
+	ahead: number,
+	behind: number,
+	stagedCount: number,
+	unstagedCount: number,
+	untrackedCount: number,
+	conflictedCount: number,
+	files: GitFileStatusPayload[],
+	lastCommit: GitCommitSummaryPayload | null,
+};
+
+export type GitStashApplyRequest = {
+	repositoryRootPath: string,
+	stashIndex: number,
+	pop: boolean,
+};
+
+export type GitStashDropRequest = {
+	repositoryRootPath: string,
+	stashIndex: number,
+};
+
+export type GitStashEntryPayload = {
+	index: number,
+	stashId: string,
+	summary: string,
+	branchName: string | null,
+	commitShortId: string | null,
+	createdAt: string,
+	fileCount: number,
+	additions: number,
+	deletions: number,
+	files: GitStashFilePayload[],
+};
+
+export type GitStashFilePayload = {
+	relativePath: string,
+	fileName: string,
+	previousRelativePath: string | null,
+	status: string,
+	additions: number,
+	deletions: number,
+};
+
+export type GitStashListPayload = {
+	entries: GitStashEntryPayload[],
+};
+
+export type GitStashSaveRequest = {
+	repositoryRootPath: string,
+	message: string | null,
+	includeUntracked: boolean,
+};
 
 export type ImageAssetPayload = {
 	path: string,

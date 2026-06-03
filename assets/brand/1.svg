@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="App icon">
-  <g transform="translate(256 256) rotate(-70)">
-    <rect x="-170" y="-103" width="340" height="50" rx="25" fill="#5E6AD2"/>
-    <rect x="-40"  y="-25"  width="210" height="50" rx="25" fill="#5E6AD2"/>
-    <rect x="40"   y="53"   width="130" height="50" rx="25" fill="#5E6AD2"/>
-  </g>
-</svg>
