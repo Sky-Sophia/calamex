@@ -3,7 +3,7 @@ import {
   type IAgentSidecarExecuteProjection,
   type TAgentSidecarToolStreamStatus,
 } from '@/composables/ai/sidecar-events';
-import { useAiStream } from '@/composables/ai/useAiStream';
+import type { useAiStream } from '@/composables/ai/useAiStream';
 import type {
   IAiChatMessage,
   IAiChatStreamEventPayload,
@@ -258,24 +258,13 @@ const cancelUiFlush = (handle: TUiFlushHandle | null): void => {
   clearTimeout(handle.id);
 };
 
-/**
- * 把同一 phase 的两个 message_delta 合并成一个「累计文本」事件。
- *
- * 后端(Node sidecar)按「增量片段」下发 message_delta(与 plain-chat 的
- * append 语义一致,源码注释明确写道 "emit only the incremental text; the
- * frontend accumulates it")。因此缓冲区必须把同一 phase 的增量拼接成完整文本,
- * 而不是用最新片段覆盖旧片段。
- *
- * 否则下游 updateSidecarAnswerStreamContent 会把 finalMessageEvent.text 当成
- * 「累计完整文本」做前缀 diff:新片段不以上一片段为前缀 → 反复 reset+append,
- * 表现为「逐段替换、上一段消失」,并在 done 收到完整文本时整段弹出。
- */
+// message_delta 下发的是「累计完整文本」快照而非增量片段；下游用前缀 diff 揭示，
+// 故合并时取最新一条完整文本，不拼接（拼接会重复，如 AB+ABC=ABABC）。
 const mergeMessageDeltaText = (
-  existing: Extract<TAgentUiEvent, { type: 'message_delta' }>,
+  _existing: Extract<TAgentUiEvent, { type: 'message_delta' }>,
   incoming: Extract<TAgentUiEvent, { type: 'message_delta' }>,
 ): Extract<TAgentUiEvent, { type: 'message_delta' }> => ({
   ...incoming,
-  text: `${existing.text ?? ''}${incoming.text ?? ''}`,
 });
 
 export const createSidecarLiveEventBuffer = (
@@ -298,7 +287,7 @@ export const createSidecarLiveEventBuffer = (
     const existingEvent = existingIndex !== undefined ? events[existingIndex] : undefined;
 
     if (existingIndex !== undefined && existingEvent?.type === 'message_delta') {
-      // 增量累加,而非覆盖:保证保留的 events 中该 phase 的 message_delta 始终是完整文本。
+      // 取最新累计快照,而非拼接:保证保留的 events 中该 phase 的 message_delta 始终是完整文本。
       events[existingIndex] = mergeMessageDeltaText(existingEvent, event);
       return;
     }
@@ -320,7 +309,7 @@ export const createSidecarLiveEventBuffer = (
     if (existingIndex >= 0) {
       const existingEvent = pendingEvents[existingIndex];
 
-      // 同一帧内合并多个增量时同样累加文本,避免丢字。
+      // 同一帧内多条 message_delta 同样取最新累计文本,避免重复。
       pendingEvents[existingIndex] =
         existingEvent?.type === 'message_delta'
           ? mergeMessageDeltaText(existingEvent, event)

@@ -76,6 +76,7 @@ import {
   normalizeAttachmentName,
   readImageDimensions,
 } from './useAiAssistant.attachments';
+import { useAiConversationTitles } from './useAiAssistant.conversation-titles';
 import {
   buildReversePatchSet,
   extractSidecarPatchEntries,
@@ -194,7 +195,6 @@ const AI_EDIT_ROLLBACK_TIMELINE_LIMIT = 24;
 const CODE_BLOCK_PATTERN = /```[a-zA-Z0-9_-]*\n([\s\S]*?)```/;
 const MSG_STREAM_ERROR = 'AI 响应出错';
 const MSG_CALL_FAILED = 'AI 调用失败';
-const CONVERSATION_TITLE_RETRY_DELAYS_MS = [1500, 3000, 5000, 9000, 16000, 30000, 60000] as const;
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -240,9 +240,8 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const activeSidecarAgentSession = ref<IAiPersistedSidecarAgentSession | null>(null);
   const activeBufferedThreadId = ref<string | null>(null);
   const displayMessages = shallowRef<IAiChatMessage[]>(unref(conversationStore.activeMessages));
-  const pendingTitleThreadIds = new Set<string>();
-  const pendingTitleRetryTimers = new Map<string, ReturnType<typeof window.setTimeout>>();
-  const titleRetryAttemptByThreadId = new Map<string, number>();
+
+  const { maybeGenerateConversationTitle } = useAiConversationTitles({ conversationStore });
 
   const revokeAttachmentPreview = (file: IAiAttachedFile): void => {
     const src = file.preview?.src;
@@ -284,11 +283,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   if (getCurrentScope()) {
     onScopeDispose(() => {
       clearAttachedFiles();
-      pendingTitleRetryTimers.forEach((timerId) => {
-        window.clearTimeout(timerId);
-      });
-      pendingTitleRetryTimers.clear();
-      titleRetryAttemptByThreadId.clear();
     });
   }
 
@@ -346,18 +340,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     if (!isConversationWriteBuffered()) {
       displayMessages.value = unref(conversationStore.activeMessages);
     }
-  };
-
-  const clearConversationTitleRetryTimer = (threadId: string): void => {
-    const timerId = pendingTitleRetryTimers.get(threadId);
-
-    if (timerId === undefined || typeof window === 'undefined') {
-      pendingTitleRetryTimers.delete(threadId);
-      return;
-    }
-
-    window.clearTimeout(timerId);
-    pendingTitleRetryTimers.delete(threadId);
   };
 
   const messages = computed<IAiChatMessage[]>({
@@ -422,64 +404,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     },
     { flush: 'sync' },
   );
-
-  const maybeGenerateConversationTitle = async (threadId: string | null): Promise<void> => {
-    if (!threadId || pendingTitleThreadIds.has(threadId)) {
-      return;
-    }
-
-    const titleStatus = conversationStore.getThreadTitleStatus(threadId);
-    const retryAttempt = titleRetryAttemptByThreadId.get(threadId) ?? 0;
-    const canRetryFailedTitle =
-      retryAttempt > 0 && retryAttempt <= CONVERSATION_TITLE_RETRY_DELAYS_MS.length;
-
-    if (titleStatus !== 'temporary' && !canRetryFailedTitle) {
-      return;
-    }
-
-    const firstRound = conversationStore.getFirstRoundForTitle(threadId);
-
-    if (!firstRound) {
-      return;
-    }
-
-    pendingTitleThreadIds.add(threadId);
-    clearConversationTitleRetryTimer(threadId);
-    conversationStore.markThreadTitleGenerating(threadId);
-
-    try {
-      const payload = await aiService.generateConversationTitle(firstRound);
-      conversationStore.completeThreadTitleGeneration(threadId, payload.title);
-      clearConversationTitleRetryTimer(threadId);
-      titleRetryAttemptByThreadId.delete(threadId);
-    } catch (error) {
-      conversationStore.failThreadTitleGeneration(threadId);
-      const nextRetryAttempt = (titleRetryAttemptByThreadId.get(threadId) ?? 0) + 1;
-      titleRetryAttemptByThreadId.set(threadId, nextRetryAttempt);
-      const retryDelay = CONVERSATION_TITLE_RETRY_DELAYS_MS[nextRetryAttempt - 1];
-      const hasScope = typeof window !== 'undefined';
-
-      if (hasScope && retryDelay !== undefined) {
-        const retryTimer = window.setTimeout(() => {
-          pendingTitleRetryTimers.delete(threadId);
-          void maybeGenerateConversationTitle(threadId);
-        }, retryDelay);
-        pendingTitleRetryTimers.set(threadId, retryTimer);
-      } else if (retryDelay === undefined) {
-        titleRetryAttemptByThreadId.delete(threadId);
-      }
-
-      logger.warn({
-        event: 'ai.conversation_title.failed',
-        err: error,
-        threadId,
-        retryDelay,
-        retryAttempt: nextRetryAttempt,
-      });
-    } finally {
-      pendingTitleThreadIds.delete(threadId);
-    }
-  };
 
   const resolveActiveAgentPatchTarget = (): IActiveAgentPatchTarget | null => {
     const activeRun = unref(agentPlan.store.activeRun);

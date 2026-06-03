@@ -255,7 +255,7 @@ export const shikiEditorChromeTheme = EditorView.theme(
     },
     '.cm-cursor, .cm-dropCursor': {
       borderLeftColor: '#24292e',
-      borderLeftWidth: '2px',
+      borderLeftWidth: '1.5px',
     },
     // 选区交给浏览器原生绘制（已移除 drawSelection）：只覆盖每行真实字符，
     // 行尾之后的空白不再刷蓝，多行/全选呈参差右边缘，跟 VS Code 一致。
