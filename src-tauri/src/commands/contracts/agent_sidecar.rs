@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 use super::ai_chat::AiContextReferencePayload;
 use super::secret::SecretString;
@@ -7,14 +8,14 @@ use super::secret::SecretString;
 // Agent sidecar
 // ============================================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarMessagePayload {
     pub(crate) role: String,
     pub(crate) content: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarModelConfigPayload {
     pub(crate) model_id: String,
@@ -23,7 +24,7 @@ pub struct AgentSidecarModelConfigPayload {
     pub(crate) base_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarWarmupRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -38,7 +39,7 @@ fn is_blank_optional_string(value: &Option<String>) -> bool {
         .is_empty()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarChatRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
@@ -58,7 +59,7 @@ pub struct AgentSidecarChatRequest {
     pub(crate) thread_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarPlanRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
@@ -77,7 +78,7 @@ pub struct AgentSidecarPlanRequest {
     pub(crate) plan_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarExecuteRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
@@ -95,7 +96,7 @@ pub struct AgentSidecarExecuteRequest {
     pub(crate) plan_step_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarPlanValidateRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
@@ -113,7 +114,7 @@ pub struct AgentSidecarPlanValidateRequest {
     pub(crate) plan_version: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarPlanReplanRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
@@ -130,7 +131,7 @@ pub struct AgentSidecarPlanReplanRequest {
     pub(crate) plan_version: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarPlanApproveRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
@@ -139,7 +140,7 @@ pub struct AgentSidecarPlanApproveRequest {
     pub(crate) version: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarPlanQueryRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
@@ -149,7 +150,7 @@ pub struct AgentSidecarPlanQueryRequest {
     pub(crate) version: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarPlanRejectRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
@@ -160,7 +161,7 @@ pub struct AgentSidecarPlanRejectRequest {
     pub(crate) reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarPlanFinishRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
@@ -172,7 +173,7 @@ pub struct AgentSidecarPlanFinishRequest {
     pub(crate) error_message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarApprovalResolveRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
@@ -199,14 +200,14 @@ pub struct AgentSidecarApprovalResolveRequest {
     pub(crate) plan_step_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(untagged)]
 pub enum AgentSidecarRollbackStepPath {
     Single(String),
     Nested(Vec<String>),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarCheckpointRestoreRequest {
     #[serde(skip_serializing_if = "is_blank_optional_string")]
@@ -220,7 +221,7 @@ pub struct AgentSidecarCheckpointRestoreRequest {
     pub(crate) model_config: Option<AgentSidecarModelConfigPayload>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarMcpHealthPayload {
     pub(crate) configured_servers: u32,
@@ -228,7 +229,7 @@ pub struct AgentSidecarMcpHealthPayload {
     pub(crate) errors: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarHealthPayload {
     pub(crate) ok: bool,
@@ -240,19 +241,20 @@ pub struct AgentSidecarHealthPayload {
     pub(crate) mcp: AgentSidecarMcpHealthPayload,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarWarmupPayload {
     pub(crate) ok: bool,
     pub(crate) provider_id: Option<String>,
     pub(crate) origin: Option<String>,
     pub(crate) status_code: Option<u16>,
+    #[specta(type = u32)]
     pub(crate) duration_ms: u64,
     pub(crate) skipped: bool,
     pub(crate) reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarResponsePayload {
     pub(crate) session_id: String,

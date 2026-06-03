@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 use super::secret::SecretString;
 
@@ -6,7 +7,7 @@ use super::secret::SecretString;
 // AI – config / credentials
 // ============================================================================
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSaveConfigRequest {
     #[serde(default)]
@@ -21,7 +22,7 @@ pub struct AiSaveConfigRequest {
 
 /// ⚠️ `api_key` 已包装在 `SecretString` 中，Debug 输出会被遮蔽为 `***`。
 /// 调用方读取明文请使用 `request.api_key.expose()` 显式取出。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSaveCredentialsRequest {
     pub(crate) provider_id: String,
@@ -34,7 +35,7 @@ pub struct AiSaveCredentialsRequest {
 ///
 /// `api_key` 允许为空：为空时后端只会尝试读取当前 Provider 已保存的凭证；
 /// 若也不存在已保存凭证，连接测试必须失败，不能伪造成功。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProviderConnectionRequest {
     #[serde(default)]
@@ -50,7 +51,7 @@ pub struct AiProviderConnectionRequest {
     pub(crate) api_key: Option<SecretString>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiConfigPayload {
     pub(crate) provider_type: String,
@@ -66,7 +67,7 @@ pub struct AiConfigPayload {
     pub(crate) credentials: Vec<AiCredentialStatusPayload>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiModelEndpointConfigPayload {
     pub(crate) provider_type: String,
@@ -77,7 +78,7 @@ pub struct AiModelEndpointConfigPayload {
     pub(crate) is_configured: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiCredentialStatusPayload {
     pub(crate) provider_id: String,
@@ -86,7 +87,7 @@ pub struct AiCredentialStatusPayload {
     pub(crate) key_preview: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProviderTestPayload {
     pub(crate) ok: bool,
@@ -95,7 +96,7 @@ pub struct AiProviderTestPayload {
     pub(crate) message: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProviderConnectionPayload {
     pub(crate) config: AiConfigPayload,

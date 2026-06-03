@@ -1,6 +1,7 @@
 use crate::commands::terminal::commands as terminal_commands;
 use crate::commands::{
-    git, script_run, search, shell_tools, ssh, window, window_stage, workspace_fs, workspace_watcher,
+    agent_sidecar, ai, git, script_run, search, shell_tools, ssh, window, window_stage,
+    workspace_fs, workspace_watcher,
 };
 use specta_typescript::Typescript;
 use std::path::PathBuf;
@@ -13,7 +14,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         .events(collect_events![
             workspace_watcher::WorkspaceFsEvent,
         ])
-        // ↓↓↓ commands 后（它会"封口"返回 Commands，不能再 .events()）↓↓↓
+        // ↓↓↓ commands 后（它会\"封口\"返回 Commands，不能再 .events()）↓↓↓
         .commands(collect_commands![
             script_run::detect_execution_environment,
             search::apply_workspace_replacement,
@@ -71,6 +72,54 @@ pub fn builder() -> Builder<tauri::Wry> {
             ssh::transfer::delete_ssh_path,
             ssh::transfer::rename_ssh_path,
             ssh::transfer::create_ssh_directory,
+            // ↓↓↓ agent_sidecar：从手写 Zod 契约迁入 specta 生成轨（用模块限定路径以解析配套宏）↓↓↓
+            agent_sidecar::agent_sidecar_health,
+            agent_sidecar::agent_sidecar_restart,
+            agent_sidecar::agent_sidecar_warmup,
+            agent_sidecar::agent_sidecar_chat,
+            agent_sidecar::agent_sidecar_plan,
+            agent_sidecar::agent_sidecar_plan_approve,
+            agent_sidecar::agent_sidecar_plan_query,
+            agent_sidecar::agent_sidecar_plan_reject,
+            agent_sidecar::agent_sidecar_plan_finish,
+            agent_sidecar::agent_sidecar_plan_validate,
+            agent_sidecar::agent_sidecar_plan_replan,
+            agent_sidecar::agent_sidecar_execute,
+            agent_sidecar::agent_sidecar_resolve_approval,
+            agent_sidecar::agent_sidecar_restore_checkpoint,
+            // ↓↓↓ ai gateway / chat / config / inline ↓↓↓
+            ai::gateway::ai_get_config,
+            ai::gateway::ai_save_config,
+            ai::gateway::ai_save_credentials,
+            ai::gateway::ai_test_provider_config,
+            ai::gateway::ai_connect_provider,
+            ai::gateway::ai_clear_credentials,
+            ai::gateway::ai_test_provider,
+            ai::gateway::ai_generate_conversation_title,
+            ai::gateway::ai_get_suggestion_pool_cache,
+            ai::gateway::ai_generate_suggestion_pool,
+            ai::gateway::ai_chat_stream,
+            ai::gateway::ai_cancel,
+            ai::gateway::ai_inline_complete,
+            // ↓↓↓ ai agent / web tools ↓↓↓
+            ai::agent::ai_agent_classify_task,
+            ai::agent::ai_agent_set_network_permission,
+            ai::tools::ai_web_search,
+            ai::tools::ai_web_fetch,
+            // ↓↓↓ ai edit（patch / timeline / snapshots）↓↓↓
+            ai::edit::ai_propose_patch,
+            ai::edit::ai_apply_patch,
+            ai::edit::ai_edit_get_auth_level,
+            ai::edit::ai_edit_set_auth_level,
+            ai::edit::ai_edit_list_timeline,
+            ai::edit::ai_edit_set_pin,
+            ai::edit::ai_edit_get_diff,
+            ai::edit::ai_edit_create_snapshot,
+            ai::edit::ai_edit_restore_snapshot,
+            ai::edit::ai_edit_undo_operation,
+            ai::edit::ai_edit_revert_file,
+            ai::edit::ai_edit_revert_hunk,
+            ai::edit::ai_edit_revert_task,
         ])
 }
 

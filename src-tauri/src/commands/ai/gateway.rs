@@ -11,11 +11,13 @@ use crate::commands::contracts::{
 use tauri::AppHandle;
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_get_config() -> Result<AiConfigPayload, String> {
     Ok(gateway::get_config())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_save_config(payload: AiSaveConfigRequest) -> Result<AiConfigPayload, String> {
     gateway::save_config(
         payload.role.as_deref(),
@@ -29,6 +31,7 @@ pub fn ai_save_config(payload: AiSaveConfigRequest) -> Result<AiConfigPayload, S
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_save_credentials(payload: AiSaveCredentialsRequest) -> Result<AiConfigPayload, String> {
     gateway::save_credentials(
         &payload.provider_id,
@@ -38,6 +41,7 @@ pub fn ai_save_credentials(payload: AiSaveCredentialsRequest) -> Result<AiConfig
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ai_test_provider_config(
     payload: AiProviderConnectionRequest,
 ) -> Result<AiProviderTestPayload, String> {
@@ -68,6 +72,7 @@ pub async fn ai_test_provider_config(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ai_connect_provider(
     payload: AiProviderConnectionRequest,
 ) -> Result<AiProviderConnectionPayload, String> {
@@ -95,6 +100,7 @@ pub async fn ai_connect_provider(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_clear_credentials() -> Result<(), String> {
     gateway::clear_credentials()?;
     audit::emit(AiAuditEventKind::CredentialCleared);
@@ -102,6 +108,7 @@ pub fn ai_clear_credentials() -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ai_test_provider() -> Result<AiProviderTestPayload, String> {
     match gateway::test_provider().await {
         Ok(()) => Ok(AiProviderTestPayload {
@@ -118,6 +125,7 @@ pub async fn ai_test_provider() -> Result<AiProviderTestPayload, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ai_generate_conversation_title(
     payload: AiConversationTitleRequest,
 ) -> Result<AiConversationTitlePayload, String> {
@@ -125,11 +133,13 @@ pub async fn ai_generate_conversation_title(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_get_suggestion_pool_cache() -> Result<Option<AiSuggestionPoolPayload>, String> {
     gateway::get_suggestion_pool_cache()
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ai_generate_suggestion_pool(
     payload: AiSuggestionPoolRequest,
 ) -> Result<AiSuggestionPoolPayload, String> {
@@ -137,6 +147,7 @@ pub async fn ai_generate_suggestion_pool(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ai_chat_stream(
     app: AppHandle,
     payload: AiChatRequest,
@@ -151,6 +162,7 @@ pub async fn ai_chat_stream(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_cancel(payload: AiCancelRequest) -> Result<(), String> {
     let stream_id = payload.stream_id.trim();
     if stream_id.is_empty() {
@@ -161,6 +173,7 @@ pub fn ai_cancel(payload: AiCancelRequest) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn ai_inline_complete(
     payload: AiInlineCompletionRequest,
 ) -> Result<AiInlineCompletionResult, String> {

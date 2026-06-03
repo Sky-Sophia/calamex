@@ -9,21 +9,25 @@ use crate::commands::contracts::{
 use tauri::AppHandle;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_health() -> Result<AgentSidecarHealthPayload, String> {
     agent_sidecar::health().await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_restart() -> Result<AgentSidecarHealthPayload, String> {
     agent_sidecar::restart().await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_warmup() -> Result<AgentSidecarWarmupPayload, String> {
     agent_sidecar::warmup().await
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_chat(
     app: AppHandle,
     payload: AgentSidecarChatRequest,
@@ -32,6 +36,7 @@ pub async fn agent_sidecar_chat(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_plan(
     app: AppHandle,
     payload: AgentSidecarPlanRequest,
@@ -40,6 +45,7 @@ pub async fn agent_sidecar_plan(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_plan_approve(
     payload: AgentSidecarPlanApproveRequest,
 ) -> Result<AgentSidecarResponsePayload, String> {
@@ -47,6 +53,7 @@ pub async fn agent_sidecar_plan_approve(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_plan_query(
     payload: AgentSidecarPlanQueryRequest,
 ) -> Result<AgentSidecarResponsePayload, String> {
@@ -54,6 +61,7 @@ pub async fn agent_sidecar_plan_query(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_plan_reject(
     payload: AgentSidecarPlanRejectRequest,
 ) -> Result<AgentSidecarResponsePayload, String> {
@@ -61,6 +69,7 @@ pub async fn agent_sidecar_plan_reject(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_plan_finish(
     payload: AgentSidecarPlanFinishRequest,
 ) -> Result<AgentSidecarResponsePayload, String> {
@@ -68,6 +77,7 @@ pub async fn agent_sidecar_plan_finish(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_plan_validate(
     payload: AgentSidecarPlanValidateRequest,
 ) -> Result<AgentSidecarResponsePayload, String> {
@@ -75,6 +85,7 @@ pub async fn agent_sidecar_plan_validate(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_plan_replan(
     payload: AgentSidecarPlanReplanRequest,
 ) -> Result<AgentSidecarResponsePayload, String> {
@@ -82,6 +93,7 @@ pub async fn agent_sidecar_plan_replan(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_execute(
     app: AppHandle,
     payload: AgentSidecarExecuteRequest,
@@ -90,6 +102,7 @@ pub async fn agent_sidecar_execute(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_resolve_approval(
     app: AppHandle,
     payload: AgentSidecarApprovalResolveRequest,
@@ -98,6 +111,7 @@ pub async fn agent_sidecar_resolve_approval(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn agent_sidecar_restore_checkpoint(
     app: AppHandle,
     payload: AgentSidecarCheckpointRestoreRequest,

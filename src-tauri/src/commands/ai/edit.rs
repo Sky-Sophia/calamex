@@ -15,11 +15,13 @@ use crate::commands::contracts::{
 use tauri::{AppHandle, State};
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_propose_patch(payload: AiProposePatchRequest) -> Result<AiProposePatchPayload, String> {
     patch::propose_patch(payload)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_apply_patch(
     app: AppHandle,
     payload: AiApplyPatchRequest,
@@ -31,11 +33,13 @@ pub fn ai_apply_patch(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_edit_get_auth_level(state: State<AiEditState>) -> Result<AiEditAuthStatePayload, String> {
     ai_edit::get_auth_level(state.inner())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_edit_set_auth_level(
     payload: AiEditSetAuthLevelRequest,
     state: State<AiEditState>,
@@ -44,6 +48,7 @@ pub fn ai_edit_set_auth_level(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_edit_list_timeline(
     app: AppHandle,
     payload: AiEditListTimelineRequest,
@@ -55,6 +60,7 @@ pub fn ai_edit_list_timeline(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_edit_set_pin(
     app: AppHandle,
     payload: AiEditSetPinRequest,
@@ -66,6 +72,7 @@ pub fn ai_edit_set_pin(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_edit_get_diff(
     app: AppHandle,
     payload: AiEditGetDiffRequest,
@@ -77,6 +84,7 @@ pub fn ai_edit_get_diff(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_edit_create_snapshot(
     app: AppHandle,
     payload: AiEditCreateSnapshotRequest,
@@ -88,6 +96,7 @@ pub fn ai_edit_create_snapshot(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_edit_restore_snapshot(
     app: AppHandle,
     payload: AiEditRestoreSnapshotRequest,
@@ -99,6 +108,7 @@ pub fn ai_edit_restore_snapshot(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_edit_undo_operation(
     app: AppHandle,
     payload: AiEditUndoOperationRequest,
@@ -110,6 +120,7 @@ pub fn ai_edit_undo_operation(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_edit_revert_file(
     app: AppHandle,
     payload: AiEditRevertFileRequest,
@@ -121,6 +132,7 @@ pub fn ai_edit_revert_file(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_edit_revert_hunk(
     app: AppHandle,
     payload: AiEditRevertHunkRequest,
@@ -132,6 +144,7 @@ pub fn ai_edit_revert_hunk(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn ai_edit_revert_task(
     app: AppHandle,
     payload: AiEditRevertTaskRequest,

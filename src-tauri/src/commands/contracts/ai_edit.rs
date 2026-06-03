@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 // ============================================================================
 // AI – patch
 // ============================================================================
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiPatchHunkPayload {
     pub(crate) old_start: u32,
@@ -21,7 +22,7 @@ pub struct AiPatchHunkPayload {
     pub(crate) lines: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiPatchFilePayload {
     pub(crate) path: String,
@@ -29,18 +30,19 @@ pub struct AiPatchFilePayload {
     /// 生成 patch 时源文件的 mtime（Unix epoch 毫秒）。
     /// 旧调用可为空；AED 写盘链路会在真正落盘前用运行时读取的 baseline 再做 OCC。
     #[serde(default)]
+    #[specta(type = Option<u32>)]
     pub(crate) original_modified_at_ms: Option<u64>,
     pub(crate) hunks: Vec<AiPatchHunkPayload>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiPatchSetPayload {
     pub(crate) summary: String,
     pub(crate) files: Vec<AiPatchFilePayload>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProposePatchRequest {
     pub(crate) path: String,
@@ -49,13 +51,13 @@ pub struct AiProposePatchRequest {
     pub(crate) summary: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProposePatchPayload {
     pub(crate) patch: AiPatchSetPayload,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiApplyPatchMetadataRequest {
     pub(crate) task_id: Option<String>,
@@ -68,21 +70,22 @@ pub struct AiApplyPatchMetadataRequest {
     pub(crate) workspace_root_path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiApplyPatchRequest {
     pub(crate) patch: AiPatchSetPayload,
     pub(crate) metadata: Option<AiApplyPatchMetadataRequest>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiApplyPatchFilePayload {
     pub(crate) path: String,
+    #[specta(type = u32)]
     pub(crate) byte_size: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiApplyPatchPayload {
     pub(crate) applied_files: Vec<AiApplyPatchFilePayload>,
@@ -92,7 +95,7 @@ pub struct AiApplyPatchPayload {
 // AI – edit / timeline / auth
 // ============================================================================
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditSetAuthLevelRequest {
     /// 已知值："manual" | "per_task" | "session"。
@@ -100,7 +103,7 @@ pub struct AiEditSetAuthLevelRequest {
     pub(crate) task_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditAuthStatePayload {
     /// 已知值："manual" | "per_task" | "session"。
@@ -109,7 +112,7 @@ pub struct AiEditAuthStatePayload {
     pub(crate) updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditOperationPayload {
     pub(crate) id: String,
@@ -122,7 +125,9 @@ pub struct AiEditOperationPayload {
     pub(crate) source_snapshot_id: Option<String>,
     pub(crate) before_hash: Option<String>,
     pub(crate) after_hash: Option<String>,
+    #[specta(type = Option<u32>)]
     pub(crate) bytes_before: Option<u64>,
+    #[specta(type = Option<u32>)]
     pub(crate) bytes_after: Option<u64>,
     pub(crate) applied_at: String,
     pub(crate) reason: String,
@@ -131,7 +136,7 @@ pub struct AiEditOperationPayload {
     pub(crate) pinned: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSnapshotPayload {
     pub(crate) id: String,
@@ -143,12 +148,13 @@ pub struct AiSnapshotPayload {
     pub(crate) label: String,
     pub(crate) file_refs: Vec<String>,
     pub(crate) storage_key: String,
+    #[specta(type = u32)]
     pub(crate) size_bytes: u64,
     pub(crate) content_available: bool,
     pub(crate) pinned: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditSetPinRequest {
     /// 已知值："operation" | "snapshot" | "task"。
@@ -157,7 +163,7 @@ pub struct AiEditSetPinRequest {
     pub(crate) pinned: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditSetPinPayload {
     pub(crate) target_type: String,
@@ -168,7 +174,7 @@ pub struct AiEditSetPinPayload {
 
 /// 与前端 `aiEditTimelineEntrySchema` 一一对齐的判别联合，
 /// 形如 `{ "type": "snapshot" | "operation", "data": { … } }`。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[allow(dead_code)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum AiEditTimelineEntryPayload {
@@ -176,20 +182,20 @@ pub enum AiEditTimelineEntryPayload {
     Operation(AiEditOperationPayload),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditListTimelineRequest {
     pub(crate) task_id: Option<String>,
     pub(crate) limit: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditListTimelinePayload {
     pub(crate) entries: Vec<AiEditTimelineEntryPayload>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditCreateSnapshotRequest {
     pub(crate) file_refs: Vec<String>,
@@ -197,19 +203,19 @@ pub struct AiEditCreateSnapshotRequest {
     pub(crate) task_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditCreateSnapshotPayload {
     pub(crate) snapshot: AiSnapshotPayload,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditRestoreSnapshotRequest {
     pub(crate) snapshot_id: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditRestoreSnapshotPayload {
     pub(crate) snapshot_id: String,
@@ -218,13 +224,13 @@ pub struct AiEditRestoreSnapshotPayload {
     pub(crate) restored_snapshot: AiSnapshotPayload,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditUndoOperationRequest {
     pub(crate) operation_id: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditUndoOperationPayload {
     pub(crate) operation_id: String,
@@ -233,14 +239,14 @@ pub struct AiEditUndoOperationPayload {
     pub(crate) restored_snapshot: AiSnapshotPayload,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditRevertFileRequest {
     pub(crate) task_id: String,
     pub(crate) path: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditRevertFilePayload {
     pub(crate) task_id: String,
@@ -251,7 +257,7 @@ pub struct AiEditRevertFilePayload {
     pub(crate) restored_snapshot: AiSnapshotPayload,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditDiffHunkPayload {
     pub(crate) hunk_index: u32,
@@ -262,14 +268,14 @@ pub struct AiEditDiffHunkPayload {
     pub(crate) lines: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditGetDiffRequest {
     pub(crate) task_id: String,
     pub(crate) path: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditGetDiffPayload {
     pub(crate) task_id: String,
@@ -281,7 +287,7 @@ pub struct AiEditGetDiffPayload {
     pub(crate) hunks: Vec<AiEditDiffHunkPayload>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditRevertHunkRequest {
     pub(crate) task_id: String,
@@ -289,7 +295,7 @@ pub struct AiEditRevertHunkRequest {
     pub(crate) hunk_index: u32,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditRevertHunkPayload {
     pub(crate) task_id: String,
@@ -301,13 +307,13 @@ pub struct AiEditRevertHunkPayload {
     pub(crate) restored_snapshot: AiSnapshotPayload,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditRevertTaskRequest {
     pub(crate) task_id: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiEditRevertTaskPayload {
     pub(crate) task_id: String,

@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 // ============================================================================
 // AI – chat
 // ============================================================================
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiChatMessagePayload {
     /// 已知值："user" | "assistant" | "system" | "tool"。
@@ -15,14 +16,14 @@ pub struct AiChatMessagePayload {
     pub(crate) references: Vec<AiContextReferencePayload>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiContextRangePayload {
     pub(crate) start_line: u32,
     pub(crate) end_line: u32,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiContextReferencePayload {
     pub(crate) id: String,
@@ -35,7 +36,7 @@ pub struct AiContextReferencePayload {
     pub(crate) redacted: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiChatRequest {
     pub(crate) thread_id: Option<String>,
@@ -43,29 +44,30 @@ pub struct AiChatRequest {
     pub(crate) references: Vec<AiContextReferencePayload>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiConversationTitleRequest {
     pub(crate) user_message: String,
     pub(crate) assistant_message: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiConversationTitlePayload {
     pub(crate) title: String,
     pub(crate) model: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSuggestionPoolRequest {
+    #[specta(type = u32)]
     pub(crate) count: usize,
     pub(crate) locale: String,
     pub(crate) topics: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSuggestionPoolPayload {
     pub(crate) suggestions: Vec<String>,
@@ -73,7 +75,7 @@ pub struct AiSuggestionPoolPayload {
     pub(crate) generated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiChatStreamPayload {
     pub(crate) stream_id: String,
@@ -82,7 +84,7 @@ pub struct AiChatStreamPayload {
     pub(crate) model: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiCancelRequest {
     pub(crate) stream_id: String,
@@ -92,7 +94,7 @@ pub struct AiCancelRequest {
 // AI – inline completion
 // ============================================================================
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiInlineCompletionRequest {
     pub(crate) file_path: String,
@@ -103,14 +105,14 @@ pub struct AiInlineCompletionRequest {
     pub(crate) recent_edits: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiInlineCompletionRangePayload {
     pub(crate) start_offset: u32,
     pub(crate) end_offset: u32,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiInlineCompletionResult {
     pub(crate) insert_text: String,
