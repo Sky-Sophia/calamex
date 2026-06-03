@@ -1,4 +1,4 @@
-import { createWorkflow, createStep } from '@mastra/core/workflows'; // VERIFY-1: 1.37.1 导出路径（应为 '@mastra/core/workflows'）
+import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
 
 /**
@@ -9,8 +9,17 @@ import { z } from 'zod';
  * - 审批门禁用原生 suspend/resume 取代「跨 HTTP 请求 + planWorkflowStore.suspend」。
  * - 本文件暂不被任何运行路径 import；接线在 Phase 2（server.ts + IPlanOrchestrationDeps 实现）。
  *
- * 需本地 `pnpm build` 核对的 4 个 VERIFY 点见下方注释。
+ * 控制流：
+ *   generatePlan → approvalGate(suspend/resume)
+ *     → .dountil(executeValidateReplan, 直到 被拒 || 验证通过 || 失败)
+ *     → finish
+ * executeValidateReplan 单步内部：顺序执行所有 step → validate → 需要则 replan(新版本, cursor 归零)。
+ *   （之前用嵌套子 workflow 会触发 exactOptionalPropertyTypes 下 Workflow→Step 类型不兼容，故改为单步 + JS 循环。
+ *    Phase 2 可在类型调通后再拆回原生逐步 step。）
  */
+
+// 重规划次数上限，防止验证反复失败时无限循环。
+const MAX_REPLANS = 3;
 
 // ---------------------------------------------------------------------------
 // 注入接口：Phase 2 由 MastraRuntime 实现（内部仍调用现有 store / 现有 phase 方法）
@@ -53,6 +62,8 @@ const cycleContextSchema = z.object({
 	cursor: z.number().int().nonnegative(), // 下一个待执行 step 的下标
 	rejected: z.boolean(),
 	validationPassed: z.boolean(),
+	failed: z.boolean(),
+	replanCount: z.number().int().nonnegative(),
 	lastSummary: z.string().nullable(),
 });
 type TCycleContext = z.infer<typeof cycleContextSchema>;
@@ -89,6 +100,8 @@ export const createPlanOrchestrationWorkflow = (deps: IPlanOrchestrationDeps) =>
 				cursor: 0,
 				rejected: false,
 				validationPassed: false,
+				failed: false,
+				replanCount: 0,
 				lastSummary: null,
 			} satisfies TCycleContext;
 		},
@@ -99,7 +112,6 @@ export const createPlanOrchestrationWorkflow = (deps: IPlanOrchestrationDeps) =>
 		inputSchema: cycleContextSchema,
 		outputSchema: cycleContextSchema,
 		resumeSchema: approvalResumeSchema,
-		// VERIFY-2: suspend() 的 payload 即 resume 前下发给前端的数据；resumeData 由 run.resume({ resumeData }) 注入
 		execute: async ({ inputData, resumeData, suspend }) => {
 			if (!resumeData) {
 				await suspend({
@@ -122,56 +134,55 @@ export const createPlanOrchestrationWorkflow = (deps: IPlanOrchestrationDeps) =>
 		},
 	});
 
-	// 执行单个 step，推进 cursor。.dountil 循环直到 cursor 越过末尾或被拒/失败。
-	const executeStepStep = createStep({
-		id: 'execute-step',
+	// 一轮「顺序执行所有 step → 验证 → 需要则重规划」。外层 .dountil 控制重规划循环。
+	const executeValidateReplanStep = createStep({
+		id: 'execute-validate-replan',
 		inputSchema: cycleContextSchema,
 		outputSchema: cycleContextSchema,
 		execute: async ({ inputData }) => {
-			if (inputData.rejected || inputData.cursor >= inputData.stepIds.length) {
-				return inputData;
+			let ctx: TCycleContext = inputData;
+			if (ctx.rejected) return ctx;
+
+			// 1) 顺序执行剩余 steps
+			while (ctx.cursor < ctx.stepIds.length) {
+				const stepId = ctx.stepIds[ctx.cursor]!;
+				const result = await deps.executeStep({
+					planId: ctx.planId,
+					version: ctx.version,
+					stepId,
+				});
+				// VERIFY-3: 'suspended'（工具审批）在 Phase 2 需冒泡为 workflow 级 suspend；Phase 1 暂按已推进处理。
+				if (result.status === 'failed') {
+					return { ...ctx, failed: true, lastSummary: result.error ?? '执行失败' };
+				}
+				ctx = { ...ctx, cursor: ctx.cursor + 1 };
 			}
-			const stepId = inputData.stepIds[inputData.cursor]!;
-			const result = await deps.executeStep({
-				planId: inputData.planId,
-				version: inputData.version,
-				stepId,
-			});
-			// VERIFY-3: 'suspended'（工具审批）在 Phase 2 需冒泡为 workflow 级 suspend；
-			// Phase 1 先按「已推进」处理以保证骨架可编译 / 可跑通 happy path。
-			if (result.status === 'failed') {
-				return { ...inputData, validationPassed: false, lastSummary: result.error ?? '执行失败' };
+
+			// 2) 验证
+			const report = await deps.validate({ planId: ctx.planId, version: ctx.version });
+			if (!report.needsReplan) {
+				return { ...ctx, validationPassed: true, lastSummary: report.summary };
 			}
-			return { ...inputData, cursor: inputData.cursor + 1 };
-		},
-	});
 
-	const validateStep = createStep({
-		id: 'validate',
-		inputSchema: cycleContextSchema,
-		outputSchema: cycleContextSchema,
-		execute: async ({ inputData }) => {
-			if (inputData.rejected) return inputData;
-			const report = await deps.validate({ planId: inputData.planId, version: inputData.version });
-			return { ...inputData, validationPassed: !report.needsReplan, lastSummary: report.summary };
+			// 3) 需要重规划
+			if (ctx.replanCount >= MAX_REPLANS) {
+				return {
+					...ctx,
+					failed: true,
+					lastSummary: `重规划次数超过上限(${MAX_REPLANS})：${report.summary}`,
+				};
+			}
+			const next = await deps.replan({ planId: ctx.planId, version: ctx.version });
+			return {
+				...ctx,
+				version: next.version,
+				stepIds: next.stepIds,
+				cursor: 0,
+				replanCount: ctx.replanCount + 1,
+				validationPassed: false,
+				lastSummary: report.summary,
+			};
 		},
-	});
-
-	const replanStep = createStep({
-		id: 'replan',
-		inputSchema: cycleContextSchema,
-		outputSchema: cycleContextSchema,
-		execute: async ({ inputData }) => {
-			const next = await deps.replan({ planId: inputData.planId, version: inputData.version });
-			return { ...inputData, version: next.version, stepIds: next.stepIds, cursor: 0 };
-		},
-	});
-
-	const passThroughStep = createStep({
-		id: 'validation-passed',
-		inputSchema: cycleContextSchema,
-		outputSchema: cycleContextSchema,
-		execute: async ({ inputData }) => inputData,
 	});
 
 	const finishStep = createStep({
@@ -200,24 +211,6 @@ export const createPlanOrchestrationWorkflow = (deps: IPlanOrchestrationDeps) =>
 		},
 	});
 
-	// 一轮「执行→验证→（需要则重规划）」。外层 .dountil 循环直到验证通过或被拒。
-	const executeValidateCycle = createWorkflow({
-		id: 'calamex-plan-execute-cycle',
-		inputSchema: cycleContextSchema,
-		outputSchema: cycleContextSchema,
-	})
-		// VERIFY-4: .dountil(step, condition) 语义 = 先跑 step，condition 为 true 时停止；条件回调签名 ({ inputData }) => boolean | Promise<boolean>
-		.dountil(
-			executeStepStep,
-			async ({ inputData }) => inputData.rejected || inputData.cursor >= inputData.stepIds.length,
-		)
-		.then(validateStep)
-		.branch([
-			[async ({ inputData }) => !inputData.rejected && !inputData.validationPassed, replanStep],
-			[async ({ inputData }) => inputData.rejected || inputData.validationPassed, passThroughStep],
-		])
-		.commit();
-
 	return createWorkflow({
 		id: PLAN_ORCHESTRATION_WORKFLOW_ID,
 		inputSchema: workflowInputSchema,
@@ -225,7 +218,10 @@ export const createPlanOrchestrationWorkflow = (deps: IPlanOrchestrationDeps) =>
 	})
 		.then(generatePlanStep)
 		.then(approvalGateStep)
-		.dountil(executeValidateCycle, async ({ inputData }) => inputData.rejected || inputData.validationPassed)
+		.dountil(
+			executeValidateReplanStep,
+			async ({ inputData }) => inputData.rejected || inputData.validationPassed || inputData.failed,
+		)
 		.then(finishStep)
 		.commit();
 };
