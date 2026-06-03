@@ -43,11 +43,10 @@ import {
   findAiServicePlatformByModel,
 } from '@/constants/ai/providers';
 import type { IAiAttachedFile, IAiConfigPayload, TAiAgentNetworkPermission } from '@/types/ai';
-
-type TAiPromptInputMode = 'chat' | 'agent' | 'plan';
+import { type TAiAssistantMode, isAiAssistantMode } from '@/types/ai/assistant-mode';
 
 interface IAiPromptModeOption {
-  key: TAiPromptInputMode;
+  key: TAiAssistantMode;
   label: string;
   description: string;
 }
@@ -68,7 +67,7 @@ interface IAiPromptModelSection {
 const modelValue = defineModel<string>({ required: true });
 
 /** 当前模式（双向绑定） */
-const activeMode = defineModel<TAiPromptInputMode>('activeMode', { required: true });
+const activeMode = defineModel<TAiAssistantMode>('activeMode', { required: true });
 
 const props = defineProps<{
   disabled: boolean;
@@ -178,9 +177,6 @@ const modelSections = computed<IAiPromptModelSection[]>(() =>
     })),
   })).filter((section) => section.models.length > 0),
 );
-
-const isPromptInputMode = (value: unknown): value is TAiPromptInputMode =>
-  value === 'chat' || value === 'agent' || value === 'plan';
 
 const hasProcessingAttachments = computed(() =>
   pendingAttachmentDrafts.value.some((attachment) => attachment.status === 'processing') ||
@@ -323,7 +319,7 @@ const handleSubmit = (): void => {
 };
 
 const handleModeChange = (value: unknown): void => {
-  if (!isPromptInputMode(value)) {
+  if (!isAiAssistantMode(value)) {
     return;
   }
   activeMode.value = value;
