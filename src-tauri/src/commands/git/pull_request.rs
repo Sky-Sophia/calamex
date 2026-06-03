@@ -113,7 +113,7 @@ fn parse_git_remote_repository_url(url: &str) -> Option<ParsedGitRemoteRepositor
         .unwrap_or(repository_path)
         .to_string();
 
-    let repository_url = format!("https://{host}/{repository_path}");
+    let repository_url = ["https://", host.as_str(), "/", repository_path.as_str()].concat();
     Some(ParsedGitRemoteRepositoryUrl {
         host,
         repository_url,
