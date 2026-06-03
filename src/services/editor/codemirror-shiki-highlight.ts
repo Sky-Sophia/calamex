@@ -23,7 +23,7 @@ export const EDITOR_FONT_FAMILY =
 // 超过该长度不做整文档高亮，避免大文件卡顿。
 const MAX_HIGHLIGHT_LENGTH = 300_000;
 
-// 输入停顿后过多久触发一次全量重算（毫秒）；过小会让连续输入仍频繁重算，过大高亮滞后明显。
+// 输入停顿后过多久触发一次全量重算（毫秒）；过小会让连续输入仍频繁重算，过大高亮滑后明显。
 const HIGHLIGHT_RECOMPUTE_DEBOUNCE_MS = 90;
 
 const FONT_STYLE_ITALIC = 1;
@@ -255,6 +255,7 @@ export const shikiEditorChromeTheme = EditorView.theme(
     },
     '.cm-cursor, .cm-dropCursor': {
       borderLeftColor: '#24292e',
+      borderLeftWidth: '2px',
     },
     // 选区交给浏览器原生绘制（已移除 drawSelection）：只覆盖每行真实字符，
     // 行尾之后的空白不再刷蓝，多行/全选呈参差右边缘，跟 VS Code 一致。
