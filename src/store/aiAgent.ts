@@ -28,6 +28,7 @@ import {
   aiTaskPlanStepSchema,
   aiToolConfirmationRequestSchema,
 } from '@/types/ai/agent.schema';
+import { AI_ASSISTANT_MODES, type TAiAssistantMode } from '@/types/ai/assistant-mode';
 import { aiContextReferenceSchema } from '@/types/ai/context.schema';
 import { aiChatMessageSchema, aiLanguageModelUsageSchema } from '@/types/ai/schema';
 import { AGENT_PLAN_STATUSES } from '@/types/ai/sidecar';
@@ -47,13 +48,13 @@ export interface IAiPersistedSidecarAgentSession {
   references: IAiContextReference[];
 }
 
-export type TAiAgentPanelMode = 'chat' | 'plan' | 'agent';
+export type TAiAgentPanelMode = TAiAssistantMode;
 
 // ---------------------------------------------------------------------------
 // Persistence schema
 // ---------------------------------------------------------------------------
 
-const aiAgentPanelModeSchema = z.enum(['chat', 'plan', 'agent']);
+const aiAgentPanelModeSchema = z.enum(AI_ASSISTANT_MODES);
 const agentPlanStatusSchema = z.enum(AGENT_PLAN_STATUSES);
 const nullablePersistedTextSchema = z.string().min(1).nullable();
 
@@ -254,7 +255,7 @@ const isSameToolActivity = (a: IAiToolActivityInline, b: IAiToolActivityInline):
 export const useAiAgentStore = defineStore(
   'ai-agent',
   () => {
-    // ── State ────────────────────────────────────────────────────────────────
+    // ── State ───────────────────────────────────────────────────
     const mode = ref<TAiAgentPanelMode>('agent');
     const networkPermission = ref<TAiAgentNetworkPermission>('ask');
     const activeGoal = ref<string>('');
@@ -292,7 +293,7 @@ export const useAiAgentStore = defineStore(
     const pendingSidecarAgentSession = ref<IAiPersistedSidecarAgentSession | null>(null);
     const errorMessage = ref<string>('');
 
-    // ── Getters ──────────────────────────────────────────────────────────────
+    // ── Getters ────────────────────────────────────────────────
     const hasPlan = computed(() => steps.value.length > 0);
 
     const activeRun = computed(
@@ -313,7 +314,7 @@ export const useAiAgentStore = defineStore(
       return findLatestActiveToolActivity(Object.values(toolActivities.value).flat());
     });
 
-    // ── Internal helpers ─────────────────────────────────────────────────────
+    // ── Internal helpers ────────────────────────────────────────
 
     const getStepDetailKey = (runId: string, stepId: string): string => `${runId}:${stepId}`;
 
@@ -352,7 +353,7 @@ export const useAiAgentStore = defineStore(
       totalOfficialUsage.value = null;
     };
 
-    // ── Actions: classification & plan lifecycle ─────────────────────────────
+    // ── Actions: classification & plan lifecycle ────────────────────────
 
     const setClassification = (payload: IAiAgentClassifyTaskPayload): void => {
       classification.value = payload.classification;
@@ -466,7 +467,7 @@ export const useAiAgentStore = defineStore(
       activeRunId.value = null;
     };
 
-    // ── Actions: runs ────────────────────────────────────────────────────────
+    // ── Actions: runs ────────────────────────────────────────────
 
     const upsertRun = (run: IAiAgentRun): void => {
       activeRunId.value = run.id;
@@ -505,7 +506,7 @@ export const useAiAgentStore = defineStore(
       });
     };
 
-    // ── Actions: usage ───────────────────────────────────────────────────────
+    // ── Actions: usage ──────────────────────────────────────────
 
     const setLatestOfficialUsage = (usage: IAiLanguageModelUsage | null): void => {
       latestOfficialUsageResolved.value = true;
@@ -528,7 +529,7 @@ export const useAiAgentStore = defineStore(
       totalOfficialUsage.value = null;
     };
 
-    // ── Actions: step details / final answers / patches ─────────────────────
+    // ── Actions: step details / final answers / patches ──────────────────
 
     const getStepDetail = (runId: string, stepId: string): IAiAgentStepDetail | null =>
       stepDetails.value[getStepDetailKey(runId, stepId)] ?? null;
@@ -592,7 +593,7 @@ export const useAiAgentStore = defineStore(
       };
     };
 
-    // ── Actions: tool activities & confirmations ─────────────────────────────
+    // ── Actions: tool activities & confirmations ────────────────────────
 
     const getToolActivities = (runId: string): IAiToolActivityInline[] =>
       toolActivities.value[runId] ?? [];
