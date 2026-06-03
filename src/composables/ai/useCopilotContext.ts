@@ -10,7 +10,7 @@
  * 访问时自动解包 computed —— 既得纯对象可序列化,watch 又能追踪依赖保持响应。
  */
 import { useCopilotReadable } from '@copilotkit/vue';
-import { computed, reactive, type Ref } from 'vue';
+import { computed, type Ref, reactive } from 'vue';
 import type {
   IActiveRunSummary,
   IAnalyzeScriptPayload,

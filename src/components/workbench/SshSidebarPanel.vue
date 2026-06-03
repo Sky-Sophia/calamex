@@ -304,7 +304,7 @@ const quoteShellArg = (value: string): string => {
   if (/^[a-zA-Z0-9_@%+=:,./~-]+$/.test(normalizedValue)) {
     return normalizedValue;
   }
-  return "'" + normalizedValue.replace(/'/g, "'\\''") + "'";
+  return `'${normalizedValue.replace(/'/g, "'\\''")}'`;
 };
 
 const formatRemoteFileSize = (size: number): string => {
@@ -784,7 +784,7 @@ const buildSshCommand = (): string => {
   }
 
   if (usernameText && hostText) {
-    parts.push(usernameText + '@' + hostText);
+    parts.push(`${usernameText}@${hostText}`);
   }
 
   return parts.join(' ');

@@ -76,7 +76,7 @@ const inlineCompletionGhostField = StateField.define<DecorationSet>({
         continue;
       }
       const next = effect.value;
-      if (!next || !next.text) {
+      if (!next?.text) {
         return Decoration.none;
       }
       const widget = Decoration.widget({
@@ -161,7 +161,7 @@ const resolveInlineCompletionInsertText = (
 
 const acceptInlineCompletion = (view: EditorView): boolean => {
   const ghost = view.state.field(inlineCompletionState, false);
-  if (!ghost || !ghost.text.trim() || view.state.selection.main.head !== ghost.from) {
+  if (!ghost?.text.trim() || view.state.selection.main.head !== ghost.from) {
     return false;
   }
   view.dispatch({

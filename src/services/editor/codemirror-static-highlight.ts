@@ -87,10 +87,7 @@ export const createRawTokens = (code: string): ITokenizedCode => ({
  * 同步高亮：仅当目标语法已按需加载时返回结果，否则返回 null。
  * 调用方应先用 createRawTokens 兜底，并通过 highlightCodeAsync 在语法加载后升级。
  */
-export const highlightCodeSync = (
-  code: string,
-  language: string,
-): ITokenizedCode | null => {
+export const highlightCodeSync = (code: string, language: string): ITokenizedCode | null => {
   const languageId = resolveCodeMirrorLanguageId(language);
   if (languageId === 'text') {
     return null;
@@ -164,7 +161,7 @@ const tokenStyleToHtml = (token: ICodeMirrorHighlightToken): string => {
     declarations.push('text-decoration:underline');
   }
 
-  return declarations.length > 0 ? ` style=\"${declarations.join(';')}\"` : '';
+  return declarations.length > 0 ? ` style="${declarations.join(';')}"` : '';
 };
 
 const tokenToHtml = (token: ICodeMirrorHighlightToken): string =>
@@ -186,5 +183,5 @@ export const highlightCodeToHtml = (code: string, language: string): string => {
     .map((line) => line.map((token) => tokenToHtml(token)).join(''))
     .join('\n');
 
-  return `<pre class=\"cm-static-highlight\" style=\"background-color:${finalTokenized.bg};color:${finalTokenized.fg}\"><code>${html}</code></pre>`;
+  return `<pre class="cm-static-highlight" style="background-color:${finalTokenized.bg};color:${finalTokenized.fg}"><code>${html}</code></pre>`;
 };

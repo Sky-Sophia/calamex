@@ -667,7 +667,7 @@ export const useEditorStore = defineStore(
 
     const updateDocumentContent = (documentId: string, content: string): void => {
       const targetDocument = getDocumentById(documentId);
-      if (!targetDocument || targetDocument.kind !== 'text') {
+      if (targetDocument?.kind !== 'text') {
         return;
       }
       targetDocument.content = content;
@@ -680,7 +680,7 @@ export const useEditorStore = defineStore(
 
     const updateDocumentEncoding = (documentId: string, encoding: TDocumentEncoding): void => {
       const targetDocument = getDocumentById(documentId);
-      if (!targetDocument || targetDocument.kind !== 'text') {
+      if (targetDocument?.kind !== 'text') {
         return;
       }
       targetDocument.encoding = encoding;

@@ -146,9 +146,7 @@ export const buildConversationCheckpoints = (
   return checkpoints;
 };
 
-export const getLatestCheckpointEvent = (
-  message: IAiChatMessage,
-): IAgentCheckpointEvent | null => {
+export const getLatestCheckpointEvent = (message: IAiChatMessage): IAgentCheckpointEvent | null => {
   const runtimeEvents = message.stream?.runtimeEvents ?? [];
 
   for (let index = runtimeEvents.length - 1; index >= 0; index -= 1) {

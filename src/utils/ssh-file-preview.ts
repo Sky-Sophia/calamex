@@ -1,11 +1,11 @@
 import {
   CODEMIRROR_LANGUAGE_LABELS,
   resolveCodeMirrorLanguageId,
-} from "@/services/editor/codemirror-language";
-import { splitTextGraphemes } from "@/utils/text-preview";
+} from '@/services/editor/codemirror-language';
+import { splitTextGraphemes } from '@/utils/text-preview';
 
-export type TSshPreviewEncoding = "utf-8" | "utf-8-bom";
-export type TSshPreviewLineEnding = "lf" | "crlf" | "cr" | "mixed" | "none";
+export type TSshPreviewEncoding = 'utf-8' | 'utf-8-bom';
+export type TSshPreviewLineEnding = 'lf' | 'crlf' | 'cr' | 'mixed' | 'none';
 
 export interface ISshPreviewLanguageInfo {
   codeMirrorLanguage: string;
@@ -26,91 +26,88 @@ export interface ISshPreviewMatchHit extends ISshPreviewMatchRange {
 }
 
 const LANGUAGE_BY_EXTENSION: Readonly<Record<string, string>> = {
-  bash: "bash",
-  bat: "bat",
-  c: "c",
-  cc: "cpp",
-  cpp: "cpp",
-  css: "css",
-  cts: "typescript",
-  cxx: "cpp",
-  dockerfile: "dockerfile",
-  go: "go",
-  h: "c",
-  hpp: "cpp",
-  htm: "html",
-  html: "html",
-  ini: "ini",
-  java: "java",
-  js: "javascript",
-  json: "json",
-  jsonc: "jsonc",
-  jsx: "jsx",
-  less: "less",
-  log: "text",
-  md: "markdown",
-  mts: "typescript",
-  ps1: "powershell",
-  py: "python",
-  rb: "ruby",
-  rs: "rust",
-  scss: "scss",
-  sh: "bash",
-  sql: "sql",
-  svg: "svg",
-  toml: "toml",
-  ts: "typescript",
-  tsx: "tsx",
-  txt: "text",
-  vue: "vue",
-  xml: "xml",
-  yaml: "yaml",
-  yml: "yaml",
-  zsh: "bash",
+  bash: 'bash',
+  bat: 'bat',
+  c: 'c',
+  cc: 'cpp',
+  cpp: 'cpp',
+  css: 'css',
+  cts: 'typescript',
+  cxx: 'cpp',
+  dockerfile: 'dockerfile',
+  go: 'go',
+  h: 'c',
+  hpp: 'cpp',
+  htm: 'html',
+  html: 'html',
+  ini: 'ini',
+  java: 'java',
+  js: 'javascript',
+  json: 'json',
+  jsonc: 'jsonc',
+  jsx: 'jsx',
+  less: 'less',
+  log: 'text',
+  md: 'markdown',
+  mts: 'typescript',
+  ps1: 'powershell',
+  py: 'python',
+  rb: 'ruby',
+  rs: 'rust',
+  scss: 'scss',
+  sh: 'bash',
+  sql: 'sql',
+  svg: 'svg',
+  toml: 'toml',
+  ts: 'typescript',
+  tsx: 'tsx',
+  txt: 'text',
+  vue: 'vue',
+  xml: 'xml',
+  yaml: 'yaml',
+  yml: 'yaml',
+  zsh: 'bash',
 };
 
 const LINE_ENDING_LABEL_MAP: Readonly<Record<TSshPreviewLineEnding, string>> = {
-  lf: "LF",
-  crlf: "CRLF",
-  cr: "CR",
-  mixed: "Mixed",
-  none: "无",
+  lf: 'LF',
+  crlf: 'CRLF',
+  cr: 'CR',
+  mixed: 'Mixed',
+  none: '无',
 };
 
 const normalizeSearchGrapheme = (value: string): string =>
-  value.normalize("NFC").toLocaleLowerCase("zh-CN");
+  value.normalize('NFC').toLocaleLowerCase('zh-CN');
 
 const resolveFileExtension = (path: string): string => {
-  const normalized = path.trim().toLowerCase().split(/[?#]/u, 1)[0] ?? "";
+  const normalized = path.trim().toLowerCase().split(/[?#]/u, 1)[0] ?? '';
   const fileName = normalized.split(/[\\/]/u).at(-1) ?? normalized;
 
-  if (fileName === "dockerfile") {
-    return "dockerfile";
+  if (fileName === 'dockerfile') {
+    return 'dockerfile';
   }
 
-  if (!fileName.includes(".")) {
-    return "";
+  if (!fileName.includes('.')) {
+    return '';
   }
 
-  return fileName.split(".").at(-1) ?? "";
+  return fileName.split('.').at(-1) ?? '';
 };
 
 export const normalizeSshPreviewContent = (value: string): string =>
-  value.replace(/\r\n/gu, "\n").replace(/\r/gu, "\n");
+  value.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n');
 
-export const formatSshPreviewLineEnding = (
-  value: TSshPreviewLineEnding,
-): string => LINE_ENDING_LABEL_MAP[value];
+export const formatSshPreviewLineEnding = (value: TSshPreviewLineEnding): string =>
+  LINE_ENDING_LABEL_MAP[value];
 
 export const formatSshPreviewEncoding = (value: TSshPreviewEncoding): string =>
-  value === "utf-8-bom" ? "UTF-8 BOM" : "UTF-8";
+  value === 'utf-8-bom' ? 'UTF-8 BOM' : 'UTF-8';
 
-export const resolveSshPreviewLanguageInfo = (
-  path: string,
-): ISshPreviewLanguageInfo => {
+export const resolveSshPreviewLanguageInfo = (path: string): ISshPreviewLanguageInfo => {
   const extension = resolveFileExtension(path);
   const codeMirrorLanguage = resolveCodeMirrorLanguageId(
-    LANGUAGE_BY_EXTENSION[extension] ?? "text",
+    LANGUAGE_BY_EXTENSION[extension] ?? 'text',
   );
 
   return {
@@ -121,35 +118,35 @@ export const resolveSshPreviewLanguageInfo = (
 
 export const formatSshPreviewModifiedAt = (value: string | null): string => {
   if (!value) {
-    return "—";
+    return '—';
   }
 
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) {
-    return "—";
+    return '—';
   }
 
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
     hour12: false,
   })
     .format(new Date(timestamp))
-    .replace(/\//gu, "-");
+    .replace(/\//gu, '-');
 };
 
 export const countSshPreviewLines = (value: string): number =>
-  value.length === 0 ? 1 : normalizeSshPreviewContent(value).split("\n").length;
+  value.length === 0 ? 1 : normalizeSshPreviewContent(value).split('\n').length;
 
 export const resolveSshPreviewCursorPosition = (
   textBeforeCursor: string,
 ): { line: number; column: number } => {
   const normalized = normalizeSshPreviewContent(textBeforeCursor);
-  const lines = normalized.split("\n");
-  const currentLine = lines.at(-1) ?? "";
+  const lines = normalized.split('\n');
+  const currentLine = lines.at(-1) ?? '';
 
   return {
     line: lines.length,
@@ -168,10 +165,7 @@ export const buildSshPreviewMatchRanges = (
 
   const lineGraphemes = splitTextGraphemes(line);
   const queryGraphemes = splitTextGraphemes(normalizedQuery);
-  if (
-    queryGraphemes.length === 0 ||
-    queryGraphemes.length > lineGraphemes.length
-  ) {
+  if (queryGraphemes.length === 0 || queryGraphemes.length > lineGraphemes.length) {
     return [];
   }
 
@@ -186,15 +180,8 @@ export const buildSshPreviewMatchRanges = (
   ) {
     let matched = true;
 
-    for (
-      let offset = 0;
-      offset < normalizedQueryGraphemes.length;
-      offset += 1
-    ) {
-      if (
-        normalizedLineGraphemes[start + offset] !==
-        normalizedQueryGraphemes[offset]
-      ) {
+    for (let offset = 0; offset < normalizedQueryGraphemes.length; offset += 1) {
+      if (normalizedLineGraphemes[start + offset] !== normalizedQueryGraphemes[offset]) {
         matched = false;
         break;
       }
@@ -224,22 +211,19 @@ const buildGraphemeCodeUnitOffsets = (value: string): number[] => {
   return offsets;
 };
 
-export const buildSshPreviewMatchHits = (
-  content: string,
-  query: string,
-): ISshPreviewMatchHit[] => {
+export const buildSshPreviewMatchHits = (content: string, query: string): ISshPreviewMatchHit[] => {
   const normalizedContent = normalizeSshPreviewContent(content);
   const normalizedQuery = query.trim();
   if (!normalizedQuery) {
     return [];
   }
 
-  const lines = normalizedContent.split("\n");
+  const lines = normalizedContent.split('\n');
   const hits: ISshPreviewMatchHit[] = [];
   let documentOffset = 0;
 
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const line = lines[lineIndex] ?? "";
+    const line = lines[lineIndex] ?? '';
     const ranges = buildSshPreviewMatchRanges(line, normalizedQuery);
     const codeUnitOffsets = buildGraphemeCodeUnitOffsets(line);
 
@@ -274,18 +258,18 @@ export const estimateSshPreviewByteSize = (
 ): number => {
   const normalizedLineFeed = normalizeSshPreviewContent(content);
   const normalized = (() => {
-    if (lineEnding === "crlf") {
-      return normalizedLineFeed.replace(/\n/gu, "\r\n");
+    if (lineEnding === 'crlf') {
+      return normalizedLineFeed.replace(/\n/gu, '\r\n');
     }
-    if (lineEnding === "cr") {
-      return normalizedLineFeed.replace(/\n/gu, "\r");
+    if (lineEnding === 'cr') {
+      return normalizedLineFeed.replace(/\n/gu, '\r');
     }
 
     return normalizedLineFeed;
   })();
 
   const textEncoder = new TextEncoder();
-  const bomSize = encoding === "utf-8-bom" ? 3 : 0;
+  const bomSize = encoding === 'utf-8-bom' ? 3 : 0;
 
   return textEncoder.encode(normalized).length + bomSize;
 };

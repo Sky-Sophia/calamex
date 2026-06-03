@@ -24,10 +24,8 @@
 
 .explorer-sidebar {
   --explorer-bg: #fafafa;
-  --explorer-bg-elev: #fafafa;
   --explorer-bg-hover: var(--bg-h);
   --explorer-bg-active: var(--bg-s);
-  --explorer-border: var(--border-subtle);
   --explorer-text: var(--text-primary);
   --explorer-text-dim: var(--text-tertiary);
   --explorer-text-faint: var(--text-quaternary);
@@ -71,10 +69,6 @@
 
 .explorer-tree::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--shell-divider) 100%, transparent);
-}
-
-.explorer-node {
-  position: relative;
 }
 
 .explorer-root-row,
@@ -152,10 +146,6 @@
   color: var(--explorer-text-faint);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-}
-
-.explorer-tree-children {
-  display: block;
 }
 
 .explorer-empty-state,

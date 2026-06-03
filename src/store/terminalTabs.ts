@@ -21,9 +21,7 @@ export interface ITerminalTab {
  *  - 后端会话的 dispose 由调用方（RunPanel）负责。
  */
 export const useTerminalTabsStore = defineStore('terminal-tabs', () => {
-  const tabs = ref<ITerminalTab[]>([
-    { sessionId: DEFAULT_TERMINAL_SESSION_ID, title: '终端 1' },
-  ]);
+  const tabs = ref<ITerminalTab[]>([{ sessionId: DEFAULT_TERMINAL_SESSION_ID, title: '终端 1' }]);
   const activeSessionId = ref<string>(DEFAULT_TERMINAL_SESSION_ID);
 
   // 标题用单调递增计数，避免关闭后复用导致重名。

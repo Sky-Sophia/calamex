@@ -46,7 +46,7 @@ vi.mock('@/components/ui/input', () => ({
     props: ['modelValue'],
     emits: ['update:modelValue'],
     template:
-      "<input :value=\"modelValue\" @input=\"$emit('update:modelValue', $event.target.value)\" />",
+      '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
   },
 }));
 

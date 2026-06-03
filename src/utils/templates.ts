@@ -15,7 +15,6 @@ export const DEFAULT_EXECUTOR: TExecutorKind = 'wsl';
 
 export const getExecutorLabel = (executor: TExecutorKind): string => {
   switch (executor) {
-    case 'wsl':
     default:
       return 'WSL2';
   }

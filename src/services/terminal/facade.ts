@@ -191,7 +191,10 @@ export const useTerminalFacade = (options: ITerminalFacadeOptions = {}): ITermin
       } catch (error) {
         const remaining = queued.slice(index);
         switchingInputBuffer.unshift(...remaining);
-        switchingInputBufferBytes += remaining.reduce((total, chunk) => total + chunk.byteLength, 0);
+        switchingInputBufferBytes += remaining.reduce(
+          (total, chunk) => total + chunk.byteLength,
+          0,
+        );
         scheduleSwitchingInputFlush();
         throw error;
       }

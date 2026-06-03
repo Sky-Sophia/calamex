@@ -121,8 +121,6 @@ const mapToolCallStatusToActivityState = (
       return 'failed';
     case 'denied':
       return 'cancelled';
-    case 'pending':
-    case 'running':
     default:
       return 'running';
   }

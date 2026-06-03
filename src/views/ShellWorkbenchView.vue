@@ -134,6 +134,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed, defineAsyncComponent, nextTick, ref } from 'vue';
 import EmptyEditorState from '@/components/editor/EmptyEditorState.vue';
 import { Card, CardContent } from '@/components/ui/card';
 import StartupAiWorkbenchShell from '@/components/workbench/StartupAiWorkbenchShell.vue';
@@ -145,7 +146,6 @@ import AppShellLayout from '@/layouts/AppShellLayout.vue';
 import { useAiAgentStore } from '@/store/aiAgent';
 import type { TWorkbenchOpenFilePayload } from '@/types/editor';
 import type { IGitDiffPreviewRequest } from '@/types/git';
-import { computed, defineAsyncComponent, nextTick, ref } from 'vue';
 
 const DeferredAiWorkspaceSurface = defineAsyncComponent({
   loader: () => import('@/components/business/ai/shell/AiWorkspaceSurface.vue'),
@@ -258,8 +258,8 @@ const hasPinnedAiWorkspace = computed(() => {
 
   return Boolean(
     aiAgentStore.planId &&
-    aiAgentStore.planStatus &&
-    !terminalPlanStatuses.has(aiAgentStore.planStatus),
+      aiAgentStore.planStatus &&
+      !terminalPlanStatuses.has(aiAgentStore.planStatus),
   );
 });
 

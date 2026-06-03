@@ -515,7 +515,7 @@ function handleEditorScroll(): void {
 
 function updateCursorFromPreviewSelection(): void {
   const selection = window.getSelection();
-  if (!selection || !selection.anchorNode) {
+  if (!selection?.anchorNode) {
     return;
   }
 

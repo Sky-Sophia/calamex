@@ -6,12 +6,12 @@ import {
   isBold,
   isItalic,
   isUnderline,
-} from "@/services/editor/codemirror-static-highlight";
+} from '@/services/editor/codemirror-static-highlight';
 
 export type {
   ICodeMirrorHighlightToken,
   ITokenizedCode,
-} from "@/services/editor/codemirror-static-highlight";
+} from '@/services/editor/codemirror-static-highlight';
 export { createRawTokens, isBold, isItalic, isUnderline };
 
 /**

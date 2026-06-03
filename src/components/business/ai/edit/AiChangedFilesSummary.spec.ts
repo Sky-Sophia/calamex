@@ -168,9 +168,9 @@ describe('AiChangedFilesSummary', () => {
       isReverting: false,
       summary: createPatchSummary({ revertedAt: '2026-05-03T10:02:00.000Z' }),
     });
-    expect(
-      wrapper.find('button.ai-changed-files-action:not(.is-icon-only)').text(),
-    ).toContain('已撤销');
+    expect(wrapper.find('button.ai-changed-files-action:not(.is-icon-only)').text()).toContain(
+      '已撤销',
+    );
     expect(
       wrapper.find('button.ai-changed-files-action:not(.is-icon-only)').attributes('disabled'),
     ).toBeDefined();

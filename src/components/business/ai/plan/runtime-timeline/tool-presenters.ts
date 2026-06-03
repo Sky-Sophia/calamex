@@ -10,12 +10,8 @@ import {
   hasShellcheckPassSummary,
   hasShellcheckUnavailableSummary,
 } from './shellcheck';
-import {
-  isWebSearchToolName,
-  resolveWebSearchQuery,
-  resolveWebSearchSources,
-} from './web-search';
 import type { IToolActionDescriptor, TToolLifecycleEvent } from './types';
+import { isWebSearchToolName, resolveWebSearchQuery, resolveWebSearchSources } from './web-search';
 
 type TToolPhase = 'running' | 'done' | 'failed';
 
@@ -144,14 +140,22 @@ const TOOL_PHRASE_ENTRIES: Record<string, IToolPhrases> = {
     failed: '文件信息读取失败',
   },
   view_image: { running: '正在查看图片', done: '图片查看完成', failed: '图片查看失败' },
-  read_media_file: { running: '正在查看媒体文件', done: '媒体文件查看完成', failed: '媒体文件查看失败' },
+  read_media_file: {
+    running: '正在查看媒体文件',
+    done: '媒体文件查看完成',
+    failed: '媒体文件查看失败',
+  },
   copilot_getnotebooksummary: {
     running: '正在读取笔记本摘要',
     done: '笔记本摘要读取完成',
     failed: '笔记本摘要读取失败',
   },
   get_errors: { running: '正在检查错误', done: '错误检查完成', failed: '错误检查失败' },
-  get_changed_files: { running: '正在读取改动文件', done: '改动文件读取完成', failed: '改动文件读取失败' },
+  get_changed_files: {
+    running: '正在读取改动文件',
+    done: '改动文件读取完成',
+    failed: '改动文件读取失败',
+  },
   mastra_list_logs: { running: '正在读取日志', done: '日志读取完成', failed: '日志读取失败' },
   read_current_file: {
     running: '正在读取当前文件',
@@ -163,16 +167,45 @@ const TOOL_PHRASE_ENTRIES: Record<string, IToolPhrases> = {
   list_dir: DIRECTORY_PHRASES,
   list_directory: DIRECTORY_PHRASES,
   list_workspace_entries: DIRECTORY_PHRASES,
-  directory_tree: { running: '正在读取目录结构', done: '目录结构读取完成', failed: '目录结构读取失败' },
+  directory_tree: {
+    running: '正在读取目录结构',
+    done: '目录结构读取完成',
+    failed: '目录结构读取失败',
+  },
 
   grep_in_files: TEXT_SEARCH_PHRASES,
   mastra_workspace_grep: TEXT_SEARCH_PHRASES,
   grep_search: { running: '正在搜索', done: '搜索完成', failed: '搜索失败' },
-  file_search: { resource: 'query', running: '正在查找文件 {name}', done: '文件查找完成', failed: '文件查找失败' },
-  search_files: { resource: 'query', running: '正在查找文件 {name}', done: '文件查找完成', failed: '文件查找失败' },
-  semantic_search: { resource: 'query', running: '正在语义搜索 {name}', done: '语义搜索完成', failed: '语义搜索失败' },
-  search_project_files: { resource: 'query', running: '正在搜索项目文件 {name}', done: '项目文件搜索完成', failed: '项目文件搜索失败' },
-  search_text: { resource: 'query', running: '正在搜索文本 {name}', done: '文本搜索完成', failed: '文本搜索失败' },
+  file_search: {
+    resource: 'query',
+    running: '正在查找文件 {name}',
+    done: '文件查找完成',
+    failed: '文件查找失败',
+  },
+  search_files: {
+    resource: 'query',
+    running: '正在查找文件 {name}',
+    done: '文件查找完成',
+    failed: '文件查找失败',
+  },
+  semantic_search: {
+    resource: 'query',
+    running: '正在语义搜索 {name}',
+    done: '语义搜索完成',
+    failed: '语义搜索失败',
+  },
+  search_project_files: {
+    resource: 'query',
+    running: '正在搜索项目文件 {name}',
+    done: '项目文件搜索完成',
+    failed: '项目文件搜索失败',
+  },
+  search_text: {
+    resource: 'query',
+    running: '正在搜索文本 {name}',
+    done: '文本搜索完成',
+    failed: '文本搜索失败',
+  },
 
   search_symbols: SYMBOL_SEARCH_PHRASES,
   vscode_listcodeusages: {
@@ -217,45 +250,127 @@ const TOOL_PHRASE_ENTRIES: Record<string, IToolPhrases> = {
     done: '已删除 {name}',
     failed: '删除失败 {name}',
   },
-  edit_notebook_file: { running: '正在编辑笔记本', done: '笔记本编辑完成', failed: '笔记本编辑失败' },
-  create_new_jupyter_notebook: { running: '正在创建笔记本', done: '笔记本已创建', failed: '笔记本创建失败' },
-  create_new_workspace: { running: '正在创建工作区', done: '工作区已创建', failed: '工作区创建失败' },
+  edit_notebook_file: {
+    running: '正在编辑笔记本',
+    done: '笔记本编辑完成',
+    failed: '笔记本编辑失败',
+  },
+  create_new_jupyter_notebook: {
+    running: '正在创建笔记本',
+    done: '笔记本已创建',
+    failed: '笔记本创建失败',
+  },
+  create_new_workspace: {
+    running: '正在创建工作区',
+    done: '工作区已创建',
+    failed: '工作区创建失败',
+  },
 
   run_command: COMMAND_PHRASES,
   run_in_terminal: COMMAND_PHRASES,
   mastra_workspace_execute_command: COMMAND_PHRASES,
   send_to_terminal: { running: '正在向终端发送命令', done: '命令已发送', failed: '命令发送失败' },
-  get_terminal_output: { running: '正在读取终端输出', done: '终端输出读取完成', failed: '终端输出读取失败' },
-  terminal_last_command: { running: '正在读取上一条命令', done: '命令读取完成', failed: '命令读取失败' },
-  terminal_selection: { running: '正在读取终端选区', done: '终端选区读取完成', failed: '终端选区读取失败' },
-  mastra_workspace_get_process_output: { running: '正在读取进程输出', done: '进程输出读取完成', failed: '进程输出读取失败' },
-  mastra_workspace_kill_process: { running: '正在结束进程', done: '进程已结束', failed: '进程结束失败' },
+  get_terminal_output: {
+    running: '正在读取终端输出',
+    done: '终端输出读取完成',
+    failed: '终端输出读取失败',
+  },
+  terminal_last_command: {
+    running: '正在读取上一条命令',
+    done: '命令读取完成',
+    failed: '命令读取失败',
+  },
+  terminal_selection: {
+    running: '正在读取终端选区',
+    done: '终端选区读取完成',
+    failed: '终端选区读取失败',
+  },
+  mastra_workspace_get_process_output: {
+    running: '正在读取进程输出',
+    done: '进程输出读取完成',
+    failed: '进程输出读取失败',
+  },
+  mastra_workspace_kill_process: {
+    running: '正在结束进程',
+    done: '进程已结束',
+    failed: '进程结束失败',
+  },
 
   open_browser_page: { running: '正在打开网页', done: '网页已打开', failed: '网页打开失败' },
   fetch_webpage: { running: '正在抓取网页', done: '网页抓取完成', failed: '网页抓取失败' },
   web_fetch: { running: '正在读取网页', done: '网页读取完成', failed: '网页读取失败' },
-  'query-docs': { resource: 'query', running: '正在查阅文档 {name}', done: '文档查阅完成', failed: '文档查阅失败' },
-  query_docs: { resource: 'query', running: '正在查阅文档 {name}', done: '文档查阅完成', failed: '文档查阅失败' },
+  'query-docs': {
+    resource: 'query',
+    running: '正在查阅文档 {name}',
+    done: '文档查阅完成',
+    failed: '文档查阅失败',
+  },
+  query_docs: {
+    resource: 'query',
+    running: '正在查阅文档 {name}',
+    done: '文档查阅完成',
+    failed: '文档查阅失败',
+  },
 
-  github_repo: { running: '正在查询代码仓库', done: '代码仓库查询完成', failed: '代码仓库查询失败' },
+  github_repo: {
+    running: '正在查询代码仓库',
+    done: '代码仓库查询完成',
+    failed: '代码仓库查询失败',
+  },
 
-  manage_todo_list: { running: '正在更新待办清单', done: '待办清单已更新', failed: '待办清单更新失败' },
+  manage_todo_list: {
+    running: '正在更新待办清单',
+    done: '待办清单已更新',
+    failed: '待办清单更新失败',
+  },
   runsubagent: { running: '正在运行子代理', done: '子代理运行完成', failed: '子代理运行失败' },
   vscode_askquestions: { running: '正在向你确认问题', done: '确认完成', failed: '确认失败' },
-  test_failure: { running: '正在分析测试失败', done: '测试失败分析完成', failed: '测试失败分析失败' },
+  test_failure: {
+    running: '正在分析测试失败',
+    done: '测试失败分析完成',
+    failed: '测试失败分析失败',
+  },
   create_and_run_task: { running: '正在运行任务', done: '任务运行完成', failed: '任务运行失败' },
 
   install_extension: { running: '正在安装扩展', done: '扩展安装完成', failed: '扩展安装失败' },
-  run_vscode_command: { running: '正在执行编辑器命令', done: '编辑器命令执行完成', failed: '编辑器命令执行失败' },
-  configure_python_environment: { running: '正在配置 Python 环境', done: 'Python 环境配置完成', failed: 'Python 环境配置失败' },
-  install_python_packages: { running: '正在安装 Python 依赖', done: 'Python 依赖安装完成', failed: 'Python 依赖安装失败' },
-  get_python_environment_details: { running: '正在读取 Python 环境信息', done: 'Python 环境信息读取完成', failed: 'Python 环境信息读取失败' },
-  get_python_executable_details: { running: '正在读取 Python 解释器信息', done: 'Python 解释器信息读取完成', failed: 'Python 解释器信息读取失败' },
-  mcp_pylance_mcp_s_pylanceruncodesnippet: { running: '正在运行 Python 代码', done: 'Python 代码运行完成', failed: 'Python 代码运行失败' },
+  run_vscode_command: {
+    running: '正在执行编辑器命令',
+    done: '编辑器命令执行完成',
+    failed: '编辑器命令执行失败',
+  },
+  configure_python_environment: {
+    running: '正在配置 Python 环境',
+    done: 'Python 环境配置完成',
+    failed: 'Python 环境配置失败',
+  },
+  install_python_packages: {
+    running: '正在安装 Python 依赖',
+    done: 'Python 依赖安装完成',
+    failed: 'Python 依赖安装失败',
+  },
+  get_python_environment_details: {
+    running: '正在读取 Python 环境信息',
+    done: 'Python 环境信息读取完成',
+    failed: 'Python 环境信息读取失败',
+  },
+  get_python_executable_details: {
+    running: '正在读取 Python 解释器信息',
+    done: 'Python 解释器信息读取完成',
+    failed: 'Python 解释器信息读取失败',
+  },
+  mcp_pylance_mcp_s_pylanceruncodesnippet: {
+    running: '正在运行 Python 代码',
+    done: 'Python 代码运行完成',
+    failed: 'Python 代码运行失败',
+  },
 
   rendermermaiddiagram: { running: '正在绘制图示', done: '图示绘制完成', failed: '图示绘制失败' },
 
-  get_current_time: { running: '正在读取当前时间', done: '当前时间读取完成', failed: '当前时间读取失败' },
+  get_current_time: {
+    running: '正在读取当前时间',
+    done: '当前时间读取完成',
+    failed: '当前时间读取失败',
+  },
   convert_time: { running: '正在转换时间', done: '时间转换完成', failed: '时间转换失败' },
 
   updateworkingmemory: WORKING_MEMORY_PHRASES,
@@ -266,17 +381,41 @@ const TOOL_PHRASE_ENTRIES: Record<string, IToolPhrases> = {
   },
   memory: { running: '正在更新记忆', done: '记忆已更新', failed: '记忆更新失败' },
   read_graph: { running: '正在读取知识图谱', done: '知识图谱读取完成', failed: '知识图谱读取失败' },
-  search_nodes: { resource: 'query', running: '正在检索记忆节点 {name}', done: '记忆节点检索完成', failed: '记忆节点检索失败' },
+  search_nodes: {
+    resource: 'query',
+    running: '正在检索记忆节点 {name}',
+    done: '记忆节点检索完成',
+    failed: '记忆节点检索失败',
+  },
   open_nodes: { running: '正在打开记忆节点', done: '记忆节点已打开', failed: '记忆节点打开失败' },
-  create_entities: { running: '正在写入记忆实体', done: '记忆实体已写入', failed: '记忆实体写入失败' },
-  create_relations: { running: '正在建立记忆关联', done: '记忆关联已建立', failed: '记忆关联建立失败' },
-  add_observations: { running: '正在补充记忆观察', done: '记忆观察已补充', failed: '记忆观察补充失败' },
-  resolve_memory_file_uri: { running: '正在解析记忆文件路径', done: '记忆文件路径已解析', failed: '记忆文件路径解析失败' },
+  create_entities: {
+    running: '正在写入记忆实体',
+    done: '记忆实体已写入',
+    failed: '记忆实体写入失败',
+  },
+  create_relations: {
+    running: '正在建立记忆关联',
+    done: '记忆关联已建立',
+    failed: '记忆关联建立失败',
+  },
+  add_observations: {
+    running: '正在补充记忆观察',
+    done: '记忆观察已补充',
+    failed: '记忆观察补充失败',
+  },
+  resolve_memory_file_uri: {
+    running: '正在解析记忆文件路径',
+    done: '记忆文件路径已解析',
+    failed: '记忆文件路径解析失败',
+  },
 
   sequentialthinking: { running: '正在推理', done: '推理完成', failed: '推理失败' },
 };
 
-const TOOL_PREFIX_PHRASES: ReadonlyArray<{ test: (name: string) => boolean; phrases: IToolPhrases }> = [
+const TOOL_PREFIX_PHRASES: ReadonlyArray<{
+  test: (name: string) => boolean;
+  phrases: IToolPhrases;
+}> = [
   { test: (name) => name.startsWith('git_') || name.startsWith('get_git_'), phrases: GIT_PHRASES },
   {
     test: (name) =>

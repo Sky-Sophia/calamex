@@ -1,6 +1,6 @@
 import { commands } from '@/bindings/tauri';
 import { useDialog } from '@/composables/useDialog';
-import { AppError, isAppError } from '@/types/app-error';
+import { type AppError, isAppError } from '@/types/app-error';
 import type { ITauriService } from '@/types/tauri';
 import { buildPayloadMetricsOmittingTextFields } from './tauri.ipc-metrics';
 import { callSpectaCommand } from './tauri.ipc-runtime';

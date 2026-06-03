@@ -39,7 +39,13 @@ export const aiImageAttachmentPreviewSchema = z.object({
 
 const IMAGE_ATTACHMENT_MODEL_PART_MARKER = 'AI_SDK_IMAGE_PART_JSON:';
 
-const withImageAttachmentModelPart = <TReference extends { contentPreview: string; kind: string; attachmentPreview?: z.infer<typeof aiImageAttachmentPreviewSchema> }>(
+const withImageAttachmentModelPart = <
+  TReference extends {
+    contentPreview: string;
+    kind: string;
+    attachmentPreview?: z.infer<typeof aiImageAttachmentPreviewSchema>;
+  },
+>(
   reference: TReference,
 ): TReference => {
   const preview = reference.attachmentPreview;

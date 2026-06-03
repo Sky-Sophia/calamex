@@ -253,7 +253,7 @@ export class ThemeManager {
       const html = document.documentElement;
       html.classList.toggle('dark', variant.mode === 'dark');
       html.classList.toggle('light', variant.mode === 'light');
-      html.dataset['theme'] = variant.mode;
+      html.dataset.theme = variant.mode;
     }
 
     // 缓存派生结果

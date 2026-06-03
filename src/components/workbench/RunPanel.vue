@@ -54,8 +54,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
+import { computed, nextTick, onMounted, watch } from 'vue';
 import EmbeddedTerminal from '@/components/workbench/EmbeddedTerminal.vue';
 import TerminalTabBar from '@/components/workbench/TerminalTabBar.vue';
 import { useMessage } from '@/composables/useMessage';
@@ -63,10 +63,7 @@ import { useTerminalTabsStore } from '@/store/terminalTabs';
 import { useTerminalRegistryStore } from '@/terminal/registry';
 import type { TThemeMode } from '@/types/app';
 import type { ITerminalSettings } from '@/types/settings';
-import type {
-  ITerminalRunChunkPayload,
-  ITerminalRunCompletedPayload,
-} from '@/types/terminal';
+import type { ITerminalRunChunkPayload, ITerminalRunCompletedPayload } from '@/types/terminal';
 import { toErrorMessage } from '@/utils/error';
 
 const props = defineProps<{

@@ -134,7 +134,7 @@ export const useWindowResizeState = () => {
   // 与本文件其余 Tauri 调用方保持一致：按需动态加载 @tauri-apps/api/window，
   // 让该模块可被独立分包，并消除 INEFFECTIVE_DYNAMIC_IMPORT 构建警告。
   const attachWindowResizeListener = async (): Promise<void> => {
-    let getCurrentWindow: (typeof import('@tauri-apps/api/window'))['getCurrentWindow'];
+    let getCurrentWindow: typeof import('@tauri-apps/api/window')['getCurrentWindow'];
     try {
       const tauriWindow = await import('@tauri-apps/api/window');
       getCurrentWindow = tauriWindow.getCurrentWindow;

@@ -83,19 +83,6 @@
   stroke-width: 1.5;
 }
 
-.source-control-setup-search-bar {
-  margin: 12px 14px 8px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--scm-border);
-  border-radius: 6px;
-  background: #fafafa;
-  padding: 8px 10px;
-  opacity: 0.5;
-  cursor: default;
-}
-
 .source-control-setup-search-bar svg,
 .source-control-setup-footnote svg {
   width: 13px;
@@ -106,26 +93,6 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.5;
-}
-
-.source-control-setup-search-bar svg {
-  color: var(--scm-text-dim);
-}
-
-.source-control-setup-search-placeholder {
-  flex: 1;
-  color: var(--scm-text-dim);
-  font-size: 12.5px;
-}
-
-.source-control-setup-kbd {
-  border-radius: 3px;
-  background: #fafafa;
-  padding: 2px 5px;
-  color: var(--scm-text-faint);
-  font-size: 11px;
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 .source-control-setup-empty-state {
@@ -334,11 +301,6 @@
   padding: 10px 12px;
 }
 
-.source-control-repo {
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
 .source-control-repo:hover,
 .source-control-branch:hover {
   background: var(--scm-bg-hover);
@@ -363,11 +325,6 @@
   font-weight: 400;
 }
 
-.source-control-repo-chevron {
-  display: inline-flex;
-  color: var(--scm-text-faint);
-}
-
 .source-control-repo-chevron svg,
 .source-control-search-box svg,
 .source-control-branch-icon,
@@ -382,10 +339,6 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
-}
-
-.source-control-search {
-  padding: 8px 10px;
 }
 
 .source-control-toolbar {
@@ -422,25 +375,6 @@
   white-space: nowrap;
 }
 
-.source-control-toolbar-icon {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  place-items: center;
-  padding: 0;
-}
-
-.source-control-toolbar-icon svg {
-  width: 13px;
-  height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.8;
-}
-
 .source-control-toolbar-btn:hover:not(:disabled),
 .source-control-toolbar-icon:hover:not(:disabled) {
   border-color: rgba(255, 255, 255, 0.12);
@@ -457,46 +391,6 @@
 .source-control-toolbar-icon:disabled {
   cursor: default;
   opacity: 0.42;
-}
-
-.source-control-search-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--scm-border);
-  border-radius: var(--scm-radius);
-  background: #fafafa;
-  padding: 6px 8px;
-  color: var(--scm-text-dim);
-  transition: border-color 0.15s ease;
-}
-
-.source-control-search-box:focus-within {
-  border-color: var(--settings-accent-soft);
-}
-
-.source-control-search-box input {
-  min-width: 0;
-  flex: 1;
-  border: 0;
-  background: transparent;
-  color: var(--scm-text);
-  font-family: inherit;
-  font-size: 12.5px;
-  outline: 0;
-}
-
-.source-control-search-box input::placeholder {
-  color: var(--scm-text-dim);
-}
-
-.source-control-kbd {
-  border: 1px solid var(--scm-border);
-  border-radius: 4px;
-  background: var(--bg-code);
-  padding: 1px 5px;
-  color: var(--scm-text-faint);
-  font-size: 10.5px;
 }
 
 .source-control-branch {
@@ -1347,30 +1241,4 @@
 .source-control-btn-icon:disabled {
   cursor: default;
   opacity: 0.46;
-}
-
-.native-select {
-  width: 100%;
-  appearance: none;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  background:
-    linear-gradient(45deg, transparent 50%, var(--text-quaternary) 50%),
-    linear-gradient(135deg, var(--text-quaternary) 50%, transparent 50%), rgba(255, 255, 255, 0.04);
-  background-position:
-    calc(100% - 14px) calc(50% - 2px),
-    calc(100% - 9px) calc(50% - 2px),
-    0 0;
-  background-size:
-    5px 5px,
-    5px 5px,
-    100% 100%;
-  background-repeat: no-repeat;
-  color: var(--text-primary);
-  padding: 8px 34px 8px 12px;
-}
-
-.native-select:focus {
-  outline: 1px solid color-mix(in srgb, var(--accent-strong) 45%, transparent);
-  outline-offset: 0;
 }

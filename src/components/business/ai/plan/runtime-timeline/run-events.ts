@@ -1,6 +1,6 @@
+import type { TAgentRuntimeEvent } from '@/types/ai/sidecar';
 import { tokenNumberFormatter } from './constants';
 import type { TProviderPayloadRuntimeEvent, TTokenBudgetRuntimeEvent } from './types';
-import type { TAgentRuntimeEvent } from '@/types/ai/sidecar';
 
 const formatOptionalNumber = (value: number | undefined): string | null =>
   typeof value === 'number' && Number.isFinite(value) ? tokenNumberFormatter.format(value) : null;

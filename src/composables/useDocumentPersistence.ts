@@ -326,7 +326,7 @@ export const useDocumentPersistence = ({
   const saveDirtyDocuments = async (documentIds: string[]): Promise<boolean> => {
     for (const documentId of documentIds) {
       const targetDocument = editorStore.getDocumentById(documentId);
-      if (!targetDocument || !targetDocument.isDirty) {
+      if (!targetDocument?.isDirty) {
         continue;
       }
 

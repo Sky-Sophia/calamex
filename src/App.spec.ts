@@ -51,7 +51,7 @@ const flushUi = async (): Promise<void> => {
 describe('App startup handoff', () => {
   beforeEach(() => {
     runtimeErrorState.value = null;
-    document.documentElement.dataset['theme'] = 'dark';
+    document.documentElement.dataset.theme = 'dark';
     window.__SH_WINDOW_LABEL__ = 'main';
     (window as Window & { __TAURI_INTERNALS__?: { invoke?: unknown } }).__TAURI_INTERNALS__ = {
       invoke: vi.fn(),

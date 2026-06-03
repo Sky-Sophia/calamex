@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveFileIconAsset } from '@/utils/file-icons';
 import type { IFileIconAsset } from '@/types/file-icon';
+import { resolveFileIconAsset } from '@/utils/file-icons';
 
 const expectValidAsset = (asset: IFileIconAsset): void => {
   expect(typeof asset.darkSrc).toBe('string');

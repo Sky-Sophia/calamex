@@ -3,12 +3,12 @@ import { AppError } from '@/types/app-error';
 import { assertDesktopRuntime } from '@/utils/desktop-runtime';
 import { buildPayloadMetrics, formatZodIssueSummary } from './tauri.ipc-metrics';
 import {
-  TAURI_IPC_DEFAULT_TIMEOUT_MS,
   createCanceledError,
   invokeTauriCommand,
   normalizeInvokeArgs,
   raceWithTimeoutAndAbort,
   runInstrumentedIpc,
+  TAURI_IPC_DEFAULT_TIMEOUT_MS,
 } from './tauri.ipc-runtime';
 import type {
   IDefineIpcOptions,
@@ -121,10 +121,7 @@ export const defineIpc = <TInSchema extends z.ZodTypeAny, TOutSchema extends z.Z
     );
 };
 
-export const defineContractIpc = <
-  TInSchema extends z.ZodTypeAny,
-  TOutSchema extends z.ZodTypeAny,
->(
+export const defineContractIpc = <TInSchema extends z.ZodTypeAny, TOutSchema extends z.ZodTypeAny>(
   name: string,
   guardHint: string,
   contract: IIpcContract<TInSchema, TOutSchema>,
@@ -138,10 +135,7 @@ export const defineContractIpc = <
     ...options,
   });
 
-export const definePayloadIpc = <
-  TInSchema extends z.ZodTypeAny,
-  TOutSchema extends z.ZodTypeAny,
->(
+export const definePayloadIpc = <TInSchema extends z.ZodTypeAny, TOutSchema extends z.ZodTypeAny>(
   name: string,
   guardHint: string,
   contract: IIpcContract<TInSchema, TOutSchema>,

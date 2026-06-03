@@ -38,7 +38,6 @@ const getPlacementCandidates = (preferredPlacement: TTooltipPlacement): TTooltip
       return ['left', 'right', 'top', 'bottom'];
     case 'right':
       return ['right', 'left', 'top', 'bottom'];
-    case 'top':
     default:
       return ['top', 'bottom', 'right', 'left'];
   }
@@ -125,7 +124,6 @@ const resolveTooltipPosition = (
         left: clamp(targetRect.right + TOOLTIP_GAP, minLeft, maxLeft),
         top: clamp(targetRect.top + (targetRect.height - tooltipHeight) / 2, minTop, maxTop),
       };
-    case 'top':
     default:
       return {
         left: clamp(targetRect.left + (targetRect.width - tooltipWidth) / 2, minLeft, maxLeft),

@@ -7,4 +7,4 @@ import { z } from 'zod';
  */
 export const zTauriVoid = z
   .union([z.null(), z.undefined(), z.void()])
-  .transform(() => undefined as void);
+  .transform(() => undefined as undefined);

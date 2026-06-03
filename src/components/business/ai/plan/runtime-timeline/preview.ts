@@ -2,11 +2,7 @@ import { MAX_TOOL_TAGS, PREVIEW_PATH_KEYS, PREVIEW_QUERY_KEYS } from './constant
 import { clipTag, isNonEmptyString } from './text';
 import type { TToolLifecycleEvent } from './types';
 
-export const collectPreviewTextCandidates = (
-  value: unknown,
-  output: string[],
-  depth = 0,
-): void => {
+export const collectPreviewTextCandidates = (value: unknown, output: string[], depth = 0): void => {
   if (output.length >= MAX_TOOL_TAGS || depth > 3) {
     return;
   }
@@ -80,9 +76,7 @@ export const parsePreviewValue = (value: string | undefined): string[] => {
   return clipped ? [clipped] : [];
 };
 
-export const parsePreviewRecord = (
-  value: string | undefined,
-): Record<string, unknown> | null => {
+export const parsePreviewRecord = (value: string | undefined): Record<string, unknown> | null => {
   if (!isNonEmptyString(value)) {
     return null;
   }
@@ -287,9 +281,7 @@ export const resolvePreviewCommand = (value: string | undefined): string | null 
   return isNonEmptyString(value) ? value.trim() : null;
 };
 
-export const formatTerminalResultSummary = (
-  value: Record<string, unknown>,
-): string | null => {
+export const formatTerminalResultSummary = (value: Record<string, unknown>): string | null => {
   const segments: string[] = [];
 
   for (const [key, label] of [

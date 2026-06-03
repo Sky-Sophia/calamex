@@ -803,9 +803,8 @@ const closeInlineCreateDraft = (): void => {
 const focusInlineCreateInput = async (): Promise<void> => {
   await nextTick();
 
-  const input =
-    (explorerSectionRef.value?.querySelector('.explorer-inline-create-input') ??
-      null) as HTMLInputElement | null;
+  const input = (explorerSectionRef.value?.querySelector('.explorer-inline-create-input') ??
+    null) as HTMLInputElement | null;
   input?.focus();
   input?.select();
 };
@@ -926,9 +925,8 @@ const focusInlineRenameInput = async (): Promise<boolean> => {
   await nextTick();
   await waitNextFrame();
 
-  const input =
-    (explorerSectionRef.value?.querySelector('.explorer-inline-rename-input') ??
-      null) as HTMLInputElement | null;
+  const input = (explorerSectionRef.value?.querySelector('.explorer-inline-rename-input') ??
+    null) as HTMLInputElement | null;
   if (!input) {
     return false;
   }

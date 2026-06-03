@@ -182,9 +182,10 @@ const modelSections = computed<IAiPromptModelSection[]>(() =>
 const isPromptInputMode = (value: unknown): value is TAiPromptInputMode =>
   value === 'chat' || value === 'agent' || value === 'plan';
 
-const hasProcessingAttachments = computed(() =>
-  pendingAttachmentDrafts.value.some((attachment) => attachment.status === 'processing') ||
-  props.attachments.some((attachment) => attachment.status === 'processing'),
+const hasProcessingAttachments = computed(
+  () =>
+    pendingAttachmentDrafts.value.some((attachment) => attachment.status === 'processing') ||
+    props.attachments.some((attachment) => attachment.status === 'processing'),
 );
 const hasReadyAttachments = computed(() =>
   props.attachments.some((attachment) => (attachment.status ?? 'ready') === 'ready'),

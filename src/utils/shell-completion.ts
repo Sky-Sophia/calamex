@@ -1,3 +1,8 @@
+import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
+import { snippet } from '@codemirror/autocomplete';
+import bashLanguageWasmUrl from 'tree-sitter-bash/tree-sitter-bash.wasm?url';
+import { Language, type Node, Parser, type Point, type Tree } from 'web-tree-sitter';
+import treeSitterWasmUrl from 'web-tree-sitter/web-tree-sitter.wasm?url';
 import { listShellCommandLabels, loadShellCommandSpec } from '@/services/shell/command-catalog';
 import type {
   IShellCommandArgumentSpec,
@@ -6,11 +11,6 @@ import type {
   IShellCommandValueSuggestionSpec,
   IShellCompletionEntry,
 } from '@/types/shell-completion';
-import type { Completion, CompletionContext, CompletionResult } from '@codemirror/autocomplete';
-import { snippet } from '@codemirror/autocomplete';
-import bashLanguageWasmUrl from 'tree-sitter-bash/tree-sitter-bash.wasm?url';
-import { Language, type Node, Parser, type Point, type Tree } from 'web-tree-sitter';
-import treeSitterWasmUrl from 'web-tree-sitter/web-tree-sitter.wasm?url';
 
 const MAX_SUGGESTIONS = 80;
 
@@ -832,12 +832,12 @@ const resolveCommandCatalogContext = async (
   if (strippedTokens.length === 0) {
     return wrapperResolution.awaitingCommand
       ? {
-        activeNode: null,
-        awaitingFlagValue: null,
-        visitedNodes: [],
-        wrapperAwaitingCommand: true,
-        positionalArgumentIndex: 0,
-      }
+          activeNode: null,
+          awaitingFlagValue: null,
+          visitedNodes: [],
+          wrapperAwaitingCommand: true,
+          positionalArgumentIndex: 0,
+        }
       : null;
   }
   const rootNode = await loadShellCommandSpec(strippedTokens[0]);
@@ -1052,10 +1052,10 @@ const buildArgumentEntries = async (
   const positionalArgumentEntries = partial.startsWith('-')
     ? []
     : buildPositionalArgumentValueEntries(
-      catalogContext.activeNode,
-      catalogContext.positionalArgumentIndex,
-      partial,
-    );
+        catalogContext.activeNode,
+        catalogContext.positionalArgumentIndex,
+        partial,
+      );
   const flagEntries = collectAvailableFlags(catalogContext.visitedNodes).map(
     createFlagEntryFromSpec,
   );
@@ -1175,53 +1175,53 @@ const toCodeMirrorCompletion = (
 
 export const createShellCodeMirrorCompletionSource =
   () =>
-    async (completionContext: CompletionContext): Promise<CompletionResult | null> => {
+  async (completionContext: CompletionContext): Promise<CompletionResult | null> => {
+    try {
+      const source = completionContext.state.doc.toString();
+      const line = completionContext.state.doc.lineAt(completionContext.pos);
+      const linePrefix = source.slice(line.from, completionContext.pos);
+      const lineSuffix = source.slice(completionContext.pos, line.to);
+      const cursorByteOffset = getUtf8ByteLength(source.slice(0, completionContext.pos));
+      const point = {
+        row: Math.max(0, line.number - 1),
+        column: getUtf8ByteLength(linePrefix),
+      };
+      const { language, entry } = await parseShellDocument(source);
       try {
-        const source = completionContext.state.doc.toString();
-        const line = completionContext.state.doc.lineAt(completionContext.pos);
-        const linePrefix = source.slice(line.from, completionContext.pos);
-        const lineSuffix = source.slice(completionContext.pos, line.to);
-        const cursorByteOffset = getUtf8ByteLength(source.slice(0, completionContext.pos));
-        const point = {
-          row: Math.max(0, line.number - 1),
-          column: getUtf8ByteLength(linePrefix),
-        };
-        const { language, entry } = await parseShellDocument(source);
-        try {
-          if (completionContext.aborted) {
-            return null;
-          }
-          const shellContext = resolveCompletionContext(
-            entry.tree,
-            cursorByteOffset,
-            linePrefix,
-            lineSuffix,
-            point,
-          );
-          const entries = await buildCompletionEntries(
-            language,
-            shellContext,
-            getEntrySymbols(entry),
-          );
-          lastProviderErrorMessage = null;
-          const prefixLength = shellContext.variableContext
-            ? shellContext.variableContext.partial.length
-            : shellContext.optionPrefix
-              ? shellContext.optionPrefix.length
-              : shellContext.wordPrefix.length;
-          const from = Math.max(0, completionContext.pos - prefixLength);
-          return {
-            from,
-            options: entries.map((completionEntry) =>
-              toCodeMirrorCompletion(completionEntry, shellContext),
-            ),
-            validFor: /^[A-Za-z0-9_./:${}-]*$/u,
-          };
-        } finally {
-          releaseParseEntry(entry);
+        if (completionContext.aborted) {
+          return null;
         }
-      } catch (error) {
-        reportShellCompletionProviderError(error);
-        return null;
+        const shellContext = resolveCompletionContext(
+          entry.tree,
+          cursorByteOffset,
+          linePrefix,
+          lineSuffix,
+          point,
+        );
+        const entries = await buildCompletionEntries(
+          language,
+          shellContext,
+          getEntrySymbols(entry),
+        );
+        lastProviderErrorMessage = null;
+        const prefixLength = shellContext.variableContext
+          ? shellContext.variableContext.partial.length
+          : shellContext.optionPrefix
+            ? shellContext.optionPrefix.length
+            : shellContext.wordPrefix.length;
+        const from = Math.max(0, completionContext.pos - prefixLength);
+        return {
+          from,
+          options: entries.map((completionEntry) =>
+            toCodeMirrorCompletion(completionEntry, shellContext),
+          ),
+          validFor: /^[A-Za-z0-9_./:${}-]*$/u,
+        };
+      } finally {
+        releaseParseEntry(entry);
       }
-    };
+    } catch (error) {
+      reportShellCompletionProviderError(error);
+      return null;
+    }
+  };

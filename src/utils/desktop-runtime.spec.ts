@@ -29,13 +29,7 @@ describe('desktop-runtime 检测', () => {
     expect(desktopRuntimeReady.value).toBe(false);
   });
 
-  it(
-    '浏览器预览模式下 assert 抛出包含场景名的错误',
-    async () => {
-      await expect(assertDesktopRuntime('保存文件')).rejects.toThrow(
-        /保存文件.*Tauri 桌面端/,
-      );
-    },
-    10000,
-  );
+  it('浏览器预览模式下 assert 抛出包含场景名的错误', async () => {
+    await expect(assertDesktopRuntime('保存文件')).rejects.toThrow(/保存文件.*Tauri 桌面端/);
+  }, 10000);
 });

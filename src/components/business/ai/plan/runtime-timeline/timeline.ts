@@ -1,3 +1,5 @@
+import { classifyRuntimeToolKind, normalizeRuntimeToolName } from '@/constants/ai/runtime-tools';
+import type { TAgentRuntimeEvent } from '@/types/ai/sidecar';
 import {
   COMMAND_TOOL_NAMES,
   HIDDEN_RUNTIME_EVENT_TYPES,
@@ -9,22 +11,13 @@ import {
   parsePreviewValue,
   resolveCommandTerminalOutput,
 } from './preview';
-import { describeRunEvent } from './run-events';
 import { splitReasoningSegments } from './reasoning-markdown';
+import { describeRunEvent } from './run-events';
 import { isNonEmptyString } from './text';
 import { isMcpListToolsName, resolveRuntimeToolIcon, resolveToolEventIcon } from './tool-icons';
 import { describeToolAction } from './tool-presenters';
-import {
-  isWebSearchToolName,
-  mergeWebSearchSources,
-  resolveWebSearchSources,
-} from './web-search';
 import type { ITaskNodeItem, TTimelineItem, TToolRuntimeEvent } from './types';
-import {
-  classifyRuntimeToolKind,
-  normalizeRuntimeToolName,
-} from '@/constants/ai/runtime-tools';
-import type { TAgentRuntimeEvent } from '@/types/ai/sidecar';
+import { isWebSearchToolName, mergeWebSearchSources, resolveWebSearchSources } from './web-search';
 
 export const createEventKey = (
   event: Pick<TAgentRuntimeEvent, 'id' | 'type'>,

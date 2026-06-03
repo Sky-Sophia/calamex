@@ -59,11 +59,7 @@ const TOOL_PROGRESS_PREFIXES = [
 ] as const;
 // 报错只在输入框上方以一条居中提示线呈现，因此这些“把报错当回复”的助手占位消息
 // 不再进入对话流，避免同一个错误出现两次。
-const ERROR_REPLY_PREFIXES = [
-  'Agent 执行失败：',
-  'AI 上下文收集失败：',
-  '计划生成失败：',
-] as const;
+const ERROR_REPLY_PREFIXES = ['Agent 执行失败：', 'AI 上下文收集失败：', '计划生成失败：'] as const;
 const CONTEXT_COMPRESSION_EVENT_TYPE = 'acontext.memory.compressed';
 
 const isErrorReplyMessage = (message: IAiChatMessage): boolean => {
@@ -122,7 +118,7 @@ const lastAssistantMessageId = computed(() => {
 
   return null;
 });
-const conversationInitialScroll = computed(() => (props.scrollState ? false : true));
+const conversationInitialScroll = computed(() => !props.scrollState);
 const conversationResizeMode = computed(() => (props.isTyping ? undefined : 'instant'));
 
 const handleMessageAction = (messageId: string, actionId: TAiChatMessageActionId): void => {

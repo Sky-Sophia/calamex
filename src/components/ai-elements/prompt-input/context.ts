@@ -16,7 +16,7 @@ export function usePromptInputProvider(props: {
   const isLoading = ref(false);
 
   const revokeObjectUrl = (file: AttachmentFile) => {
-    if (file.url && file.url.startsWith('blob:')) {
+    if (file.url?.startsWith('blob:')) {
       URL.revokeObjectURL(file.url);
     }
   };
@@ -162,7 +162,7 @@ export function usePromptInputProvider(props: {
       // Process files (convert blobs to base64 if needed for AI SDK)
       const processedFiles = await Promise.all(
         submittedFiles.map(async (item) => {
-          if (item.url && item.url.startsWith('blob:')) {
+          if (item.url?.startsWith('blob:')) {
             const dataUrl = await convertBlobUrlToDataUrl(item.url);
             return { ...item, url: dataUrl ?? item.url };
           }

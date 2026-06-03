@@ -264,7 +264,7 @@ const aiServiceMock = vi.hoisted(() => {
     const planResponse = createSidecarPlanResponse('接入 Agent Plan Mode');
     const planReady = planResponse.events.find((event) => event.type === 'plan_ready');
 
-    if (!planReady || planReady.type !== 'plan_ready') {
+    if (planReady?.type !== 'plan_ready') {
       throw new Error('测试计划响应缺少 plan_ready。');
     }
 
@@ -732,7 +732,7 @@ const createPlanStep = (
   goal: title,
   kind: status === 'done' ? 'verify' : 'inspect',
   status,
-  expectedOutput: title + ' 的输出',
+  expectedOutput: `${title} 的输出`,
   tools: ['get_diagnostics'],
   requiresUserApproval: false,
   riskLevel: 'low',
@@ -834,7 +834,7 @@ describe('useAiAssistant streaming integration', () => {
     await waitForStartedStream(() => assistant.messages.value.at(-1)?.id);
 
     const fence = String.fromCharCode(96).repeat(3);
-    const partialFence = ['鍓嶆枃 **markdown**', '', fence + 'ts', 'const pending = true;'].join(
+    const partialFence = ['鍓嶆枃 **markdown**', '', `${fence}ts`, 'const pending = true;'].join(
       String.fromCharCode(10),
     );
 
@@ -859,7 +859,7 @@ describe('useAiAssistant streaming integration', () => {
     await waitForStartedStream(() => assistant.messages.value.at(-1)?.id);
 
     const fence = String.fromCharCode(96).repeat(3);
-    const openFence = [fence + 'ts', 'const pending = true;', ''].join(String.fromCharCode(10));
+    const openFence = [`${fence}ts`, 'const pending = true;', ''].join(String.fromCharCode(10));
 
     aiServiceMock.emitDelta(openFence);
     await flushMicrotasks();

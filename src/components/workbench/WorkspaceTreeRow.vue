@@ -175,8 +175,7 @@ const isDirectory = computed(
 );
 const isActive = computed(
   () =>
-    props.row.type === 'entry' &&
-    areFileSystemPathsEqual(props.row.entry.path, props.activePath),
+    props.row.type === 'entry' && areFileSystemPathsEqual(props.row.entry.path, props.activePath),
 );
 const isContextTarget = computed(
   () =>
@@ -185,9 +184,7 @@ const isContextTarget = computed(
     areFileSystemPathsEqual(props.row.entry.path, props.contextMenuPath ?? null),
 );
 const isRenaming = computed(
-  () =>
-    props.row.type === 'entry' &&
-    props.inlineRenameDraft?.path === props.row.entry.path,
+  () => props.row.type === 'entry' && props.inlineRenameDraft?.path === props.row.entry.path,
 );
 const showDirtyMarker = computed(
   () =>

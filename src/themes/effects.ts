@@ -40,8 +40,8 @@ export function applyResolvedThemeEffect(settings: IAppSettings, effectiveTheme:
   const accentStyle = ACCENT_STYLE_MAP[settings.appearance.accentColor];
 
   // html 数据属性（供选择器 / JS 读取）
-  root.dataset['themePreference'] = settings.appearance.themePreference;
-  root.dataset['uiDensity'] = settings.appearance.uiDensity;
+  root.dataset.themePreference = settings.appearance.themePreference;
+  root.dataset.uiDensity = settings.appearance.uiDensity;
   root.classList.toggle('reduce-motion', settings.appearance.reduceMotion);
 
   // accent 系列：覆盖主题管理器注入的默认值

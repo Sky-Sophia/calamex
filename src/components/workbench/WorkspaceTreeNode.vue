@@ -298,9 +298,7 @@ const findRowEl = (path: string): HTMLElement | null => {
 const focusRowByPath = async (path: string): Promise<void> => {
   focusedPath.value = path;
   if (shouldVirtualize.value) {
-    const index = rows.value.findIndex(
-      (row) => row.type === 'entry' && row.entry.path === path,
-    );
+    const index = rows.value.findIndex((row) => row.type === 'entry' && row.entry.path === path);
     if (index >= 0) {
       virtualizer.value.scrollToIndex(index, { align: 'auto' });
       await nextTick();

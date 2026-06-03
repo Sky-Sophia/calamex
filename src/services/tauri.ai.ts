@@ -189,10 +189,7 @@ const aiChatStreamIpc = (
     () => commands.aiChatStream(payload),
   );
 
-const aiCancelIpc = (
-  payload: TAiRequest<'aiCancel'>,
-  options?: IIpcCallOptions,
-): Promise<void> =>
+const aiCancelIpc = (payload: TAiRequest<'aiCancel'>, options?: IIpcCallOptions): Promise<void> =>
   callSpectaCommand<void>(
     {
       command: 'ai_cancel',

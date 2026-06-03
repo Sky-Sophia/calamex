@@ -429,7 +429,7 @@ describe('useWorkbench 特征化快照', () => {
     it('关闭脏文档时显示对话框', async () => {
       workbench.createNewDocument();
       const doc = editorStore.documents[0]!;
-      editorStore.updateDocumentContent(doc.id, doc.content + '\n# dirty');
+      editorStore.updateDocumentContent(doc.id, `${doc.content}\n# dirty`);
 
       mockDialogConfirm.mockResolvedValueOnce('cancel' as 'confirm' | 'cancel' | 'dismiss');
       await workbench.requestCloseDocument(doc.id);
@@ -441,7 +441,7 @@ describe('useWorkbench 特征化快照', () => {
     it('脏文档对话框选取消时不关闭', async () => {
       workbench.createNewDocument();
       const doc = editorStore.documents[0]!;
-      editorStore.updateDocumentContent(doc.id, doc.content + '\n# dirty');
+      editorStore.updateDocumentContent(doc.id, `${doc.content}\n# dirty`);
 
       mockDialogConfirm.mockResolvedValueOnce('dismiss' as 'confirm' | 'cancel' | 'dismiss');
       await workbench.requestCloseDocument(doc.id);
@@ -982,7 +982,7 @@ describe('useWorkbench 特征化快照', () => {
     it('有脏文档且选取消时不关闭窗口', async () => {
       workbench.createNewDocument();
       const doc = editorStore.documents[0]!;
-      editorStore.updateDocumentContent(doc.id, doc.content + '\n# dirty');
+      editorStore.updateDocumentContent(doc.id, `${doc.content}\n# dirty`);
 
       mockDialogConfirm.mockResolvedValueOnce('dismiss' as 'confirm' | 'cancel' | 'dismiss');
       await workbench.requestCloseApplication();
@@ -993,7 +993,7 @@ describe('useWorkbench 特征化快照', () => {
     it('另存为选择器报错时不中断关闭流程并给出错误提示', async () => {
       workbench.createNewDocument();
       const doc = editorStore.documents[0]!;
-      editorStore.updateDocumentContent(doc.id, doc.content + '\n# dirty');
+      editorStore.updateDocumentContent(doc.id, `${doc.content}\n# dirty`);
 
       mockDialogConfirm.mockResolvedValueOnce('confirm' as 'confirm' | 'cancel' | 'dismiss');
       mockTauriService.pickSavePath.mockRejectedValueOnce(new Error('dialog load failed'));

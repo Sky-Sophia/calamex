@@ -147,7 +147,8 @@ const isAttachmentPreviewPointer = (value: string): boolean =>
   ATTACHMENT_PREVIEW_POINTER_PATTERN.test(value);
 
 const toAttachmentPreviewKey = (id: string): string => `${ATTACHMENT_PREVIEW_KEY_PREFIX}${id}`;
-const toAttachmentPreviewPointer = (id: string): string => `${ATTACHMENT_PREVIEW_POINTER_PREFIX}${id}`;
+const toAttachmentPreviewPointer = (id: string): string =>
+  `${ATTACHMENT_PREVIEW_POINTER_PREFIX}${id}`;
 
 const getAttachmentPreviewIdFromPointer = (value: string): string | null => {
   if (!isAttachmentPreviewPointer(value)) {
@@ -423,37 +424,36 @@ const reconcileAfterHydrate = (loaded: string | null): void => {
  * reconcileAfterHydrate 决定恢复磁盘数据还是落盘用户新值,从而避免
  * "磁盘偏慢一次 → 历史被空态覆盖"的静默数据丢失。
  */
-export const hydrateAiConversationStorage =
-  async (): Promise<TAiConversationHydrateStatus> => {
-    if (typeof window === 'undefined') {
-      isReady = true;
-      hydrationSettled = true;
-      cache = null;
-      return 'empty';
-    }
-    registerFlushListeners();
-    const loadPromise = loadFromIdbWithMigration();
-    // 后台对账:无论是否在 timeout 窗口内返回,真正 settle 后都对账一次。
-    void loadPromise.then(reconcileAfterHydrate).catch((error) => {
-      hydrationSettled = true;
-      logError('ai-conversation-hydrate-failed', error);
-    });
-    const result = await withTimeout(loadPromise, HYDRATE_TIMEOUT_MS);
+export const hydrateAiConversationStorage = async (): Promise<TAiConversationHydrateStatus> => {
+  if (typeof window === 'undefined') {
     isReady = true;
-    if (result === TIMEOUT_SENTINEL) {
-      // 占位空态:getItem 暂时返回 null,但 setItem 会 defer,最终处置交给
-      // reconcileAfterHydrate,绝不在此用空态覆盖磁盘历史。
-      cache = null;
-      logWarn(
-        'ai-conversation-hydrate-timeout',
-        `idb did not resolve within ${HYDRATE_TIMEOUT_MS}ms; deferring writes until settle`,
-      );
-      return 'timeout';
-    }
-    // 命中:reconcileAfterHydrate 通常已先行设置 cache,这里再确保一次。
-    cache = result;
-    return result === null ? 'empty' : 'loaded';
-  };
+    hydrationSettled = true;
+    cache = null;
+    return 'empty';
+  }
+  registerFlushListeners();
+  const loadPromise = loadFromIdbWithMigration();
+  // 后台对账:无论是否在 timeout 窗口内返回,真正 settle 后都对账一次。
+  void loadPromise.then(reconcileAfterHydrate).catch((error) => {
+    hydrationSettled = true;
+    logError('ai-conversation-hydrate-failed', error);
+  });
+  const result = await withTimeout(loadPromise, HYDRATE_TIMEOUT_MS);
+  isReady = true;
+  if (result === TIMEOUT_SENTINEL) {
+    // 占位空态:getItem 暂时返回 null,但 setItem 会 defer,最终处置交给
+    // reconcileAfterHydrate,绝不在此用空态覆盖磁盘历史。
+    cache = null;
+    logWarn(
+      'ai-conversation-hydrate-timeout',
+      `idb did not resolve within ${HYDRATE_TIMEOUT_MS}ms; deferring writes until settle`,
+    );
+    return 'timeout';
+  }
+  // 命中:reconcileAfterHydrate 通常已先行设置 cache,这里再确保一次。
+  cache = result;
+  return result === null ? 'empty' : 'loaded';
+};
 
 const aiConversationStorage: IAiConversationPersistStorage = {
   getItem(key) {

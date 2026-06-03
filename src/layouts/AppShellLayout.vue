@@ -142,7 +142,6 @@ const shellThemeStyle = computed(() => ({
   '--surface-soft-strong': '#d1d9e0b3',
 }));
 
-
 const getAppWindow = async () => {
   if (!props.isDesktopRuntime) {
     return null;

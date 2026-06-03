@@ -120,7 +120,7 @@ export const useSidecarChangedDocumentRefresh = () => {
           : null;
       const targetDocument = storeDocument ?? fallbackDocument;
 
-      if (!targetDocument || targetDocument.kind !== 'text') {
+      if (targetDocument?.kind !== 'text') {
         continue;
       }
 

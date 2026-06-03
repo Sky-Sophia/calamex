@@ -801,31 +801,6 @@
   border-color: color-mix(in srgb, var(--danger) 34%, var(--border-strong));
 }
 
-.ssh-preview-modal {
-  width: min(760px, calc(100vw - 32px));
-  max-height: min(720px, calc(100vh - 48px));
-}
-
-.ssh-preview-body {
-  min-height: 220px;
-  max-height: 520px;
-  overflow: auto;
-  border: 1px solid var(--shell-divider);
-  border-radius: calc(var(--radius) - 3px);
-  background: var(--panel-bg);
-}
-
-.ssh-preview-body pre {
-  margin: 0;
-  padding: 12px;
-  overflow-wrap: anywhere;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-}
-
 .ssh-modal-copy {
   display: grid;
   gap: 4px;

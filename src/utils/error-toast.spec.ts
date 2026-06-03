@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { presentErrorToast } from '@/utils/error-toast';
 import { toast } from 'vue-sonner';
+import { presentErrorToast } from '@/utils/error-toast';
 
 vi.mock('vue-sonner', () => ({
   toast: {
@@ -48,9 +48,8 @@ describe('presentErrorToast', () => {
       actions: [{ id: 'retry', label: '重试', onSelect }],
     });
     const [, options] = vi.mocked(toast.error).mock.calls[0] ?? [];
-    const action = (
-      options as { action?: { label: string; onClick: (event: MouseEvent) => void } }
-    ).action;
+    const action = (options as { action?: { label: string; onClick: (event: MouseEvent) => void } })
+      .action;
     expect(action?.label).toBe('重试');
     action?.onClick(new MouseEvent('click'));
     expect(onSelect).toHaveBeenCalledTimes(1);

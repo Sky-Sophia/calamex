@@ -166,7 +166,6 @@ const inferChangedFileStatusFromAedKind = (
       return 'deleted';
     case 'rename':
       return 'renamed';
-    case 'modify':
     default:
       return 'modified';
   }

@@ -15,7 +15,7 @@ import {
 } from '@/components/ai-elements/attachments';
 import type { IAiImageAttachmentPreview, TAiAttachmentStatus } from '@/types/ai';
 import 'photoswipe/style.css';
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type StyleValue } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, type StyleValue, watch } from 'vue';
 
 type TAiImageAttachmentPreviewVariant = 'composer' | 'message';
 
@@ -94,7 +94,8 @@ const preloadedImageSources = new Set<string>();
 
 const isAttachmentBusy = (item: IAiAttachmentPreviewItem): boolean => item.status === 'processing';
 const isAttachmentFailed = (item: IAiAttachmentPreviewItem): boolean => item.status === 'failed';
-const isRestoredPreviewSource = (src: string): boolean => !ATTACHMENT_PREVIEW_POINTER_PATTERN.test(src);
+const isRestoredPreviewSource = (src: string): boolean =>
+  !ATTACHMENT_PREVIEW_POINTER_PATTERN.test(src);
 
 const canOpenItem = (item: IAiAttachmentPreviewItem): item is IOpenableAttachmentPreviewItem =>
   !isAttachmentBusy(item) &&

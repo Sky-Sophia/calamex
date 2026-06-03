@@ -77,9 +77,7 @@ export const codeMirrorGithubLightHighlightStyle = HighlightStyle.define([
   { tag: tags.invalid, class: 'cmh-invalid' },
 ]);
 
-export function resolveCodeMirrorHighlightStyle(
-  classNames: string,
-): ICodeMirrorStaticTokenStyle {
+export function resolveCodeMirrorHighlightStyle(classNames: string): ICodeMirrorStaticTokenStyle {
   const merged: ICodeMirrorStaticTokenStyle = {};
 
   for (const className of classNames.split(/\s+/u)) {

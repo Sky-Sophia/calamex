@@ -986,7 +986,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         return 'cancelled';
       case 'pending':
         return 'pending';
-      case 'running':
       default:
         return 'running';
     }
@@ -2270,7 +2269,7 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const rollbackLatestFileChange = async (): Promise<void> => {
     const prompt = fileRollbackPrompt.value;
 
-    if (!prompt || prompt.status !== 'ready') {
+    if (prompt?.status !== 'ready') {
       return;
     }
 

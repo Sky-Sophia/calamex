@@ -1,11 +1,11 @@
+import { createHighlighterCore, type HighlighterCore } from 'shiki/core';
+import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
 import {
   CODEMIRROR_GITHUB_LIGHT_BACKGROUND,
   CODEMIRROR_GITHUB_LIGHT_FOREGROUND,
 } from '@/services/editor/codemirror-github-light-highlight';
 import { resolveCodeMirrorLanguageId } from '@/services/editor/codemirror-language';
 import { logger } from '@/utils/logger';
-import { createHighlighterCore, type HighlighterCore } from 'shiki/core';
-import { createOnigurumaEngine } from 'shiki/engine/oniguruma';
 
 /**
  * 专业版 Shiki 高亮服务。

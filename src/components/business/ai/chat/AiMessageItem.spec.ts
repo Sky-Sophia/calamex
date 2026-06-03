@@ -812,7 +812,9 @@ describe('AiMessageItem', () => {
     expect(wrapper.find('.ai-message-image-attachments').exists()).toBe(true);
     expect(wrapper.findAll('.ai-attachment-card[data-variant="message"]')).toHaveLength(1);
     expect(wrapper.text()).toContain('README.md');
-    expect(wrapper.find('.ai-attachment-card[data-variant="message"] span[class*="icon-["]').exists()).toBe(true);
+    expect(
+      wrapper.find('.ai-attachment-card[data-variant="message"] span[class*="icon-["]').exists(),
+    ).toBe(true);
     expect(wrapper.find('.ai-attachment-hover-card').exists()).toBe(false);
   });
 
