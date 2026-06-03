@@ -8,6 +8,7 @@ import {
   projectSidecarPlanValidationResponse,
   resolveSidecarOfficialUsage,
 } from '@/composables/ai/sidecar-events';
+import { subscribeSidecarSessionStream } from '@/composables/ai/sidecar-stream-listener';
 import { useSidecarChangedDocumentRefresh } from '@/composables/useSidecarChangedDocumentRefresh';
 import { aiService } from '@/services/ipc/ai.service';
 import { type TAiAgentPanelMode, useAiAgentStore } from '@/store/aiAgent';
@@ -518,16 +519,33 @@ export const useAiAgentRun = () => {
       errorMessage: null,
     }));
 
+  const appendStepFinalAnswerFromProjection = (
+    session: ISidecarStepLoopSession,
+    projection: ReturnType<typeof projectSidecarExecuteResponse>,
+  ): void => {
+    const finalContent = projection.assistantContent.trim();
+
+    if (!finalContent) {
+      return;
+    }
+
+    store.appendStepFinalAnswer(
+      toStepFinalAnswer(
+        session.runId,
+        session.stepId,
+        finalContent,
+        new Date().toISOString(),
+        projection.toolCalls.length,
+      ),
+    );
+  };
+
   const executeSidecarStepLoop = async (session: ISidecarStepLoopSession): Promise<IAiAgentRun> => {
     const sidecarSessionId =
       session.sessionId ?? createSidecarStepSessionId(session.runId, session.stepId);
     const liveEvents: TAgentUiEvent[] = [];
-    const unlistenSidecarStream = await aiService.onSidecarStream((payload) => {
-      if (payload.sessionId !== sidecarSessionId) {
-        return;
-      }
-
-      liveEvents.push(payload.event);
+    const unlistenSidecarStream = await subscribeSidecarSessionStream(sidecarSessionId, (event) => {
+      liveEvents.push(event);
       appendSidecarLiveToolActivities(session.runId, session.stepId, liveEvents);
     });
 
@@ -592,19 +610,7 @@ export const useAiAgentRun = () => {
       return failedRun;
     }
 
-    const finalContent = projection.assistantContent.trim();
-    if (finalContent) {
-      const createdAt = new Date().toISOString();
-      store.appendStepFinalAnswer(
-        toStepFinalAnswer(
-          session.runId,
-          session.stepId,
-          finalContent,
-          createdAt,
-          projection.toolCalls.length,
-        ),
-      );
-    }
+    appendStepFinalAnswerFromProjection(session, projection);
 
     const nextRun = finishRunWithStepStatus(session.runId, session.stepId, 'done');
     await validateCompletedSidecarPlan(nextRun, session);
@@ -711,12 +717,8 @@ export const useAiAgentRun = () => {
     const sidecarSessionId =
       session.sessionId ?? createSidecarStepSessionId(session.runId, session.stepId);
     const liveEvents: TAgentUiEvent[] = [];
-    const unlistenSidecarStream = await aiService.onSidecarStream((payload) => {
-      if (payload.sessionId !== sidecarSessionId) {
-        return;
-      }
-
-      liveEvents.push(payload.event);
+    const unlistenSidecarStream = await subscribeSidecarSessionStream(sidecarSessionId, (event) => {
+      liveEvents.push(event);
       appendSidecarLiveToolActivities(session.runId, session.stepId, liveEvents);
     });
 
@@ -770,19 +772,7 @@ export const useAiAgentRun = () => {
       return setRunWaitingForConfirmation(session.runId);
     }
 
-    const finalContent = projection.assistantContent.trim();
-    if (finalContent) {
-      const createdAt = new Date().toISOString();
-      store.appendStepFinalAnswer(
-        toStepFinalAnswer(
-          session.runId,
-          session.stepId,
-          finalContent,
-          createdAt,
-          projection.toolCalls.length,
-        ),
-      );
-    }
+    appendStepFinalAnswerFromProjection(session, projection);
 
     if (projection.errorMessage) {
       setErrorMessage(projection.errorMessage);

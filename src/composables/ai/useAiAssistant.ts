@@ -20,6 +20,7 @@ import {
   projectSidecarEventsToToolState,
   projectSidecarExecuteResponse,
 } from '@/composables/ai/sidecar-events';
+import { subscribeSidecarSessionStream } from '@/composables/ai/sidecar-stream-listener';
 import { useAiAgentPlan } from '@/composables/ai/useAiAgentPlan';
 import { useAiStream } from '@/composables/ai/useAiStream';
 import { useSidecarChangedDocumentRefresh } from '@/composables/useSidecarChangedDocumentRefresh';
@@ -1341,6 +1342,17 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     }
   };
 
+  const failSidecarAgentMessage = (messageId: string, message: string): void => {
+    disposeSidecarAnswerStream(messageId);
+    updateAgentExecutionMessage({
+      messageId,
+      content: `Agent 执行失败：${message}`,
+      toolCalls: [],
+      streamStatus: 'completed',
+    });
+    errorMessage.value = message;
+  };
+
   const executeSidecarAgentRequest = async (
     visibleMessages: IAiChatMessage[],
     messageContent: string,
@@ -1387,12 +1399,8 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     let unlistenSidecarStream: (() => void) | null = null;
 
     try {
-      unlistenSidecarStream = await aiService.onSidecarStream((payload) => {
-        if (payload.sessionId !== sidecarSessionId) {
-          return;
-        }
-
-        liveEventBuffer.push(payload.event);
+      unlistenSidecarStream = await subscribeSidecarSessionStream(sidecarSessionId, (event) => {
+        liveEventBuffer.push(event);
       });
       const payload = await aiService.sidecarChat({
         sessionId: sidecarSessionId,
@@ -1426,18 +1434,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         },
       });
     } catch (error) {
-      const wasAborted = activeAbortController.value?.signal.aborted;
-      disposeSidecarAnswerStream(assistantMessageId);
-
-      if (!wasAborted) {
-        const message = toErrorMessage(error, MSG_CALL_FAILED);
-        updateAgentExecutionMessage({
-          messageId: assistantMessageId,
-          content: `Agent 执行失败：${message}`,
-          toolCalls: [],
-          streamStatus: 'completed',
-        });
-        errorMessage.value = message;
+      if (activeAbortController.value?.signal.aborted) {
+        disposeSidecarAnswerStream(assistantMessageId);
+      } else {
+        failSidecarAgentMessage(assistantMessageId, toErrorMessage(error, MSG_CALL_FAILED));
       }
     } finally {
       liveEventBuffer.dispose();
@@ -1478,12 +1478,8 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     let unlistenSidecarStream: (() => void) | null = null;
 
     try {
-      unlistenSidecarStream = await aiService.onSidecarStream((payload) => {
-        if (payload.sessionId !== session.sessionId) {
-          return;
-        }
-
-        liveEventBuffer.push(payload.event);
+      unlistenSidecarStream = await subscribeSidecarSessionStream(session.sessionId, (event) => {
+        liveEventBuffer.push(event);
       });
       const payload = await aiService.sidecarResolveApproval({
         sessionId: session.sessionId,
@@ -1514,15 +1510,10 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
         },
       });
     } catch (error) {
-      const message = toErrorMessage(error, '处理 Agent 工具确认失败。');
-      disposeSidecarAnswerStream(session.assistantMessageId);
-      updateAgentExecutionMessage({
-        messageId: session.assistantMessageId,
-        content: `Agent 执行失败：${message}`,
-        toolCalls: [],
-        streamStatus: 'completed',
-      });
-      errorMessage.value = message;
+      failSidecarAgentMessage(
+        session.assistantMessageId,
+        toErrorMessage(error, '处理 Agent 工具确认失败。'),
+      );
     } finally {
       liveEventBuffer.dispose();
       unlistenSidecarStream?.();
