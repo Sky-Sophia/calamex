@@ -1890,4 +1890,53 @@ onBeforeUnmount(() => {
 .ai-dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 
+  z-index: 1300;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.ai-dialog {
+  display: grid;
+  inline-size: fit-content;
+  min-inline-size: min(380px, calc(100vw - 32px));
+  max-inline-size: min(460px, calc(100vw - 32px));
+  gap: 12px;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.ai-dialog-copy h3 {
+  margin: 0;
+  color: #000000;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ai-dialog-copy p {
+  margin: 4px 0 0;
+  color: #737373;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.ai-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.ai-button.is-ghost {
+  border: 1px solid #d4d4d4;
+  background: #ffffff;
+  color: #000000;
+}
+
+.ai-button.is-danger {
+  border: 0;
+  background: #ea1a24;
+  color: #ffffff;
+}
+</style>
