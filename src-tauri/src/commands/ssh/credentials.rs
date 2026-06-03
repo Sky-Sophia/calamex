@@ -7,6 +7,7 @@ use crate::commands::{
 const SSH_KEYRING_SERVICE: &str = "calamex.ssh";
 
 #[tauri::command]
+#[specta::specta]
 pub async fn save_ssh_password(
     payload: SshPasswordSaveRequest,
 ) -> Result<SshPasswordStatusPayload, String> {
@@ -26,6 +27,7 @@ pub async fn save_ssh_password(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_ssh_password(
     payload: SshPasswordGetRequest,
 ) -> Result<SshPasswordPayload, String> {

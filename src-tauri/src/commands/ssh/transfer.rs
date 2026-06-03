@@ -35,6 +35,7 @@ const SFTP_TRANSFER_CHUNK_BYTES: usize = 256 * 1024;
 const SFTP_PIPELINE_DEPTH: usize = 32;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn list_ssh_directory(
     payload: SshDirectoryListRequest,
 ) -> Result<SshDirectoryListPayload, String> {
@@ -95,6 +96,7 @@ async fn list_dir_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn download_ssh_file(
     payload: SshFileDownloadRequest,
 ) -> Result<SshFileDownloadPayload, String> {
@@ -200,6 +202,7 @@ let partial_for_rename = partial.clone();
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn upload_ssh_file(
     payload: SshFileUploadRequest,
 ) -> Result<SshFileUploadPayload, String> {
@@ -329,6 +332,7 @@ fn ensure_expected_transfer_size(actual: u64, expected: u64, operation: &str) ->
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn read_ssh_file(
     payload: SshFileReadRequest,
 ) -> Result<SshFileReadPayload, String> {
@@ -421,6 +425,7 @@ async fn read_file_inner(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn write_ssh_file(
     payload: SshFileWriteRequest,
 ) -> Result<SshFileWritePayload, String> {
@@ -504,6 +509,7 @@ async fn swap_partial_onto_target(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_ssh_path(
     payload: SshPathDeleteRequest,
 ) -> Result<SshPathDeletePayload, String> {
@@ -553,6 +559,7 @@ async fn delete_path_inner(sftp: &SftpSession, remote_path: &str) -> Result<(), 
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn rename_ssh_path(
     payload: SshPathRenameRequest,
 ) -> Result<SshPathRenamePayload, String> {
@@ -586,6 +593,7 @@ pub async fn rename_ssh_path(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn create_ssh_directory(
     payload: SshDirectoryCreateRequest,
 ) -> Result<SshDirectoryCreatePayload, String> {

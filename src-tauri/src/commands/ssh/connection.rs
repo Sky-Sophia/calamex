@@ -392,6 +392,7 @@ fn failed(code: &str, message: &str) -> SshConnectionTestPayload {
 
 // ===== Tauri Commands =====
 #[tauri::command]
+#[specta::specta]
 pub async fn test_ssh_connection(
     payload: SshConnectionTestRequest,
 ) -> Result<SshConnectionTestPayload, String> {
@@ -443,12 +444,13 @@ pub async fn test_ssh_connection(
 }
 
 // ===== Host-key trust =====
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, specta::Type)]
 pub struct SshHostKeyTrustPayload {
     pub trusted: bool,
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn trust_ssh_host_key(
     host: String,
     port: u16,
