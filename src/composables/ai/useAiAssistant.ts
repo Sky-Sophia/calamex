@@ -33,7 +33,6 @@ import type {
   IAiApplyPatchMetadata,
   IAiAttachedFile,
   IAiChatMessage,
-  IAiChatStreamEventPayload,
   IAiContextReference,
   IAiImageAttachmentPreview,
   IAiPatchSet,
@@ -98,19 +97,18 @@ import {
   getLatestSidecarLiveEvents,
   getOperationAppliedTime,
   hasMeaningfulAssistantText,
-  hasStreamTokenSnapshot,
   type ISidecarAnswerStreamMetadata,
   type ISidecarAnswerStreamState,
   isAiEditOperationEntry,
   isNonNegativeFiniteNumber,
   mapStreamStatus,
   mapToolConfirmationDecisionToSidecarDecision,
-  mergeStreamTokenSnapshot,
   resolveSidecarDoneStreamTokenSnapshot,
   resolveSidecarToolProjectionStatus,
   resolveSidecarWaitingStreamStatus,
   type TSidecarStreamTokenSnapshot,
 } from './useAiAssistant.stream';
+import { createStreamPipeline } from './useAiAssistant.stream-pipeline';
 
 type TAiQuickActionId = 'explain' | 'fix' | 'review';
 
@@ -189,7 +187,6 @@ const MAX_TEXT_ATTACHMENT_BYTES = 128 * 1024;
 const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const AI_EDIT_ROLLBACK_TIMELINE_LIMIT = 24;
 const CODE_BLOCK_PATTERN = /```[a-zA-Z0-9_-]*\n([\s\S]*?)```/;
-const MSG_STREAM_ERROR = 'AI 响应出错';
 const MSG_CALL_FAILED = 'AI 调用失败';
 
 // ---------------------------------------------------------------------------
@@ -1850,104 +1847,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   // Streaming pipeline
   // -----------------------------------------------------------------------
 
-  interface IStreamPipeline {
-    readonly handleEvent: (event: IAiChatStreamEventPayload) => void;
-    readonly startAssistantStream: (streamId: string, assistantMessageId: string) => void;
-    readonly flushBufferedText: () => void;
-  }
-
-  const createStreamPipeline = (
-    assistantMessage: IAiChatMessage,
-    settle: () => void,
-  ): IStreamPipeline => {
-    let isStreamClosed = false;
-    let hasStartedStream = false;
-
-    const flushBufferedText = (): void => {
-      aiStream.flushNow();
-      syncActiveAssistantMessage();
-    };
-
-    const startAssistantStream = (streamId: string, assistantMessageId: string): void => {
-      if (hasStartedStream) {
-        return;
-      }
-
-      hasStartedStream = true;
-      activeStreamId.value = streamId;
-      assistantMessage.id = assistantMessageId;
-
-      aiStream.start({ messageId: assistantMessageId });
-      syncActiveAssistantMessage();
-    };
-
-    const applyStreamTokenSnapshot = (event: IAiChatStreamEventPayload): void => {
-      if (!hasStreamTokenSnapshot(event)) {
-        return;
-      }
-
-      assistantMessage.stream = mergeStreamTokenSnapshot(assistantMessage.stream, event);
-      syncActiveAssistantMessage();
-    };
-
-    const handleEvent = (event: IAiChatStreamEventPayload): void => {
-      if (!activeStreamId.value && event.kind === 'start') {
-        startAssistantStream(event.streamId, event.assistantMessageId);
-        applyStreamTokenSnapshot(event);
-        return;
-      }
-
-      if (event.streamId !== activeStreamId.value) {
-        return;
-      }
-
-      if (isStreamClosed) {
-        return;
-      }
-
-      applyStreamTokenSnapshot(event);
-
-      if (event.kind === 'delta') {
-        if (event.delta) {
-          aiStream.append(event.delta);
-        }
-
-        return;
-      }
-
-      isStreamClosed = true;
-
-      if (event.kind === 'done') {
-        aiStream.complete();
-        syncActiveAssistantMessage();
-        clearAttachedFiles({ revokePreviews: false });
-        settle();
-        return;
-      }
-
-      if (event.kind === 'cancelled') {
-        aiStream.stop();
-        syncActiveAssistantMessage();
-        errorMessage.value = '';
-        settle();
-        return;
-      }
-
-      if (event.kind === 'error') {
-        aiStream.stop();
-        syncActiveAssistantMessage();
-        errorMessage.value = event.message ?? MSG_STREAM_ERROR;
-        settle();
-      }
-    };
-
-    return {
-      handleEvent,
-      startAssistantStream,
-      flushBufferedText,
-    };
-  };
-
   const executeAiRequest = async (
     requestMessages: IAiChatMessage[],
     visibleMessages: IAiChatMessage[],
@@ -1981,7 +1880,17 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       activeStreamResolve.value?.();
     };
 
-    const pipeline = createStreamPipeline(assistantMessage, settle);
+    const pipeline = createStreamPipeline(
+      {
+        aiStream,
+        activeStreamId,
+        errorMessage,
+        syncActiveAssistantMessage,
+        clearAttachedFiles,
+      },
+      assistantMessage,
+      settle,
+    );
 
     try {
       unlisten = await aiService.onChatStream(pipeline.handleEvent);
