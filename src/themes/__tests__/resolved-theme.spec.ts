@@ -1,95 +1,32 @@
 /**
- * T-2.1 特征化测试：主题合成管道
+ * 主题合成管道单元测试
  *
- * 目标：锁定 buildComponentTokens / buildTerminalTheme / 用户偏好常量的当前行为，
- * 作为 T-2.4（ResolvedTheme 拆分）的安全网。
+ * 覆盖三条纯函数管道：
+ *  - buildComponentTokens：L2 变体 → L3 组件令牌映射
+ *  - buildTerminalTheme：变体 → 终端 ANSI 主题派生
+ *  - 用户偏好覆盖常量（accent / radius / density）契约
  *
- * 规则：
- *  - MUST NOT 依赖 document / window / localStorage（纯函数，无副作用）
- *  - 覆盖率目标 ≥ 90%（themes/components.ts、themes/derive/terminal.ts）
- *  - 断言数量 ≥ 24
+ * 约束：被测对象均为纯函数，断言不得依赖 document / window / localStorage。
  */
 
 import { describe, expect, it } from 'vitest';
 import { buildComponentTokens } from '@/themes/components';
 import { buildTerminalTheme } from '@/themes/derive/terminal';
+import {
+  ACCENT_STYLE_MAP,
+  RADIUS_VALUE_MAP,
+  UI_DENSITY_SCALE_MAP,
+} from '@/themes/resolved-theme';
 import { dark } from '@/themes/variants/dark';
 import { light } from '@/themes/variants/light';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 用户偏好覆盖常量（从 store/app.ts 提取的黄金值，T-2.4 后迁入 resolved-theme.ts）
-// ─────────────────────────────────────────────────────────────────────────────
-
-const ACCENT_STYLE_MAP = {
-  indigo: {
-    accent: 'var(--r-accent-default)',
-    accentStrong: 'var(--r-accent-strong)',
-    accentMuted: 'var(--r-accent-muted)',
-    accentSoft: 'var(--r-accent-soft)',
-    statusbarAccent: 'var(--r-accent-statusbar)',
-  },
-  violet: {
-    accent: '#7c3aed',
-    accentStrong: '#9462ff',
-    accentMuted: 'rgba(124, 58, 237, 0.18)',
-    accentSoft: 'rgba(124, 58, 237, 0.34)',
-    statusbarAccent: '#7c3aed',
-  },
-  blue: {
-    accent: '#2f80ed',
-    accentStrong: '#4295ff',
-    accentMuted: 'rgba(47, 128, 237, 0.18)',
-    accentSoft: 'rgba(47, 128, 237, 0.34)',
-    statusbarAccent: '#2f80ed',
-  },
-  teal: {
-    accent: '#14b8a6',
-    accentStrong: '#1ecfbc',
-    accentMuted: 'rgba(20, 184, 166, 0.18)',
-    accentSoft: 'rgba(20, 184, 166, 0.34)',
-    statusbarAccent: '#14b8a6',
-  },
-  gold: {
-    accent: '#e5b800',
-    accentStrong: '#f4c91c',
-    accentMuted: 'rgba(229, 184, 0, 0.18)',
-    accentSoft: 'rgba(229, 184, 0, 0.34)',
-    statusbarAccent: '#c99f00',
-  },
-  red: {
-    accent: '#e5484d',
-    accentStrong: '#ff6468',
-    accentMuted: 'rgba(229, 72, 77, 0.18)',
-    accentSoft: 'rgba(229, 72, 77, 0.34)',
-    statusbarAccent: '#d93c42',
-  },
-} as const;
-
-const RADIUS_VALUE_MAP = {
-  sharp: '0.375rem',
-  default: '0.625rem',
-  rounded: '0.95rem',
-} as const;
-
-const UI_DENSITY_SCALE_MAP = {
-  compact: '0.94',
-  default: '1',
-  comfortable: '1.08',
-} as const;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 辅助：一次性构建令牌，供多组测试复用
-// ─────────────────────────────────────────────────────────────────────────────
-
+// 一次性构建令牌，供多组测试复用（纯函数，可安全共享）。
 const darkTokens = buildComponentTokens(dark);
 const lightTokens = buildComponentTokens(light);
 const darkTerminalTheme = buildTerminalTheme(dark);
 const lightTerminalTheme = buildTerminalTheme(light);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 1: 深色变体 L2 → L3 组件令牌映射
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ── Group 1: 深色变体 L2 → L3 组件令牌映射 ──
 describe('buildComponentTokens / dark', () => {
   it('Primer dark 层级：深色主题使用官方核心表面色', () => {
     expect(dark.surface.app).toBe('#0d1117');
@@ -157,10 +94,7 @@ describe('buildComponentTokens / dark', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 2: 浅色变体 L2 → L3 组件令牌映射
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ── Group 2: 浅色变体 L2 → L3 组件令牌映射 ──
 describe('buildComponentTokens / light', () => {
   it('布局令牌：app 背景等于 light.surface.app', () => {
     expect(lightTokens.layout.app.background).toBe(light.surface.app);
@@ -195,10 +129,7 @@ describe('buildComponentTokens / light', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 3: 终端主题派生
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ── Group 3: 终端主题派生 ──
 describe('buildTerminalTheme / dark', () => {
   it('background 等于 dark.terminal.background', () => {
     expect(darkTerminalTheme.background).toBe(dark.terminal.background);
@@ -224,7 +155,7 @@ describe('buildTerminalTheme / dark', () => {
     expect(darkTerminalTheme.scrollbarSliderBackground).toBe(dark.terminal.scrollbarBackground);
   });
 
-  it('16色全部存在（ANSI 完整性）', () => {
+  it('16 色全部存在（ANSI 完整性）', () => {
     const colors = [
       darkTerminalTheme.black,
       darkTerminalTheme.red,
@@ -268,82 +199,63 @@ describe('buildTerminalTheme / light', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 4: 用户偏好覆盖常量（accent، radius، density）
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ── Group 4: 用户偏好覆盖常量（直接校验生产模块导出，而非测试内副本）──
 describe('用户偏好覆盖常量 / accent', () => {
-  it('共 6 种预设强调色', () => {
-    expect(Object.keys(ACCENT_STYLE_MAP)).toHaveLength(6);
+  const accentNames = ['indigo', 'violet', 'blue', 'teal', 'gold', 'red'] as const;
+  const accentFields = ['accent', 'accentMuted', 'accentSoft', 'accentStrong', 'statusbarAccent'];
+
+  it('恰好提供 6 种预设强调色', () => {
+    expect(Object.keys(ACCENT_STYLE_MAP).sort()).toEqual([...accentNames].sort());
   });
 
-  it('indigo accent 默认值跟随当前 Primer 主题 accent', () => {
-    expect(ACCENT_STYLE_MAP.indigo.accent).toBe('var(--r-accent-default)');
-  });
-
-  it('indigo accentStrong 跟随当前 Primer 主题强调色', () => {
-    expect(ACCENT_STYLE_MAP.indigo.accentStrong).toBe('var(--r-accent-strong)');
-  });
-
-  it('indigo statusbarAccent 跟随当前 Primer 主题状态栏强调色', () => {
-    expect(ACCENT_STYLE_MAP.indigo.statusbarAccent).toBe('var(--r-accent-statusbar)');
-  });
-
-  it('每种 accent 都含 accent / accentStrong / accentMuted / accentSoft / statusbarAccent 字段', () => {
-    for (const [name, style] of Object.entries(ACCENT_STYLE_MAP)) {
-      expect(style.accent, `${name}.accent`).toBeTruthy();
-      expect(style.accentStrong, `${name}.accentStrong`).toBeTruthy();
-      expect(style.accentMuted, `${name}.accentMuted`).toBeTruthy();
-      expect(style.accentSoft, `${name}.accentSoft`).toBeTruthy();
-      expect(style.statusbarAccent, `${name}.statusbarAccent`).toBeTruthy();
+  it('每种强调色都包含全部 5 个 CSS 字段且取值非空', () => {
+    for (const name of accentNames) {
+      const style = ACCENT_STYLE_MAP[name];
+      expect(Object.keys(style).sort()).toEqual([...accentFields].sort());
+      for (const [field, value] of Object.entries(style)) {
+        expect(value, `${name}.${field}`).toBeTruthy();
+      }
     }
   });
 
-  it('red accent 主色为 #e5484d', () => {
+  it('indigo 预设跟随 Primer 主题 CSS 变量而非硬编码色值', () => {
+    expect(ACCENT_STYLE_MAP.indigo.accent).toBe('var(--r-accent-default)');
+    expect(ACCENT_STYLE_MAP.indigo.accentStrong).toBe('var(--r-accent-strong)');
+    expect(ACCENT_STYLE_MAP.indigo.statusbarAccent).toBe('var(--r-accent-statusbar)');
+  });
+
+  it('自定义强调色使用确定的十六进制主色', () => {
     expect(ACCENT_STYLE_MAP.red.accent).toBe('#e5484d');
+    expect(ACCENT_STYLE_MAP.blue.accent).toBe('#2f80ed');
+    expect(ACCENT_STYLE_MAP.teal.accent).toBe('#14b8a6');
   });
 });
 
 describe('用户偏好覆盖常量 / radius', () => {
-  it('共 3 种圆角预设', () => {
-    expect(Object.keys(RADIUS_VALUE_MAP)).toHaveLength(3);
+  it('提供 sharp/default/rounded 三档圆角', () => {
+    expect(Object.keys(RADIUS_VALUE_MAP)).toEqual(['sharp', 'default', 'rounded']);
   });
 
-  it('sharp 圆角值为 0.375rem', () => {
-    expect(RADIUS_VALUE_MAP.sharp).toBe('0.375rem');
-  });
-
-  it('default 圆角值为 0.625rem', () => {
-    expect(RADIUS_VALUE_MAP.default).toBe('0.625rem');
-  });
-
-  it('rounded 圆角值为 0.95rem', () => {
-    expect(RADIUS_VALUE_MAP.rounded).toBe('0.95rem');
+  it('圆角半径随档位单调递增', () => {
+    const rem = (value: string) => Number.parseFloat(value);
+    expect(rem(RADIUS_VALUE_MAP.sharp)).toBeLessThan(rem(RADIUS_VALUE_MAP.default));
+    expect(rem(RADIUS_VALUE_MAP.default)).toBeLessThan(rem(RADIUS_VALUE_MAP.rounded));
   });
 });
 
 describe('用户偏好覆盖常量 / density', () => {
-  it('共 3 种 UI 密度', () => {
-    expect(Object.keys(UI_DENSITY_SCALE_MAP)).toHaveLength(3);
+  it('提供 compact/default/comfortable 三档密度', () => {
+    expect(Object.keys(UI_DENSITY_SCALE_MAP)).toEqual(['compact', 'default', 'comfortable']);
   });
 
-  it('compact 缩放比为 0.94', () => {
-    expect(UI_DENSITY_SCALE_MAP.compact).toBe('0.94');
-  });
-
-  it('default 缩放比为 1', () => {
-    expect(UI_DENSITY_SCALE_MAP.default).toBe('1');
-  });
-
-  it('comfortable 缩放比为 1.08', () => {
-    expect(UI_DENSITY_SCALE_MAP.comfortable).toBe('1.08');
+  it('密度缩放比满足 compact < default(=1) < comfortable', () => {
+    expect(Number(UI_DENSITY_SCALE_MAP.default)).toBe(1);
+    expect(Number(UI_DENSITY_SCALE_MAP.compact)).toBeLessThan(1);
+    expect(Number(UI_DENSITY_SCALE_MAP.comfortable)).toBeGreaterThan(1);
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 5: 跨变体不变量（合成管道稳健性）
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ── Group 5: 跨变体不变量（合成管道稳健性）──
 describe('合成管道稳健性', () => {
   it('buildComponentTokens(dark) 整体结构与 buildComponentTokens(light) 相同', () => {
     const darkKeys = Object.keys(darkTokens).sort();

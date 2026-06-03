@@ -7,32 +7,36 @@ describe('computeDocumentMetrics', () => {
     expect(computeDocumentMetrics('')).toEqual({ lineCount: 1, charCount: 0 });
   });
 
-  it('行数与 split 一致，字符数按码点计', () => {
-    const content = 'a\nbb\nccc';
-    expect(computeDocumentMetrics(content)).toEqual({
-      lineCount: content.split('\n').length,
-      charCount: Array.from(content).length,
+  it('单行纯 ASCII：字符数等于字符串长度', () => {
+    expect(computeDocumentMetrics('hello')).toEqual({ lineCount: 1, charCount: 5 });
+  });
+
+  it('多行文本按 \\n 计行，换行符本身计入字符数', () => {
+    // a \n b b \n c c c → 3 行、8 个码点（含两个换行符）
+    expect(computeDocumentMetrics('a\nbb\nccc')).toEqual({ lineCount: 3, charCount: 8 });
+  });
+
+  it('末尾换行符额外计入一行', () => {
+    expect(computeDocumentMetrics('line\n')).toEqual({ lineCount: 2, charCount: 5 });
+  });
+
+  it('CRLF 中的 \\r 计入字符但不额外计行', () => {
+    expect(computeDocumentMetrics('a\r\nb')).toEqual({ lineCount: 2, charCount: 4 });
+  });
+
+  it('代理对 emoji 记为单个码点', () => {
+    expect(computeDocumentMetrics('😀a😀')).toEqual({ lineCount: 1, charCount: 3 });
+  });
+
+  it('多行混合 emoji 与数学双线数字均按码点计数', () => {
+    // '第一行 😀'=5 + '\n'=1 + '第二行 𝟙𝟚'=6 + '\n'=1 + '③'=1 → 14 码点、3 行
+    expect(computeDocumentMetrics('第一行 😀\n第二行 𝟙𝟚\n③')).toEqual({
+      lineCount: 3,
+      charCount: 14,
     });
   });
 
-  it('末尾换行符计入新的一行', () => {
-    const content = 'line\n';
-    expect(computeDocumentMetrics(content).lineCount).toBe(content.split('\n').length);
-  });
-
-  it('代理对（emoji）记为单个字符', () => {
-    const content = '😀a😀';
-    expect(computeDocumentMetrics(content)).toEqual({
-      lineCount: 1,
-      charCount: Array.from(content).length,
-    });
-  });
-
-  it('多行含 emoji 文本，与 split + Array.from 旧实现结果一致', () => {
-    const content = '第一行 😀\n第二行 𝟙𝟚\n③';
-    expect(computeDocumentMetrics(content)).toEqual({
-      lineCount: content.split('\n').length,
-      charCount: Array.from(content).length,
-    });
+  it('结尾处孤立的高位代理项不会越界，按单码点计数', () => {
+    expect(computeDocumentMetrics('a\uD83D')).toEqual({ lineCount: 1, charCount: 2 });
   });
 });
