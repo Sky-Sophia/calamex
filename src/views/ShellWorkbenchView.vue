@@ -78,7 +78,8 @@
                     </CardContent>
                   </ResizablePanel>
 
-                  <ResizableHandle class="workbench-terminal-handle" />
+                  <ResizableHandle
+                    :class="['workbench-terminal-handle', { 'workbench-terminal-handle--fullscreen': isEditorCollapsed }]" />
 
                   <ResizablePanel id="workbench-terminal-panel" :order="2" :min-size="12" collapsible
                     :collapsed-size="0" :default-size="32" class="min-h-0 overflow-hidden"
@@ -416,6 +417,18 @@ const bindEditorViewportRef = (value: unknown): void => {
 .workbench-terminal-handle[data-resize-handle-state='drag']::before {
   height: 3px !important;
   background-color: var(--accent-strong) !important;
+}
+
+/* 终端全屏（编辑器折叠）时：手柄收为 0 高、隐藏线条，不再碍眼。 */
+.workbench-terminal-handle--fullscreen {
+  height: 0 !important;
+  min-height: 0 !important;
+  flex: 0 0 0 !important;
+  pointer-events: none !important;
+}
+
+.workbench-terminal-handle--fullscreen::before {
+  display: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
