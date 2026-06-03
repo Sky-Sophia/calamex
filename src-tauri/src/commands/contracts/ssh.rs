@@ -17,8 +17,11 @@ use super::secret::SecretString;
 // String），故 password 字段在前端类型中表现为 `string`。
 //
 // 本版所有 *Request / *Payload 均派生 `specta::Type`，供 tauri-specta 生成前端
-// 绑定；u64 字段以 `#[specta(type = f64)]` 覆盖（specta 禁止导出 64 位整型，
-// 且文件字节数可能超过 u32 上限，TS 侧统一为 number）。
+// 绑定；u64 字段以 `#[specta(type = u32)]` 覆盖（specta 禁止导出 64 位整型，
+// TS 侧统一为 number）。注意：该覆盖只影响生成的 TS 类型标注，不改变 serde
+// 序列化——后端仍按 u64 序列化，即使字节数超过 u32 上限，JS 端也会原样收到一个
+// 普通 number（安全整数范围内），故 TS 侧用 number 标注无运行期风险，同时避免
+// f64 覆盖在生成类型中带来的 `number | null`。
 //
 // 注意：identity_path 在某些上下文下可能算敏感信息（包含本地用户名路径），
 // 当前保留 Debug；若要进一步收紧可换成 `SecretString` 或自定义 Debug。
@@ -92,7 +95,7 @@ pub struct SshDirectoryEntryPayload {
     pub(crate) path: String,
     /// 已知值："file" | "directory" | "symlink"。
     pub(crate) kind: String,
-    #[specta(type = f64)]
+    #[specta(type = u32)]
     pub(crate) size: u64,
 }
 
@@ -121,7 +124,7 @@ pub struct SshFileDownloadRequest {
 pub struct SshFileDownloadPayload {
     pub(crate) remote_path: String,
     pub(crate) local_path: String,
-    #[specta(type = f64)]
+    #[specta(type = u32)]
     pub(crate) byte_size: u64,
 }
 
@@ -143,7 +146,7 @@ pub struct SshFileUploadRequest {
 pub struct SshFileUploadPayload {
     pub(crate) local_path: String,
     pub(crate) remote_path: String,
-    #[specta(type = f64)]
+    #[specta(type = u32)]
     pub(crate) byte_size: u64,
 }
 
@@ -220,10 +223,10 @@ pub struct SshFileReadRequest {
 pub struct SshFileReadPayload {
     pub(crate) remote_path: String,
     pub(crate) content: String,
-    #[specta(type = f64)]
+    #[specta(type = u32)]
     pub(crate) byte_size: u64,
     pub(crate) encoding: String,
-    #[specta(type = f64)]
+    #[specta(type = u32)]
     pub(crate) line_count: u64,
     pub(crate) line_ending: String,
     pub(crate) permission: String,
@@ -250,7 +253,7 @@ pub struct SshFileWriteRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SshFileWritePayload {
     pub(crate) remote_path: String,
-    #[specta(type = f64)]
+    #[specta(type = u32)]
     pub(crate) byte_size: u64,
 }
 
