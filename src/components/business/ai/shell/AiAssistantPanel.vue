@@ -14,6 +14,7 @@ import AiPlanConfirmationMessage from '@/components/business/ai/plan/AiPlanConfi
 import AiPlanModePanel from '@/components/business/ai/plan/AiPlanModePanel.vue';
 import AiProviderIcon from '@/components/business/ai/provider/AiProviderIcon.vue';
 import AiProviderSettings from '@/components/business/ai/provider/AiProviderSettings.vue';
+import AiPanelFrame from '@/components/business/ai/shell/AiPanelFrame.vue';
 import AiToolConfirmationCard from '@/components/business/ai/shell/AiToolConfirmationCard.vue';
 import AiWebSourcesPanel from '@/components/business/ai/web/AiWebSourcesPanel.vue';
 import { useAiAgentNetwork } from '@/composables/ai/useAiAgentNetwork';
@@ -1216,225 +1217,204 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="ai-assistant-panel" aria-label="AI 助手面板">
-    <header class="ai-panel-header">
+  <AiPanelFrame class="ai-assistant-panel" aria-label="AI 助手面板">
+    <template #mark>
       <div class="ai-provider-mark" aria-label="当前 AI 平台和模型" :title="providerMarkTitle">
         <AiProviderIcon class="ai-provider-mark__icon" :platform-id="aiIconPlatformId" decorative />
         <span class="ai-provider-mark__copy">
           <span class="ai-provider-mark__label" v-text="aiModelName"></span>
         </span>
       </div>
-      <div class="ai-panel-actions">
-        <button type="button" class="ai-icon-button" aria-label="新建对话" @click="startNewConversation">
-          <span aria-hidden="true" class="icon-[lucide--square-pen]" />
-        </button>
-        <button type="button" class="ai-icon-button" aria-label="AI 设置" @click="openSettings">
+    </template>
+
+    <template #actions>
+      <button type="button" class="ai-icon-button" aria-label="新建对话" @click="startNewConversation">
+        <span aria-hidden="true" class="icon-[lucide--square-pen]" />
+      </button>
+      <button type="button" class="ai-icon-button" aria-label="AI 设置" @click="openSettings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M20 7h-7" />
+          <path d="M14 17H4" />
+          <circle cx="17" cy="17" r="3" />
+          <circle cx="7" cy="7" r="3" />
+        </svg>
+      </button>
+      <div ref="historyAnchorRef" class="ai-history-anchor">
+        <button type="button" class="ai-icon-button" aria-label="对话记录" aria-haspopup="dialog"
+          :aria-expanded="isHistoryOpen" @click="toggleHistoryPopover">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-            <path d="M20 7h-7" />
-            <path d="M14 17H4" />
-            <circle cx="17" cy="17" r="3" />
-            <circle cx="7" cy="7" r="3" />
+            <path d="M3 3v5h5" />
+            <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
+            <path d="M12 7v5l4 2" />
           </svg>
         </button>
-        <div ref="historyAnchorRef" class="ai-history-anchor">
-          <button type="button" class="ai-icon-button" aria-label="对话记录" aria-haspopup="dialog"
-            :aria-expanded="isHistoryOpen" @click="toggleHistoryPopover">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-              <path d="M3 3v5h5" />
-              <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
-              <path d="M12 7v5l4 2" />
-            </svg>
-          </button>
-          <section v-if="isHistoryOpen" ref="historyPopoverRef" class="ai-history-popover" role="dialog"
-            aria-label="对话记录">
-            <header class="ai-history-header">
-              <div class="ai-history-title-group">
-                <strong>对话记录</strong>
-              </div>
-              <button v-if="activeHistoryThread" type="button" class="ai-history-clear-icon" aria-label="删除当前对话记录"
-                @click="openDeleteConversationDialog(activeHistoryThread.id)">
-                <span aria-hidden="true" class="icon-[lucide--trash-2]" />
-              </button>
-            </header>
-            <div v-if="historyThreads.length" class="ai-history-scroll-area">
-              <div class="ai-history-list">
-                <article v-for="thread in historyThreads" :key="thread.id" class="ai-history-item"
-                  :class="{ 'is-active': thread.id === assistant.activeConversationId.value }">
-                  <button type="button" class="ai-history-button" @click="openHistoryThread(thread.id)">
-                    <div class="ai-history-meta">
-                      <strong class="ai-history-title" v-text="thread.title"></strong>
-                      <time v-text="getHistoryTimeLabel(thread.updatedAt)"></time>
-                    </div>
-                    <div class="ai-history-subtitle" v-text="getHistoryMessageCountLabel(thread.messages)"></div>
-                  </button>
-                  <button type="button" class="ai-history-delete-button" aria-label="删除这条对话记录"
-                    @click.stop="openDeleteConversationDialog(thread.id)">
-                    <span aria-hidden="true" class="icon-[lucide--trash-2]" />
-                  </button>
-                </article>
-              </div>
+        <section v-if="isHistoryOpen" ref="historyPopoverRef" class="ai-history-popover" role="dialog"
+          aria-label="对话记录">
+          <header class="ai-history-header">
+            <div class="ai-history-title-group">
+              <strong>对话记录</strong>
             </div>
-            <div v-else class="ai-history-empty">暂无对话记录</div>
-          </section>
-        </div>
-        <slot name="header-actions-after" />
-      </div>
-    </header>
-
-    <AiChatThread :messages="threadMessages" :is-typing="assistant.isSending.value" :platform-id="aiIconPlatformId"
-      :provider-label="aiIconTitle" :conversation-id="assistant.activeConversationId.value"
-      :workspace-root-path="workspaceRootPath" :scroll-state="assistant.activeConversationScrollState.value"
-      :typing-label="assistantTypingLabel" :has-extra-content="planConfirmationVisible || directToolConfirmationVisible"
-      :reverting-changed-files-summary-id="assistant.revertingChangedFilesSummaryId.value"
-      :pinning-changed-files-summary-id="assistant.pinningChangedFilesSummaryId.value"
-      @scroll-state-change="handleConversationScrollStateChange"
-      @changed-files-rollback="assistant.rollbackChangedFilesSummary"
-      @changed-files-pin="assistant.setChangedFilesSummaryPin">
-      <template #empty>
-        <div class="ai-suggestion-empty">
-          <h2 class="ai-suggestion-greeting">有什么我能帮你的吗？</h2>
-          <div v-for="(suggestionRow, rowIndex) in suggestionRows" :key="rowIndex" class="ai-suggestion-row">
-            <button v-for="suggestion in suggestionRow" :key="suggestion.message" type="button"
-              class="ai-suggestion-chip" :disabled="composerDisabled"
-              @click="handleSuggestionSelect(suggestion.message)" v-text="suggestion.title"></button>
+            <button v-if="activeHistoryThread" type="button" class="ai-history-clear-icon" aria-label="删除当前对话记录"
+              @click="openDeleteConversationDialog(activeHistoryThread.id)">
+              <span aria-hidden="true" class="icon-[lucide--trash-2]" />
+            </button>
+          </header>
+          <div v-if="historyThreads.length" class="ai-history-scroll-area">
+            <div class="ai-history-list">
+              <article v-for="thread in historyThreads" :key="thread.id" class="ai-history-item"
+                :class="{ 'is-active': thread.id === assistant.activeConversationId.value }">
+                <button type="button" class="ai-history-button" @click="openHistoryThread(thread.id)">
+                  <div class="ai-history-meta">
+                    <strong class="ai-history-title" v-text="thread.title"></strong>
+                    <time v-text="getHistoryTimeLabel(thread.updatedAt)"></time>
+                  </div>
+                  <div class="ai-history-subtitle" v-text="getHistoryMessageCountLabel(thread.messages)"></div>
+                </button>
+                <button type="button" class="ai-history-delete-button" aria-label="删除这条对话记录"
+                  @click.stop="openDeleteConversationDialog(thread.id)">
+                  <span aria-hidden="true" class="icon-[lucide--trash-2]" />
+                </button>
+              </article>
+            </div>
           </div>
-        </div>
-      </template>
-      <template #after-message="{ message }">
-        <Checkpoint v-if="getConversationCheckpoint(message.id)" class="ai-conversation-checkpoint">
-          <CheckpointTrigger class="ai-conversation-checkpoint__trigger" :disabled="isConversationCheckpointDisabled"
-            @click="handleRestoreConversationCheckpoint(message.id)">
-            <CheckpointIcon class="ai-conversation-checkpoint__icon" aria-hidden="true" />
-            <span class="ai-conversation-checkpoint__label" v-text="getConversationCheckpointLabel(message.id)"></span>
-            <Loader v-if="isConversationCheckpointRestoring(message.id)" class="ai-conversation-checkpoint__loader"
-              :size="12" />
-            <span v-else class="ai-conversation-checkpoint__spacer" aria-hidden="true"></span>
-          </CheckpointTrigger>
-        </Checkpoint>
-      </template>
-      <template #after-messages>
-        <AiPlanConfirmationMessage v-if="planConfirmationVisible" :goal="planActiveGoal" :summary="planSummary"
-          :status="planStatus" :steps="planSteps" :is-planning="planIsPlanning" :is-approving="planIsApproving"
-          :can-edit="canEditPlan" :can-approve="canApprovePlan" :approved-at="planApprovedAt"
-          @update-step-title="handleUpdatePlanStepTitle" @remove-step="handleRemovePlanStep"
-          @regenerate="handleRegeneratePlan" @reject="handleRejectPlan" @approve="handleApprovePlan" />
-        <div v-if="directToolConfirmationVisible && visibleDirectToolConfirmation" class="ai-direct-tool-confirmation">
-          <AiToolConfirmationCard :confirmation="visibleDirectToolConfirmation" :disabled="isAgentRunActionPending"
-            @resolve="handleResolveToolConfirmation" />
-        </div>
-        <AiErrorNotice v-if="assistant.errorMessage.value" :message="assistant.errorMessage.value" />
-      </template>
-    </AiChatThread>
-    <div v-if="fileRollbackPrompt" class="ai-file-rollback-entry" :class="`is-${fileRollbackPrompt.status}`">
-      <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
-      <button type="button" class="ai-file-rollback-entry__button" :disabled="isFileRollbackDisabled"
-        :aria-label="fileRollbackLabel" @click="assistant.rollbackLatestFileChange">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-          <path d="M3 7v5h5" />
-          <path d="M21 17a8 8 0 0 0-13.66-5.66L3 16" />
-        </svg>
-        <span v-text="fileRollbackLabel"></span>
-      </button>
-      <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
-    </div>
-    <AiPatchPreview :patch="visiblePatchPreview" :is-applying="assistant.isApplyingPatch.value"
-      :is-applied="isVisiblePatchApplied" :workspace-root-path="workspaceRootPath" @apply="assistant.applyProposedPatch"
-      @close="assistant.proposedPatch.value = null; assistant.appliedPatchPreview.value = null"
-      @open-diff="emit('open-patch-diff', $event)" />
-    <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
-      <span class="ai-patch-entry__line" aria-hidden="true"></span>
-      <button type="button" class="ai-patch-entry__button" @click="assistant.previewPatchFromLastAnswer">
-        <span>预览为 Patch</span>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-          <circle cx="6" cy="6" r="2" />
-          <circle cx="18" cy="6" r="2" />
-          <circle cx="18" cy="18" r="2" />
-          <path d="M8 6h4a4 4 0 0 1 4 4v6" />
-        </svg>
-      </button>
-      <span class="ai-patch-entry__line" aria-hidden="true"></span>
-    </div>
-    <AiWebSourcesPanel v-if="webSourcesVisible" :sources="webSources.sources.value"
-      :activity="planProgressVisible ? null : webSources.activity.value" :error-message="webSources.errorMessage.value"
-      :is-searching="webSources.isSearching.value" :network-permission="networkPermission"
-      @search="handleSearchWebSources" @fetch-source="handleFetchWebSource" @clear="webSources.clear" />
-    <div class="ai-composer-shell" :class="{ 'has-plan': planProgressVisible }">
-      <AiPlanModePanel v-if="planProgressVisible" :goal="planActiveGoal" :plan-summary="planSummary"
-        :plan-status="planStatus" :plan-id="planId" :plan-version="planVersion" :plan-thread-id="planThreadId"
-        :plan-created-at="planCreatedAt" :plan-updated-at="planUpdatedAt" :plan-executed-at="planExecutedAt"
-        :plan-rejection-reason="planRejectionReason" :plan-error-message="planExecutionErrorMessage"
-        :plan-versions="planVersions" :steps="planSteps" :classification-reason="planClassificationReason"
-        :error-message="planErrorMessage" :is-classifying="planIsClassifying" :is-planning="planIsPlanning"
-        :is-approving="planIsApproving" :approved-at="planApprovedAt" :active-run="planActiveRun"
-        :is-run-action-pending="isAgentRunActionPending" :web-activity="webSources.activity.value"
-        :tool-activity="planActiveToolActivity" :tool-confirmation="planPendingToolConfirmation"
-        @update-step-title="handleUpdatePlanStepTitle" @remove-step="handleRemovePlanStep"
-        @regenerate="handleRegeneratePlan" @reject="handleRejectPlan" @approve="handleApprovePlan"
-        @reset="handleResetPlan" @run-step="handleRunStep" @pause-run="handlePauseRun" @resume-run="handleResumeRun"
-        @cancel-run="handleCancelRun" @resolve-tool-confirmation="handleResolveToolConfirmation" />
-      <AiPromptInput v-model="assistant.draft.value" v-model:active-mode="assistant.activeMode.value"
-        :disabled="composerDisabled" :stop-visible="assistant.isSending.value"
-        :error-message="assistant.errorMessage.value" :submit-label="submitLabel" :config="assistant.config.value"
-        :is-model-saving="isPromptModelSaving" :network-permission="networkPermission"
-        :is-network-permission-saving="agentNetwork.pending.value" :attachments="assistant.attachedFiles.value"
-        :has-attachments="assistant.attachedFiles.value.length > 0" :token-context="tokenContextProps"
-        @submit="handleSubmitMessage" @stop="assistant.stopCurrentRequest" @file-selected="assistant.attachFile"
-        @remove-file="assistant.removeAttachedFile" @model-change="handlePromptModelChange"
-        @network-permission-change="handlePromptNetworkPermissionChange"
-        @information-sources-open="openPromptInformationSources" @personalization-open="openPromptPersonalization"
-        @prewarm="handlePromptPrewarm" />
-    </div>
-
-    <AiProviderSettings v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
-      v-model:tavily-api-key="settingsTavilyApiKey" :open="assistant.isSettingsOpen.value"
-      :config="assistant.config.value" @close="assistant.isSettingsOpen.value = false" @save="saveSettings"
-      @save-credentials="saveCredentials" @test-provider="testProvider" @save-tavily-key="saveTavilyKey" />
-
-    <Teleport to="body">
-      <div v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop" @click.self="cancelClearConversation">
-        <section class="ai-dialog is-compact" role="alertdialog" aria-modal="true">
-          <div class="ai-dialog-copy">
-            <h3 v-text="getDeleteDialogTitle()"></h3>
-            <p v-text="getDeleteDialogDescription()"></p>
-          </div>
-          <div class="ai-dialog-actions">
-            <button type="button" class="ai-button is-ghost" @click="cancelClearConversation">取消</button>
-            <button type="button" class="ai-button is-danger" @click="confirmClearConversation">删除</button>
-          </div>
+          <div v-else class="ai-history-empty">暂无对话记录</div>
         </section>
       </div>
-    </Teleport>
-  </section>
+      <slot name="header-actions-after" />
+    </template>
+
+    <template #body>
+      <AiChatThread :messages="threadMessages" :is-typing="assistant.isSending.value" :platform-id="aiIconPlatformId"
+        :provider-label="aiIconTitle" :conversation-id="assistant.activeConversationId.value"
+        :workspace-root-path="workspaceRootPath" :scroll-state="assistant.activeConversationScrollState.value"
+        :typing-label="assistantTypingLabel" :has-extra-content="planConfirmationVisible || directToolConfirmationVisible"
+        :reverting-changed-files-summary-id="assistant.revertingChangedFilesSummaryId.value"
+        :pinning-changed-files-summary-id="assistant.pinningChangedFilesSummaryId.value"
+        @scroll-state-change="handleConversationScrollStateChange"
+        @changed-files-rollback="assistant.rollbackChangedFilesSummary"
+        @changed-files-pin="assistant.setChangedFilesSummaryPin">
+        <template #empty>
+          <div class="ai-suggestion-empty">
+            <h2 class="ai-suggestion-greeting">有什么我能帮你的吗？</h2>
+            <div v-for="(suggestionRow, rowIndex) in suggestionRows" :key="rowIndex" class="ai-suggestion-row">
+              <button v-for="suggestion in suggestionRow" :key="suggestion.message" type="button"
+                class="ai-suggestion-chip" :disabled="composerDisabled"
+                @click="handleSuggestionSelect(suggestion.message)" v-text="suggestion.title"></button>
+            </div>
+          </div>
+        </template>
+        <template #after-message="{ message }">
+          <Checkpoint v-if="getConversationCheckpoint(message.id)" class="ai-conversation-checkpoint">
+            <CheckpointTrigger class="ai-conversation-checkpoint__trigger" :disabled="isConversationCheckpointDisabled"
+              @click="handleRestoreConversationCheckpoint(message.id)">
+              <CheckpointIcon class="ai-conversation-checkpoint__icon" aria-hidden="true" />
+              <span class="ai-conversation-checkpoint__label" v-text="getConversationCheckpointLabel(message.id)"></span>
+              <Loader v-if="isConversationCheckpointRestoring(message.id)" class="ai-conversation-checkpoint__loader"
+                :size="12" />
+              <span v-else class="ai-conversation-checkpoint__spacer" aria-hidden="true"></span>
+            </CheckpointTrigger>
+          </Checkpoint>
+        </template>
+        <template #after-messages>
+          <AiPlanConfirmationMessage v-if="planConfirmationVisible" :goal="planActiveGoal" :summary="planSummary"
+            :status="planStatus" :steps="planSteps" :is-planning="planIsPlanning" :is-approving="planIsApproving"
+            :can-edit="canEditPlan" :can-approve="canApprovePlan" :approved-at="planApprovedAt"
+            @update-step-title="handleUpdatePlanStepTitle" @remove-step="handleRemovePlanStep"
+            @regenerate="handleRegeneratePlan" @reject="handleRejectPlan" @approve="handleApprovePlan" />
+          <div v-if="directToolConfirmationVisible && visibleDirectToolConfirmation" class="ai-direct-tool-confirmation">
+            <AiToolConfirmationCard :confirmation="visibleDirectToolConfirmation" :disabled="isAgentRunActionPending"
+              @resolve="handleResolveToolConfirmation" />
+          </div>
+          <AiErrorNotice v-if="assistant.errorMessage.value" :message="assistant.errorMessage.value" />
+        </template>
+      </AiChatThread>
+    </template>
+
+    <template #composer>
+      <div v-if="fileRollbackPrompt" class="ai-file-rollback-entry" :class="`is-${fileRollbackPrompt.status}`">
+        <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
+        <button type="button" class="ai-file-rollback-entry__button" :disabled="isFileRollbackDisabled"
+          :aria-label="fileRollbackLabel" @click="assistant.rollbackLatestFileChange">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path d="M3 7v5h5" />
+            <path d="M21 17a8 8 0 0 0-13.66-5.66L3 16" />
+          </svg>
+          <span v-text="fileRollbackLabel"></span>
+        </button>
+        <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
+      </div>
+      <AiPatchPreview :patch="visiblePatchPreview" :is-applying="assistant.isApplyingPatch.value"
+        :is-applied="isVisiblePatchApplied" :workspace-root-path="workspaceRootPath" @apply="assistant.applyProposedPatch"
+        @close="assistant.proposedPatch.value = null; assistant.appliedPatchPreview.value = null"
+        @open-diff="emit('open-patch-diff', $event)" />
+      <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
+        <span class="ai-patch-entry__line" aria-hidden="true"></span>
+        <button type="button" class="ai-patch-entry__button" @click="assistant.previewPatchFromLastAnswer">
+          <span>预览为 Patch</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <circle cx="6" cy="6" r="2" />
+            <circle cx="18" cy="6" r="2" />
+            <circle cx="18" cy="18" r="2" />
+            <path d="M8 6h4a4 4 0 0 1 4 4v6" />
+          </svg>
+        </button>
+        <span class="ai-patch-entry__line" aria-hidden="true"></span>
+      </div>
+      <AiWebSourcesPanel v-if="webSourcesVisible" :sources="webSources.sources.value"
+        :activity="planProgressVisible ? null : webSources.activity.value" :error-message="webSources.errorMessage.value"
+        :is-searching="webSources.isSearching.value" :network-permission="networkPermission"
+        @search="handleSearchWebSources" @fetch-source="handleFetchWebSource" @clear="webSources.clear" />
+      <div class="ai-composer-shell" :class="{ 'has-plan': planProgressVisible }">
+        <AiPlanModePanel v-if="planProgressVisible" :goal="planActiveGoal" :plan-summary="planSummary"
+          :plan-status="planStatus" :plan-id="planId" :plan-version="planVersion" :plan-thread-id="planThreadId"
+          :plan-created-at="planCreatedAt" :plan-updated-at="planUpdatedAt" :plan-executed-at="planExecutedAt"
+          :plan-rejection-reason="planRejectionReason" :plan-error-message="planExecutionErrorMessage"
+          :plan-versions="planVersions" :steps="planSteps" :classification-reason="planClassificationReason"
+          :error-message="planErrorMessage" :is-classifying="planIsClassifying" :is-planning="planIsPlanning"
+          :is-approving="planIsApproving" :approved-at="planApprovedAt" :active-run="planActiveRun"
+          :is-run-action-pending="isAgentRunActionPending" :web-activity="webSources.activity.value"
+          :tool-activity="planActiveToolActivity" :tool-confirmation="planPendingToolConfirmation"
+          @update-step-title="handleUpdatePlanStepTitle" @remove-step="handleRemovePlanStep"
+          @regenerate="handleRegeneratePlan" @reject="handleRejectPlan" @approve="handleApprovePlan"
+          @reset="handleResetPlan" @run-step="handleRunStep" @pause-run="handlePauseRun" @resume-run="handleResumeRun"
+          @cancel-run="handleCancelRun" @resolve-tool-confirmation="handleResolveToolConfirmation" />
+        <AiPromptInput v-model="assistant.draft.value" v-model:active-mode="assistant.activeMode.value"
+          :disabled="composerDisabled" :stop-visible="assistant.isSending.value"
+          :error-message="assistant.errorMessage.value" :submit-label="submitLabel" :config="assistant.config.value"
+          :is-model-saving="isPromptModelSaving" :network-permission="networkPermission"
+          :is-network-permission-saving="agentNetwork.pending.value" :attachments="assistant.attachedFiles.value"
+          :has-attachments="assistant.attachedFiles.value.length > 0" :token-context="tokenContextProps"
+          @submit="handleSubmitMessage" @stop="assistant.stopCurrentRequest" @file-selected="assistant.attachFile"
+          @remove-file="assistant.removeAttachedFile" @model-change="handlePromptModelChange"
+          @network-permission-change="handlePromptNetworkPermissionChange"
+          @information-sources-open="openPromptInformationSources" @personalization-open="openPromptPersonalization"
+          @prewarm="handlePromptPrewarm" />
+      </div>
+
+      <AiProviderSettings v-model:draft="settingsDraft" v-model:api-key="settingsApiKey"
+        v-model:tavily-api-key="settingsTavilyApiKey" :open="assistant.isSettingsOpen.value"
+        :config="assistant.config.value" @close="assistant.isSettingsOpen.value = false" @save="saveSettings"
+        @save-credentials="saveCredentials" @test-provider="testProvider" @save-tavily-key="saveTavilyKey" />
+
+      <Teleport to="body">
+        <div v-if="assistant.isClearDialogOpen.value" class="ai-dialog-backdrop" @click.self="cancelClearConversation">
+          <section class="ai-dialog is-compact" role="alertdialog" aria-modal="true">
+            <div class="ai-dialog-copy">
+              <h3 v-text="getDeleteDialogTitle()"></h3>
+              <p v-text="getDeleteDialogDescription()"></p>
+            </div>
+            <div class="ai-dialog-actions">
+              <button type="button" class="ai-button is-ghost" @click="cancelClearConversation">取消</button>
+              <button type="button" class="ai-button is-danger" @click="confirmClearConversation">删除</button>
+            </div>
+          </section>
+        </div>
+      </Teleport>
+    </template>
+  </AiPanelFrame>
 </template>
 
 <style scoped>
-.ai-assistant-panel {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  height: 100%;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  overflow-x: hidden;
-  background: var(--sidebar-bg);
-  color: var(--text-primary);
-}
-
-.ai-panel-header {
-  position: relative;
-  display: flex;
-  flex: 0 0 auto;
-  height: 40px;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px 0 12px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-}
-
 .ai-provider-mark {
   display: inline-flex;
   min-width: 0;
@@ -1466,14 +1446,6 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.2;
-}
-
-.ai-panel-actions {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
 }
 
 .ai-icon-button {
@@ -1918,53 +1890,4 @@ onBeforeUnmount(() => {
 .ai-dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1300;
-  display: grid;
-  place-items: center;
-  background: rgba(0, 0, 0, 0.28);
-}
-
-.ai-dialog {
-  display: grid;
-  inline-size: fit-content;
-  min-inline-size: min(380px, calc(100vw - 32px));
-  max-inline-size: min(460px, calc(100vw - 32px));
-  gap: 12px;
-  border: 1px solid #e5e5e5;
-  border-radius: 12px;
-  background: #ffffff;
-  padding: 16px;
-}
-
-.ai-dialog-copy h3 {
-  margin: 0;
-  color: #000000;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.ai-dialog-copy p {
-  margin: 4px 0 0;
-  color: #737373;
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.ai-dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.ai-button.is-ghost {
-  border: 1px solid #d4d4d4;
-  background: #ffffff;
-  color: #000000;
-}
-
-.ai-button.is-danger {
-  border: 0;
-  background: #ea1a24;
-  color: #ffffff;
-}
-</style>
+  z-index: 
