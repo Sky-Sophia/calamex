@@ -290,8 +290,8 @@ fn stash_blob_bytes(repository: &Repository, object_id: gix::ObjectId) -> Option
 
 /// 统计两段 blob 内容之间的增删行数；任一侧含 NUL 字节则视为二进制（返回 0/0 + true）。
 fn count_blob_line_changes(old: Option<&[u8]>, new: Option<&[u8]>) -> (u32, u32, bool) {
-    let is_binary = old.map_or(false, |bytes| bytes.contains(&0))
-        || new.map_or(false, |bytes| bytes.contains(&0));
+    let is_binary = old.is_some_and(|bytes| bytes.contains(&0))
+        || new.is_some_and(|bytes| bytes.contains(&0));
     if is_binary {
         return (0, 0, true);
     }

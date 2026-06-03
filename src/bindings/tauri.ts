@@ -40,6 +40,12 @@ export const commands = {
 	 *  重复调用、未启动时调用都是安全的（幂等）。
 	 */
 	stopWorkspaceWatching: () => __TAURI_INVOKE<null>("stop_workspace_watching"),
+	ensureTerminalSession: (payload: EnsureTerminalSessionRequest) => __TAURI_INVOKE<TerminalSessionPayload>("ensure_terminal_session", { payload }),
+	writeTerminalInput: (payload: TerminalInputRequest) => __TAURI_INVOKE<null>("write_terminal_input", { payload }),
+	resizeTerminalSession: (payload: TerminalResizeRequest) => __TAURI_INVOKE<null>("resize_terminal_session", { payload }),
+	closeTerminalSession: (payload: CloseTerminalSessionRequest) => __TAURI_INVOKE<null>("close_terminal_session", { payload }),
+	dispatchScriptToTerminal: (payload: DispatchTerminalScriptRequest) => __TAURI_INVOKE<DispatchTerminalScriptPayload>("dispatch_script_to_terminal", { payload }),
+	cancelTerminalRun: (payload: CancelTerminalRunRequest) => __TAURI_INVOKE<null>("cancel_terminal_run", { payload }),
 };
 
 /** Events */
@@ -61,7 +67,40 @@ export type AnalyzeScriptRequest = {
 	content: string,
 };
 
+export type CancelTerminalRunRequest = {
+	runId: string,
+	mode: string | null,
+};
+
+export type CloseTerminalSessionRequest = {
+	sessionId: string,
+};
+
+export type DispatchTerminalScriptPayload = {
+	sessionId: string,
+	cwd: string,
+	commandLine: string,
+	usedTempFile: boolean,
+	startedAt: string,
+};
+
+export type DispatchTerminalScriptRequest = {
+	sessionId: string,
+	path: string | null,
+	workspaceRootPath: string | null,
+	content: string,
+	isDirty: boolean,
+	runId: string,
+};
+
 export type DocumentEncoding = "utf-8" | "utf-8-bom" | "gbk" | "gb18030" | "utf-16le" | "utf-16be";
+
+export type EnsureTerminalSessionRequest = {
+	sessionId: string,
+	cwd: string | null,
+	cols: number,
+	rows: number,
+};
 
 export type ExecutionEnvironment = {
 	recommended: ExecutorKind,
@@ -146,6 +185,25 @@ export type SetWindowBackgroundInput = {
 	g: number,
 	b: number,
 	a?: number,
+};
+
+export type TerminalInputRequest = {
+	sessionId: string,
+	data: string,
+};
+
+export type TerminalResizeRequest = {
+	sessionId: string,
+	cols: number,
+	rows: number,
+};
+
+export type TerminalSessionPayload = {
+	sessionId: string,
+	cwd: string,
+	shellLabel: string,
+	created: boolean,
+	initialOutput: string | null,
 };
 
 export type WindowStage = "main";

@@ -18,6 +18,5 @@ pub use ai_chat::*;
 pub use ai_config::*;
 pub use ai_edit::*;
 pub use script::*;
-pub use secret::*;
 pub use ssh::*;
 pub use workspace::*;

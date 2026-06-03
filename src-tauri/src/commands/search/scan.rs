@@ -54,7 +54,7 @@ pub(super) struct PathFilters {
     exclude: Option<GlobSet>,
 }
 
-struct WorkspaceFileCache {
+pub(super) struct WorkspaceFileCache {
     files: Arc<Vec<ScannedFile>>,
     symbols: Option<Arc<Vec<SymbolEntry>>>,
     dirty: Arc<AtomicBool>,

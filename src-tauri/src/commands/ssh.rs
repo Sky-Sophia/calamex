@@ -27,7 +27,7 @@ mod transfer;
 mod util;
 
 pub use config::list_ssh_config_hosts;
-pub use connection::{test_ssh_connection, trust_ssh_host_key, SshHostKeyTrustPayload};
+pub use connection::{test_ssh_connection, trust_ssh_host_key};
 pub use credentials::{get_ssh_password, save_ssh_password};
 pub use transfer::{
     create_ssh_directory, delete_ssh_path, download_ssh_file, list_ssh_directory, read_ssh_file,

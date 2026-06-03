@@ -306,9 +306,8 @@ where
         pair.master,
         on_event,
     )
-    .map_err(|error| {
+    .inspect_err(|_error| {
         cleanup_wsl_paths(&cleanup_paths);
-        error
     })?;
 
     Ok(LocalWslRunHandle {
