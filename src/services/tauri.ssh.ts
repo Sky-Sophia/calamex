@@ -1,99 +1,214 @@
-import { z } from 'zod';
+import { commands } from '@/bindings/tauri';
 import { useDialog } from '@/composables/useDialog';
 import { AppError, isAppError } from '@/types/app-error';
 import type { ITauriService } from '@/types/tauri';
-import { tauriContracts } from './tauri.contracts';
-import { defineContractIpc, defineIpc, definePayloadIpc } from './tauri.ipc-factory';
 import { buildPayloadMetricsOmittingTextFields } from './tauri.ipc-metrics';
+import { callSpectaCommand } from './tauri.ipc-runtime';
 import type { IIpcCallOptions } from './tauri.ipc-types';
 
-const testSshConnectionIpc = definePayloadIpc(
-  'test_ssh_connection',
-  '测试 SSH 连接',
-  tauriContracts.testSshConnection,
-  { idempotent: true, timeoutMs: 15_000, audit: 'sensitive' },
-);
+/**
+ * SSH invoke 层：从手写 Zod 契约迁入 tauri-specta 生成绑定（commands.*）。
+ *
+ * - 入参 / 出参类型以 Rust 为单一事实源，经 src/bindings/tauri.ts 生成。
+ * - 仍保留薄仪表化外壳（callSpectaCommand：审计 / 超时 / 取消 / 错误归一化）。
+ * - 主机密钥变更（host-key-changed）的确认弹窗与无感重试逻辑原样保留。
+ */
 
-const saveSshPasswordIpc = definePayloadIpc(
-  'save_ssh_password',
-  '保存 SSH 密码',
-  tauriContracts.saveSshPassword,
-  { audit: 'sensitive' },
-);
+type TSshRequest<K extends keyof ITauriService> = Parameters<ITauriService[K]>[0];
+type TSshResult<K extends keyof ITauriService> = Awaited<ReturnType<ITauriService[K]>>;
 
-const getSshPasswordIpc = definePayloadIpc(
-  'get_ssh_password',
-  '读取 SSH 密码',
-  tauriContracts.getSshPassword,
-  { idempotent: true, audit: 'sensitive' },
-);
+const testSshConnectionIpc = (
+  payload: TSshRequest<'testSshConnection'>,
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'testSshConnection'>> =>
+  callSpectaCommand(
+    {
+      command: 'test_ssh_connection',
+      guardHint: '测试 SSH 连接',
+      idempotent: true,
+      timeoutMs: 15_000,
+      audit: 'sensitive',
+      input: payload,
+      signal: options?.signal,
+    },
+    () => commands.testSshConnection(payload),
+  );
 
-const listSshConfigHostsIpc = defineContractIpc(
-  'list_ssh_config_hosts',
-  '读取 SSH 配置主机',
-  tauriContracts.listSshConfigHosts,
-  { idempotent: true, audit: 'sensitive' },
-);
+const saveSshPasswordIpc = (
+  payload: TSshRequest<'saveSshPassword'>,
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'saveSshPassword'>> =>
+  callSpectaCommand(
+    {
+      command: 'save_ssh_password',
+      guardHint: '保存 SSH 密码',
+      audit: 'sensitive',
+      input: payload,
+      signal: options?.signal,
+    },
+    () => commands.saveSshPassword(payload),
+  );
 
-const listSshDirectoryIpc = definePayloadIpc(
-  'list_ssh_directory',
-  '读取 SSH 远端目录',
-  tauriContracts.listSshDirectory,
-  { idempotent: true, timeoutMs: 15_000, audit: 'sensitive' },
-);
+const getSshPasswordIpc = (
+  payload: TSshRequest<'getSshPassword'>,
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'getSshPassword'>> =>
+  callSpectaCommand(
+    {
+      command: 'get_ssh_password',
+      guardHint: '读取 SSH 密码',
+      idempotent: true,
+      audit: 'sensitive',
+      input: payload,
+      signal: options?.signal,
+    },
+    () => commands.getSshPassword(payload),
+  );
 
-const downloadSshFileIpc = definePayloadIpc(
-  'download_ssh_file',
-  '下载 SSH 远端文件',
-  tauriContracts.downloadSshFile,
-  { audit: 'sensitive', timeoutMs: 60_000 },
-);
+const listSshConfigHostsIpc = (
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'listSshConfigHosts'>> =>
+  callSpectaCommand(
+    {
+      command: 'list_ssh_config_hosts',
+      guardHint: '读取 SSH 配置主机',
+      idempotent: true,
+      audit: 'sensitive',
+      signal: options?.signal,
+    },
+    () => commands.listSshConfigHosts(),
+  );
 
-const uploadSshFileIpc = definePayloadIpc(
-  'upload_ssh_file',
-  '上传 SSH 远端文件',
-  tauriContracts.uploadSshFile,
-  { audit: 'sensitive', timeoutMs: 60_000 },
-);
+const listSshDirectoryIpc = (
+  payload: TSshRequest<'listSshDirectory'>,
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'listSshDirectory'>> =>
+  callSpectaCommand(
+    {
+      command: 'list_ssh_directory',
+      guardHint: '读取 SSH 远端目录',
+      idempotent: true,
+      timeoutMs: 15_000,
+      audit: 'sensitive',
+      input: payload,
+      signal: options?.signal,
+    },
+    () => commands.listSshDirectory(payload),
+  );
 
-const readSshFileIpc = definePayloadIpc(
-  'read_ssh_file',
-  '读取 SSH 远端文件',
-  tauriContracts.readSshFile,
-  { idempotent: true, audit: 'sensitive', timeoutMs: 60_000 },
-);
+const downloadSshFileIpc = (
+  payload: TSshRequest<'downloadSshFile'>,
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'downloadSshFile'>> =>
+  callSpectaCommand(
+    {
+      command: 'download_ssh_file',
+      guardHint: '下载 SSH 远端文件',
+      audit: 'sensitive',
+      timeoutMs: 60_000,
+      input: payload,
+      signal: options?.signal,
+    },
+    () => commands.downloadSshFile(payload),
+  );
 
-const writeSshFileIpc = definePayloadIpc(
-  'write_ssh_file',
-  '写入 SSH 远端文件',
-  tauriContracts.writeSshFile,
-  {
-    audit: 'sensitive',
-    timeoutMs: 60_000,
-    measureInput: (value) => buildPayloadMetricsOmittingTextFields(value, ['content']),
-  },
-);
+const uploadSshFileIpc = (
+  payload: TSshRequest<'uploadSshFile'>,
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'uploadSshFile'>> =>
+  callSpectaCommand(
+    {
+      command: 'upload_ssh_file',
+      guardHint: '上传 SSH 远端文件',
+      audit: 'sensitive',
+      timeoutMs: 60_000,
+      input: payload,
+      signal: options?.signal,
+    },
+    () => commands.uploadSshFile(payload),
+  );
 
-const deleteSshPathIpc = definePayloadIpc(
-  'delete_ssh_path',
-  '删除 SSH 远端路径',
-  tauriContracts.deleteSshPath,
-  { audit: 'sensitive', timeoutMs: 30_000 },
-);
+const readSshFileIpc = (
+  payload: TSshRequest<'readSshFile'>,
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'readSshFile'>> =>
+  callSpectaCommand(
+    {
+      command: 'read_ssh_file',
+      guardHint: '读取 SSH 远端文件',
+      idempotent: true,
+      audit: 'sensitive',
+      timeoutMs: 60_000,
+      input: payload,
+      signal: options?.signal,
+    },
+    () => commands.readSshFile(payload),
+  );
 
-const renameSshPathIpc = definePayloadIpc(
-  'rename_ssh_path',
-  '重命名 SSH 远端路径',
-  tauriContracts.renameSshPath,
-  { audit: 'sensitive', timeoutMs: 30_000 },
-);
+const writeSshFileIpc = (
+  payload: TSshRequest<'writeSshFile'>,
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'writeSshFile'>> =>
+  callSpectaCommand(
+    {
+      command: 'write_ssh_file',
+      guardHint: '写入 SSH 远端文件',
+      audit: 'sensitive',
+      timeoutMs: 60_000,
+      input: payload,
+      measureInput: (value) => buildPayloadMetricsOmittingTextFields(value, ['content']),
+      signal: options?.signal,
+    },
+    () => commands.writeSshFile(payload),
+  );
 
-const createSshDirectoryIpc = definePayloadIpc(
-  'create_ssh_directory',
-  '创建 SSH 远端目录',
-  tauriContracts.createSshDirectory,
-  { audit: 'sensitive', timeoutMs: 30_000 },
-);
+const deleteSshPathIpc = (
+  payload: TSshRequest<'deleteSshPath'>,
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'deleteSshPath'>> =>
+  callSpectaCommand(
+    {
+      command: 'delete_ssh_path',
+      guardHint: '删除 SSH 远端路径',
+      audit: 'sensitive',
+      timeoutMs: 30_000,
+      input: payload,
+      signal: options?.signal,
+    },
+    () => commands.deleteSshPath(payload),
+  );
+
+const renameSshPathIpc = (
+  payload: TSshRequest<'renameSshPath'>,
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'renameSshPath'>> =>
+  callSpectaCommand(
+    {
+      command: 'rename_ssh_path',
+      guardHint: '重命名 SSH 远端路径',
+      audit: 'sensitive',
+      timeoutMs: 30_000,
+      input: payload,
+      signal: options?.signal,
+    },
+    () => commands.renameSshPath(payload),
+  );
+
+const createSshDirectoryIpc = (
+  payload: TSshRequest<'createSshDirectory'>,
+  options?: IIpcCallOptions,
+): Promise<TSshResult<'createSshDirectory'>> =>
+  callSpectaCommand(
+    {
+      command: 'create_ssh_directory',
+      guardHint: '创建 SSH 远端目录',
+      audit: 'sensitive',
+      timeoutMs: 30_000,
+      input: payload,
+      signal: options?.signal,
+    },
+    () => commands.createSshDirectory(payload),
+  );
 
 /**
  * SSH 主机密钥变更处理。
@@ -105,19 +220,26 @@ const createSshDirectoryIpc = definePayloadIpc(
  */
 const SSH_HOST_KEY_CHANGED_CODE = 'ssh/host-key-changed';
 
-const trustSshHostKeyIpc = defineIpc({
-  name: 'trust_ssh_host_key',
-  guardHint: '信任变更后的 SSH 主机密钥',
-  inSchema: z.object({ host: z.string(), port: z.number() }),
-  outSchema: z.object({ trusted: z.boolean() }),
-  audit: 'sensitive',
-  timeoutMs: 15_000,
-});
-
 interface ISshHostKeyEndpoint {
   host: string;
   port: number;
 }
+
+const trustSshHostKeyIpc = (
+  endpoint: ISshHostKeyEndpoint,
+  options?: IIpcCallOptions,
+): Promise<{ trusted: boolean }> =>
+  callSpectaCommand(
+    {
+      command: 'trust_ssh_host_key',
+      guardHint: '信任变更后的 SSH 主机密钥',
+      audit: 'sensitive',
+      timeoutMs: 15_000,
+      input: endpoint,
+      signal: options?.signal,
+    },
+    () => commands.trustSshHostKey(endpoint.host, endpoint.port),
+  );
 
 const extractChangedHostKeyFingerprint = (message: string): string | null => {
   const marker = `${SSH_HOST_KEY_CHANGED_CODE}::`;
@@ -217,7 +339,7 @@ export const sshTauriService: TSshTauriService = {
 
   getSshPassword: getSshPasswordIpc,
 
-  listSshConfigHosts: () => listSshConfigHostsIpc(undefined),
+  listSshConfigHosts: () => listSshConfigHostsIpc(),
 
   listSshDirectory: withChangedHostKeyPrompt(listSshDirectoryIpc),
 

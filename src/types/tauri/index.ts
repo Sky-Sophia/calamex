@@ -169,7 +169,8 @@ export interface ISshDirectoryListRequest extends ISshConnectionTestRequest {
 export interface ISshDirectoryEntryPayload {
   name: string;
   path: string;
-  kind: 'directory' | 'file';
+  // 生成绑定为 string（Rust 单一事实源）。已知值：'directory' | 'file'。
+  kind: string;
   size: number;
 }
 
@@ -208,9 +209,11 @@ export interface ISshFileReadPayload {
   remotePath: string;
   content: string;
   byteSize: number;
-  encoding: 'utf-8' | 'utf-8-bom';
+  // 生成绑定为 string（Rust 单一事实源）。已知值：'utf-8' | 'utf-8-bom'。
+  encoding: string;
   lineCount: number;
-  lineEnding: 'lf' | 'crlf' | 'cr' | 'mixed' | 'none';
+  // 生成绑定为 string（Rust 单一事实源）。已知值：'lf' | 'crlf' | 'cr' | 'mixed' | 'none'。
+  lineEnding: string;
   permission: string;
   owner: string;
   modifiedAt: string | null;
