@@ -289,7 +289,7 @@ pub async fn lsp_did_change(
     manager: tauri::State<'_, LspManager>,
     file_path: String,
     content: String,
-    version: i64,
+    version: u32,
 ) -> Result<(), String> {
     let (stdin, uri, _) = require_running_with_uri(&manager, &file_path, false).await?;
     let params = serde_json::json!({
