@@ -49,7 +49,9 @@ pub struct GitCommitSummaryPayload {
 #[serde(rename_all = "camelCase")]
 pub struct GitCommitHistoryRequest {
     repository_root_path: String,
+    #[specta(type = Option<u32>)]
     offset: Option<usize>,
+    #[specta(type = Option<u32>)]
     limit: Option<usize>,
 }
 
@@ -58,6 +60,7 @@ pub struct GitCommitHistoryRequest {
 pub struct GitCommitHistoryPayload {
     entries: Vec<GitCommitSummaryPayload>,
     has_more: bool,
+    #[specta(type = Option<u32>)]
     next_offset: Option<usize>,
 }
 
@@ -70,7 +73,9 @@ pub struct GitBranchPayload {
     upstream_name: Option<String>,
     is_current: bool,
     is_head: bool,
+    #[specta(type = u32)]
     ahead: usize,
+    #[specta(type = u32)]
     behind: usize,
     last_commit: Option<GitCommitSummaryPayload>,
 }
@@ -129,11 +134,17 @@ pub struct GitRepositoryStatusPayload {
     head_short_oid: Option<String>,
     is_detached: bool,
     is_clean: bool,
+    #[specta(type = u32)]
     ahead: usize,
+    #[specta(type = u32)]
     behind: usize,
+    #[specta(type = u32)]
     staged_count: usize,
+    #[specta(type = u32)]
     unstaged_count: usize,
+    #[specta(type = u32)]
     untracked_count: usize,
+    #[specta(type = u32)]
     conflicted_count: usize,
     files: Vec<GitFileStatusPayload>,
     last_commit: Option<GitCommitSummaryPayload>,
@@ -203,12 +214,14 @@ pub struct GitPathOperationRequest {
 #[derive(Debug, Serialize, Clone, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct GitStashEntryPayload {
+    #[specta(type = u32)]
     index: usize,
     stash_id: String,
     summary: String,
     branch_name: Option<String>,
     commit_short_id: Option<String>,
     created_at: String,
+    #[specta(type = u32)]
     file_count: usize,
     additions: u32,
     deletions: u32,
@@ -244,6 +257,7 @@ pub struct GitStashSaveRequest {
 #[serde(rename_all = "camelCase")]
 pub struct GitStashApplyRequest {
     repository_root_path: String,
+    #[specta(type = u32)]
     stash_index: usize,
     pop: bool,
 }
@@ -252,6 +266,7 @@ pub struct GitStashApplyRequest {
 #[serde(rename_all = "camelCase")]
 pub struct GitStashDropRequest {
     repository_root_path: String,
+    #[specta(type = u32)]
     stash_index: usize,
 }
 
