@@ -15,7 +15,8 @@ use notify_debouncer_full::{
 };
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Arc, time::Duration};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
+use tauri_specta::Event as _;
 
 const DEBOUNCE_DURATION: Duration = Duration::from_millis(200);
 
@@ -218,8 +219,9 @@ fn handle_debounced_events(
         root_path: root_path.to_string(),
     };
 
-    // 强类型 emit：事件名由 derive(Event) 自动生成为 `workspace-fs-event`
-    if let Err(e) = app.emit("workspace-fs-event", &payload) {
+    // 强类型 emit：事件名由 impl(Event) 的 `WorkspaceFsEvent::NAME` 统一保证，
+    // 避免硬编码字符串与 TS 绑定漂移。
+    if let Err(e) = payload.emit(app) {
         log::warn!("发送工作区文件事件失败: {e}");
     }
 }

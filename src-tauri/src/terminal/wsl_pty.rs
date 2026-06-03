@@ -357,7 +357,10 @@ where
                             ));
                         }
                     }
-                    Err(_) => break,
+                    Err(error) => {
+                        log::warn!("WSL 交互终端读线程异常退出（session_id={session_id}）：{error}");
+                        break;
+                    }
                 }
             }
 
@@ -427,7 +430,10 @@ where
                             ));
                         }
                     }
-                    Err(_) => break,
+                    Err(error) => {
+                        log::warn!("WSL 运行任务读线程异常退出（run_id={run_id}）：{error}");
+                        break;
+                    }
                 }
             }
 

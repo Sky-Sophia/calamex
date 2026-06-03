@@ -12,10 +12,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// 脚本文件读取上限：超过则拒绝在编辑器中打开，避免一次性读入超大文件耗尽内存。
+const MAX_SCRIPT_FILE_BYTES: u64 = 10 * 1024 * 1024;
+/// 图片资源读取上限：base64 编码约放大 1.37 倍并叠加 data URL 字符串，故上限略宽于脚本。
+const MAX_IMAGE_ASSET_BYTES: u64 = 20 * 1024 * 1024;
+
 #[tauri::command]
 #[specta::specta]
 pub fn load_script(path: String) -> Result<ScriptFilePayload, String> {
     let file_path = PathBuf::from(&path);
+    ensure_within_size_limit(&file_path, MAX_SCRIPT_FILE_BYTES, "脚本")?;
     let bytes = fs::read(&file_path).map_err(|error| format!("读取脚本失败：{error}"))?;
     let (content, encoding) = decode_script_bytes(&bytes)?;
     build_script_payload(file_path, content, encoding)
@@ -32,6 +38,7 @@ pub fn load_image_asset(path: String) -> Result<ImageAssetPayload, String> {
         return Err("目标图片不存在或不是有效文件。".into());
     }
 
+    ensure_within_size_limit(&file_path, MAX_IMAGE_ASSET_BYTES, "图片资源")?;
     let bytes = fs::read(&file_path).map_err(|error| format!("读取图片资源失败：{error}"))?;
     build_image_asset_payload(file_path, bytes)
 }
@@ -45,7 +52,7 @@ pub fn save_script(payload: SaveScriptRequest) -> Result<ScriptFilePayload, Stri
     }
 
     let bytes = encode_script_content(&payload.content, &payload.encoding)?;
-    fs::write(&file_path, bytes).map_err(|error| format!("保存脚本失败：{error}"))?;
+    atomic_write(&file_path, &bytes)?;
     build_script_payload(file_path, payload.content, payload.encoding)
 }
 
@@ -255,6 +262,39 @@ fn validate_workspace_entry_name(raw_name: &str) -> Result<String, String> {
     }
 
     Ok(name.to_string())
+}
+
+/// 校验文件大小未超过上限，避免一次性读入超大文件耗尽内存。
+fn ensure_within_size_limit(path: &Path, max_bytes: u64, label: &str) -> Result<(), String> {
+    let metadata = fs::metadata(path).map_err(|error| format!("读取{label}失败：{error}"))?;
+    if metadata.len() > max_bytes {
+        return Err(format!(
+            "{label}过大（{:.1} MB），超过 {} MB 上限，已取消读取。",
+            metadata.len() as f64 / (1024.0 * 1024.0),
+            max_bytes / (1024 * 1024)
+        ));
+    }
+    Ok(())
+}
+
+/// 原子写入：先写入同目录下的临时文件，再 rename 覆盖目标，
+/// 避免写入中途崩溃 / 断电导致原文件被截断、内容丢失。
+fn atomic_write(file_path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let file_name = file_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "无法解析目标文件名。".to_string())?;
+    let temp_path = match file_path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.join(format!(".{file_name}.tmp")),
+        _ => PathBuf::from(format!(".{file_name}.tmp")),
+    };
+
+    fs::write(&temp_path, bytes).map_err(|error| format!("保存脚本失败：{error}"))?;
+    if let Err(error) = fs::rename(&temp_path, file_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(format!("保存脚本失败：{error}"));
+    }
+    Ok(())
 }
 
 pub(crate) fn decode_script_bytes(bytes: &[u8]) -> Result<(String, DocumentEncoding), String> {
