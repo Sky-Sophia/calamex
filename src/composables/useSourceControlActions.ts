@@ -191,7 +191,7 @@ export const useSourceControlActions = (options: IUseSourceControlActionsOptions
         const result = await options.gitStore.commitIndex(nextCommitMessage);
         options.setCommitMessage('');
         options.markStatusSynced();
-        options.message.success(`已创建提交 ${result.commit.shortId}`);
+        options.message.success(`已创建提交 ${result.commitId?.slice(0, 7) ?? ''}`);
       });
     } catch (error) {
       options.message.error(toErrorMessage(error, '创建 Git 提交失败'));
