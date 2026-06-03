@@ -1418,8 +1418,6 @@ onBeforeUnmount(() => {
 .ai-provider-mark {
   display: inline-flex;
   min-width: 0;
-  max-width: min(48%, 320px);
-  flex: 0 1 auto;
   align-items: center;
   gap: 10px;
   border-radius: 7px;

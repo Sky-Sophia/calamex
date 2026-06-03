@@ -1391,131 +1391,25 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       liveEventBuffer.flush();
       unlistenSidecarStream?.();
       unlistenSidecarStream = null;
-      appendRuntimeTimelineEvents(payload.events);
-      const projection = projectSidecarExecuteResponse(payload);
-      const toolProjection = projectSidecarEventsToToolState({
-        events: payload.events,
-        fallbackActivityText: initialActivityText,
-        streamStatus: resolveSidecarToolProjectionStatus(projection),
-      });
-      const sidecarStreamStatus = resolveSidecarWaitingStreamStatus(projection);
-      const streamMetadata: ISidecarAnswerStreamMetadata = {
-        messageId: assistantMessageId,
-        threadId: targetThreadId,
-        toolCalls: toolProjection.toolCalls,
-        streamStatus: sidecarStreamStatus,
-        activityText: toolProjection.activityText,
-        runtimeEvents: compactRuntimeEvents(extractVisibleAgentRuntimeEvents(payload.events)),
-        finalAnswerStarted: hasMeaningfulAssistantText(projection.assistantContent),
-        streamTokenSnapshot: resolveSidecarDoneStreamTokenSnapshot(
-          getLatestSidecarLiveEvents(payload.events).doneEvent,
-        ),
-      };
-      if (projection.errorMessage) {
-        disposeSidecarAnswerStream(assistantMessageId);
-      }
-
-      const displayContent = projection.errorMessage
-        ? projection.assistantContent
-        : completeSidecarAnswerStream(projection.assistantContent, streamMetadata);
-      const sidecarAnswerCompletion =
-        projection.errorMessage || projection.pendingConfirmation
-          ? Promise.resolve()
-          : waitForSidecarAnswerStreamCompletion(assistantMessageId);
-      const sidecarPatchEntries = projection.errorMessage
-        ? []
-        : extractSidecarPatchEntries(payload.events);
-      const sidecarPatchResult =
-        sidecarPatchEntries.length > 0
-          ? await applySidecarPatchSets(sidecarPatchEntries, turnId, sidecarSessionId)
-          : { appliedPaths: [], runtimeEvents: [], patches: [], summaries: [] };
-      const sidecarAppliedPaths = sidecarPatchResult.appliedPaths;
-      const aedDiffPatchState = projection.errorMessage
-        ? null
-        : await loadAedDiffPatchStateForChangedFiles({
-            changedFilePaths: projection.changedFilePaths,
-            excludedPaths: sidecarAppliedPaths,
-            fallbackTaskId: turnId,
-            runId: `sidecar:${turnId}`,
-            stepId: 'agent',
-          });
-      const patchSummaries = [
-        ...sidecarPatchResult.summaries,
-        ...(aedDiffPatchState?.changedFilesSummary ? [aedDiffPatchState.changedFilesSummary] : []),
-      ];
-      const displayedPatches = [
-        ...sidecarPatchResult.patches,
-        ...(aedDiffPatchState?.patches ?? []),
-      ];
-      const changedFilesSummary = mergeAiAgentPatchSummaries(patchSummaries);
-      const patchState =
-        displayedPatches.length > 0 || changedFilesSummary
-          ? {
-              patches: displayedPatches,
-              changedFilesSummary,
-            }
-          : undefined;
-
-      if (sidecarPatchResult.runtimeEvents.length > 0) {
-        streamMetadata.runtimeEvents = compactRuntimeEvents([
-          ...(streamMetadata.runtimeEvents ?? []),
-          ...sidecarPatchResult.runtimeEvents,
-        ]);
-        appendVisibleRuntimeTimelineEvents(sidecarPatchResult.runtimeEvents);
-      }
-
-      for (const toolCall of toolProjection.toolCalls) {
-        updateAgentStep(
-          toolCall.id,
-          toolCall.summary,
-          mapSidecarToolCallStatusToStepStatus(toolCall.status),
-        );
-      }
-
-      updateAgentExecutionMessage(
+      await finalizeSidecarTurn(payload, {
         assistantMessageId,
-        displayContent,
-        toolProjection.toolCalls,
-        projection.errorMessage ? 'completed' : resolveSidecarAnswerDisplayStatus(streamMetadata),
-        toolProjection.activityText,
-        streamMetadata.runtimeEvents,
-        streamMetadata.finalAnswerStarted,
-        streamMetadata.streamTokenSnapshot,
-        patchState,
-      );
-
-      await refreshChangedDocumentsAfterSidecarRun(
-        [...projection.changedFilePaths, ...sidecarAppliedPaths],
-        projection.hasFileMutations || sidecarAppliedPaths.length > 0,
-      );
-      await updateFileRollbackPrompt(
-        [...projection.changedFilePaths, ...sidecarAppliedPaths],
-        projection.hasFileMutations || sidecarAppliedPaths.length > 0,
-      );
-      await sidecarAnswerCompletion;
-
-      if (projection.pendingConfirmation) {
-        persistSidecarToolConfirmation(projection.pendingConfirmation, {
-          sessionId: payload.sessionId,
-          assistantMessageId,
-          threadId: targetThreadId,
-          turnId,
-          baseMessages: visibleMessages,
-          messageContent,
-          references: sidecarContextReferences,
-        });
-        return;
-      }
-
-      clearSidecarToolConfirmation();
-
-      if (!projection.errorMessage) {
-        clearAttachedFiles({ revokePreviews: false });
-      }
-
-      if (projection.errorMessage) {
-        errorMessage.value = projection.errorMessage;
-      }
+        threadId: targetThreadId,
+        fallbackActivityText: initialActivityText,
+        patchTaskId: turnId,
+        patchSessionId: sidecarSessionId,
+        updateSteps: true,
+        onPendingConfirmation: (pendingConfirmation) => {
+          persistSidecarToolConfirmation(pendingConfirmation, {
+            sessionId: payload.sessionId,
+            assistantMessageId,
+            threadId: targetThreadId,
+            turnId,
+            baseMessages: visibleMessages,
+            messageContent,
+            references: sidecarContextReferences,
+          });
+        },
+      });
     } catch (error) {
       const wasAborted = activeAbortController.value?.signal.aborted;
       disposeSidecarAnswerStream(assistantMessageId);
@@ -1590,123 +1484,20 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       unlistenSidecarStream?.();
       unlistenSidecarStream = null;
       clearSidecarToolConfirmation(confirmation.id);
-      appendRuntimeTimelineEvents(payload.events);
-      const projection = projectSidecarExecuteResponse(payload);
-      const toolProjection = projectSidecarEventsToToolState({
-        events: payload.events,
-        fallbackActivityText: session.messageContent,
-        streamStatus: resolveSidecarToolProjectionStatus(projection),
-      });
-      const sidecarStreamStatus = resolveSidecarWaitingStreamStatus(projection);
-      const streamMetadata: ISidecarAnswerStreamMetadata = {
-        messageId: session.assistantMessageId,
+      await finalizeSidecarTurn(payload, {
+        assistantMessageId: session.assistantMessageId,
         threadId: session.threadId,
-        toolCalls: toolProjection.toolCalls,
-        streamStatus: sidecarStreamStatus,
-        activityText: toolProjection.activityText,
-        runtimeEvents: compactRuntimeEvents(extractVisibleAgentRuntimeEvents(payload.events)),
-        finalAnswerStarted: hasMeaningfulAssistantText(projection.assistantContent),
-        streamTokenSnapshot: resolveSidecarDoneStreamTokenSnapshot(
-          getLatestSidecarLiveEvents(payload.events).doneEvent,
-        ),
-      };
-      if (projection.errorMessage) {
-        disposeSidecarAnswerStream(session.assistantMessageId);
-      }
-
-      const displayContent = projection.errorMessage
-        ? projection.assistantContent
-        : completeSidecarAnswerStream(projection.assistantContent, streamMetadata);
-      const sidecarAnswerCompletion =
-        projection.errorMessage || projection.pendingConfirmation
-          ? Promise.resolve()
-          : waitForSidecarAnswerStreamCompletion(session.assistantMessageId);
-      const sidecarPatchEntries = projection.errorMessage
-        ? []
-        : extractSidecarPatchEntries(payload.events);
-      const sidecarPatchResult =
-        sidecarPatchEntries.length > 0
-          ? await applySidecarPatchSets(
-              sidecarPatchEntries,
-              session.turnId ?? session.assistantMessageId,
-              payload.sessionId,
-            )
-          : { appliedPaths: [], runtimeEvents: [], patches: [], summaries: [] };
-      const sidecarAppliedPaths = sidecarPatchResult.appliedPaths;
-      const fallbackTaskId = session.turnId ?? session.assistantMessageId;
-      const aedDiffPatchState = projection.errorMessage
-        ? null
-        : await loadAedDiffPatchStateForChangedFiles({
-            changedFilePaths: projection.changedFilePaths,
-            excludedPaths: sidecarAppliedPaths,
-            fallbackTaskId,
-            runId: `sidecar:${fallbackTaskId}`,
-            stepId: 'agent',
+        fallbackActivityText: session.messageContent,
+        patchTaskId: session.turnId ?? session.assistantMessageId,
+        patchSessionId: payload.sessionId,
+        updateSteps: false,
+        onPendingConfirmation: (pendingConfirmation) => {
+          persistSidecarToolConfirmation(pendingConfirmation, {
+            ...session,
+            sessionId: payload.sessionId,
           });
-      const patchSummaries = [
-        ...sidecarPatchResult.summaries,
-        ...(aedDiffPatchState?.changedFilesSummary ? [aedDiffPatchState.changedFilesSummary] : []),
-      ];
-      const displayedPatches = [
-        ...sidecarPatchResult.patches,
-        ...(aedDiffPatchState?.patches ?? []),
-      ];
-      const changedFilesSummary = mergeAiAgentPatchSummaries(patchSummaries);
-      const patchState =
-        displayedPatches.length > 0 || changedFilesSummary
-          ? {
-              patches: displayedPatches,
-              changedFilesSummary,
-            }
-          : undefined;
-
-      if (sidecarPatchResult.runtimeEvents.length > 0) {
-        streamMetadata.runtimeEvents = compactRuntimeEvents([
-          ...(streamMetadata.runtimeEvents ?? []),
-          ...sidecarPatchResult.runtimeEvents,
-        ]);
-        appendVisibleRuntimeTimelineEvents(sidecarPatchResult.runtimeEvents);
-      }
-
-      updateAgentExecutionMessage(
-        session.assistantMessageId,
-        displayContent,
-        toolProjection.toolCalls,
-        projection.errorMessage ? 'completed' : resolveSidecarAnswerDisplayStatus(streamMetadata),
-        toolProjection.activityText,
-        streamMetadata.runtimeEvents,
-        streamMetadata.finalAnswerStarted,
-        streamMetadata.streamTokenSnapshot,
-        patchState,
-      );
-
-      await refreshChangedDocumentsAfterSidecarRun(
-        [...projection.changedFilePaths, ...sidecarAppliedPaths],
-        projection.hasFileMutations || sidecarAppliedPaths.length > 0,
-      );
-      await updateFileRollbackPrompt(
-        [...projection.changedFilePaths, ...sidecarAppliedPaths],
-        projection.hasFileMutations || sidecarAppliedPaths.length > 0,
-      );
-      await sidecarAnswerCompletion;
-
-      if (projection.pendingConfirmation) {
-        persistSidecarToolConfirmation(projection.pendingConfirmation, {
-          ...session,
-          sessionId: payload.sessionId,
-        });
-        return;
-      }
-
-      clearSidecarToolConfirmation();
-
-      if (!projection.errorMessage) {
-        clearAttachedFiles({ revokePreviews: false });
-      }
-
-      if (projection.errorMessage) {
-        errorMessage.value = projection.errorMessage;
-      }
+        },
+      });
     } catch (error) {
       const message = toErrorMessage(error, '处理 Agent 工具确认失败。');
       disposeSidecarAnswerStream(session.assistantMessageId);
