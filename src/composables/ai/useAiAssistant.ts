@@ -17,10 +17,8 @@ import {
 } from '@/components/business/ai/edit/patch-summary';
 import {
   extractVisibleAgentRuntimeEvents,
-  type IAgentSidecarExecuteProjection,
   projectSidecarEventsToToolState,
   projectSidecarExecuteResponse,
-  type TAgentSidecarToolStreamStatus,
 } from '@/composables/ai/sidecar-events';
 import { useAiAgentPlan } from '@/composables/ai/useAiAgentPlan';
 import { useAiStream } from '@/composables/ai/useAiStream';
@@ -30,7 +28,6 @@ import { aiService } from '@/services/ipc/ai.service';
 import { createDefaultAiConfigPayload } from '@/services/ipc/ai-config.service';
 import { buildCurrentFileReference } from '@/services/ipc/ai-context.service';
 import { aiEditService } from '@/services/ipc/ai-edit.service';
-import { tauriService } from '@/services/tauri';
 import { type IAiPersistedSidecarAgentSession, useAiAgentStore } from '@/store/aiAgent';
 import { type IAiConversationScrollState, useAiConversationStore } from '@/store/aiConversation';
 import type {
@@ -39,7 +36,6 @@ import type {
   IAiAttachedFile,
   IAiChatMessage,
   IAiChatStreamEventPayload,
-  IAiChatStreamRenderState,
   IAiConfigPayload,
   IAiContextReference,
   IAiImageAttachmentPreview,
@@ -49,18 +45,8 @@ import type {
   TAiModelRole,
   TAiToolConfirmationDecision,
 } from '@/types/ai';
-import type {
-  IAiEditGetDiffPayload,
-  IAiEditOperation,
-  IAiEditTimelineEntry,
-} from '@/types/ai/edit';
-import {
-  AGENT_RUNTIME_EVENT_SCHEMA_VERSION,
-  type IAgentCheckpointEvent,
-  type IAgentSidecarMessage,
-  type TAgentRuntimeEvent,
-  type TAgentUiEvent,
-} from '@/types/ai/sidecar';
+import type { IAiEditGetDiffPayload, IAiEditOperation } from '@/types/ai/edit';
+import type { IAgentSidecarMessage, TAgentRuntimeEvent, TAgentUiEvent } from '@/types/ai/sidecar';
 import type {
   IActiveRunSummary,
   IAnalyzeScriptPayload,
@@ -95,7 +81,6 @@ import {
   extractSidecarPatchEntries,
   type ISidecarPatchEntry,
   normalizePatchDisplayPath,
-  runShellCheckForAppliedPatch,
   syncPatchedDocument,
 } from './useAiAssistant.patch';
 import {
@@ -109,6 +94,7 @@ import {
   type IAiConversationCheckpoint,
   mergeRuntimeEvents,
 } from './useAiAssistant.runtime-events';
+import { runShellCheckForAppliedPatch } from './useAiAssistant.shellcheck';
 import {
   createSidecarLiveEventBuffer,
   extractNewVisibleRuntimeEvents,

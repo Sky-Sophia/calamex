@@ -445,7 +445,7 @@ export type SshDirectoryEntryPayload = {
 	path: string,
 	/**  已知值："file" | "directory" | "symlink"。 */
 	kind: string,
-	size: number | null,
+	size: number,
 };
 
 export type SshDirectoryListPayload = {
@@ -466,7 +466,7 @@ export type SshDirectoryListRequest = {
 export type SshFileDownloadPayload = {
 	remotePath: string,
 	localPath: string,
-	byteSize: number | null,
+	byteSize: number,
 };
 
 export type SshFileDownloadRequest = {
@@ -483,9 +483,9 @@ export type SshFileDownloadRequest = {
 export type SshFileReadPayload = {
 	remotePath: string,
 	content: string,
-	byteSize: number | null,
+	byteSize: number,
 	encoding: string,
-	lineCount: number | null,
+	lineCount: number,
 	lineEnding: string,
 	permission: string,
 	owner: string,
@@ -505,7 +505,7 @@ export type SshFileReadRequest = {
 export type SshFileUploadPayload = {
 	localPath: string,
 	remotePath: string,
-	byteSize: number | null,
+	byteSize: number,
 };
 
 export type SshFileUploadRequest = {
@@ -521,7 +521,7 @@ export type SshFileUploadRequest = {
 
 export type SshFileWritePayload = {
 	remotePath: string,
-	byteSize: number | null,
+	byteSize: number,
 };
 
 export type SshFileWriteRequest = {
