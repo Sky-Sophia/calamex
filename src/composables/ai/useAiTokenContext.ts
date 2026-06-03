@@ -3,6 +3,7 @@ import { getContext } from 'tokenlens';
 import type { ComputedRef } from 'vue';
 import { computed } from 'vue';
 import type { IAiChatMessage } from '@/types/ai';
+import type { TAiAssistantMode } from '@/types/ai/assistant-mode';
 import type { IAiContextReference } from '@/types/ai/context';
 import type { TAgentRuntimeEvent } from '@/types/ai/sidecar';
 
@@ -14,7 +15,7 @@ export interface IAiTokenContextProps {
   usageSource: TAiTokenUsageSource;
 }
 
-export type TAiTokenContextMode = 'chat' | 'agent' | 'plan';
+export type TAiTokenContextMode = TAiAssistantMode;
 export type TAiTokenUsageSource = 'official' | 'estimated';
 
 interface IUseAiTokenContextOptions {
