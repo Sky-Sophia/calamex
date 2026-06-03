@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -224,6 +224,33 @@ const writeJson = (response: ServerResponse, statusCode: number, payload: unknow
   response.end(JSON.stringify(payload));
 };
 
+// 将空 / 空白令牌归一为 null，表示「未配置鉴权」。
+const normalizeSidecarToken = (value: string | null | undefined): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+// 未配置令牌时不强制（兼容外部 / 自定义部署）；配置后要求
+// Authorization: Bearer <token>，用恒时比较避免时序侧信道。
+const isAuthorizedSidecarRequest = (
+  request: IncomingMessage,
+  token: string | null,
+): boolean => {
+  if (!token) {
+    return true;
+  }
+  const header = request.headers.authorization;
+  if (typeof header !== 'string') {
+    return false;
+  }
+  const expected = Buffer.from(`Bearer ${token}`, 'utf8');
+  const actual = Buffer.from(header, 'utf8');
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+};
+
 const readBody = async (request: IncomingMessage): Promise<unknown> =>
   new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -443,9 +470,12 @@ const handlePostStream = async (
 // -----------------------------------------------------------------------
 
 export const createAgentSidecarServer = (
-  options: { runtime?: IAgentSidecarRuntime } = {},
+  options: { runtime?: IAgentSidecarRuntime; authToken?: string | null } = {},
 ) => {
   const runtime = options.runtime ?? createConfiguredRuntime();
+  const authToken = options.authToken !== undefined
+    ? normalizeSidecarToken(options.authToken)
+    : normalizeSidecarToken(process.env.AGENT_SIDECAR_TOKEN);
 
   // Phase 2b：挂起中的编排 run 注册表。sidecar 是长跑进程，同一进程内保留 run
   // 实例即可跨 HTTP 请求 resume；跨进程 / 回收后则由 Phase 3b 从 libsql 快照重建。
@@ -488,6 +518,15 @@ export const createAgentSidecarServer = (
   return createServer((request, response) => {
     const url = request.url ?? '/';
     const parsedUrl = new URL(url, 'http://127.0.0.1');
+
+    // /health 保持免鉴权（宿主探活在注入令牌前也要可用）；其余路由需带有效令牌。
+    const isHealthProbe = request.method === 'GET' && parsedUrl.pathname === '/health';
+    if (!isHealthProbe && !isAuthorizedSidecarRequest(request, authToken)) {
+      writeJson(response, 401, {
+        error: 'sidecar 鉴权失败。',
+      });
+      return;
+    }
 
     if (request.method === 'GET' && parsedUrl.pathname === '/health') {
       writeJson(response, 200, {
@@ -704,62 +743,6 @@ export const createAgentSidecarServer = (
         }
         return { runId, result };
       });
-      return;
-    }
-
-    if (request.method === 'POST' && url === '/agent/plan/orchestrate/stream') {
-      // Phase 2c-1：原生编排 workflow 的流式入口。同样默认关闭。
-      // 用 run.stream() 把 workflow 执行事件以 NDJSON 逐帧推给客户端，达到与旧
-      // /stream 路径的功能对等；首帧先回 runId 便于挂起后 resume。
-      if (process.env.AGENT_ORCHESTRATION_WORKFLOW !== '1') {
-        writeJson(response, 404, {
-          error: '未知 sidecar 路由。',
-        });
-        return;
-      }
-      void (async () => {
-        try {
-          const payload = agentSidecarOrchestrateRequestSchema.parse(await readBody(request));
-          if (typeof runtime.buildPlanOrchestrationWorkflow !== 'function') {
-            throw new Error('当前 runtime 不支持原生编排 workflow。');
-          }
-          const workflow = runtime.buildPlanOrchestrationWorkflow(payload.modelConfig);
-          const runId = randomUUID();
-          const run = await workflow.createRun({ runId });
-          rememberOrchestrationRun(runId, run);
-          writeStreamHeaders(response);
-          // 首帧：尽早把 runId 交给客户端（approval-gate 挂起后 resume 需要它）。
-          writeNdjsonFrame(response, { type: 'meta', runId });
-          // run.stream() 返回 async-iterable 的 WorkflowRunOutput；closeOnSuspend
-          // 默认 true：approval-gate 挂起时流自动闭合，客户端据此转去调用 resume。
-          const stream = run.stream({
-            inputData: { goal: payload.goal, threadId: payload.threadId ?? null },
-          });
-          for await (const chunk of stream) {
-            writeNdjsonFrame(response, { type: 'event', event: chunk });
-          }
-          // 流结束后读取权威终态：result 为 Promise，status 为当前运行状态。
-          const result = await stream.result;
-          if (stream.status !== 'suspended') {
-            forgetOrchestrationRun(runId);
-          }
-          writeNdjsonFrame(response, {
-            type: 'response',
-            runId,
-            status: stream.status,
-            result,
-          });
-          response.end();
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          if (!response.headersSent) {
-            writeJson(response, 400, { error: message });
-            return;
-          }
-          writeNdjsonFrame(response, { type: 'error', error: message });
-          response.end();
-        }
-      })();
       return;
     }
 
