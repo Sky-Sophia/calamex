@@ -1,4 +1,5 @@
 use crate::commands::terminal::commands as terminal_commands;
+use crate::commands::lsp::commands as lsp_commands;
 use crate::commands::{
     agent_sidecar, ai, git, script_run, search, shell_tools, ssh, window, window_stage,
     workspace_fs, workspace_watcher,
@@ -120,6 +121,14 @@ pub fn builder() -> Builder<tauri::Wry> {
             ai::edit::ai_edit_revert_file,
             ai::edit::ai_edit_revert_hunk,
             ai::edit::ai_edit_revert_task,
+            // ↓↓↓ lsp：补登记进 specta 生成轨（命令早已带 #[specta::specta]，此前漏登记）↓↓↓
+            lsp_commands::lsp_start,
+            lsp_commands::lsp_stop,
+            lsp_commands::lsp_did_open,
+            lsp_commands::lsp_did_change,
+            lsp_commands::lsp_did_close,
+            lsp_commands::lsp_completion,
+            lsp_commands::lsp_hover,
         ])
 }
 

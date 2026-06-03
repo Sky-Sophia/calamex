@@ -12,7 +12,7 @@ pub(crate) mod window;
 pub(crate) mod window_stage;
 pub(crate) mod workspace_fs;
 pub(crate) mod workspace_watcher;
-mod lsp;
+pub(crate) mod lsp;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW_FLAG: u32 = 0x0800_0000;

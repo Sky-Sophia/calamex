@@ -20,7 +20,7 @@
 //! - `discovery`:node / shellcheck / bash-language-server CLI 路径解析
 //! - `commands`:对外 `#[tauri::command]` 入口
 
-mod commands;
+pub(crate) mod commands;
 mod diagnostics;
 mod discovery;
 mod io;
