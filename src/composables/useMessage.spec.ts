@@ -66,4 +66,42 @@ describe('useMessage', () => {
     expect(toastMock.dismiss).toHaveBeenCalledWith('save-error');
     expect(dismissDetail).toEqual({ id: 'save-error' });
   });
+
+  it('成功消息不再弹出 Toast，但仍保留 app-message 事件', () => {
+    let eventDetail: MessageDetail | null = null;
+    window.addEventListener(
+      'app-message',
+      (event) => {
+        eventDetail = event.detail;
+      },
+      { once: true },
+    );
+
+    useMessage().success('保存成功', { id: 'save-ok' });
+
+    expect(toastMock.success).not.toHaveBeenCalled();
+    // 顺手关闭同 id 上可能残留的进行中 Toast（如 loading 转圈）。
+    expect(toastMock.dismiss).toHaveBeenCalledWith('save-ok');
+    expect(eventDetail).toMatchObject({ id: 'save-ok', type: 'success', message: '保存成功' });
+  });
+
+  it('info 提示不再弹出 Toast', () => {
+    useMessage().info('仅供参考的提示');
+
+    expect(toastMock.info).not.toHaveBeenCalled();
+  });
+
+  it('警告与错误仍然弹出 Toast', () => {
+    useMessage().warning('请注意检查输入');
+    useMessage().error('操作失败');
+
+    expect(toastMock.warning).toHaveBeenCalledTimes(1);
+    expect(toastMock.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('loading 进度仍然弹出 Toast', () => {
+    useMessage().loading('正在保存…');
+
+    expect(toastMock.loading).toHaveBeenCalledTimes(1);
+  });
 });
