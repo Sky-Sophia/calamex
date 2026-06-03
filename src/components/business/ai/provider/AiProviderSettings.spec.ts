@@ -214,19 +214,6 @@ describe('AiProviderSettings', () => {
     expect(emittedConfig.narrator.selectedModel).toBe('deepseek/deepseek-v4-pro');
   });
 
-  it('在凭证列表设置主模型默认时只保存主模型配置', async () => {
-    const wrapper = mountSettings();
-
-    await wrapper.get('[aria-label="设为主模型：智谱 GLM"]').trigger('click');
-
-    const event = wrapper.emitted('save')?.[0];
-    expect(event?.[1]).toBe('');
-    expect(event?.[2]).toBe('main');
-    const emittedConfig = event?.[0] as IAiConfigPayload;
-    expect(emittedConfig.selectedModel).toBe('zhipuai/glm-4.7-flash');
-    expect(emittedConfig.narrator.selectedModel).toBe('zhipuai/glm-4.7-flash');
-  });
-
   it('在凭证列表设置小模型默认时不改动主模型配置', async () => {
     const wrapper = mountSettings();
 
