@@ -1478,11 +1478,6 @@ const extractDoneResult = (events: readonly TAgentUiEvent[]): string | null => {
  * 让所有下游消费者拿到的 IAiLanguageModelUsage 一定有 detail 子结构,而不是
  * 让 store / UI 端到处写 `?? 0` 守卫。原始 sidecar usage 是否真的有这些字段
  * 取决于 mastra 的 LanguageModel,缺失时用 0 占位,语义等价于"未上报"。
- *
- * TODO[outputTokenDetails 默认值]: 暂用 `{} as ...` 占位 —— 等 IAiLanguageModelUsage
- * 的完整定义贴出来后,把 DEFAULT_OUTPUT_TOKEN_DETAILS 换成对应字段全 0 的实例。
- * 当前 `{}` cast 在 TS 类型上等价于 NonNullable<...>,运行时该字段在第一次访问
- * 缺省 sub-property 时返回 undefined,UI 端如已用 `??` 兜底则不会出问题。
  * ========================================================================== */
 
 const DEFAULT_INPUT_TOKEN_DETAILS: NonNullable<IAiLanguageModelUsage['inputTokenDetails']> = {
@@ -1491,7 +1486,10 @@ const DEFAULT_INPUT_TOKEN_DETAILS: NonNullable<IAiLanguageModelUsage['inputToken
   cacheWriteTokens: 0,
 };
 
-const DEFAULT_OUTPUT_TOKEN_DETAILS = {} as NonNullable<IAiLanguageModelUsage['outputTokenDetails']>;
+const DEFAULT_OUTPUT_TOKEN_DETAILS: NonNullable<IAiLanguageModelUsage['outputTokenDetails']> = {
+  textTokens: 0,
+  reasoningTokens: 0,
+};
 
 const normalizeLanguageModelUsage = (usage: IAiLanguageModelUsage): IAiLanguageModelUsage => ({
   ...usage,
