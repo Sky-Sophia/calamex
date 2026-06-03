@@ -61,7 +61,7 @@ fn emit_startup_step(event: &str, app_started_at: Instant, step_started_at: Inst
 }
 
 macro_rules! timed_step {
-    ($event:expr, $app_started_at:expr, $body:block) => ({
+    ($event:expr_2021, $app_started_at:expr_2021, $body:block) => ({
         let __step_started_at = std::time::Instant::now();
         let __result = $body;
         emit_startup_step($event, $app_started_at, __step_started_at);
@@ -199,7 +199,8 @@ fn prime_bundled_resource_env<R: tauri::Runtime>(app: &tauri::App<R>) {
         }
         let exists = if require_dir { path.is_dir() } else { path.is_file() };
         if exists {
-            std::env::set_var(key, &path);
+            // TODO: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var(key, &path) };
         }
     };
 

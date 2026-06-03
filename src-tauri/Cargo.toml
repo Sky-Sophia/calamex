@@ -2,7 +2,7 @@
 name = "calamex"
 version = "0.1.0"
 description = "面向 Windows 的 Linux Shell 脚本编辑器"
-edition = "2021"
+edition = "2024"
 build = "build.rs"
 default-run = "calamex"
 

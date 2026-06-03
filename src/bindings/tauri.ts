@@ -124,6 +124,15 @@ export const commands = {
 	aiEditRevertFile: (payload: AiEditRevertFileRequest) => __TAURI_INVOKE<AiEditRevertFilePayload>("ai_edit_revert_file", { payload }),
 	aiEditRevertHunk: (payload: AiEditRevertHunkRequest) => __TAURI_INVOKE<AiEditRevertHunkPayload>("ai_edit_revert_hunk", { payload }),
 	aiEditRevertTask: (payload: AiEditRevertTaskRequest) => __TAURI_INVOKE<AiEditRevertTaskPayload>("ai_edit_revert_task", { payload }),
+	lspStart: (workspaceRoot: string) => __TAURI_INVOKE<null>("lsp_start", { workspaceRoot }),
+	lspStop: () => __TAURI_INVOKE<null>("lsp_stop"),
+	lspDidOpen: (filePath: string, content: string, languageId: string) => __TAURI_INVOKE<null>("lsp_did_open", { filePath, content, languageId }),
+	lspDidChange: (filePath: string, content: string, version: number) => __TAURI_INVOKE<null>("lsp_did_change", { filePath, content, version }),
+	lspDidClose: (filePath: string) => __TAURI_INVOKE<null>("lsp_did_close", { filePath }),
+	lspCompletion: (filePath: string, line: number, column: number) => __TAURI_INVOKE<LspCompletionItem[]>("lsp_completion", { filePath, line, column }),
+	lspHover: (filePath: string, line: number, column: number) => __TAURI_INVOKE<{
+	contents: string,
+} | null>("lsp_hover", { filePath, line, column }),
 };
 
 /** Events */
@@ -1169,6 +1178,18 @@ export type ImageAssetPayload = {
 	mimeType: string,
 	dataUrl: string,
 	byteSize: number,
+};
+
+export type LspCompletionItem = {
+	label: string,
+	insertText: string | null,
+	kind: number | null,
+	detail: string | null,
+	documentation: string | null,
+};
+
+export type LspHoverResult = {
+	contents: string,
 };
 
 export type SaveScriptRequest = {
