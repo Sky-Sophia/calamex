@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { AgentBrowser } from '@mastra/agent-browser';
 import type { MastraBrowser } from '@mastra/core/browser';
-import { BatchPartsProcessor, UnicodeNormalizer, type InputProcessorOrWorkflow, type OutputProcessorOrWorkflow } from '@mastra/core/processors';
+import { UnicodeNormalizer, type InputProcessorOrWorkflow, type OutputProcessorOrWorkflow } from '@mastra/core/processors';
 import { LocalFilesystem, LocalSandbox, Workspace, WORKSPACE_TOOLS, type AnyWorkspace, type CommandResult, type ExecuteCommandOptions, type WorkspaceToolsConfig } from '@mastra/core/workspace';
 import { MastraStorageExporter, Observability, SensitiveDataFilter } from '@mastra/observability';
 import type { IAgentContextReferenceInput, IAgentRuntimeInput } from './contracts/runtime-input.js';
@@ -254,18 +254,14 @@ export const createMastraAgentInputProcessors = (): InputProcessorOrWorkflow[] =
 // 流式聊天 / Agent 的最终回答必须逐 token 实时下发。
 // 此前输出侧挂了基于大模型的 PIIDetector（strategy:'redact' + lastMessageOnly），
 // 它必须拿到完整最终消息才能脱敏，会把整段输出缓冲到流结束才一次性放出；
-// 而 consumeTextStream 读取的是 output processor 之后的 fullStream，因此 token
-// 在到达转发层/前端之前就被截留，表现为“先冒一点点、末尾哗一下全弹”。
-// 因此输出侧不再挂任何会整段缓冲的护栏处理器，只保留不阻塞流的 BatchPartsProcessor
-//（达到 batchSize 或 maxWaitTime 即 flush）。输入侧脱敏仍由 Rust 网关
-// collect_messages 中的 redact_text 完成，安全护栏不受影响。
-export const createMastraAgentOutputProcessors = (): OutputProcessorOrWorkflow[] => [
-    new BatchPartsProcessor({
-        batchSize: 10,
-        maxWaitTime: 120,
-        emitOnNonText: true,
-    }),
-];
+// 随后改用的 BatchPartsProcessor 虽不等待整段消息，但仍在 output 侧成批合并 token
+//（batchSize 个一批），快速模型下整段答案会在很短时间内堆满批次、集中到末尾放出，
+// 依旧表现为“先冒一点点、末尾哗一下全弹”。
+// 由于 consumeTextStream 读取的是 output processor 之后的 fullStream，任何 output 侧
+// 处理器都会截留 token。为保证真正逐 token 实时流式，输出侧不再挂任何处理器；
+// 平滑节奏完全交由前端 markstream-vue 的 smoothStreaming 负责。
+// 输入侧脱敏仍由 Rust 网关 collect_messages 中的 redact_text 完成，安全护栏不受影响。
+export const createMastraAgentOutputProcessors = (): OutputProcessorOrWorkflow[] => [];
 
 export const createMastraObservability = (): Observability => new Observability({
     configs: {
