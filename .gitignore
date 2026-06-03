@@ -16,6 +16,8 @@ agent-sidecar/.agent-sidecar/
 # 构建产物 / 缓存
 *.pdb
 *.tsbuildinfo
+.node-compile-cache/
+.mastra/
 
 # vite 配置的编译产物（源文件为 vite.config.ts）
 /vite.config.js
