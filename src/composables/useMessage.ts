@@ -65,18 +65,18 @@ const emitToast = (
 ): void => {
   const toastOptions = toToastOptions(options);
 
-  if (type === 'success') {
-    toast.success(message, toastOptions);
+  // 仅 error / warning / loading 会弹出右上角 Toast。
+  // success（成功）与 info（提示）不再弹窗，避免频繁打扰；
+  // 若该 id 上已有进行中的 Toast（如 promise() 的 loading 转圈），顺手关闭，避免残留。
+  if (type === 'success' || type === 'info') {
+    if (options?.id) {
+      toast.dismiss(options.id);
+    }
     return;
   }
 
   if (type === 'warning') {
     toast.warning(message, toastOptions);
-    return;
-  }
-
-  if (type === 'info') {
-    toast.info(message, toastOptions);
     return;
   }
 
