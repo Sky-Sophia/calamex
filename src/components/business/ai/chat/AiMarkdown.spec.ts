@@ -62,7 +62,7 @@ describe('AiMarkdown rendering', () => {
     expect(wrapper.text()).toContain('done');
   });
 
-  it('保持平滑流式(auto)且 typewriter 常驻、max-live-nodes 不跳变，避免结束时一次性 flush', async () => {
+  it('保持平滑流式(auto)且关闭打字机光标、max-live-nodes 不跳变', async () => {
     const wrapper = mount(AiMarkdown, {
       props: {
         messageId: 'm-smooth-stream',
@@ -74,11 +74,11 @@ describe('AiMarkdown rendering', () => {
     await nextTick();
 
     const streamingRenderer = wrapper.getComponent(MarkdownRender);
-    // 流式阶段：smooth-streaming="auto"（backlog-aware 平滑分发）、typewriter 常驻显示打字光标、
+    // 流式阶段：smooth-streaming="auto"（backlog-aware 平滑分发）、关闭打字机光标(typewriter=false)、
     // max-live-nodes=0 启用增量渲染、关闭与高频更新冲突的淡入动画。
     expect(streamingRenderer.props('smoothStreaming')).toBe('auto');
     expect(streamingRenderer.props('fade')).toBe(false);
-    expect(streamingRenderer.props('typewriter')).toBe(true);
+    expect(streamingRenderer.props('typewriter')).toBe(false);
     expect(streamingRenderer.props('maxLiveNodes')).toBe(0);
     expect(streamingRenderer.props('batchRendering')).toBe(true);
     expect(streamingRenderer.props('initialRenderBatchSize')).toBe(24);
@@ -92,11 +92,11 @@ describe('AiMarkdown rendering', () => {
     await nextTick();
 
     const finalRenderer = wrapper.getComponent(MarkdownRender);
-    // 完成后：smooth-streaming 仍为 "auto"、typewriter 仍为 true、max-live-nodes 仍为 0（均不跳变），
-    // 让收尾交给 backlog 追平的平滑分发而不是一次性 flush；final 仅负责让未闭合结构定型。
+    // 完成后：smooth-streaming 仍为 "auto"、typewriter 仍为 false、max-live-nodes 仍为 0（均不跳变）；
+    // final 仅负责让未闭合结构定型。
     expect(finalRenderer.props('smoothStreaming')).toBe('auto');
     expect(finalRenderer.props('fade')).toBe(false);
-    expect(finalRenderer.props('typewriter')).toBe(true);
+    expect(finalRenderer.props('typewriter')).toBe(false);
     expect(finalRenderer.props('maxLiveNodes')).toBe(0);
     expect(finalRenderer.props('final')).toBe(true);
     expect(finalRenderer.props('batchRendering')).toBe(true);

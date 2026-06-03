@@ -65,21 +65,16 @@ const isFinal = computed(
   () => props.streamStatus !== 'streaming' && props.streamStatus !== 'waiting-confirmation',
 );
 
-// 保留 markstream-vue 的平滑流式（smooth-streaming），并彻底修复“先一点点、结束时一次性全弹”。
+// 保留 markstream-vue 的平滑流式（smooth-streaming），但按用户要求关闭打字机光标效果。
 //
-// 根因（已逐链路确认）：后端逐 token 下发、Rust 桥接逐帧转发、前端逐 delta 累加，content 是连续增长的；
-// markstream-vue 的平滑分发会按节奏把文本“打字机式”揭示出来。之前把 typewriter 绑定为 !isFinal，会在
-// 流结束(final=true)的同一拍把打字机关闭，平滑分发被中途切断，缓冲里尚未揭示的 backlog 被一次性渲染——
-// 这才是“末尾全弹”的真正元凶（与 max-live-nodes 是否跳变无关）。
-//
-// 修复（对齐官方推荐范式：:typewriter 常驻 true + :final 仅在结束时翻 true）：
-//  - smooth-streaming 用 "auto"：backlog-aware 平滑分发，待显示文本堆积（GLM-flash 这类极快模型整段秒
-//    级到齐）时自动加速追平，避免明显滞后。
+//  - smooth-streaming 用 "auto"：backlog-aware 平滑分发，待显示文本堆积时自动加速追平。
+//    注意：当 max-live-nodes<=0 时，"auto" 依旧启用平滑分发，因此关闭 typewriter 不会影响
+//    “文本连续平滑揭示”，只是去掉逐字蹦出的打字光标。
 //  - max-live-nodes 始终为 0：启用增量/批量渲染，且不在 final 时跳变。
-//  - typewriter 始终为 true：让平滑分发在收尾阶段继续把剩余 backlog 顺滑放出；final 只负责让未闭合的
-//    Markdown 结构（如未闭合代码块/公式）定型。显示追平且 content 不再增长后，打字光标自然停止，不会常驻。
+//  - typewriter 关闭：不再显示一个字一个字蹦出的打字光标；平滑输出仍由 smooth-streaming +
+//    max-live-nodes=0 提供。final 只负责让未闭合的 Markdown 结构（如未闭合代码块/公式）定型。
 const smoothStreaming = 'auto' as const;
-const typewriter = true as const;
+const typewriter = false as const;
 // 始终关闭虚拟化(max-live-nodes=0)：既启用增量/批量渲染，也保证 final 收尾时平滑分发不被中断。
 const maxLiveNodes = 0;
 const rendererId = computed(() => `ai-message-${props.messageId}`);
