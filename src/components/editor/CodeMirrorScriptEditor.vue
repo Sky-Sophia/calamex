@@ -9,35 +9,6 @@
 </template>
 
 <script setup lang="ts">
-import EditorContextMenu from '@/components/editor/EditorContextMenu.vue';
-import type { IEditorContextMenuItem } from '@/components/editor/editor-context-menu.types';
-import { buildCodeMirrorSettingsExtensions } from '@/services/editor/codemirror-config';
-import { createCodeMirrorInlineCompletionController } from '@/services/editor/codemirror-inline-completion';
-import {
-  loadCodeMirrorLanguageSupport,
-  resolveCodeMirrorLanguageExtension,
-} from '@/services/editor/codemirror-language';
-import {
-  setShikiLanguage,
-  shikiEditorChromeTheme,
-  shikiHighlightExtension,
-} from '@/services/editor/codemirror-shiki-highlight';
-import { createLspExtension, createLucideCompletionIcon, lspCompletionTheme } from '@/services/editor/lsp-bridge';
-import { useEditorStore } from '@/store/editor';
-import type { TThemeMode } from '@/types/app';
-import type {
-  IAnalyzeScriptPayload,
-  IEditorSelectionSummary,
-  TScriptDiagnosticSeverity,
-} from '@/types/editor';
-import type { IEditorSettings } from '@/types/settings';
-import { tryReadClipboardText, writeClipboardText } from '@/utils/clipboard';
-import { resolveLanguageForPath } from '@/utils/editor-language';
-import {
-  SHELL_WINDOW_RESIZE_END_EVENT,
-  SHELL_WINDOW_RESIZE_SETTLED_EVENT,
-  SHELL_WINDOW_RESIZE_START_EVENT,
-} from '@/utils/window-resize-events';
 import type {
   CompletionContext,
   CompletionResult,
@@ -81,11 +52,43 @@ import {
   highlightSpecialChars,
   keymap,
   rectangularSelection,
-  scrollPastEnd,
   type ViewUpdate,
 } from '@codemirror/view';
 import { useResizeObserver } from '@vueuse/core';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import EditorContextMenu from '@/components/editor/EditorContextMenu.vue';
+import type { IEditorContextMenuItem } from '@/components/editor/editor-context-menu.types';
+import { buildCodeMirrorSettingsExtensions } from '@/services/editor/codemirror-config';
+import { createCodeMirrorInlineCompletionController } from '@/services/editor/codemirror-inline-completion';
+import {
+  loadCodeMirrorLanguageSupport,
+  resolveCodeMirrorLanguageExtension,
+} from '@/services/editor/codemirror-language';
+import {
+  setShikiLanguage,
+  shikiEditorChromeTheme,
+  shikiHighlightExtension,
+} from '@/services/editor/codemirror-shiki-highlight';
+import {
+  createLspExtension,
+  createLucideCompletionIcon,
+  lspCompletionTheme,
+} from '@/services/editor/lsp-bridge';
+import { useEditorStore } from '@/store/editor';
+import type { TThemeMode } from '@/types/app';
+import type {
+  IAnalyzeScriptPayload,
+  IEditorSelectionSummary,
+  TScriptDiagnosticSeverity,
+} from '@/types/editor';
+import type { IEditorSettings } from '@/types/settings';
+import { tryReadClipboardText, writeClipboardText } from '@/utils/clipboard';
+import { resolveLanguageForPath } from '@/utils/editor-language';
+import {
+  SHELL_WINDOW_RESIZE_END_EVENT,
+  SHELL_WINDOW_RESIZE_SETTLED_EVENT,
+  SHELL_WINDOW_RESIZE_START_EVENT,
+} from '@/utils/window-resize-events';
 
 interface IEditorExpose {
   focusEditor: () => void;
@@ -194,34 +197,34 @@ const buildCompletionExtension = (
 ): Extension =>
   editorSettings.commandCompletion
     ? autocompletion({
-      activateOnTyping: true,
-      activateOnTypingDelay: editorSettings.suggestionDelay,
-      // CM6 的 icons 是布尔开关：关掉内置字形，改用 Lucide SVG（addToOptions 渲染）
-      icons: false,
-      addToOptions: [
-        {
-          position: 20, // 图标槽位（label=50 / detail=80）
-          render: (completion) => {
-            try {
-              return createLucideCompletionIcon(completion.type ?? 'text');
-            } catch {
-              return null;
-            }
-          },
-        },
-      ],
-      override:
-        language === 'shell'
-          ? [
-            async (completionContext: CompletionContext): Promise<CompletionResult | null> => {
-              const source = await getShellCompletionSource();
-              return source(completionContext);
+        activateOnTyping: true,
+        activateOnTypingDelay: editorSettings.suggestionDelay,
+        // CM6 的 icons 是布尔开关：关掉内置字形，改用 Lucide SVG（addToOptions 渲染）
+        icons: false,
+        addToOptions: [
+          {
+            position: 20, // 图标槽位（label=50 / detail=80）
+            render: (completion) => {
+              try {
+                return createLucideCompletionIcon(completion.type ?? 'text');
+              } catch {
+                return null;
+              }
             },
-            ...(lspCompletionSource ? [lspCompletionSource] : []),
-          ]
-          : [completeAnyWord],
-      maxRenderedOptions: 80,
-    })
+          },
+        ],
+        override:
+          language === 'shell'
+            ? [
+                async (completionContext: CompletionContext): Promise<CompletionResult | null> => {
+                  const source = await getShellCompletionSource();
+                  return source(completionContext);
+                },
+                ...(lspCompletionSource ? [lspCompletionSource] : []),
+              ]
+            : [completeAnyWord],
+        maxRenderedOptions: 80,
+      })
     : [];
 
 const getCurrentLanguage = (): string =>
@@ -379,16 +382,16 @@ const syncDiagnostics = (): void => {
   if (!view) return;
   shellcheckDiagnostics = analysisState.value.available
     ? analysisState.value.diagnostics.map((item): Diagnostic => {
-      const from = lineColumnToOffset(view, item.line, item.column);
-      const to = Math.max(from + 1, lineColumnToOffset(view, item.endLine, item.endColumn));
-      return {
-        from,
-        to: Math.min(to, view.state.doc.length),
-        severity: toDiagnosticSeverity(item.level),
-        source: item.code,
-        message: `${item.code} · ${item.message}`,
-      };
-    })
+        const from = lineColumnToOffset(view, item.line, item.column);
+        const to = Math.max(from + 1, lineColumnToOffset(view, item.endLine, item.endColumn));
+        return {
+          from,
+          to: Math.min(to, view.state.doc.length),
+          severity: toDiagnosticSeverity(item.level),
+          source: item.code,
+          message: `${item.code} · ${item.message}`,
+        };
+      })
     : [];
   applyDiagnostics();
 };
@@ -703,6 +706,13 @@ const buildLspExtension = (): Extension => {
   return currentLsp.extensions;
 };
 
+// 编辑器底部预留约 5 行空白：替代 scrollPastEnd()（其会预留近一屏空白、
+// 可把最后一行滚到顶部）。改为固定 5 行更贴近常规编辑器手感。
+// CM6 默认行高约为字号的 1.6 倍，故 15 行 = 24em。
+const editorBottomPaddingTheme = EditorView.theme({
+  '.cm-content': { paddingBottom: '24em' },
+});
+
 const createBaseExtensions = (language: string): Extension[] => [
   lspCompletionTheme,
   highlightSpecialChars(),
@@ -716,7 +726,7 @@ const createBaseExtensions = (language: string): Extension[] => [
   highlightSelectionMatches(),
   search({ top: true }),
   lintGutter(),
-  scrollPastEnd(),
+  editorBottomPaddingTheme,
   ...inlineCompletionController.extensions,
   keymap.of([
     indentWithTab,
@@ -997,7 +1007,7 @@ defineExpose<IEditorExpose>({
 }
 
 /* 选中行圆角：与外框同心(外 12 − 内边距 4 = 8) */
-.cm-tooltip.cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] {
+.cm-tooltip.cm-tooltip.cm-tooltip-autocomplete>ul>li[aria-selected] {
   border-radius: 8px;
 }
 
@@ -1177,3 +1187,5 @@ defineExpose<IEditorExpose>({
   line-height: 1.45;
 }
 </style>
+
+
