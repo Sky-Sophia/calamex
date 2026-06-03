@@ -18,15 +18,9 @@ pub(crate) mod status;
 #[cfg(test)]
 mod tests;
 
-pub use branches::{checkout_git_branch, create_git_branch, list_git_branches};
-pub use diff::get_git_diff_preview;
-pub use history::list_git_commit_history;
-pub use pull_request::get_git_pull_request_support;
-pub use stash::{apply_git_stash, drop_git_stash, list_git_stashes, save_git_stash};
-pub use status::{
-    commit_git_index, discard_git_paths, get_git_file_baseline, get_git_repository_status,
-    init_git_repository, stage_git_paths, unstage_git_paths,
-};
+// 命令由 `tauri_bindings.rs` 以定义子模块限定路径登记（如 `git::status::commit_git_index`），
+// 以便 tauri-specta 解析配套宏；故此处不再重新导出扁平命令名。
+// 子模块均为 `pub(crate)`，测试按其真实路径（如 `super::status::init_git_repository`）引用。
 
 const GIT_DIFF_MODE_WORKTREE: &str = "worktree";
 const GIT_DIFF_MODE_STAGED: &str = "staged";

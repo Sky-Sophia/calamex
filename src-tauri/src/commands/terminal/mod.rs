@@ -12,11 +12,9 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-pub use commands::{
-    cancel_terminal_run, close_terminal_session, dispatch_script_to_terminal,
-    ensure_terminal_session, resize_terminal_session, shutdown_all_terminal_sessions,
-    write_terminal_input,
-};
+// 其余终端命令经 `tauri_bindings.rs` 以 `terminal::commands::*` 路径直接登记；
+// 此处仅保留 `main.rs` 仍按 `commands::*` 引用的两项。
+pub use commands::shutdown_all_terminal_sessions;
 pub use state::TerminalSessionState;
 
 pub(crate) fn to_wsl_path(path: &std::path::Path) -> Result<String, String> {

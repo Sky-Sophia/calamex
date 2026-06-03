@@ -27,7 +27,6 @@ mod io;
 mod protocol;
 mod types;
 
-pub use self::commands::{
-    lsp_completion, lsp_did_change, lsp_did_close, lsp_did_open, lsp_hover, lsp_start, lsp_stop,
-};
+// LSP 命令经 `tauri_bindings.rs` 以 `lsp::commands::*` 路径直接登记；
+// 此处仅保留 `main.rs` 仍按 `commands::LspManager` 引用的管理器句柄。
 pub use self::types::LspManager;

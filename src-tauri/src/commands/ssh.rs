@@ -11,10 +11,10 @@
 //! - `credentials`：基于系统钥匙串的密码存取命令
 //! - `config`：解析 ~/.ssh/config 主机列表命令
 //!
-//! 对外命令名经由下方 `pub use` 重新导出，`commands/mod.rs` 的注册路径保持不变。
 //! 持有 `#[tauri::command] + #[specta::specta]` 命令的子模块（connection/credentials/
-//! config/transfer）声明为 `pub(crate)`，以便 `tauri_bindings.rs` 用模块限定路径
-//! （如 `ssh::transfer::read_ssh_file`）解析 tauri-specta 配套宏。
+//! config/transfer）声明为 `pub(crate)`，由 `tauri_bindings.rs` 用模块限定路径
+//! （如 `ssh::transfer::read_ssh_file`）直接登记并解析 tauri-specta 配套宏；
+//! 因此不再在此重新导出扁平命令名。
 
 use super::{
     SshConnectionTestRequest, SshDirectoryCreateRequest, SshDirectoryListRequest,
@@ -28,14 +28,6 @@ pub(crate) mod credentials;
 mod hostkey;
 pub(crate) mod transfer;
 mod util;
-
-pub use config::list_ssh_config_hosts;
-pub use connection::{test_ssh_connection, trust_ssh_host_key};
-pub use credentials::{get_ssh_password, save_ssh_password};
-pub use transfer::{
-    create_ssh_directory, delete_ssh_path, download_ssh_file, list_ssh_directory, read_ssh_file,
-    rename_ssh_path, upload_ssh_file, write_ssh_file,
-};
 
 // `ssh_pool` 通过 `super::ssh::{connect_and_auth, SshClientHandler}` 引用这两项。
 pub(crate) use connection::{connect_and_auth, SshClientHandler};
