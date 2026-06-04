@@ -189,33 +189,25 @@ watch(
   overflow: hidden;
 }
 
+/* MergeView 官方滚动模型：只有外层 .cm-mergeView 作为滚动容器
+   （需要 height + overflow:auto）；两侧编辑器按内容自然增高，一起在外层滚动。
+   不要给 .cm-mergeViewEditors 写死 height:100%，否则配合 base theme 的
+   .cm-mergeViewEditor{overflow:hidden} 会把超出一屏的内容裁掉，外层没有
+   溢出内容就滚不动。 */
 .git-diff-viewer-surface :deep(.cm-mergeView) {
   width: 100%;
   height: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
   outline: none;
 }
 
 .git-diff-viewer-surface :deep(.cm-mergeViewEditors) {
-  height: 100%;
-  min-height: 0;
+  min-height: 100%;
 }
 
 .git-diff-viewer-surface :deep(.cm-mergeViewEditor) {
   min-width: 0;
-  height: 100%;
-}
-
-/* 让每侧编辑器自身的 .cm-scroller 承担纵向滚动（CM6 固定高度可滚的标准写法）。
-   .cm-mergeViewEditor 默认 overflow:hidden 会裁掉超出可视区的内容，
-   只在外层开 overflow 滚不动，必须把高度下压到 .cm-editor 再让 scroller 滚。 */
-.git-diff-viewer-surface :deep(.cm-editor) {
-  height: 100%;
-}
-
-.git-diff-viewer-surface :deep(.cm-scroller) {
-  overflow: auto;
 }
 
 .git-diff-viewer-empty {
