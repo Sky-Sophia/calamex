@@ -56,7 +56,6 @@ export const MCP_SERVER_NAMES = [
   'context7',
   'logoscope',
   'hooks-mcp',
-  'sqlite-mcp',
   'tavily-mcp',
 ] as const;
 
@@ -83,7 +82,6 @@ const DEFAULT_GITHUB_MCP_URL = 'https://api.githubcopilot.com/mcp/';
 const MCP_PACKAGE_SPECS = {
   mcpServerGit: 'mcp-server-git==2026.1.14',
   hooksMcp: 'hooks-mcp==0.2.4',
-  sqliteMcp: 'sqlite-mcp==0.1.0',
   probe: '@probelabs/probe@0.6.0-rc315', // NOTE: pre-release；首次启动需联网拉包
 } as const;
 
@@ -362,7 +360,6 @@ export const loadMcpServerConfigs = (
   const memoryFilePath = resolve(trimToNull(env.AGENT_MCP_MEMORY_FILE_PATH) ?? DEFAULT_MEMORY_FILE_PATH);
   const githubMcpPat = trimToNull(env.GITHUB_MCP_PAT);
   const githubMcpUrl = trimToNull(env.GITHUB_MCP_URL) ?? DEFAULT_GITHUB_MCP_URL;
-  const sqliteDbPath = trimToNull(env.SQLITE_DB_PATH);
 
   if (!shouldLoadServer(requestedServers, 'git')) {
     // 当前请求不需要 Git MCP。
@@ -481,30 +478,6 @@ export const loadMcpServerConfigs = (
     if (hooksMcp) {
       configs.push(hooksMcp);
     }
-  }
-
-  if (!shouldLoadServer(requestedServers, 'sqlite-mcp')) {
-    // 当前请求不需要 SQLite MCP。
-  } else if (sqliteDbPath) {
-    const sqlite = uvxServerConfig(
-      'sqlite-mcp',
-      uvxCommand,
-      MCP_PACKAGE_SPECS.sqliteMcp,
-      [],
-      workspaceRoot,
-      errors,
-      '未找到 uvx 可执行文件，已跳过 sqlite-mcp。请设置 AGENT_MCP_UVX_PATH。',
-      {
-        SQLITE_DB_PATH: resolve(sqliteDbPath),
-        SQLITE_READ_ONLY: trimToNull(env.SQLITE_READ_ONLY) ?? 'true',
-        SQLITE_TIMEOUT: trimToNull(env.SQLITE_TIMEOUT) ?? '30',
-      },
-    );
-    if (sqlite) {
-      configs.push(sqlite);
-    }
-  } else {
-    errors.push('SQLITE_DB_PATH 未配置，已跳过 sqlite-mcp。');
   }
 
   const tavilyApiKey = trimToNull(env.TAVILY_API_KEY);
