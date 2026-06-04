@@ -193,7 +193,7 @@ watch(
   width: 100%;
   height: 100%;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   outline: none;
 }
 
@@ -204,6 +204,18 @@ watch(
 
 .git-diff-viewer-surface :deep(.cm-mergeViewEditor) {
   min-width: 0;
+  height: 100%;
+}
+
+/* 让每侧编辑器自身的 .cm-scroller 承担纵向滚动（CM6 固定高度可滚的标准写法）。
+   .cm-mergeViewEditor 默认 overflow:hidden 会裁掉超出可视区的内容，
+   只在外层开 overflow 滚不动，必须把高度下压到 .cm-editor 再让 scroller 滚。 */
+.git-diff-viewer-surface :deep(.cm-editor) {
+  height: 100%;
+}
+
+.git-diff-viewer-surface :deep(.cm-scroller) {
+  overflow: auto;
 }
 
 .git-diff-viewer-empty {
