@@ -90,8 +90,8 @@ describe('Agent sidecar orchestration stream route', () => {
     }
   });
 
-  it('returns 404 when the orchestration workflow flag is disabled', async () => {
-    delete process.env[ORCHESTRATION_FLAG];
+  it('returns 404 when the orchestration workflow flag is explicitly disabled', async () => {
+    process.env[ORCHESTRATION_FLAG] = '0';
     // 门控关闭时必须在触达 runtime 之前短路：workflow 桩一旦被构建即抛错。
     const runtime = {
       name: 'mastra',

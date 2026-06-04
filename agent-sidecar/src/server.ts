@@ -42,6 +42,15 @@ export const SIDECAR_IMPLEMENTATION_VERSION = 'deepseek-reasoning-transport-v6-p
 // 超时未 resume 则回收，避免长负 sidecar 永久持有被放弃的 run。
 const ORCHESTRATION_RUN_TTL_MS = 30 * 60 * 1000;
 
+// Orchestration is enabled by default; it is disabled only when
+// AGENT_ORCHESTRATION_WORKFLOW is explicitly set to '0' or 'false'. The flag was
+// only an off-by-default migration gate while the per-phase channel was primary;
+// the native orchestration channel is now the default path.
+const isOrchestrationWorkflowDisabled = (): boolean => {
+  const raw = (process.env.AGENT_ORCHESTRATION_WORKFLOW ?? '').trim().toLowerCase();
+  return raw === '0' || raw === 'false';
+};
+
 // committed orchestration workflow 的 run 实例类型（createRun 可能同步或异步返回，统一 Awaited）。
 type TPlanOrchestrationRun = Awaited<ReturnType<TPlanOrchestrationWorkflow['createRun']>>;
 
@@ -718,7 +727,7 @@ export const createAgentSidecarServer = (
 
     if (request.method === 'POST' && url === '/agent/plan/orchestrate') {
       // Phase 2：原生编排 workflow 新路径。默认关闭；未开启时与未知路由一致（旧行为完全不变）。
-      if (process.env.AGENT_ORCHESTRATION_WORKFLOW !== '1') {
+      if (isOrchestrationWorkflowDisabled()) {
         writeJson(response, 404, {
           error: '未知 sidecar 路由。',
         });
@@ -750,7 +759,7 @@ export const createAgentSidecarServer = (
       // Phase 2c-1：原生编排 workflow 的流式入口。同样默认关闭。
       // 用 run.stream() 把 workflow 执行事件以 NDJSON 逐帧推给客户端，达到与旧
       // /stream 路径的功能对等；首帧先回 runId 便于挂起后 resume。
-      if (process.env.AGENT_ORCHESTRATION_WORKFLOW !== '1') {
+      if (isOrchestrationWorkflowDisabled()) {
         writeJson(response, 404, {
           error: '未知 sidecar 路由。',
         });
@@ -804,7 +813,7 @@ export const createAgentSidecarServer = (
 
     if (request.method === 'POST' && url === '/agent/plan/orchestrate/resume') {
       // Phase 2b：恢复被计划审批门挂起的编排 run。同样默认关闭。
-      if (process.env.AGENT_ORCHESTRATION_WORKFLOW !== '1') {
+      if (isOrchestrationWorkflowDisabled()) {
         writeJson(response, 404, {
           error: '未知 sidecar 路由。',
         });
