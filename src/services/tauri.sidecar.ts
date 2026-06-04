@@ -244,6 +244,39 @@ const agentSidecarRestoreCheckpointIpc = (
     () => commands.agentSidecarRestoreCheckpoint(payload),
   );
 
+const agentSidecarOrchestrateIpc = (
+  payload: TSidecarRequest<'agentSidecarOrchestrate'>,
+  options?: IIpcCallOptions,
+): Promise<TSidecarResult<'agentSidecarOrchestrate'>> =>
+  callSpectaCommand(
+    {
+      command: 'agent_sidecar_orchestrate',
+      guardHint: 'Start native orchestration workflow via Node sidecar',
+      audit: 'sensitive',
+      timeoutMs: AGENT_SIDECAR_TASK_TIMEOUT_MS,
+      input: payload,
+      measureInput: measureAiChatInput,
+      signal: options?.signal,
+    },
+    () => commands.agentSidecarOrchestrate(payload),
+  );
+
+const agentSidecarOrchestrateResumeIpc = (
+  payload: TSidecarRequest<'agentSidecarOrchestrateResume'>,
+  options?: IIpcCallOptions,
+): Promise<TSidecarResult<'agentSidecarOrchestrateResume'>> =>
+  callSpectaCommand(
+    {
+      command: 'agent_sidecar_orchestrate_resume',
+      guardHint: 'Resume Agent sidecar orchestration workflow (approval gate)',
+      audit: 'sensitive',
+      timeoutMs: AGENT_SIDECAR_TASK_TIMEOUT_MS,
+      input: payload,
+      signal: options?.signal,
+    },
+    () => commands.agentSidecarOrchestrateResume(payload),
+  );
+
 type TSidecarTauriService = Pick<
   ITauriService,
   | 'agentSidecarHealth'
@@ -260,6 +293,8 @@ type TSidecarTauriService = Pick<
   | 'agentSidecarExecute'
   | 'agentSidecarResolveApproval'
   | 'agentSidecarRestoreCheckpoint'
+  | 'agentSidecarOrchestrate'
+  | 'agentSidecarOrchestrateResume'
   | 'onAgentSidecarStream'
 >;
 
@@ -291,6 +326,10 @@ export const sidecarTauriService: TSidecarTauriService = {
   agentSidecarResolveApproval: agentSidecarResolveApprovalIpc,
 
   agentSidecarRestoreCheckpoint: agentSidecarRestoreCheckpointIpc,
+
+  agentSidecarOrchestrate: agentSidecarOrchestrateIpc,
+
+  agentSidecarOrchestrateResume: agentSidecarOrchestrateResumeIpc,
 
   async onAgentSidecarStream(handler) {
     await assertDesktopRuntime('监听 Agent sidecar 流式事件');

@@ -407,6 +407,11 @@ button.ai-changed-files-action:disabled {
   border: 0;
   border-radius: 0;
   background: #ffffff;
+  overflow: visible;
+}
+
+.ai-changed-file-code :deep(.overflow-auto) {
+  overflow: visible;
 }
 
 .ai-changed-file-code :deep(pre) {

@@ -108,6 +108,11 @@ const diffCode = computed(() =>
   border: 0;
   border-radius: 0;
   background: #ffffff;
+  overflow: visible;
+}
+
+.ai-diff-hunk-code :deep(.overflow-auto) {
+  overflow: visible;
 }
 
 .ai-diff-hunk-code :deep(pre) {

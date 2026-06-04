@@ -90,6 +90,8 @@ export const commands = {
 	agentSidecarExecute: (payload: AgentSidecarExecuteRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_execute", { payload }),
 	agentSidecarResolveApproval: (payload: AgentSidecarApprovalResolveRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_resolve_approval", { payload }),
 	agentSidecarRestoreCheckpoint: (payload: AgentSidecarCheckpointRestoreRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarResponsePayload>("agent_sidecar_restore_checkpoint", { payload }),
+	agentSidecarOrchestrate: (payload: AgentSidecarOrchestrateRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarOrchestratePayload>("agent_sidecar_orchestrate", { payload }),
+	agentSidecarOrchestrateResume: (payload: AgentSidecarOrchestrateResumeRequest_Deserialize) => __TAURI_INVOKE<AgentSidecarOrchestratePayload>("agent_sidecar_orchestrate_resume", { payload }),
 	aiGetConfig: () => __TAURI_INVOKE<AiConfigPayload>("ai_get_config"),
 	aiSaveConfig: (payload: AiSaveConfigRequest) => __TAURI_INVOKE<AiConfigPayload>("ai_save_config", { payload }),
 	aiSaveCredentials: (payload: AiSaveCredentialsRequest) => __TAURI_INVOKE<AiConfigPayload>("ai_save_credentials", { payload }),
@@ -274,6 +276,48 @@ export type AgentSidecarModelConfigPayload_Serialize = {
 	modelId: string,
 	apiKey: SecretString,
 	baseUrl?: string | null,
+};
+
+export type AgentSidecarOrchestratePayload = {
+	runId: string,
+	/**
+	 *  Final orchestration result; passed through verbatim and validated by the
+	 *  frontend (Zod). Mapped to TS `unknown` via specta_typescript::Unknown to
+	 *  avoid serde_json::Number tripping specta's BigInt-forbidden check.
+	 */
+	result?: unknown,
+};
+
+export type AgentSidecarOrchestrateRequest = AgentSidecarOrchestrateRequest_Serialize | AgentSidecarOrchestrateRequest_Deserialize;
+
+export type AgentSidecarOrchestrateRequest_Deserialize = {
+	sessionId: string | null,
+	goal: string,
+	threadId: string | null,
+	modelConfig: AgentSidecarModelConfigPayload_Deserialize | null,
+};
+
+export type AgentSidecarOrchestrateRequest_Serialize = {
+	sessionId?: string | null,
+	goal: string,
+	threadId?: string | null,
+	modelConfig?: AgentSidecarModelConfigPayload_Serialize | null,
+};
+
+export type AgentSidecarOrchestrateResumeRequest = AgentSidecarOrchestrateResumeRequest_Serialize | AgentSidecarOrchestrateResumeRequest_Deserialize;
+
+export type AgentSidecarOrchestrateResumeRequest_Deserialize = {
+	runId: string,
+	decision: string,
+	reason: string | null,
+	modelConfig: AgentSidecarModelConfigPayload_Deserialize | null,
+};
+
+export type AgentSidecarOrchestrateResumeRequest_Serialize = {
+	runId: string,
+	decision: string,
+	reason?: string | null,
+	modelConfig?: AgentSidecarModelConfigPayload_Serialize | null,
 };
 
 export type AgentSidecarPlanApproveRequest = AgentSidecarPlanApproveRequest_Serialize | AgentSidecarPlanApproveRequest_Deserialize;

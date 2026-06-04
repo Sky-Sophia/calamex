@@ -255,6 +255,8 @@
 </template>
 
 <script setup lang="ts">
+import { useVirtualizer } from '@tanstack/vue-virtual';
+import { computed, onScopeDispose, ref, watch } from 'vue';
 import InlineError from '@/components/common/InlineError.vue';
 import { Input } from '@/components/ui/input';
 import ExplorerEntryIcon from '@/components/workbench/ExplorerEntryIcon.vue';
@@ -275,8 +277,6 @@ import type {
   TWorkspaceSearchScope,
 } from '@/types/search';
 import { toErrorMessage } from '@/utils/error';
-import { useVirtualizer } from '@tanstack/vue-virtual';
-import { computed, onScopeDispose, ref, watch } from 'vue';
 
 type TSearchReason = TWorkspaceSearchResultKind;
 type TSearchToggleOption = 'matchCase' | 'wholeWord' | 'useRegex' | 'showPathFilters';
@@ -565,8 +565,9 @@ const buildCompactHighlightedSegments = (
     .slice(previewStart, safeStart)
     .join('')}`;
   const matchText = characters.slice(safeStart, safeEnd).join('');
-  const suffixText = `${characters.slice(safeEnd, previewEnd).join('')}${previewEnd < characters.length ? COMPACT_PREVIEW_ELLIPSIS : ''
-    }`;
+  const suffixText = `${characters.slice(safeEnd, previewEnd).join('')}${
+    previewEnd < characters.length ? COMPACT_PREVIEW_ELLIPSIS : ''
+  }`;
   const segments: IHighlightedSegment[] = [];
 
   if (prefixText) {
@@ -753,7 +754,9 @@ const windowedSearchRows = computed(() =>
       start: item.start,
       row: flatSearchRows.value[item.index],
     }))
-    .filter((entry) => Boolean(entry.row)),
+    .filter((entry): entry is { key: string; start: number; row: IFlatSearchRow } =>
+      Boolean(entry.row),
+    ),
 );
 
 watch(flatSearchRows, () => {
@@ -809,7 +812,7 @@ const buildReplacementLineSegments = (
     suffixLength < beforeCharacters.length - prefixLength &&
     suffixLength < afterCharacters.length - prefixLength &&
     beforeCharacters[beforeCharacters.length - 1 - suffixLength] ===
-    afterCharacters[afterCharacters.length - 1 - suffixLength]
+      afterCharacters[afterCharacters.length - 1 - suffixLength]
   ) {
     suffixLength += 1;
   }

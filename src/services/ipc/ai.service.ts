@@ -37,6 +37,9 @@ import type {
   IAgentSidecarCheckpointRestoreRequest,
   IAgentSidecarExecuteRequest,
   IAgentSidecarHealthPayload,
+  IAgentSidecarOrchestratePayload,
+  IAgentSidecarOrchestrateRequest,
+  IAgentSidecarOrchestrateResumeRequest,
   IAgentSidecarPlanApproveRequest,
   IAgentSidecarPlanFinishRequest,
   IAgentSidecarPlanQueryRequest,
@@ -247,6 +250,16 @@ export const aiService = {
     payload: IAgentSidecarCheckpointRestoreRequest,
   ): Promise<IAgentSidecarResponsePayload> {
     return tauriService.agentSidecarRestoreCheckpoint(payload);
+  },
+  sidecarOrchestrate(
+    payload: IAgentSidecarOrchestrateRequest,
+  ): Promise<IAgentSidecarOrchestratePayload> {
+    return tauriService.agentSidecarOrchestrate(payload);
+  },
+  sidecarOrchestrateResume(
+    payload: IAgentSidecarOrchestrateResumeRequest,
+  ): Promise<IAgentSidecarOrchestratePayload> {
+    return tauriService.agentSidecarOrchestrateResume(payload);
   },
   onSidecarStream(
     handler: (payload: IAgentSidecarStreamEventPayload) => void,

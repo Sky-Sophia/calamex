@@ -589,3 +589,33 @@ export interface IAgentSidecarStreamEventPayload {
   seq: number;
   event: TAgentUiEvent;
 }
+
+/* ============================================================================
+ * Native orchestration (orchestration workflow) request / response
+ *
+ * Single-channel orchestration: start streams events (reusing TAgentUiEvent
+ * via the existing ai:sidecar-stream window event); resume is a plain JSON
+ * call. Shapes mirror Rust AgentSidecarOrchestrateRequest /
+ * AgentSidecarOrchestrateResumeRequest / AgentSidecarOrchestratePayload.
+ * ========================================================================== */
+
+export interface IAgentSidecarOrchestrateRequest {
+  sessionId?: string;
+  goal: string;
+  threadId?: string;
+  modelConfig?: IAgentSidecarModelConfig;
+}
+
+export type TAgentSidecarOrchestrateDecision = 'approve' | 'reject';
+
+export interface IAgentSidecarOrchestrateResumeRequest {
+  runId: string;
+  decision: TAgentSidecarOrchestrateDecision;
+  reason?: string;
+  modelConfig?: IAgentSidecarModelConfig;
+}
+
+export interface IAgentSidecarOrchestratePayload {
+  runId: string;
+  result: TJsonValue | null;
+}
