@@ -734,3 +734,19 @@
   width: 13px;
   height: 13px;
 }
+.search-panel-virtual-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.search-panel-virtual-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+}
+
+.search-panel-virtual-row.search-panel-result-group-header {
+  height: 28px;
+}

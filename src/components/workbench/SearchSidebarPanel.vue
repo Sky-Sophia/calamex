@@ -81,7 +81,7 @@
       </label>
     </div>
 
-    <div class="search-panel-results" role="listbox">
+    <div ref="resultsScrollRef" class="search-panel-results" role="listbox">
       <div v-if="replacementPreviewOpen" class="search-replace-inline">
         <div v-if="replaceRunning && !replacementPreview" class="search-replace-inline-empty">
           <span class="icon-[lucide--loader-circle] search-panel-spin" aria-hidden="true" />
@@ -172,7 +172,53 @@
       </div>
 
       <template v-else>
+        <!-- ① 新增：结果多时走虚拟化 -->
+        <div v-if="shouldVirtualizeSearch" class="search-panel-virtual-spacer"
+          :style="{ height: `${searchTotalSize}px` }">
+          <template v-for="entry in windowedSearchRows" :key="entry.key">
+            <header v-if="entry.row.kind === 'group'" class="search-panel-result-group-header search-panel-virtual-row"
+              :style="{ transform: `translateY(${entry.start}px)` }">
+              <button type="button" class="search-panel-result-group-open"
+                :aria-expanded="!isSearchResultGroupCollapsed(entry.row.group.path)"
+                @click="toggleSearchResultGroup(entry.row.group.path)">
+                <span class="search-panel-result-group-chevron" aria-hidden="true">填你原来的箭头表达式</span>
+                <span class="search-panel-result-group-icon" aria-hidden="true">
+                  <ExplorerEntryIcon kind="file" :path="entry.row.group.path" />
+                </span>
+                <span class="search-panel-result-group-name"> entry.row.group.name </span>
+                <span class="search-panel-result-group-path"> entry.row.group.parentPath </span>
+              </button>
+              <span class="search-panel-result-group-count"> entry.row.group.results.length </span>
+            </header>
+
+            <button v-else type="button" class="search-panel-result-line search-panel-virtual-row"
+              :class="{ 'is-selected': selectedResultKey === entry.row.result?.resultKey }" role="option"
+              :aria-selected="selectedResultKey === entry.row.result?.resultKey"
+              :style="{ transform: `translateY(${entry.start}px)` }"
+              @click="entry.row.result && handleSearchResultOpen(entry.row.result)">
+              <span class="search-panel-result-line-number"> entry.row.result?.lineNumber </span>
+              <span class="search-panel-result-line-body">
+                <span class="search-panel-result-snippet">
+                  <template v-for="(segment, index) in entry.row.result?.snippetSegments ?? []"
+                    :key="`${entry.row.result?.resultKey}-snippet-${index}`">
+                    <mark v-if="segment.matched" class="search-panel-result-snippet-match" v-text="segment.text" />
+                    <span v-else class="search-panel-result-snippet-context" v-text="segment.text" />
+                  </template>
+                </span>
+              </span>
+            </button>
+          </template>
+        </div>
+
+        <!-- ② 原样保留：结果少时不虚拟化（你原来的 article 整段塞进这里，一字不改） -->
+        <template v-else>
+          <article v-for="group in searchResultGroups" :key="group.path" class="search-panel-result-group">
+            …（你原本的内容，原封不动）…
+          </article>
+        </template>
+
         <article v-for="group in searchResultGroups" :key="group.path" class="search-panel-result-group">
+
           <header class="search-panel-result-group-header">
             <button type="button" class="search-panel-result-group-open"
               :aria-expanded="!isSearchResultGroupCollapsed(group.path)" @click="toggleSearchResultGroup(group.path)">
@@ -212,6 +258,7 @@
 </template>
 
 <script setup lang="ts">
+import { useVirtualizer } from '@tanstack/vue-virtual';
 import { computed, onScopeDispose, ref, watch } from 'vue';
 import InlineError from '@/components/common/InlineError.vue';
 import { Input } from '@/components/ui/input';
@@ -263,6 +310,13 @@ interface ISearchResultGroup {
   results: ISearchResultItem[];
 }
 
+interface IFlatSearchRow {
+  kind: 'group' | 'line';
+  key: string;
+  group: ISearchResultGroup;
+  result: ISearchResultItem | null;
+}
+
 interface ISearchMatcher {
   hasQuery: boolean;
   errorMessage: string;
@@ -305,10 +359,13 @@ const SEARCH_SCOPE_LABELS: Record<TWorkspaceSearchScope, string> = {
 };
 
 const SEARCH_DEBOUNCE_MS = 180;
-const SEARCH_RESULT_LIMIT = 200;
+const SEARCH_RESULT_LIMIT = 2000;
 const SEARCH_RESULT_CONTEXT_CHARS = 28;
 const COMPACT_PREVIEW_ELLIPSIS = '…';
 const REPLACEMENT_FILE_LIMIT = 200;
+const SEARCH_VIRTUALIZE_THRESHOLD = 100;
+const SEARCH_GROUP_ROW_HEIGHT = 28;
+const SEARCH_LINE_ROW_HEIGHT = 24;
 
 const searchQuery = ref('');
 const replacementQuery = ref('');
@@ -656,6 +713,57 @@ const searchResultGroups = computed<ISearchResultGroup[]>(() => {
 
   return Array.from(groups.values());
 });
+
+const resultsScrollRef = ref<HTMLElement | null>(null);
+
+const flatSearchRows = computed<IFlatSearchRow[]>(() => {
+  const rows: IFlatSearchRow[] = [];
+  for (const group of searchResultGroups.value) {
+    rows.push({ kind: 'group', key: `group:${group.path}`, group, result: null });
+    if (!isSearchResultGroupCollapsed(group.path)) {
+      for (const result of group.results) {
+        rows.push({ kind: 'line', key: result.resultKey, group, result });
+      }
+    }
+  }
+  return rows;
+});
+
+const shouldVirtualizeSearch = computed(
+  () => flatSearchRows.value.length > SEARCH_VIRTUALIZE_THRESHOLD,
+);
+
+const searchVirtualizer = useVirtualizer<HTMLElement, HTMLElement>(
+  computed(() => ({
+    count: shouldVirtualizeSearch.value ? flatSearchRows.value.length : 0,
+    getScrollElement: () => resultsScrollRef.value,
+    estimateSize: (index: number) =>
+      flatSearchRows.value[index]?.kind === 'group'
+        ? SEARCH_GROUP_ROW_HEIGHT
+        : SEARCH_LINE_ROW_HEIGHT,
+    overscan: 16,
+    getItemKey: (index: number) => flatSearchRows.value[index]?.key ?? index,
+  })),
+);
+
+const searchTotalSize = computed(() =>
+  shouldVirtualizeSearch.value ? searchVirtualizer.value.getTotalSize() : 0,
+);
+
+const windowedSearchRows = computed(() =>
+  (shouldVirtualizeSearch.value ? searchVirtualizer.value.getVirtualItems() : [])
+    .map((item) => ({
+      key: String(item.key),
+      start: item.start,
+      row: flatSearchRows.value[item.index],
+    }))
+    .filter((entry) => Boolean(entry.row)),
+);
+
+watch(flatSearchRows, () => {
+  searchVirtualizer.value.measure();
+});
+
 const canApplyReplacement = computed(
   () =>
     !replaceRunning.value &&

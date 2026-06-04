@@ -22,7 +22,7 @@ use std::fs;
 use util::{count_to_u32, require_replacement_query, u64_to_u32};
 
 const DEFAULT_SEARCH_LIMIT: usize = 200;
-const MAX_SEARCH_LIMIT: usize = 500;
+const MAX_SEARCH_LIMIT: usize = 2000;
 const DEFAULT_REPLACEMENT_FILE_LIMIT: usize = 100;
 const MAX_REPLACEMENT_FILE_LIMIT: usize = 500;
 
