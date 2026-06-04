@@ -982,7 +982,7 @@ onBeforeUnmount(() => {
                 :data-index="line.lineIndex" class="ssh-preview-dialog__line"
                 :data-ssh-preview-line-index="line.lineIndex">
                 <div class="ssh-preview-dialog__gutter" aria-hidden="true">
-                  <span> line.lineIndex + 1 </span>
+                  <span> {line.lineIndex + 1} </span>
                 </div>
 
                 <div class="ssh-preview-dialog__line-code" data-ssh-preview-line-code="true">
@@ -995,8 +995,7 @@ onBeforeUnmount(() => {
                       :class="{
                         'is-match': segment.matched,
                         'is-active-match': segment.active,
-                      }" :data-ssh-preview-active-hit="segment.active ? 'true' : undefined" :style="segment.style"> segment.text
-                    </span>
+                      }" :data-ssh-preview-active-hit="segment.active ? 'true' : undefined" :style="segment.style"> segment.text </span>
                   </template>
                 </div>
               </div>
