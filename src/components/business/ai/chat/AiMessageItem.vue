@@ -10,7 +10,6 @@ import {
 } from '@/components/ai-elements/message';
 import AiMarkdown from '@/components/business/ai/chat/AiMarkdown.vue';
 import AiChangedFilesSummary from '@/components/business/ai/edit/AiChangedFilesSummary.vue';
-import AiPatchPreview from '@/components/business/ai/edit/AiPatchPreview.vue';
 import AiAgentRuntimeTimeline from '@/components/business/ai/plan/AiAgentRuntimeTimeline.vue';
 import { useMessage } from '@/composables/useMessage';
 import type { TAiServicePlatformId } from '@/constants/ai/providers';
@@ -127,9 +126,6 @@ const canShowRuntimeMessageBubble = computed(
 
 const hasMessageActions = computed(() => Boolean(props.message.actions?.length));
 const hasChangedFilesSummary = computed(() => Boolean(props.message.changedFilesSummary));
-const hasInlinePatches = computed(
-  () => Boolean(props.message.patches?.length) && !hasChangedFilesSummary.value,
-);
 
 const isToolProgressContent = computed(() => {
   if (props.message.role !== 'assistant' || !hasToolCalls.value) {
@@ -227,7 +223,6 @@ const shouldRenderMessage = computed(
     hasToolCalls.value ||
     shouldShowMessageBubble.value ||
     shouldShowRuntimeTimeline.value ||
-    hasInlinePatches.value ||
     hasChangedFilesSummary.value ||
     shouldShowThinkingStatus.value ||
     shouldShowStreamTokenProgress.value ||
@@ -370,10 +365,6 @@ onBeforeUnmount(() => {
     </div>
     <ImageAttachmentPreviewGrid v-if="userAttachmentItems.length" class="ai-message-image-attachments"
       :items="userAttachmentItems" aria-label="已发送附件" variant="message" />
-    <div v-if="hasInlinePatches" class="ai-message-patch-list" aria-label="已编辑的文件">
-      <AiPatchPreview v-for="(patch, index) in message.patches" :key="`${message.id}:patch:${index}`" :patch="patch"
-        :workspace-root-path="workspaceRootPath" variant="message" />
-    </div>
     <MessageContent v-if="shouldShowMessageBubble" class="ai-message-bubble"
       :class="{ 'is-assistant-flat': message.role !== 'user' }">
       <AiMarkdown :message-id="message.id" :content="message.content" :stream-status="message.stream?.status" />

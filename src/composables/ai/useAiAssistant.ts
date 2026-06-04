@@ -77,7 +77,6 @@ import {
   buildReversePatchSet,
   extractSidecarPatchEntries,
   type ISidecarPatchEntry,
-  normalizePatchDisplayPath,
   syncPatchedDocument,
 } from './useAiAssistant.patch';
 import { useAiProviderConfig } from './useAiAssistant.provider-config';
@@ -186,7 +185,6 @@ const MAX_CONTEXT_CHARS = 12_000;
 const MAX_TEXT_ATTACHMENT_BYTES = 128 * 1024;
 const MAX_IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const AI_EDIT_ROLLBACK_TIMELINE_LIMIT = 24;
-const CODE_BLOCK_PATTERN = /```[a-zA-Z0-9_-]*\n([\s\S]*?)```/;
 const MSG_CALL_FAILED = 'AI 调用失败';
 
 // ---------------------------------------------------------------------------
@@ -223,9 +221,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const isSettingsOpen = ref(false);
   const isClearDialogOpen = ref(false);
   const currentReferences = ref<IAiContextReference[]>([]);
-  const proposedPatch = ref<IAiPatchSet | null>(null);
-  const appliedPatchPreview = ref<IAiPatchSet | null>(null);
-  const isApplyingPatch = ref(false);
   const fileRollbackPrompt = ref<IAiFileRollbackPrompt | null>(null);
   const revertingChangedFilesSummaryId = ref<string | null>(null);
   const pinningChangedFilesSummaryId = ref<string | null>(null);
@@ -1365,8 +1360,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     agentSteps.value = [];
     runtimeTimelineEvents.value = [];
     clearSidecarToolConfirmation();
-    proposedPatch.value = null;
-    appliedPatchPreview.value = null;
 
     const assistantMessageId = createMessageId('assistant');
     const targetThreadId = threadId;
@@ -1530,21 +1523,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   // -----------------------------------------------------------------------
 
   const sendButtonLabel = computed(() => (isSending.value ? '发送中…' : '发送'));
-
-  const latestAssistantCodeBlock = computed(() => {
-    const message = [...messages.value].reverse().find((item) => item.role === 'assistant');
-    const match = message?.content.match(CODE_BLOCK_PATTERN);
-
-    return match?.[1] ?? '';
-  });
-
-  const canPreviewPatch = computed(() => {
-    const document = options.document.value;
-
-    return Boolean(
-      document.path && document.kind === 'text' && latestAssistantCodeBlock.value.trim(),
-    );
-  });
 
   // -----------------------------------------------------------------------
   // Context builders
@@ -1882,8 +1860,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
       const nextMessages = messages.value.slice(0, targetMessageIndex + 1);
       messages.value = nextMessages;
       runtimeTimelineEvents.value = collectConversationRuntimeEvents(nextMessages);
-      proposedPatch.value = null;
-      appliedPatchPreview.value = null;
       fileRollbackPrompt.value = null;
       agentSteps.value = [];
       clearSidecarToolConfirmation();
@@ -1932,8 +1908,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     messages.value = visibleMessages;
     draft.value = '';
     errorMessage.value = '';
-    proposedPatch.value = null;
-    appliedPatchPreview.value = null;
     isSending.value = true;
     activeBufferedThreadId.value = titleThreadId;
 
@@ -2061,7 +2035,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
   const resetConversationUiState = (): void => {
     draft.value = '';
     currentReferences.value = [];
-    proposedPatch.value = null;
     agentSteps.value = [];
     fileRollbackPrompt.value = null;
     revertingChangedFilesSummaryId.value = null;
@@ -2122,78 +2095,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     }
 
     conversationStore.updateThreadScrollState(threadId, scrollState);
-  };
-
-  const previewPatchFromLastAnswer = async (): Promise<void> => {
-    const document = options.document.value;
-    const updatedContent = latestAssistantCodeBlock.value;
-
-    if (!document.path || document.kind !== 'text' || !updatedContent.trim()) {
-      errorMessage.value = '没有可预览的代码块，或当前文件尚未保存。';
-      return;
-    }
-
-    const payload = await aiService.proposePatch({
-      path: document.path,
-      originalContent: document.content,
-      updatedContent,
-      summary: '应用 AI 回复中的代码块',
-    });
-
-    proposedPatch.value = payload.patch;
-    appliedPatchPreview.value = null;
-    errorMessage.value = '';
-  };
-
-  const applyProposedPatch = async (): Promise<void> => {
-    const patch = proposedPatch.value;
-
-    if (!patch || isApplyingPatch.value) {
-      return;
-    }
-
-    isApplyingPatch.value = true;
-
-    try {
-      const result = await aiService.applyPatch({
-        patch,
-        metadata: {
-          taskId: activeConversationId.value,
-          turnId: messages.value.at(-1)?.id ?? activeConversationId.value,
-          reason: patch.summary,
-          toolCallId: null,
-          confirmedByUser: true,
-          workspaceRootPath: options.workspaceRootPath.value,
-          ...(buildActiveAgentPatchMetadata() ?? {}),
-        },
-      });
-
-      const appliedPaths = result.appliedFiles.map((file) => file.path);
-
-      syncPatchedDocument(options.document.value, patch, appliedPaths);
-      await updateFileRollbackPrompt(appliedPaths, appliedPaths.length > 0);
-
-      messages.value = [
-        ...messages.value,
-        {
-          id: createMessageId('assistant'),
-          role: 'assistant',
-          content: `Patch 已应用：${appliedPaths
-            .map((file) => normalizePatchDisplayPath(file))
-            .join('、')}`,
-          createdAt: new Date().toISOString(),
-          references: [],
-        },
-      ];
-
-      proposedPatch.value = null;
-      appliedPatchPreview.value = patch;
-      errorMessage.value = '';
-    } catch (error) {
-      errorMessage.value = toErrorMessage(error, 'Patch 应用失败');
-    } finally {
-      isApplyingPatch.value = false;
-    }
   };
 
   const rollbackLatestFileChange = async (): Promise<void> => {
@@ -2482,9 +2383,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     isSettingsOpen,
     isClearDialogOpen,
     currentReferences,
-    proposedPatch,
-    appliedPatchPreview,
-    isApplyingPatch,
     fileRollbackPrompt,
     runtimeTimelineEvents,
     conversationCheckpoints,
@@ -2496,7 +2394,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     attachedFiles,
     providerLabel,
     sendButtonLabel,
-    canPreviewPatch,
     loadConfig,
     saveConfig,
     saveCredentials,
@@ -2512,8 +2409,6 @@ export const useAiAssistant = (options: IUseAiAssistantOptions) => {
     resolveSidecarToolConfirmation,
     sendMessage,
     stopCurrentRequest,
-    previewPatchFromLastAnswer,
-    applyProposedPatch,
     rollbackLatestFileChange,
     rollbackChangedFilesSummary,
     setChangedFilesSummaryPin,

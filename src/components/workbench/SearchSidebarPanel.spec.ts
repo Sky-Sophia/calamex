@@ -158,7 +158,7 @@ describe('SearchSidebarPanel', () => {
         query: 'foo',
         scope: 'all',
         useStructural: false,
-        limit: 200,
+        limit: 2000,
       }),
       expect.objectContaining({ signal: expect.anything() }),
     );

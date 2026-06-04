@@ -9,7 +9,6 @@ import { Loader } from '@/components/ai-elements/loader';
 import AiChatThread from '@/components/business/ai/chat/AiChatThread.vue';
 import AiErrorNotice from '@/components/business/ai/chat/AiErrorNotice.vue';
 import AiPromptInput from '@/components/business/ai/chat/AiPromptInput.vue';
-import AiPatchPreview from '@/components/business/ai/edit/AiPatchPreview.vue';
 import AiPlanConfirmationMessage from '@/components/business/ai/plan/AiPlanConfirmationMessage.vue';
 import AiPlanModePanel from '@/components/business/ai/plan/AiPlanModePanel.vue';
 import AiProviderIcon from '@/components/business/ai/provider/AiProviderIcon.vue';
@@ -322,12 +321,6 @@ const canEditPlan = computed(
     !planIsApproving.value &&
     !planIsClassifying.value &&
     (planStatus.value === 'draft' || !planStatus.value),
-);
-const visiblePatchPreview = computed(
-  () => assistant.proposedPatch.value ?? assistant.appliedPatchPreview.value,
-);
-const isVisiblePatchApplied = computed(
-  () => !assistant.proposedPatch.value && Boolean(assistant.appliedPatchPreview.value),
 );
 const planProgressVisible = computed(() => {
   if (assistant.activeMode.value !== 'plan') {
@@ -1342,23 +1335,6 @@ onBeforeUnmount(() => {
           <span v-text="fileRollbackLabel"></span>
         </button>
         <span class="ai-file-rollback-entry__line" aria-hidden="true"></span>
-      </div>
-      <AiPatchPreview :patch="visiblePatchPreview" :is-applying="assistant.isApplyingPatch.value"
-        :is-applied="isVisiblePatchApplied" :workspace-root-path="workspaceRootPath" @apply="assistant.applyProposedPatch"
-        @close="assistant.proposedPatch.value = null; assistant.appliedPatchPreview.value = null"
-        @open-diff="emit('open-patch-diff', $event)" />
-      <div v-if="assistant.canPreviewPatch.value" class="ai-patch-entry">
-        <span class="ai-patch-entry__line" aria-hidden="true"></span>
-        <button type="button" class="ai-patch-entry__button" @click="assistant.previewPatchFromLastAnswer">
-          <span>预览为 Patch</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-            <circle cx="6" cy="6" r="2" />
-            <circle cx="18" cy="6" r="2" />
-            <circle cx="18" cy="18" r="2" />
-            <path d="M8 6h4a4 4 0 0 1 4 4v6" />
-          </svg>
-        </button>
-        <span class="ai-patch-entry__line" aria-hidden="true"></span>
       </div>
       <AiWebSourcesPanel v-if="webSourcesVisible" :sources="webSources.sources.value"
         :activity="planProgressVisible ? null : webSources.activity.value" :error-message="webSources.errorMessage.value"

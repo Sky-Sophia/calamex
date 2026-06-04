@@ -189,9 +189,6 @@ const createAssistantMock = (
   const attachedFiles = ref(
     [] as Array<{ id: string; name: string; sizeLabel: string; kind: 'text' | 'image' }>,
   );
-  const proposedPatch = ref<IAiPatchSet | null>(null);
-  const appliedPatchPreview = ref<IAiPatchSet | null>(null);
-  const isApplyingPatch = ref(false);
   const runtimeTimelineEvents = ref<TAgentRuntimeEvent[]>([]);
   const conversationCheckpoints = ref<
     Array<{
@@ -259,9 +256,6 @@ const createAssistantMock = (
     currentReferences,
     agentSteps,
     attachedFiles,
-    proposedPatch,
-    appliedPatchPreview,
-    isApplyingPatch,
     runtimeTimelineEvents,
     conversationCheckpoints,
     restoringCheckpointId,
@@ -279,7 +273,6 @@ const createAssistantMock = (
       resetPlan: vi.fn(),
       restorePersistedPlanState: vi.fn().mockResolvedValue(undefined),
     },
-    canPreviewPatch: computed(() => false),
     sendButtonLabel: computed(() => '发送'),
     loadConfig: vi.fn().mockResolvedValue(undefined),
     saveConfig: vi.fn().mockResolvedValue(undefined),
@@ -287,8 +280,6 @@ const createAssistantMock = (
     testProviderConfig: vi.fn().mockResolvedValue('ok'),
     connectProvider: vi.fn().mockResolvedValue('ok'),
     testProvider: vi.fn().mockResolvedValue('ok'),
-    previewPatchFromLastAnswer: vi.fn(),
-    applyProposedPatch: vi.fn(),
     rollbackLatestFileChange: vi.fn(),
     rollbackChangedFilesSummary: vi.fn(),
     setChangedFilesSummaryPin: vi.fn(),
@@ -554,47 +545,6 @@ describe('AiAssistantPanel', () => {
     expect(assistantMock.restoreConversationCheckpoint).toHaveBeenCalledWith('checkpoint-1');
   });
 
-  it('将预览 Patch 入口放在预览面板下方并保留点击动作', async () => {
-    const assistantMock = createAssistantMock([]);
-    assistantMock.canPreviewPatch = computed(() => true);
-    useAiAssistantMock.mockReturnValue(assistantMock);
-
-    const wrapper = mount(AiAssistantPanel, {
-      props: {
-        document: createDocument(),
-        activeRun: null as IActiveRunSummary | null,
-        analysis: createAnalysis(),
-        selection: null as IEditorSelectionSummary | null,
-        gitStatus: createGitStatus(),
-        workspaceRootPath: 'd:/com.xiaojianc/my_desktop_app',
-      },
-      global: {
-        stubs: {
-          AiChatThread: {
-            template: '<div data-testid="chat-thread"><slot name="after-messages" /></div>',
-          },
-          AiContextChips: { template: '<div />' },
-          AiPatchPreview: { template: '<div class="patch-preview-stub" />' },
-          AiPromptInput: { template: '<div />' },
-          AiProviderSettings: { template: '<div />' },
-          AiPlanModePanel: { template: '<div />' },
-          teleport: true,
-        },
-      },
-    });
-
-    const html = wrapper.html();
-    expect(html.indexOf('patch-preview-stub')).toBeLessThan(html.indexOf('ai-patch-entry__button'));
-
-    const trigger = wrapper.get('.ai-patch-entry__button');
-    expect(trigger.text()).toContain('预览为 Patch');
-    expect(trigger.find('svg').exists()).toBe(true);
-
-    await trigger.trigger('click');
-
-    expect(assistantMock.previewPatchFromLastAnswer).toHaveBeenCalledTimes(1);
-  });
-
   it('AI 修改文件后在对话框下方显示低调回滚入口', async () => {
     const assistantMock = createAssistantMock([]);
     assistantMock.fileRollbackPrompt.value = {
@@ -635,9 +585,6 @@ describe('AiAssistantPanel', () => {
 
     expect(html.indexOf('chat-thread')).toBeLessThan(
       html.indexOf('ai-file-rollback-entry__button'),
-    );
-    expect(html.indexOf('ai-file-rollback-entry__button')).toBeLessThan(
-      html.indexOf('patch-preview-stub'),
     );
     expect(rollbackButton.text()).toContain('AI 已修改文件，可回滚最近一次');
     expect(rollbackButton.find('svg').exists()).toBe(true);
