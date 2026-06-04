@@ -19,6 +19,9 @@ use crate::commands::contracts::{
     AiWebFetchInput, AiWebFetchPayload, AiWebSearchInput, AiWebSearchPayload,
 };
 
+mod orchestrate;
+pub(crate) use orchestrate::{orchestrate, orchestrate_resume};
+
 const DEFAULT_SIDECAR_URL: &str = "http://127.0.0.1:39871";
 const SIDECAR_URL_ENV: &str = "XIAOJIANC_AGENT_SIDECAR_URL";
 const SIDECAR_ROOT_ENV: &str = "XIAOJIANC_AGENT_SIDECAR_ROOT";

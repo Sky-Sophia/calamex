@@ -88,6 +88,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             agent_sidecar::agent_sidecar_execute,
             agent_sidecar::agent_sidecar_resolve_approval,
             agent_sidecar::agent_sidecar_restore_checkpoint,
+            agent_sidecar::agent_sidecar_orchestrate,
+            agent_sidecar::agent_sidecar_orchestrate_resume,
             // ↓↓↓ ai gateway / chat / config / inline ↓↓↓
             ai::gateway::ai_get_config,
             ai::gateway::ai_save_config,

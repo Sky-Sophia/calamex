@@ -2,6 +2,8 @@ use crate::agent_sidecar;
 use crate::commands::contracts::{
     AgentSidecarApprovalResolveRequest, AgentSidecarChatRequest,
     AgentSidecarCheckpointRestoreRequest, AgentSidecarExecuteRequest, AgentSidecarHealthPayload,
+    AgentSidecarOrchestratePayload, AgentSidecarOrchestrateRequest,
+    AgentSidecarOrchestrateResumeRequest,
     AgentSidecarPlanApproveRequest, AgentSidecarPlanFinishRequest, AgentSidecarPlanQueryRequest,
     AgentSidecarPlanRejectRequest, AgentSidecarPlanReplanRequest, AgentSidecarPlanRequest,
     AgentSidecarPlanValidateRequest, AgentSidecarResponsePayload, AgentSidecarWarmupPayload,
@@ -117,4 +119,21 @@ pub async fn agent_sidecar_restore_checkpoint(
     payload: AgentSidecarCheckpointRestoreRequest,
 ) -> Result<AgentSidecarResponsePayload, String> {
     agent_sidecar::restore_checkpoint(app, payload).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_sidecar_orchestrate(
+    app: AppHandle,
+    payload: AgentSidecarOrchestrateRequest,
+) -> Result<AgentSidecarOrchestratePayload, String> {
+    agent_sidecar::orchestrate(app, payload).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_sidecar_orchestrate_resume(
+    payload: AgentSidecarOrchestrateResumeRequest,
+) -> Result<AgentSidecarOrchestratePayload, String> {
+    agent_sidecar::orchestrate_resume(payload).await
 }

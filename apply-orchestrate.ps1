@@ -1,21 +1,22 @@
 # apply-orchestrate.ps1
-# 用途：落地「客户端灰度接入原生编排（Rust 命令层）」改动。
-# 放在仓库根目录（应含 src-tauri\Cargo.toml）运行：
+# Land the "client gray-scale integration (Rust command layer)" change.
+# Run from the repo root (must contain src-tauri\Cargo.toml):
 #   powershell -ExecutionPolicy Bypass -File .\apply-orchestrate.ps1
+# This script is pure ASCII, so it parses correctly under any code page.
 $ErrorActionPreference = 'Stop'
 
 $root = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 if (-not (Test-Path (Join-Path $root 'src-tauri\Cargo.toml'))) {
-    throw "未找到 src-tauri\Cargo.toml，请把脚本放到仓库根目录后再运行。当前: $root"
+    throw "src-tauri\Cargo.toml not found. Put this script at the repo root. Current: $root"
 }
 
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
-# 以 agent_sidecar/mod.rs 探测仓库换行风格，所有写入与之对齐
+# Detect repo newline style from agent_sidecar/mod.rs; align all writes to it.
 $probePath = Join-Path $root 'src-tauri\src\agent_sidecar\mod.rs'
 $probe = [System.IO.File]::ReadAllText($probePath)
 $nl = if ($probe.Contains("`r`n")) { "`r`n" } else { "`n" }
-Write-Host ("仓库换行风格: " + $(if ($nl -eq "`r`n") { 'CRLF' } else { 'LF' }))
+Write-Host ("Repo newline: " + $(if ($nl -eq "`r`n") { 'CRLF' } else { 'LF' }))
 
 function Write-NewFile([string]$rel, [string]$content) {
     $full = Join-Path $root $rel
@@ -24,30 +25,30 @@ function Write-NewFile([string]$rel, [string]$content) {
     $content = $content -replace "`r`n", "`n"
     if ($nl -eq "`r`n") { $content = $content -replace "`n", "`r`n" }
     [System.IO.File]::WriteAllText($full, $content, $utf8NoBom)
-    Write-Host "  [新建] $rel"
+    Write-Host "  [new]  $rel"
 }
 
 function Edit-File([string]$rel, [string]$old, [string]$new, [string]$skipIfContains) {
     $full = Join-Path $root $rel
     $txt = [System.IO.File]::ReadAllText($full)
     if ($skipIfContains -and $txt.Contains($skipIfContains)) {
-        Write-Host "  [跳过] $rel 已包含改动"
+        Write-Host "  [skip] $rel already has the change"
         return
     }
     if (-not $txt.Contains($old)) {
-        Write-Warning "  [告警] $rel 未找到锚点，请手动处理。锚点：`n$old"
+        Write-Warning "  [warn] $rel anchor not found, edit manually. Anchor:`n$old"
         $script:hadWarning = $true
         return
     }
     $txt = $txt.Replace($old, $new)
     [System.IO.File]::WriteAllText($full, $txt, $utf8NoBom)
-    Write-Host "  [改] $rel"
+    Write-Host "  [edit] $rel"
 }
 
 $script:hadWarning = $false
 
 # ---------------------------------------------------------------------------
-# 1) 新文件：原生编排契约类型
+# 1) New file: native orchestration contract types
 # ---------------------------------------------------------------------------
 $agentOrchestration = @'
 use serde::{Deserialize, Serialize};
@@ -56,7 +57,7 @@ use specta::Type;
 use super::AgentSidecarModelConfigPayload;
 
 // ============================================================================
-// Agent sidecar 原生编排（orchestration workflow）
+// Agent sidecar native orchestration (orchestration workflow)
 // ============================================================================
 
 fn is_blank_optional_string(value: &Option<String>) -> bool {
@@ -94,9 +95,9 @@ pub struct AgentSidecarOrchestrateResumeRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AgentSidecarOrchestratePayload {
     pub(crate) run_id: String,
-    /// 编排终态结果，逐字段透传由前端 Zod 校验；
-    /// 用 specta_typescript::Unknown 将导出类型映射为 TS `unknown`，
-    /// 避开 serde_json::Number 触发 specta BigInt-forbidden。
+    /// Final orchestration result; passed through verbatim and validated by the
+    /// frontend (Zod). Mapped to TS `unknown` via specta_typescript::Unknown to
+    /// avoid serde_json::Number tripping specta's BigInt-forbidden check.
     #[serde(default)]
     #[specta(type = specta_typescript::Unknown)]
     pub(crate) result: serde_json::Value,
@@ -105,20 +106,22 @@ pub struct AgentSidecarOrchestratePayload {
 Write-NewFile 'src-tauri\src\commands\contracts\agent_orchestration.rs' $agentOrchestration
 
 # ---------------------------------------------------------------------------
-# 2) 新文件：orchestrate 子模块（流式 + resume）
+# 2) New file: orchestrate submodule (streaming + resume)
 # ---------------------------------------------------------------------------
 $orchestrate = @'
-//! 原生编排（Mastra createWorkflow）客户端命令层。
+//! Native orchestration (Mastra createWorkflow) client command layer.
 //!
-//! 作为 `agent_sidecar` 的子模块，复用父模块里现成的 HTTP / 流式 / sidecar
-//! 自启动私有助手（经 `super::` 访问），新增两条走原生编排端点的通道，与既有
-//! 「逐相」通道并存：
-//!   - `orchestrate`        → 流式 POST `/agent/plan/orchestrate/stream`
-//!   - `orchestrate_resume` → JSON   POST `/agent/plan/orchestrate/resume`
+//! Defined as a child module of `agent_sidecar` so it can reuse the parent's
+//! existing HTTP / streaming / sidecar-autostart private helpers (via `super::`).
+//! Adds two channels hitting the native orchestration endpoints, alongside the
+//! existing per-phase channels:
+//!   - `orchestrate`        -> streaming POST `/agent/plan/orchestrate/stream`
+//!   - `orchestrate_resume` -> JSON      POST `/agent/plan/orchestrate/resume`
 //!
-//! 该编排能力在 sidecar 侧由 `AGENT_ORCHESTRATION_WORKFLOW` 门控、默认关闭：
-//! 未启用时流式端点返回 404，这里显式报 `AGENT_SIDECAR_ORCHESTRATION_DISABLED`，
-//! **不** 像逐相流式那样静默回退到非流式旧端点（编排没有等价旧端点可退）。
+//! Gated on the sidecar by `AGENT_ORCHESTRATION_WORKFLOW` (default off): when
+//! disabled the streaming endpoint returns 404, and we surface an explicit
+//! `AGENT_SIDECAR_ORCHESTRATION_DISABLED` error WITHOUT silently falling back to
+//! a non-streaming legacy endpoint (orchestration has no legacy fallback).
 use serde::Deserialize;
 use tauri::AppHandle;
 
@@ -136,11 +139,11 @@ use crate::commands::contracts::{
 const ORCHESTRATE_STREAM_ENDPOINT: &str = "/agent/plan/orchestrate/stream";
 const ORCHESTRATE_RESUME_ENDPOINT: &str = "/agent/plan/orchestrate/resume";
 
-/// `/agent/plan/orchestrate/stream` 推送的 NDJSON 帧。
+/// NDJSON frames pushed by `/agent/plan/orchestrate/stream`.
 ///
-/// 与逐相流式的 `AgentSidecarStreamFrame` 不同：编排流首帧为 `meta{runId}`、
-/// 末帧为 `response{runId,result}`（服务端还会带一个冗余的 `status` 字段，
-/// 解码时按 serde 默认忽略未知字段即可）。
+/// Unlike the per-phase `AgentSidecarStreamFrame`: the orchestration stream's
+/// first frame is `meta{runId}` and the last is `response{runId,result}` (the
+/// server also sends a redundant `status` field, ignored as an unknown field).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 enum AgentSidecarOrchestrateStreamFrame {
@@ -177,7 +180,7 @@ fn consume_orchestrate_stream_line(
     let frame = serde_json::from_str::<AgentSidecarOrchestrateStreamFrame>(trimmed).map_err(
         |error| {
             format!(
-                "AGENT_SIDECAR_CONTRACT_ERROR: sidecar 流式响应无法解析({ORCHESTRATE_STREAM_ENDPOINT})：{error}"
+                "AGENT_SIDECAR_CONTRACT_ERROR: failed to parse sidecar stream response ({ORCHESTRATE_STREAM_ENDPOINT}): {error}"
             )
         },
     )?;
@@ -193,7 +196,7 @@ fn consume_orchestrate_stream_line(
             Ok(Some(AgentSidecarOrchestratePayload { run_id, result }))
         }
         AgentSidecarOrchestrateStreamFrame::Error { error } => Err(format!(
-            "AGENT_SIDECAR_STREAM_ERROR: sidecar 流式执行失败({ORCHESTRATE_STREAM_ENDPOINT})：{error}"
+            "AGENT_SIDECAR_STREAM_ERROR: sidecar stream execution failed ({ORCHESTRATE_STREAM_ENDPOINT}): {error}"
         )),
     }
 }
@@ -213,13 +216,13 @@ async fn post_orchestrate_streaming(
         .send()
         .await
         .map_err(|error| {
-            format!("AGENT_SIDECAR_UNAVAILABLE: 无法连接 Node sidecar({url})：{error}")
+            format!("AGENT_SIDECAR_UNAVAILABLE: failed to connect to Node sidecar ({url}): {error}")
         })?;
 
     let status = response.status();
     if status.as_u16() == 404 {
         return Err(
-            "AGENT_SIDECAR_ORCHESTRATION_DISABLED: 原生编排端点未启用，请在 sidecar 侧设置 AGENT_ORCHESTRATION_WORKFLOW=1 后重启。"
+            "AGENT_SIDECAR_ORCHESTRATION_DISABLED: native orchestration endpoint is not enabled; set AGENT_ORCHESTRATION_WORKFLOW=1 on the sidecar and restart."
                 .to_string(),
         );
     }
@@ -233,7 +236,7 @@ async fn post_orchestrate_streaming(
 
     while let Some(chunk) = response.chunk().await.map_err(|error| {
         format!(
-            "AGENT_SIDECAR_READ_ERROR: 读取 sidecar 流式响应失败({ORCHESTRATE_STREAM_ENDPOINT})：{error}"
+            "AGENT_SIDECAR_READ_ERROR: failed to read sidecar stream response ({ORCHESTRATE_STREAM_ENDPOINT}): {error}"
         )
     })? {
         buffer.extend_from_slice(&chunk);
@@ -260,13 +263,14 @@ async fn post_orchestrate_streaming(
 
     final_response.ok_or_else(|| {
         format!(
-            "AGENT_SIDECAR_CONTRACT_ERROR: sidecar 流式响应缺少最终结果({ORCHESTRATE_STREAM_ENDPOINT})"
+            "AGENT_SIDECAR_CONTRACT_ERROR: sidecar stream response missing final result ({ORCHESTRATE_STREAM_ENDPOINT})"
         )
     })
 }
 
-/// 启动一次原生编排 run：跑到审批门挂起或终态，全程把 workflow 事件经
-/// `ai:sidecar-stream` 窗口事件实时下发，返回 `{runId, result}` 终态。
+/// Start one native orchestration run: runs until it suspends at an approval
+/// gate or reaches a terminal state, streaming workflow events to the
+/// `ai:sidecar-stream` window event throughout, and returns `{runId, result}`.
 pub async fn orchestrate(
     app: AppHandle,
     mut payload: AgentSidecarOrchestrateRequest,
@@ -278,7 +282,8 @@ pub async fn orchestrate(
     post_orchestrate_streaming(&app, &payload, &session_id).await
 }
 
-/// 恢复一个在审批门挂起的编排 run（approve / reject），返回恢复后的 `{runId, result}`。
+/// Resume an orchestration run suspended at an approval gate (approve / reject);
+/// returns the post-resume `{runId, result}`.
 pub async fn orchestrate_resume(
     mut payload: AgentSidecarOrchestrateResumeRequest,
 ) -> Result<AgentSidecarOrchestratePayload, String> {
@@ -314,7 +319,8 @@ mod tests {
             other => panic!("expected event frame, got {other:?}"),
         }
 
-        // response 帧带有冗余的 status 字段，解码时应被忽略，仅取 runId + result。
+        // The response frame carries a redundant `status` field that must be
+        // ignored on decode; only runId + result are taken.
         let response: AgentSidecarOrchestrateStreamFrame = serde_json::from_str(
             r#"{"type":"response","runId":"run-1","status":"success","result":{"ok":true}}"#,
         )
@@ -343,7 +349,7 @@ mod tests {
 Write-NewFile 'src-tauri\src\agent_sidecar\orchestrate.rs' $orchestrate
 
 # ---------------------------------------------------------------------------
-# 3) contracts/mod.rs：声明 + 重导出新契约模块
+# 3) contracts/mod.rs: declare + re-export the new contract module
 # ---------------------------------------------------------------------------
 Edit-File 'src-tauri\src\commands\contracts\mod.rs' `
     'mod agent_sidecar;' `
@@ -355,7 +361,7 @@ Edit-File 'src-tauri\src\commands\contracts\mod.rs' `
     'pub use agent_orchestration::*;'
 
 # ---------------------------------------------------------------------------
-# 4) commands/agent_sidecar.rs：use 块加 3 个类型 + 追加 2 条命令
+# 4) commands/agent_sidecar.rs: add 3 types to use block + append 2 commands
 # ---------------------------------------------------------------------------
 Edit-File 'src-tauri\src\commands\agent_sidecar.rs' `
     'AgentSidecarExecuteRequest, AgentSidecarHealthPayload,' `
@@ -365,7 +371,7 @@ Edit-File 'src-tauri\src\commands\agent_sidecar.rs' `
 $cmdFile = Join-Path $root 'src-tauri\src\commands\agent_sidecar.rs'
 $cmdTxt = [System.IO.File]::ReadAllText($cmdFile)
 if ($cmdTxt.Contains('agent_sidecar_orchestrate')) {
-    Write-Host "  [跳过] commands/agent_sidecar.rs 已含 orchestrate 命令"
+    Write-Host "  [skip] commands/agent_sidecar.rs already has orchestrate commands"
 } else {
     $newCommands = @'
 #[tauri::command]
@@ -390,11 +396,11 @@ pub async fn agent_sidecar_orchestrate_resume(
     $cmdTxt = $cmdTxt.TrimEnd() + $nl + $nl + $newCommands
     if (-not $cmdTxt.EndsWith($nl)) { $cmdTxt += $nl }
     [System.IO.File]::WriteAllText($cmdFile, $cmdTxt, $utf8NoBom)
-    Write-Host "  [改] commands/agent_sidecar.rs（追加 2 条命令）"
+    Write-Host "  [edit] commands/agent_sidecar.rs (appended 2 commands)"
 }
 
 # ---------------------------------------------------------------------------
-# 5) tauri_bindings.rs：collect_commands! 登记 2 条命令
+# 5) tauri_bindings.rs: register 2 commands in collect_commands!
 # ---------------------------------------------------------------------------
 Edit-File 'src-tauri\src\tauri_bindings.rs' `
     'agent_sidecar::agent_sidecar_restore_checkpoint,' `
@@ -402,7 +408,7 @@ Edit-File 'src-tauri\src\tauri_bindings.rs' `
     'agent_sidecar::agent_sidecar_orchestrate,'
 
 # ---------------------------------------------------------------------------
-# 6) agent_sidecar/mod.rs：2 行模块声明（插在 contracts use 块之后、DEFAULT_SIDECAR_URL 之前）
+# 6) agent_sidecar/mod.rs: 2 lines (after the contracts use block, before DEFAULT_SIDECAR_URL)
 # ---------------------------------------------------------------------------
 $modAnchor = $nl + "};" + $nl + $nl + 'const DEFAULT_SIDECAR_URL: &str = "http://127.0.0.1:39871";'
 $modInject = $nl + "};" + $nl + $nl + "mod orchestrate;" + $nl + "pub(crate) use orchestrate::{orchestrate, orchestrate_resume};" + $nl + $nl + 'const DEFAULT_SIDECAR_URL: &str = "http://127.0.0.1:39871";'
@@ -411,8 +417,8 @@ Edit-File 'src-tauri\src\agent_sidecar\mod.rs' $modAnchor $modInject 'mod orches
 # ---------------------------------------------------------------------------
 Write-Host ""
 if ($script:hadWarning) {
-    Write-Warning "有锚点未命中（见上），请按提示手动补齐后再编译。"
+    Write-Warning "Some anchors were not found (see above). Apply those manually, then build."
 } else {
-    Write-Host "全部改动已应用。"
+    Write-Host "All changes applied."
 }
-Write-Host "下一步：cd src-tauri ; cargo test ; cargo clippy ; 然后用你的方式生成 specta 绑定（重生成 src/bindings/tauri.ts）。"
+Write-Host "Next: cd src-tauri ; cargo test ; cargo clippy ; then regenerate specta bindings (src/bindings/tauri.ts)."

@@ -2,6 +2,7 @@
 //!
 //! 本目录由原单文件 `contracts.rs` 按域拆分而来；各子模块仅承载类型定义，
 //! 通过下方 `pub use *` 重导出，保持 `commands::contracts::*` 公共路径与原来一致。
+mod agent_orchestration;
 mod agent_sidecar;
 mod ai_agent;
 mod ai_chat;
@@ -12,6 +13,7 @@ mod secret;
 mod ssh;
 mod workspace;
 
+pub use agent_orchestration::*;
 pub use agent_sidecar::*;
 pub use ai_agent::*;
 pub use ai_chat::*;
