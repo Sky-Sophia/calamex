@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { useVirtualizer } from '@tanstack/vue-virtual';
 import {
+  type ComponentPublicInstance,
   type CSSProperties,
   computed,
   nextTick,
@@ -283,6 +285,90 @@ const renderedLines = computed<IRenderedPreviewLine[]>(() =>
   })),
 );
 
+// —— 只读预览虚拟化（复用 @tanstack/vue-virtual）——
+// 仅当行数超过阈值时启用：小文件保持原生整体渲染，不影响文本选择与编辑态浮层。
+// 采用「顶/底占位块 + 普通文档流」方案，避免破坏水平滚动、sticky 行号槽与网格对齐。
+const PREVIEW_VIRTUALIZE_THRESHOLD = 500;
+const previewGridRef = ref<HTMLElement | null>(null);
+const previewScrollMargin = ref(0);
+const shouldVirtualizePreview = computed(
+  () => !isEditing.value && renderedLines.value.length > PREVIEW_VIRTUALIZE_THRESHOLD,
+);
+
+const previewVirtualizerOptions = computed(() => ({
+  count: renderedLines.value.length,
+  getScrollElement: (): HTMLElement | null =>
+    shouldVirtualizePreview.value ? codeViewportRef.value : null,
+  estimateSize: () => 21,
+  overscan: 16,
+  scrollMargin: previewScrollMargin.value,
+  getItemKey: (index: number): string => renderedLines.value[index]?.key ?? String(index),
+}));
+const previewVirtualizer = useVirtualizer<HTMLElement, HTMLElement>(previewVirtualizerOptions);
+const previewTotalSize = computed(() => previewVirtualizer.value.getTotalSize());
+
+const windowedPreviewLines = computed<IRenderedPreviewLine[]>(() => {
+  if (!shouldVirtualizePreview.value) {
+    return renderedLines.value;
+  }
+
+  const lines = renderedLines.value;
+  const result: IRenderedPreviewLine[] = [];
+  for (const item of previewVirtualizer.value.getVirtualItems()) {
+    const line = lines[item.index];
+    if (line) {
+      result.push(line);
+    }
+  }
+  return result;
+});
+
+const previewPaddingTop = computed(() => {
+  if (!shouldVirtualizePreview.value) {
+    return 0;
+  }
+  const items = previewVirtualizer.value.getVirtualItems();
+  return items.length > 0 ? (items[0]?.start ?? 0) - previewScrollMargin.value : 0;
+});
+
+const previewPaddingBottom = computed(() => {
+  if (!shouldVirtualizePreview.value) {
+    return 0;
+  }
+  const items = previewVirtualizer.value.getVirtualItems();
+  if (items.length === 0) {
+    return 0;
+  }
+  const lastItem = items[items.length - 1];
+  const lastEnd = (lastItem?.start ?? 0) + (lastItem?.size ?? 0);
+  return Math.max(0, previewTotalSize.value - lastEnd + previewScrollMargin.value);
+});
+
+const measurePreviewRow = (el: Element | ComponentPublicInstance | null): void => {
+  if (shouldVirtualizePreview.value && el instanceof HTMLElement) {
+    previewVirtualizer.value.measureElement(el);
+  }
+};
+
+const recomputePreviewScrollMargin = (): void => {
+  const scroller = codeViewportRef.value;
+  const grid = previewGridRef.value;
+  if (!scroller || !grid) {
+    previewScrollMargin.value = 0;
+    return;
+  }
+  const scrollerRect = scroller.getBoundingClientRect();
+  const gridRect = grid.getBoundingClientRect();
+  previewScrollMargin.value = gridRect.top - scrollerRect.top + scroller.scrollTop;
+};
+
+watch(
+  () => [shouldVirtualizePreview.value, props.isLoading, renderedLines.value.length] as const,
+  () => {
+    void nextTick(recomputePreviewScrollMargin);
+  },
+);
+
 const previewFileIcon = computed(() =>
   languageInfo.value.codeMirrorLanguage === 'text'
     ? 'icon-[lucide--file-text]'
@@ -462,13 +548,24 @@ function syncActiveMatchPresentation(): void {
     return;
   }
 
-  const activeElement = codeViewportRef.value?.querySelector<HTMLElement>(
-    '[data-ssh-preview-active-hit="true"]',
-  );
-  activeElement?.scrollIntoView({
-    block: 'center',
-    inline: 'nearest',
-  });
+  const scrollActiveHitIntoView = (): void => {
+    const activeElement = codeViewportRef.value?.querySelector<HTMLElement>(
+      '[data-ssh-preview-active-hit="true"]',
+    );
+    activeElement?.scrollIntoView({
+      block: 'center',
+      inline: 'nearest',
+    });
+  };
+
+  const activeHit = indexedHits.value[activeHitIndex.value];
+  if (shouldVirtualizePreview.value && activeHit) {
+    // 命中行可能尚未渲染：先把它滚进窗口，再做精确的水平对齐。
+    previewVirtualizer.value.scrollToIndex(activeHit.lineIndex, { align: 'center' });
+    void nextTick(scrollActiveHitIntoView);
+  } else {
+    scrollActiveHitIntoView();
+  }
 }
 
 function selectActiveHitInEditor(): void {
@@ -694,6 +791,7 @@ function handlePreviewMouseUp(): void {
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown);
+  void nextTick(recomputePreviewScrollMargin);
 });
 
 onBeforeUnmount(() => {
@@ -877,11 +975,14 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div v-else class="ssh-preview-dialog__preview-grid" @mouseup="handlePreviewMouseUp">
-              <div v-for="line in renderedLines" :key="line.key" class="ssh-preview-dialog__line"
+            <div v-else ref="previewGridRef" class="ssh-preview-dialog__preview-grid" @mouseup="handlePreviewMouseUp">
+              <div v-if="shouldVirtualizePreview" :style="{ height: `${previewPaddingTop}px` }" aria-hidden="true" />
+
+              <div v-for="line in windowedPreviewLines" :key="line.key" :ref="measurePreviewRow"
+                :data-index="line.lineIndex" class="ssh-preview-dialog__line"
                 :data-ssh-preview-line-index="line.lineIndex">
                 <div class="ssh-preview-dialog__gutter" aria-hidden="true">
-                  <span>{{ line.lineIndex + 1 }}</span>
+                  <span> line.lineIndex + 1 </span>
                 </div>
 
                 <div class="ssh-preview-dialog__line-code" data-ssh-preview-line-code="true">
@@ -894,12 +995,13 @@ onBeforeUnmount(() => {
                       :class="{
                         'is-match': segment.matched,
                         'is-active-match': segment.active,
-                      }" :data-ssh-preview-active-hit="segment.active ? 'true' : undefined" :style="segment.style">
-                      {{ segment.text }}
+                      }" :data-ssh-preview-active-hit="segment.active ? 'true' : undefined" :style="segment.style"> segment.text
                     </span>
                   </template>
                 </div>
               </div>
+
+              <div v-if="shouldVirtualizePreview" :style="{ height: `${previewPaddingBottom}px` }" aria-hidden="true" />
             </div>
           </template>
         </div>
