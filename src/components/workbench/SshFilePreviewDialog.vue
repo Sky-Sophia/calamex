@@ -35,6 +35,8 @@ import {
   normalizeSshPreviewContent,
   resolveSshPreviewCursorPosition,
   resolveSshPreviewLanguageInfo,
+  type TSshPreviewEncoding,
+  type TSshPreviewLineEnding,
 } from '@/utils/ssh-file-preview';
 import { splitTextGraphemes } from '@/utils/text-preview';
 
@@ -95,10 +97,12 @@ const currentContent = computed(() =>
 const currentContentLines = computed(() => currentContent.value.split('\n'));
 const languageInfo = computed(() => resolveSshPreviewLanguageInfo(props.fileItem.path));
 const encodingLabel = computed(() =>
-  props.payload ? formatSshPreviewEncoding(props.payload.encoding) : '—',
+  props.payload ? formatSshPreviewEncoding(props.payload.encoding as TSshPreviewEncoding) : '—',
 );
 const lineEndingLabel = computed(() =>
-  props.payload ? formatSshPreviewLineEnding(props.payload.lineEnding) : '—',
+  props.payload
+    ? formatSshPreviewLineEnding(props.payload.lineEnding as TSshPreviewLineEnding)
+    : '—',
 );
 const modifiedAtLabel = computed(() =>
   props.payload ? formatSshPreviewModifiedAt(props.payload.modifiedAt) : '—',
@@ -114,8 +118,8 @@ const byteSizeLabel = computed(() => {
   return formatRemoteFileSize(
     estimateSshPreviewByteSize(
       currentContent.value,
-      props.payload.encoding,
-      props.payload.lineEnding,
+      props.payload.encoding as TSshPreviewEncoding,
+      props.payload.lineEnding as TSshPreviewLineEnding,
     ),
   );
 });
@@ -995,7 +999,8 @@ onBeforeUnmount(() => {
                       :class="{
                         'is-match': segment.matched,
                         'is-active-match': segment.active,
-                      }" :data-ssh-preview-active-hit="segment.active ? 'true' : undefined" :style="segment.style"> segment.text </span>
+                      }" :data-ssh-preview-active-hit="segment.active ? 'true' : undefined" :style="segment.style">
+                      segment.text </span>
                   </template>
                 </div>
               </div>
